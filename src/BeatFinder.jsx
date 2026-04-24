@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from “react”;
+import { useState, useEffect, useCallback, useRef } from “react”;
 
 // =============================================================================
 // CONFIG
@@ -266,52 +266,67 @@ catch (e) { console.warn(”[BeatFinder] Could not save:”, e); }
 // =============================================================================
 // AVATAR
 // =============================================================================
+// Photo cache — persists across renders so each artist is only fetched once
+const photoCache = {};
+
 function Av({ name, size = 88, idx = 0, img }) {
 const [g1, g2] = GRAD[idx % GRAD.length];
-const [imgErr,     setImgErr]     = useState(false);
-const [fetchedImg, setFetchedImg] = useState(null);
-const [tried,      setTried]      = useState(false);
+const [imgErr,  setImgErr]  = useState(false);
+const [photo,   setPhoto]   = useState(img || photoCache[name] || null);
+const [visible, setVisible] = useState(false);
+const ref = useRef(null);
 
-// If no static img provided, try fetching from YouTube channel API
+// Intersection Observer — only fetch when avatar scrolls into view
 useEffect(() => {
-if (img || tried) return;
-setTried(true);
+if (!ref.current) return;
+const obs = new IntersectionObserver(
+([entry]) => { if (entry.isIntersecting) setVisible(true); },
+{ threshold: 0.1 }
+);
+obs.observe(ref.current);
+return () => obs.disconnect();
+}, []);
+
+// Fetch photo only when visible and not already loaded
+useEffect(() => {
+if (!visible || photo || img) return;
+if (photoCache[name]) { setPhoto(photoCache[name]); return; }
 fetch(API_BASE + “/api/youtube/artist-photo?artist=” + encodeURIComponent(name))
 .then(r => r.json())
-.then(d => { if (d.photo) setFetchedImg(d.photo); })
+.then(d => {
+if (d.photo) {
+photoCache[name] = d.photo;
+setPhoto(d.photo);
+}
+})
 .catch(() => {});
-}, [name, img, tried]);
+}, [visible, name, img, photo]);
 
-const src = img || fetchedImg;
+const src = photo || img;
 
-if (src && !imgErr) {
 return (
-<div style={{
+<div ref={ref} style={{
 width: size, height: size, borderRadius: “50%”, flexShrink: 0,
-border: “2.5px solid rgba(255,255,255,0.15)”, overflow: “hidden”,
-background: “#111”,
+overflow: “hidden”, position: “relative”,
+border: “2.5px solid rgba(255,255,255,0.15)”,
+background: src && !imgErr ? “#111” : “linear-gradient(135deg,” + g1 + “,” + g2 + “)”,
+display: “flex”, alignItems: “center”, justifyContent: “center”,
 }}>
+{src && !imgErr ? (
 <img
 src={src}
 alt={name}
 onError={() => setImgErr(true)}
 style={{ width: “100%”, height: “100%”, objectFit: “cover”, display: “block” }}
 />
-</div>
-);
-}
-
-// Gradient fallback while loading or if photo unavailable
-return (
-<div style={{
-width: size, height: size, borderRadius: “50%”,
-background: `linear-gradient(135deg,${g1},${g2})`,
-display: “flex”, alignItems: “center”, justifyContent: “center”,
+) : (
+<span style={{
 fontSize: size * 0.28, fontWeight: 800, color: “white”,
 fontFamily: “‘Bebas Neue’,sans-serif”,
-border: “2.5px solid rgba(255,255,255,0.12)”, flexShrink: 0,
 }}>
 {initials(name)}
+</span>
+)}
 </div>
 );
 }
