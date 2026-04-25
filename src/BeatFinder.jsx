@@ -432,22 +432,7 @@ function Player({ beat, onClose, savedIds, onSave }) {
         >
           {savedIds.has(beat.videoId) ? "🔖 Saved to Favourites" : "🔖 Save to Favourites"}
         </button>
-        <a
-          href={"https://www.y2mate.com/youtube/" + beat.videoId}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            marginTop: 10, width: "100%", borderRadius: 14, padding: "15px",
-            fontWeight: 800, fontSize: 16, cursor: "pointer",
-            background: "linear-gradient(135deg,#1a1a1a,#222)",
-            border: "1.5px solid #F59E0B",
-            color: "#F59E0B",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-            textDecoration: "none",
-          }}
-        >
-          ⬇️ Download MP3
-        </a>
+
       </div>
     </div>
   );
