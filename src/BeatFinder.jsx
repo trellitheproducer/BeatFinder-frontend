@@ -432,6 +432,22 @@ function Player({ beat, onClose, savedIds, onSave }) {
         >
           {savedIds.has(beat.videoId) ? "🔖 Saved to Favourites" : "🔖 Save to Favourites"}
         </button>
+        <a
+          href={"https://www.y2mate.com/youtube/" + beat.videoId}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            marginTop: 10, width: "100%", borderRadius: 14, padding: "15px",
+            fontWeight: 800, fontSize: 16, cursor: "pointer",
+            background: "linear-gradient(135deg,#1a1a1a,#222)",
+            border: "1.5px solid #F59E0B",
+            color: "#F59E0B",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+            textDecoration: "none",
+          }}
+        >
+          ⬇️ Download MP3
+        </a>
       </div>
     </div>
   );
@@ -799,6 +815,114 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
   );
 }
 
+
+// =============================================================================
+// PRODUCER BEATS SCREEN
+// =============================================================================
+function ProducerBeatsScreen({ onPlay, savedIds, onSave }) {
+  const [beats,   setBeats]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(null);
+
+  useEffect(() => {
+    apiFetch("/api/producer/beats")
+      .then(d => { setBeats(d); setLoading(false); })
+      .catch(e => { setError(e.message); setLoading(false); });
+  }, []);
+
+  const handleDownload = async (beat) => {
+    try {
+      await apiFetch("/api/producer/beats/" + beat.id + "/download", { method: "POST" });
+      const a = document.createElement("a");
+      a.href     = beat.url;
+      a.download = beat.title + ".mp3";
+      a.target   = "_blank";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      console.error("Download error:", e);
+    }
+  };
+
+  return (
+    <div style={{ padding: "0 16px 100px" }}>
+      <div style={{ padding: "20px 0 16px" }}>
+        <div style={{ background: "linear-gradient(135deg,#1C1917,rgba(245,158,11,0.2))", borderRadius: 16, padding: "24px 20px", marginBottom: 20, border: "1.5px solid rgba(245,158,11,0.3)" }}>
+          <div style={{ color: "#F59E0B", fontSize: 13, fontWeight: 800, marginBottom: 6 }}>🎵 PRODUCER BEATS</div>
+          <div style={{ color: "white", fontSize: 26, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
+            Download MP3s
+          </div>
+          <div style={{ color: "#aaa", fontSize: 13, marginTop: 4 }}>Beats uploaded by verified producers</div>
+        </div>
+      </div>
+
+      {loading && (
+        <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
+          <div style={{ fontSize: 36, marginBottom: 10 }}>🎵</div>
+          <div style={{ fontSize: 13 }}>Loading producer beats...</div>
+        </div>
+      )}
+
+      {error && (
+        <div style={{ background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 14, padding: 20, textAlign: "center" }}>
+          <div style={{ color: "#F87171", fontWeight: 700, fontSize: 15 }}>Could not load beats</div>
+          <div style={{ color: "#888", fontSize: 13, marginTop: 8 }}>{error}</div>
+        </div>
+      )}
+
+      {!loading && beats.length === 0 && !error && (
+        <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🎛</div>
+          <div style={{ fontSize: 15, color: "#888", lineHeight: 1.7 }}>
+            No beats uploaded yet.<br />
+            Producer Pro members can upload beats<br />from their Profile tab.
+          </div>
+        </div>
+      )}
+
+      {!loading && beats.map(beat => (
+        <div key={beat.id} style={{
+          background: "#111", borderRadius: 14, padding: "16px", marginBottom: 14,
+          border: "1px solid rgba(245,158,11,0.2)",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: "white", fontWeight: 700, fontSize: 15, lineHeight: 1.4, marginBottom: 4 }}>
+                {beat.title}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>
+                  {beat.genre}
+                </div>
+                <div style={{ background: beat.price === "free" ? "rgba(34,197,94,0.15)" : "rgba(192,38,211,0.15)", border: "1px solid " + (beat.price === "free" ? "rgba(34,197,94,0.3)" : "rgba(192,38,211,0.3)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: beat.price === "free" ? "#22C55E" : "#C026D3", fontWeight: 700 }}>
+                  {beat.price === "free" ? "FREE" : beat.price}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>
+            By {beat.producer} · {beat.downloads} downloads
+          </div>
+
+          <button
+            onClick={() => handleDownload(beat)}
+            style={{
+              width: "100%", borderRadius: 12, padding: "14px",
+              background: "linear-gradient(135deg,#F59E0B,#EF4444)",
+              border: "none", color: "white", fontWeight: 800, fontSize: 15,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+            }}
+          >
+            ⬇️ Download MP3
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // =============================================================================
 // TRENDING SCREEN
 // =============================================================================
@@ -998,9 +1122,14 @@ function ProfileScreen({ user, setUser }) {
   const [email,       setEmail]       = useState("");
   const [pw,          setPw]          = useState("");
   const [name,        setName]        = useState("");
-  const [ytLink,      setYtLink]      = useState("");
-  const [uploads,     setUploads]     = useState([]);
-  const [plan,        setPlan]        = useState(null);
+  const [ytLink,        setYtLink]        = useState("");
+  const [uploads,       setUploads]       = useState([]);
+  const [plan,          setPlan]          = useState(null);
+  const [uploadGenre,   setUploadGenre]   = useState("");
+  const [uploadPrice,   setUploadPrice]   = useState("");
+  const [uploadFile,    setUploadFile]    = useState(null);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadMsg,     setUploadMsg]     = useState("");
   const [authErr,     setAuthErr]     = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -1044,20 +1173,62 @@ function ProfileScreen({ user, setUser }) {
       {user.isPro && (
         <div>
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Upload Your Beats</div>
-          <div style={{ color: "#666", fontSize: 13, marginBottom: 14 }}>Paste a YouTube link to feature it on the Home page.</div>
+          <div style={{ color: "#666", fontSize: 13, marginBottom: 14 }}>Upload MP3 files — they appear in the MP3s tab for users to download.</div>
           <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #222" }}>
-            <input value={ytLink} onChange={e => setYtLink(e.target.value)} placeholder="https://youtube.com/watch?v=..." style={inp} />
-            <button onClick={() => { if (ytLink.trim()) { setUploads(p => [...p, { id: Date.now(), url: ytLink, date: new Date().toLocaleDateString() }]); setYtLink(""); }}}
-              style={{ width: "100%", background: "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: 13, fontSize: 15, cursor: "pointer" }}>
-              ⬆️ Upload Beat
+            <input value={ytLink} onChange={e => setYtLink(e.target.value)} placeholder="Beat title e.g. Dark Trap Beat" style={inp} />
+            <input value={uploadGenre || ""} onChange={e => setUploadGenre(e.target.value)} placeholder="Genre e.g. Trap, R&B, Afrobeats" style={inp} />
+            <input value={uploadPrice || ""} onChange={e => setUploadPrice(e.target.value)} placeholder='Price e.g. free or £9.99' style={inp} />
+            <label style={{ display: "block", background: "#1a1a1a", border: "1.5px dashed #444", borderRadius: 10, padding: "16px", textAlign: "center", cursor: "pointer", marginBottom: 12 }}>
+              <input type="file" accept=".mp3" onChange={e => setUploadFile(e.target.files[0])} style={{ display: "none" }} />
+              <div style={{ fontSize: 24, marginBottom: 6 }}>🎵</div>
+              <div style={{ color: uploadFile ? "#22C55E" : "#666", fontSize: 13, fontWeight: 600 }}>
+                {uploadFile ? uploadFile.name : "Tap to select MP3 file"}
+              </div>
+            </label>
+            <button
+              onClick={async () => {
+                if (!ytLink.trim() || !uploadFile) return;
+                setUploadLoading(true);
+                setUploadMsg("");
+                try {
+                  const token = localStorage.getItem("bf_token");
+                  const form  = new FormData();
+                  form.append("title",  ytLink.trim());
+                  form.append("genre",  uploadGenre || "General");
+                  form.append("price",  uploadPrice || "free");
+                  form.append("file",   uploadFile);
+                  const res = await fetch(API_BASE + "/api/producer/upload", {
+                    method: "POST",
+                    headers: { Authorization: "Bearer " + token },
+                    body: form,
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.detail || "Upload failed");
+                  setUploads(p => [...p, data.beat]);
+                  setYtLink(""); setUploadGenre(""); setUploadPrice(""); setUploadFile(null);
+                  setUploadMsg("Beat uploaded successfully!");
+                } catch (e) {
+                  setUploadMsg("Error: " + e.message);
+                } finally {
+                  setUploadLoading(false);
+                }
+              }}
+              disabled={uploadLoading}
+              style={{ width: "100%", background: uploadLoading ? "#333" : "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: 13, fontSize: 15, cursor: uploadLoading ? "not-allowed" : "pointer" }}>
+              {uploadLoading ? "Uploading..." : "⬆️ Upload Beat"}
             </button>
+            {uploadMsg && (
+              <div style={{ marginTop: 10, color: uploadMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, textAlign: "center", fontWeight: 600 }}>
+                {uploadMsg}
+              </div>
+            )}
           </div>
           {uploads.length > 0 && (
             <div style={{ marginTop: 14 }}>
               {uploads.map((b, i) => (
-                <div key={b.id} style={{ background: "#111", borderRadius: 12, padding: "12px 14px", marginBottom: 10, border: "1px solid #222" }}>
-                  <div style={{ color: "#C026D3", fontWeight: 700, fontSize: 13 }}>Beat #{i + 1}</div>
-                  <div style={{ color: "#aaa", fontSize: 12, wordBreak: "break-all", marginTop: 4 }}>{b.url}</div>
+                <div key={b.id || i} style={{ background: "#111", borderRadius: 12, padding: "12px 14px", marginBottom: 10, border: "1px solid #222" }}>
+                  <div style={{ color: "#C026D3", fontWeight: 700, fontSize: 13 }}>{b.title}</div>
+                  <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>{b.genre} · {b.price}</div>
                 </div>
               ))}
             </div>
@@ -1175,6 +1346,7 @@ const NAV = [
   { id: "trending",  label: "Trending",icon: "🔥" },
   { id: "search",    label: "Search",  icon: "🔍" },
   { id: "saved",     label: "Saved",   icon: "🔖" },
+  { id: "producer",  label: "MP3s",    icon: "⬇️" },
   { id: "exclusive", label: "Members", icon: "🔒" },
   { id: "profile",   label: "Profile", icon: "👤" },
 ];
@@ -1249,6 +1421,7 @@ export default function BeatFinder() {
         {tab === "saved"     && (
           <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} />
         )}
+        {tab === "producer"  && <ProducerBeatsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
         {tab === "exclusive" && (
           <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />
         )}
