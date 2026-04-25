@@ -216,7 +216,7 @@ const ARTISTS_UK = [
   {id:"ajtracey",      name:"AJ Tracey",       cat:"UK Rap", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/8/8c/AJ_Tracey_2018.jpg/440px-AJ_Tracey_2018.jpg"},
   {id:"aitch",         name:"Aitch",           cat:"UK Rap", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Aitch_2021.jpg/440px-Aitch_2021.jpg"},
   {id:"centralcee",    name:"Central Cee",     cat:"UK Rap", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/Central_Cee_2022.jpg/440px-Central_Cee_2022.jpg"},
-  {id:"dblockeurope",  name:"D Block Europe",  cat:"UK Rap", flag:"🇬🇧"},
+  {id:"dblockeurope",  name:"D-Block Europe",  cat:"UK Rap", flag:"🇬🇧"},
   {id:"dave",          name:"Dave",            cat:"UK Rap", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/Dave_rapper_2020.jpg/440px-Dave_rapper_2020.jpg"},
   {id:"diggad",        name:"Digga D",         cat:"UK Rap", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/6/6d/Digga_D_2021.jpg/440px-Digga_D_2021.jpg"},
   {id:"headieone",     name:"Headie One",      cat:"UK Rap", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Headie_One_2020.jpg/440px-Headie_One_2020.jpg"},
@@ -248,7 +248,9 @@ const ARTISTS_UK = [
   {id:"samsmith",      name:"Sam Smith",       cat:"UK R&B", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/7/7e/Sam_Smith_2015.jpg/440px-Sam_Smith_2015.jpg"},
   {id:"raye",          name:"RAYE",            cat:"UK R&B", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/RAYE_2023.jpg/440px-RAYE_2023.jpg"},
   {id:"dotrotten",     name:"Dot Rotten / Zeph Ellis", cat:"Grime", flag:"🇬🇧",
-   searchOverride:"Dot Rotten Zeph Ellis instrumental grime"},
+   searchOverride:"Dot Rotten Zeph Ellis instrumental",
+   filterTitle: false,
+   instrumentalOnly: true},
 ];
 
 const USA_CATS = ["All","Rap","R&B M","R&B F","Detroit"];
@@ -479,7 +481,7 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
 // =============================================================================
 // BEAT FEED
 // =============================================================================
-function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, showPagination, filterTitle }) {
+function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, showPagination, filterTitle, instrumentalOnly }) {
   const [beats,   setBeats]   = useState([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
@@ -495,7 +497,12 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
 
     fetchBeats(artistName, page, filterTitle).then(({ beats: b, error: e }) => {
       if (!alive) return;
-      setBeats(b);
+      // Filter to instrumentals only if flag is set (e.g. Dot Rotten)
+      const INSTRUMENTAL_KEYWORDS = ["instrumental", "riddim", "beat", "free beat", "backing track"];
+      const filtered = instrumentalOnly
+        ? b.filter(beat => INSTRUMENTAL_KEYWORDS.some(kw => beat.title.toLowerCase().includes(kw)))
+        : b;
+      setBeats(filtered);
       setError(e);
       setLoading(false);
     });
@@ -724,7 +731,7 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
         </div>
       </div>
       <div style={{ padding: "0 16px" }}>
-        <BeatFeed artistName={searchName} savedIds={savedIds} onSave={onSave} onPlay={onPlay} showPagination />
+        <BeatFeed artistName={searchName} savedIds={savedIds} onSave={onSave} onPlay={onPlay} showPagination filterTitle={artist.filterTitle !== false} instrumentalOnly={!!artist.instrumentalOnly} />
       </div>
     </div>
   );
