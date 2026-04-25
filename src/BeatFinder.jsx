@@ -316,6 +316,7 @@ function Player({ beat, onClose }) {
         display: "flex", alignItems: "center", gap: 12,
         padding: "14px 16px", borderBottom: "1px solid #1a1a1a",
         background: "#0a0a0a", flexShrink: 0,
+        paddingTop: "calc(14px + env(safe-area-inset-top))",
       }}>
         <button onClick={onClose} style={{
           background: "#1a1a1a", border: "1px solid #333", borderRadius: "50%",
@@ -1106,7 +1107,7 @@ export default function BeatFinder() {
   const goTab = id => { setTab(id); if (id !== "artists") setArtist(null); };
 
   return (
-    <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif" }}>
+    <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
       {playing && <Player beat={playing} onClose={() => setPlaying(null)} />}
@@ -1128,7 +1129,7 @@ export default function BeatFinder() {
         {tab === "profile"   && <ProfileScreen user={user} setUser={setUser} />}
       </div>
 
-      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "rgba(10,10,10,0.97)", borderTop: "1px solid #1a1a1a", display: "flex", height: 72, zIndex: 100, backdropFilter: "blur(20px)" }}>
+      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "rgba(10,10,10,0.97)", borderTop: "1px solid #1a1a1a", display: "flex", height: "calc(72px + env(safe-area-inset-bottom))", zIndex: 100, backdropFilter: "blur(20px)", paddingBottom: "env(safe-area-inset-bottom)" }}>
         {NAV.map(n => {
           const isPro    = user?.isPro || user?.isArtistPro;
           const locked   = n.id === "exclusive" && !isPro;
