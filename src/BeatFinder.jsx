@@ -254,8 +254,61 @@ const ARTISTS_UK = [
    instrumentalOnly: true},
 ];
 
-const USA_CATS = ["All","Rap","R&B M","R&B F","Detroit"];
-const UK_CATS  = ["All","UK Rap","UK R&B","Grime"];
+const ARTISTS_JAMAICA = [
+  {id:"bobmarley",     name:"Bob Marley",        cat:"Reggae",    flag:"🇯🇲", img:"https://i.ibb.co/bj20Yf1B/IMG-8938.webp"},
+  {id:"shaggy",        name:"Shaggy",            cat:"Dancehall", flag:"🇯🇲"},
+  {id:"seanpaul",      name:"Sean Paul",          cat:"Dancehall", flag:"🇯🇲", img:"https://i.ibb.co/KcDyfPW5/IMG-8945.webp"},
+  {id:"popcaan",       name:"Popcaan",            cat:"Dancehall", flag:"🇯🇲", img:"https://i.ibb.co/wFXD4tkW/IMG-8946.jpg"},
+  {id:"alkaline",      name:"Alkaline",           cat:"Dancehall", flag:"🇯🇲", img:"https://i.ibb.co/vvmF4ktR/IMG-8947.webp"},
+  {id:"vybzkartel",    name:"Vybz Kartel",        cat:"Dancehall", flag:"🇯🇲", img:"https://i.ibb.co/JjqgMmzC/IMG-8948.webp"},
+  {id:"mavadogee",     name:"Mavado",             cat:"Dancehall", flag:"🇯🇲", img:"https://i.ibb.co/qMys8fNq/IMG-8949.webp"},
+  {id:"burnaboys",     name:"Busy Signal",        cat:"Reggae",    flag:"🇯🇲", img:"https://i.ibb.co/JFbknRg7/IMG-8944.webp"},
+  {id:"chronixx",      name:"Chronixx",           cat:"Reggae",    flag:"🇯🇲", img:"https://i.ibb.co/kgBwMtfw/IMG-8939.webp"},
+  {id:"protoje",       name:"Protoje",            cat:"Reggae",    flag:"🇯🇲", img:"https://i.ibb.co/VcHv91Pn/IMG-8940.jpg"},
+  {id:"koffee",        name:"Koffee",             cat:"Reggae",    flag:"🇯🇲", img:"https://i.ibb.co/FFnPTyS/IMG-8941.webp"},
+  {id:"aidonia",       name:"Aidonia",            cat:"Bashment",  flag:"🇯🇲", img:"https://i.ibb.co/4Rgx7WJv/IMG-8956.webp"},
+  {id:"spicejamaica",  name:"Spice",              cat:"Bashment",  flag:"🇯🇲", img:"https://i.ibb.co/CpQybJm2/IMG-8955.jpg"},
+  {id:"demarcojamaica",name:"Demarco",            cat:"Bashment",  flag:"🇯🇲", img:"https://i.ibb.co/WWBjbJQw/IMG-8954.jpg"},
+  {id:"masicka",       name:"Masicka",            cat:"Dancehall", flag:"🇯🇲", img:"https://i.ibb.co/8LYx9Z8D/IMG-8950.webp"},
+  {id:"skillibeng",    name:"Skillibeng",         cat:"Dancehall", flag:"🇯🇲", img:"https://i.ibb.co/Z64DBgz1/IMG-8951.webp"},
+  {id:"jahcure",       name:"Jah Cure",           cat:"Reggae",    flag:"🇯🇲", img:"https://i.ibb.co/hxF3wXSz/IMG-8942.webp"},
+  {id:"tarrus",        name:"Tarrus Riley",       cat:"Reggae",    flag:"🇯🇲", img:"https://i.ibb.co/LXcMdNzY/IMG-8943.webp"},
+  {id:"munga",         name:"Munga Honorable",    cat:"Dancehall", flag:"🇯🇲", img:"https://i.ibb.co/3m70P0v9/IMG-8953.webp"},
+  {id:"konshens",      name:"Konshens",           cat:"Dancehall", flag:"🇯🇲", img:"https://i.ibb.co/39LG5x19/IMG-8952.webp"},
+];
+
+const ARTISTS_AFRICA = [
+  {id:"burnaboy",      name:"Burna Boy",          cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/4nVk9JbV/IMG-8906.webp"},
+  {id:"wizkid",        name:"WizKid",             cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/08BSCx1/IMG-8907.webp"},
+  {id:"davido",        name:"Davido",             cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/08BSCx1/IMG-8907.webp"},
+  {id:"asake",         name:"Asake",              cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/qM7nKW4S/IMG-8909.png"},
+  {id:"ruema",         name:"Rema",               cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/j9rMjRBY/IMG-8910.png"},
+  {id:"ckay",          name:"CKay",               cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/5XLSCcbZ/IMG-8911.webp"},
+  {id:"omah",          name:"Omah Lay",           cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/5XLSCcbZ/IMG-8911.webp"},
+  {id:"ayra",          name:"Ayra Starr",         cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/FbC9fmqv/IMG-8913.webp"},
+  {id:"tiwasavage",    name:"Tiwa Savage",        cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/SD09jqCy/IMG-8914.webp"},
+  {id:"olamide",       name:"Olamide",            cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/SD09jqCy/IMG-8914.webp"},
+  {id:"afrobeatz",     name:"Fireboy DML",        cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/SD09jqCy/IMG-8914.webp"},
+  {id:"joeboy",        name:"Joeboy",             cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/Ps5zG4b4/IMG-8917.webp"},
+  {id:"kizzdaniel",    name:"Kizz Daniel",        cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/FPkV9tC/IMG-8918.webp"},
+  {id:"tems",          name:"Tems",               cat:"Afrobeats", flag:"🇳🇬", img:"https://i.ibb.co/DD1TRV16/IMG-8919.webp"},
+  {id:"amaarae",       name:"Amaarae",            cat:"Afrobeats", flag:"🇬🇭", img:"https://i.ibb.co/DHsWm7pj/IMG-8920.webp"},
+  {id:"blacksherif",   name:"Black Sherif",       cat:"Afrobeats", flag:"🇬🇭", img:"https://i.ibb.co/xtycqz11/IMG-8921.webp"},
+  {id:"sarkodie",      name:"Sarkodie",           cat:"Afrobeats", flag:"🇬🇭", img:"https://i.ibb.co/V09ZjRNk/IMG-8922.webp"},
+  {id:"stonebwoy",     name:"Stonebwoy",          cat:"Afrobeats", flag:"🇬🇭", img:"https://i.ibb.co/Vcms8Rrc/IMG-8923.webp"},
+  {id:"masterkg",      name:"Master KG",          cat:"Tribal House", flag:"🇿🇦", img:"https://i.ibb.co/4bGNbww/IMG-8926.webp"},
+  {id:"nomcebo",       name:"Nomcebo Zikode",     cat:"Tribal House", flag:"🇿🇦", img:"https://i.ibb.co/7JK6qYV9/IMG-8927.webp"},
+  {id:"kabza",         name:"Kabza De Small",     cat:"Tribal House", flag:"🇿🇦", img:"https://i.ibb.co/WvqF2PpG/IMG-8928.webp"},
+  {id:"djmaphorisa",   name:"DJ Maphorisa",       cat:"Tribal House", flag:"🇿🇦", img:"https://i.ibb.co/WvqF2PpG/IMG-8928.webp"},
+  {id:"sho",           name:"Sho Madjozi",        cat:"Afrobeats", flag:"🇿🇦", img:"https://i.ibb.co/jk1wmtnn/IMG-8924.jpg"},
+  {id:"nasty",         name:"Nasty C",            cat:"Afrobeats", flag:"🇿🇦", img:"https://i.ibb.co/Y7w048Kd/IMG-8925.webp"},
+  {id:"ladydu",        name:"Lady Du",            cat:"Tribal House", flag:"🇿🇦", img:"https://i.ibb.co/whmMj9M5/IMG-8930.webp"},
+];
+
+const USA_CATS     = ["All","Rap","R&B M","R&B F","Detroit"];
+const UK_CATS      = ["All","UK Rap","UK R&B","Grime"];
+const JAMAICA_CATS = ["All","Reggae","Dancehall","Bashment"];
+const AFRICA_CATS  = ["All","Afrobeats","Tribal House"];
 
 // =============================================================================
 // LOCAL STORAGE
@@ -613,8 +666,14 @@ function ArtistsScreen({ onArtistSelect }) {
   const [cat,    setCat]    = useState("All");
   const [search, setSearch] = useState("");
 
-  const artists = region === "USA" ? ARTISTS_USA : ARTISTS_UK;
-  const cats    = region === "USA" ? USA_CATS    : UK_CATS;
+  const REGION_MAP = {
+    USA:     { artists: ARTISTS_USA,     cats: USA_CATS     },
+    UK:      { artists: ARTISTS_UK,      cats: UK_CATS      },
+    JAMAICA: { artists: ARTISTS_JAMAICA, cats: JAMAICA_CATS },
+    AFRICA:  { artists: ARTISTS_AFRICA,  cats: AFRICA_CATS  },
+  };
+  const artists = REGION_MAP[region].artists;
+  const cats    = REGION_MAP[region].cats;
   const list    = artists.filter(a =>
     (cat === "All" || a.cat === cat) &&
     a.name.toLowerCase().includes(search.toLowerCase())
@@ -636,15 +695,20 @@ function ArtistsScreen({ onArtistSelect }) {
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search artists"
           style={{ background: "none", border: "none", outline: "none", color: "white", fontSize: 15, flex: 1 }} />
       </div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-        {["USA","UK"].map(r => (
-          <button key={r} onClick={() => { setRegion(r); setCat("All"); }}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        {[
+          { id: "USA",     label: "🇺🇸 USA"     },
+          { id: "UK",      label: "🇬🇧 UK"      },
+          { id: "JAMAICA", label: "🇯🇲 Jamaica"  },
+          { id: "AFRICA",  label: "🇳🇬 Africa"   },
+        ].map(r => (
+          <button key={r.id} onClick={() => { setRegion(r.id); setCat("All"); }}
             style={{
-              borderRadius: 24, padding: "8px 20px", fontWeight: 700, fontSize: 14, cursor: "pointer",
-              border: region === r ? "2px solid #C026D3" : "1.5px solid #333",
-              background: "transparent", color: region === r ? "white" : "#888",
+              borderRadius: 24, padding: "8px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer",
+              border: region === r.id ? "2px solid #C026D3" : "1.5px solid #333",
+              background: "transparent", color: region === r.id ? "white" : "#888",
             }}>
-            {r === "USA" ? "🇺🇸" : "🇬🇧"} {r}
+            {r.label}
           </button>
         ))}
       </div>
@@ -672,9 +736,13 @@ function ArtistsScreen({ onArtistSelect }) {
             </div>
             <div style={{
               fontSize: 10, marginTop: 2,
-              color: a.cat === "Detroit"                       ? "#F59E0B"
-                   : a.cat === "R&B M" || a.cat === "R&B F"  ? "#EC4899"
-                   : a.cat === "Grime"                        ? "#06B6D4" : "#666",
+              color: a.cat === "Detroit"                         ? "#F59E0B"
+                   : a.cat === "R&B M" || a.cat === "R&B F"    ? "#EC4899"
+                   : a.cat === "Grime"                          ? "#06B6D4"
+                   : a.cat === "Reggae"                         ? "#22C55E"
+                   : a.cat === "Dancehall" || a.cat === "Bashment" ? "#F97316"
+                   : a.cat === "Afrobeats"                      ? "#EAB308"
+                   : a.cat === "Tribal House"                   ? "#A78BFA" : "#666",
             }}>
               {a.cat}
             </div>
@@ -689,12 +757,16 @@ function ArtistsScreen({ onArtistSelect }) {
 // ARTIST DETAIL
 // =============================================================================
 function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
-  const allA = [...ARTISTS_USA, ...ARTISTS_UK];
+  const allA = [...ARTISTS_USA, ...ARTISTS_UK, ...ARTISTS_JAMAICA, ...ARTISTS_AFRICA];
   const idx  = allA.findIndex(a => a.id === artist.id);
   const searchName = artist.searchOverride || artist.name;
-  const cc = artist.cat === "Detroit"                          ? "#F59E0B"
-           : artist.cat === "R&B M" || artist.cat === "R&B F" ? "#EC4899"
-           : artist.cat === "Grime"                            ? "#06B6D4" : "#888";
+  const cc = artist.cat === "Detroit"                              ? "#F59E0B"
+           : artist.cat === "R&B M" || artist.cat === "R&B F"    ? "#EC4899"
+           : artist.cat === "Grime"                               ? "#06B6D4"
+           : artist.cat === "Reggae"                              ? "#22C55E"
+           : artist.cat === "Dancehall" || artist.cat === "Bashment" ? "#F97316"
+           : artist.cat === "Afrobeats"                           ? "#EAB308"
+           : artist.cat === "Tribal House"                        ? "#A78BFA" : "#888";
 
   return (
     <div style={{ padding: "0 0 100px" }}>
@@ -710,7 +782,7 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
         <Av name={artist.name} size={72} idx={idx >= 0 ? idx : 0} img={artist.img} />
         <div>
           <div style={{ color: "#aaa", fontSize: 12, marginBottom: 4 }}>
-            {artist.flag} {artist.flag === "🇺🇸" ? "USA" : "UK"} · <span style={{ color: cc }}>{artist.cat}</span>
+            {artist.flag} {artist.flag === "🇺🇸" ? "USA" : artist.flag === "🇬🇧" ? "UK" : artist.flag === "🇯🇲" ? "Jamaica" : "Africa"} · <span style={{ color: cc }}>{artist.cat}</span>
           </div>
           <div style={{ color: "white", fontSize: 21, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
             {artist.name}
