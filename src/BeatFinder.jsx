@@ -1125,11 +1125,14 @@ function ProfileScreen({ user, setUser }) {
   const [ytLink,        setYtLink]        = useState("");
   const [uploads,       setUploads]       = useState([]);
   const [plan,          setPlan]          = useState(null);
-  const [uploadGenre,   setUploadGenre]   = useState("");
-  const [uploadPrice,   setUploadPrice]   = useState("");
-  const [uploadFile,    setUploadFile]    = useState(null);
-  const [uploadLoading, setUploadLoading] = useState(false);
-  const [uploadMsg,     setUploadMsg]     = useState("");
+  const [uploadGenre,      setUploadGenre]      = useState("");
+  const [uploadPrice,      setUploadPrice]      = useState("");
+  const [uploadFile,       setUploadFile]       = useState(null);
+  const [uploadLoading,    setUploadLoading]    = useState(false);
+  const [uploadMsg,        setUploadMsg]        = useState("");
+  const [activationCode,   setActivationCode]   = useState("");
+  const [activationErr,    setActivationErr]    = useState("");
+  const [activationSuccess,setActivationSuccess]= useState("");
   const [authErr,     setAuthErr]     = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -1142,12 +1145,10 @@ function ProfileScreen({ user, setUser }) {
   const PLANS = [
     {
       id: "artist", label: "🎤 Artist Pro", price: "4.99",
-      pp: "https://www.paypal.com/paypalme/trellitheproducer/4.99GBP",
       perks: ["Access Exclusive Members area","Bookmark unlimited beats","Artist verified badge","AI beat recommendations"],
     },
     {
       id: "producer", label: "🎛 Producer Pro", price: "8.99",
-      pp: "https://www.paypal.com/paypalme/trellitheproducer/8.99GBP",
       perks: ["Everything in Artist Pro","Upload beats to Home featured","Featured in rotation","Producer verified badge","Analytics"],
     },
   ];
@@ -1256,21 +1257,65 @@ function ProfileScreen({ user, setUser }) {
               </div>
               {plan === pl.id && (
                 <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #222", marginBottom: 16 }}>
-                  <div style={{ color: "#888", fontSize: 13, marginBottom: 12, textAlign: "center", lineHeight: 1.6 }}>Pay via PayPal, then tap Activate.</div>
-                  <a href={pl.pp} target="_blank" rel="noopener noreferrer"
-                    style={{ display: "block", background: "#0070BA", borderRadius: 12, color: "white", fontWeight: 800, padding: 14, fontSize: 16, textAlign: "center", textDecoration: "none", marginBottom: 10 }}>
-                    💳 Pay £{pl.price}/mo via PayPal
-                  </a>
-                  <button onClick={() => setUser({ ...user, isPro: pl.id === "producer", isArtistPro: true })}
-                    style={{ width: "100%", background: "#1a1a1a", border: "1.5px solid #333", borderRadius: 12, color: "#aaa", fontWeight: 700, padding: 12, fontSize: 14, cursor: "pointer" }}>
-                    ✅ I've Paid — Activate {pl.id === "producer" ? "Producer" : "Artist"} Pro
+                  <div style={{ color: "#888", fontSize: 13, marginBottom: 16, textAlign: "center", lineHeight: 1.8 }}>
+                    Pay securely with card, Apple Pay or Google Pay.<br />
+                    Your activation code is emailed to you instantly after payment.
+                  </div>
+
+                  <button
+                    onClick={async () => {
+                      setActivationErr("");
+                      try {
+                        const result = await apiFetch("/api/stripe/create-checkout", {
+                          method: "POST",
+                          body: JSON.stringify({ plan: pl.id }),
+                        });
+                        window.open(result.checkout_url, "_blank");
+                      } catch (e) {
+                        setActivationErr(e.message);
+                      }
+                    }}
+                    style={{ width: "100%", background: "linear-gradient(135deg,#635BFF,#8B5CF6)", border: "none", borderRadius: 12, color: "white", fontWeight: 800, padding: 14, fontSize: 16, cursor: "pointer", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+                    💳 Pay £{pl.price}/mo with Card
+                  </button>
+
+                  <div style={{ color: "#555", fontSize: 12, textAlign: "center", marginBottom: 16 }}>
+                    — or enter your activation code below —
+                  </div>
+
+                  <input
+                    value={activationCode}
+                    onChange={e => setActivationCode(e.target.value.toUpperCase())}
+                    placeholder="Activation code e.g. PRD-A1B2C3"
+                    style={{ width: "100%", background: "#1a1a1a", border: "1.5px solid #444", borderRadius: 12, padding: "13px 14px", color: "white", fontSize: 14, marginBottom: 10, boxSizing: "border-box", outline: "none", letterSpacing: 2, fontWeight: 700 }}
+                  />
+                  {activationErr && <div style={{ color: "#F87171", fontSize: 13, marginBottom: 10, textAlign: "center" }}>{activationErr}</div>}
+                  {activationSuccess && <div style={{ color: "#22C55E", fontSize: 13, marginBottom: 10, textAlign: "center" }}>{activationSuccess}</div>}
+                  <button
+                    onClick={async () => {
+                      if (!activationCode.trim()) return;
+                      setActivationErr("");
+                      setActivationSuccess("");
+                      try {
+                        const result = await apiFetch("/api/auth/activate", {
+                          method: "POST",
+                          body: JSON.stringify({ code: activationCode.trim() }),
+                        });
+                        setActivationSuccess(result.message || "Plan activated!");
+                        setUser({ ...user, isPro: result.plan === "producer", isArtistPro: true, plan: result.plan });
+                      } catch (e) {
+                        setActivationErr(e.message);
+                      }
+                    }}
+                    style={{ width: "100%", background: "#1a1a1a", border: "1.5px solid #C026D3", borderRadius: 12, color: "#C026D3", fontWeight: 800, padding: 13, fontSize: 15, cursor: "pointer" }}>
+                    🔑 Activate with Code
                   </button>
                 </div>
               )}
             </div>
           ))}
           <div style={{ color: "#444", fontSize: 11, textAlign: "center", lineHeight: 1.7, marginTop: 8 }}>
-            Payments go to trellitheproducer@gmail.com via PayPal.<br />Renews monthly. Cancel anytime.
+            Payments processed securely by Stripe.<br />Renews monthly. Cancel anytime.
           </div>
         </div>
       )}
