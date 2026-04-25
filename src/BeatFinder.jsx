@@ -611,7 +611,7 @@ function HomeScreen({ savedIds, onSave, onPlay }) {
           🎵 Real YouTube results — tap any artist to find their type beats instantly.
         </div>
       </div>
-      <BeatFeed artistName="best free" featured savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} max={10} />
+      <BeatFeed artistName="best free beats" featured savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} max={10} />
     </div>
   );
 }
