@@ -217,7 +217,7 @@ const ARTISTS_UK = [
   {id:"ajtracey",      name:"AJ Tracey",       cat:"UK Rap", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/8/8c/AJ_Tracey_2018.jpg/440px-AJ_Tracey_2018.jpg"},
   {id:"aitch",         name:"Aitch",           cat:"UK Rap", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Aitch_2021.jpg/440px-Aitch_2021.jpg"},
   {id:"centralcee",    name:"Central Cee",     cat:"UK Rap", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/Central_Cee_2022.jpg/440px-Central_Cee_2022.jpg"},
-  {id:"dblockeurope",  name:"D-Block Europe",  cat:"UK Rap", flag:"🇬🇧"},
+  {id:"dblockeurope",  name:"D Block Europe",  cat:"UK Rap", flag:"🇬🇧"},
   {id:"dave",          name:"Dave",            cat:"UK Rap", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/Dave_rapper_2020.jpg/440px-Dave_rapper_2020.jpg"},
   {id:"diggad",        name:"Digga D",         cat:"UK Rap", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/6/6d/Digga_D_2021.jpg/440px-Digga_D_2021.jpg"},
   {id:"headieone",     name:"Headie One",      cat:"UK Rap", flag:"🇬🇧", img:"https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Headie_One_2020.jpg/440px-Headie_One_2020.jpg"},
