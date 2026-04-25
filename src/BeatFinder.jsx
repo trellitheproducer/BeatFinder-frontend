@@ -706,7 +706,7 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
         </div>
       </div>
       <div style={{ padding: "0 16px" }}>
-        <BeatFeed artistName={searchName} savedIds={savedIds} onSave={onSave} onPlay={onPlay} showPagination filterTitle={artist.filterTitle !== false} instrumentalOnly={!!artist.instrumentalOnly} />
+        <BeatFeed artistName={searchName} savedIds={savedIds} onSave={onSave} onPlay={onPlay} showPagination filterTitle={artist.filterTitle !== false} instrumentalOnly={!!artist.instrumentalOnly} max={10} />
       </div>
     </div>
   );
