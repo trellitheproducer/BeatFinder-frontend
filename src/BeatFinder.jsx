@@ -1255,7 +1255,7 @@ function ProfileScreen({ user, setUser }) {
                           method: "POST",
                           body: JSON.stringify({ plan: pl.id }),
                         });
-                        window.open(result.checkout_url, "_blank");
+                        window.location.href = result.checkout_url;
                       } catch (e) {
                         setActivationErr(e.message);
                       }
