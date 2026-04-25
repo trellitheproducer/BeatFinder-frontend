@@ -306,7 +306,7 @@ function Av({ name, size = 88, idx = 0, img }) {
 // =============================================================================
 // FULL-SCREEN PLAYER
 // =============================================================================
-function Player({ beat, onClose }) {
+function Player({ beat, onClose, savedIds, onSave }) {
   return (
     <div style={{
       position: "fixed", inset: 0, zIndex: 9999, background: "#000",
@@ -366,6 +366,19 @@ function Player({ beat, onClose }) {
         >
           ▶ Open in YouTube
         </a>
+        <button
+          onClick={() => onSave(beat)}
+          style={{
+            marginTop: 12, width: "100%", borderRadius: 14, padding: "15px",
+            fontWeight: 800, fontSize: 16, cursor: "pointer",
+            background: savedIds.has(beat.videoId) ? "rgba(192,38,211,0.15)" : "#1a1a1a",
+            border: savedIds.has(beat.videoId) ? "2px solid #C026D3" : "1.5px solid #333",
+            color: savedIds.has(beat.videoId) ? "#C026D3" : "#aaa",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+          }}
+        >
+          {savedIds.has(beat.videoId) ? "🔖 Saved to Favourites" : "🔖 Save to Favourites"}
+        </button>
       </div>
     </div>
   );
@@ -429,7 +442,9 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
         </div>
       </div>
       <div style={{ padding: "12px 14px" }}>
-        <div style={{ color: "white", fontWeight: 700, fontSize: 13, lineHeight: 1.4, marginBottom: 4 }}>
+        <div
+          onClick={() => onPlay(beat)}
+          style={{ color: "white", fontWeight: 700, fontSize: 13, lineHeight: 1.4, marginBottom: 4, cursor: "pointer" }}>
           {beat.title}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -1149,7 +1164,7 @@ export default function BeatFinder() {
     <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
-      {playing && <Player beat={playing} onClose={() => setPlaying(null)} />}
+      {playing && <Player beat={playing} onClose={() => setPlaying(null)} savedIds={savedIds} onSave={toggleSave} />}
 
       <div style={{ overflowY: "auto", height: "calc(100vh - 72px)" }}>
         {tab === "home"      && <HomeScreen     savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
