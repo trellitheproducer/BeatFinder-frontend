@@ -56,20 +56,21 @@ async function apiFetch(path, options = {}) {
 // YOUTUBE — calls /api/youtube/search on your FastAPI backend
 // Backend makes the real googleapis.com call server-side (no CORS issues)
 // =============================================================================
-async function fetchBeats(artistName, page, filterTitle) {
+async function fetchBeats(artistName, page, filterTitle, maxResults) {
   const pageNum     = page || 1;
+  const maxNum      = maxResults || 20;
   const doFilter    = filterTitle !== false;
-  const query       = artistName + "|page" + pageNum + "|filter" + doFilter;
+  const query       = artistName + "|page" + pageNum + "|filter" + doFilter + "|max" + maxNum;
   if (cache[query] && Date.now() - cache[query].ts < CACHE_TTL) {
     return { beats: cache[query].data, error: null };
   }
 
   const filterParam = doFilter ? "true" : "false";
-  console.log("[BeatFinder] Searching: " + artistName + " page " + pageNum + " filter=" + filterParam);
+  console.log("[BeatFinder] Searching: " + artistName + " page " + pageNum + " filter=" + filterParam + " max=" + maxNum);
   try {
     const data = await apiFetch(
       "/api/youtube/search?artist=" + encodeURIComponent(artistName) +
-      "&max=20&page=" + pageNum +
+      "&max=" + maxNum + "&page=" + pageNum +
       "&filter_title=" + filterParam
     );
     const beats = data.beats || [];
@@ -481,7 +482,7 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
 // =============================================================================
 // BEAT FEED
 // =============================================================================
-function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, showPagination, filterTitle, instrumentalOnly }) {
+function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, showPagination, filterTitle, instrumentalOnly, max }) {
   const [beats,   setBeats]   = useState([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
@@ -495,7 +496,7 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
     setBeats([]);
     window.scrollTo(0, 0);
 
-    fetchBeats(artistName, page, filterTitle).then(({ beats: b, error: e }) => {
+    fetchBeats(artistName, page, filterTitle, max || 20).then(({ beats: b, error: e }) => {
       if (!alive) return;
       // Filter to instrumentals only if flag is set (e.g. Dot Rotten)
       const INSTRUMENTAL_KEYWORDS = ["instrumental", "riddim", "beat", "free beat", "backing track"];
@@ -610,7 +611,7 @@ function HomeScreen({ savedIds, onSave, onPlay }) {
           🎵 Real YouTube results — tap any artist to find their type beats instantly.
         </div>
       </div>
-      <BeatFeed artistName="best free" featured savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} />
+      <BeatFeed artistName="best free" featured savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} max={10} />
     </div>
   );
 }
@@ -752,7 +753,7 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
           <div style={{ color: "#aaa", fontSize: 13, marginTop: 4 }}>Live from YouTube</div>
         </div>
       </div>
-      <BeatFeed artistName="trending" savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} />
+      <BeatFeed artistName="trending" savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} max={10} />
     </div>
   );
 }
