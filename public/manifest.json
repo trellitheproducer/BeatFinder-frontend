@@ -1,0 +1,22 @@
+{
+  "name": "BeatFinder",
+  "short_name": "BeatFinder",
+  "description": "The World's #1 Beat Finder App",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://i.ibb.co/fYpYhVVd/IMG-8822.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "https://i.ibb.co/fYpYhVVd/IMG-8822.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    }
+  ]
+}
