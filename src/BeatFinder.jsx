@@ -432,7 +432,14 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
         <div style={{ color: "white", fontWeight: 700, fontSize: 13, lineHeight: 1.4, marginBottom: 4 }}>
           {beat.title}
         </div>
-        <div style={{ color: "#888", fontSize: 12, marginBottom: 6 }}>{beat.channel}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <div style={{ color: "#888", fontSize: 12 }}>{beat.channel}</div>
+          {beat.viewsLabel && (
+            <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "2px 8px", fontSize: 11, color: "#C026D3", fontWeight: 700 }}>
+              {beat.viewsLabel}
+            </div>
+          )}
+        </div>
         <a
           href={watchUrl(beat.videoId)}
           target="_blank" rel="noopener noreferrer"
@@ -709,6 +716,17 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
 // TRENDING SCREEN
 // =============================================================================
 function TrendingScreen({ savedIds, onSave, onPlay }) {
+  const [beats,   setBeats]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(null);
+
+  useEffect(() => {
+    setLoading(true);
+    apiFetch("/api/youtube/trending")
+      .then(d => { setBeats(d.beats || []); setLoading(false); })
+      .catch(e => { setError(e.message); setLoading(false); });
+  }, []);
+
   return (
     <div style={{ padding: "0 16px 100px" }}>
       <div style={{ padding: "20px 0 0" }}>
@@ -717,10 +735,31 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
           <div style={{ color: "white", fontSize: 26, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
             Hottest type beats
           </div>
-          <div style={{ color: "#aaa", fontSize: 13, marginTop: 4 }}>Live from YouTube</div>
+          <div style={{ color: "#aaa", fontSize: 13, marginTop: 4 }}>1M+ views only - sorted by most viewed</div>
         </div>
       </div>
-      <BeatFeed artistName="trending" savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} max={10} />
+
+      {loading && (
+        <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
+          <div style={{ fontSize: 36, marginBottom: 10 }}>🔥</div>
+          <div style={{ fontSize: 13 }}>Finding viral beats with 1M+ views...</div>
+        </div>
+      )}
+
+      {error && !beats.length && (
+        <div style={{ background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 14, padding: 20, textAlign: "center" }}>
+          <div style={{ color: "#F87171", fontWeight: 700, fontSize: 15, marginBottom: 8 }}>Could not load trending beats</div>
+          <div style={{ color: "#888", fontSize: 13 }}>{error}</div>
+        </div>
+      )}
+
+      {!loading && beats.map(beat => (
+        <BeatCard key={beat.videoId} beat={beat} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
+      ))}
+
+      {!loading && !beats.length && !error && (
+        <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>No trending beats found.</div>
+      )}
     </div>
   );
 }
