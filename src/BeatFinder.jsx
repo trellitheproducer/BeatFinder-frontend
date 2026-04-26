@@ -92,7 +92,8 @@ const AuthAPI = {
       body: JSON.stringify({ name, email, password }),
     });
     saveToken(data.access_token);
-    return data.user;
+    const u = data.user;
+    return { ...u, isPro: u.plan === "producer", isArtistPro: u.plan === "artist" || u.plan === "producer" };
   },
 
   async login(email, password) {
@@ -101,7 +102,8 @@ const AuthAPI = {
       body: JSON.stringify({ email, password }),
     });
     saveToken(data.access_token);
-    return data.user;
+    const u = data.user;
+    return { ...u, isPro: u.plan === "producer", isArtistPro: u.plan === "artist" || u.plan === "producer" };
   },
 
   async me() {
@@ -1512,7 +1514,7 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat 
                           body: JSON.stringify({ code: activationCode.trim() }),
                         });
                         setActivationSuccess(result.message || "Plan activated!");
-                        setUser({ ...user, isPro: result.plan === "producer", isArtistPro: true, plan: result.plan });
+                        setUser({ ...user, plan: result.plan, isPro: result.plan === "producer", isArtistPro: result.plan === "artist" || result.plan === "producer" });
                       } catch (e) {
                         setActivationErr(e.message);
                       }
@@ -1623,8 +1625,14 @@ export default function BeatFinder() {
     const token = getToken();
     if (!token) return;
     AuthAPI.me()
-      .then(u => setUser(u))
-      .catch(() => clearToken()); // token expired or invalid
+      .then(u => {
+        setUser({
+          ...u,
+          isPro:       u.plan === "producer",
+          isArtistPro: u.plan === "artist" || u.plan === "producer",
+        });
+      })
+      .catch(() => clearToken());
   }, []);
 
   // When user logs in, pull their saved beats from the backend
