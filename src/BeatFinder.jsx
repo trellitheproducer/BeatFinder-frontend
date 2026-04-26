@@ -377,32 +377,65 @@ function Av({ name, size = 88, idx = 0, img }) {
 
 // Large rhyme groups — words grouped by shared ending sound
 const RHYME_GROUPS = [
-  ["day","way","say","play","stay","pray","pay","slay","okay","away","today","highway","relay","display","portray","betray","decay","convey","hooray","spray","stray","bay","clay","gray","lay","may","ray","sway","tray"],
-  ["night","right","fight","light","sight","might","tight","bright","flight","white","ignite","despite","delight","tonight","midnight","highlight","moonlight","flashlight","insight","invite","excite","unite","recite","polite","alight","fright","height","kite","quite","write","bite","cite","mite","smite","sprite"],
-  ["know","flow","show","glow","grow","slow","go","though","below","bestow","shadow","tomorrow","sorrow","follow","hollow","borrow","plateau","although","ago","radio","studio","vertigo"],
-  ["seen","mean","clean","dream","team","scheme","supreme","between","machine","routine","serene","marine","obscene","intervene","magazine","gasoline","lean","keen","queen","screen","scene","bean","dean","green","preen","sheen","teen","wean"],
-  ["mine","shine","fine","line","time","crime","rhyme","sublime","overtime","prime","dime","lime","grime","vine","wine","pine","nine","spine","twine","divine","design","align","define","refine","combine","decline","confine","outline","sunshine","moonshine","sideline","deadline"],
-  ["take","make","break","shake","wake","fake","mistake","heartbreak","forsake","earthquake","stake","lake","bake","rake","sake","cake","drake","flake","snake","awake","intake","overtake","remake","cupcake","snowflake","namesake"],
-  ["alone","phone","throne","zone","stone","bone","tone","moan","groan","unknown","microphone","milestone","cornerstone","shown","blown","grown","flown","own","known","sewn","thrown","postpone","ozone","cyclone","backbone","jawbone","headstone","limestone","gravestone"],
-  ["back","track","stack","black","crack","attack","setback","flashback","payback","comeback","feedback","kickback","cutback","throwback","knack","hack","slack","pack","rack","lack","jack","mac","shack","snack","smack","whack","knack"],
-  ["ground","found","sound","around","bound","pound","profound","surround","background","underground","playground","rebound","compound","astound","abound","renowned","expound","confound","dumbfound"],
-  ["real","feel","deal","heal","steel","wheel","appeal","reveal","conceal","ideal","ordeal","surreal","kneel","meal","seal","zeal","peel","repeal","congeal","genteel","squeal","teal","veal","weal","unreal","ordeal"],
-  ["same","name","game","flame","claim","frame","blame","shame","fame","came","tame","aim","exclaim","proclaim","acclaim","defame","inflame","became","reclaim","proclaim","rename","nickname","lastname","ballgame","endgame"],
-  ["told","bold","cold","gold","hold","sold","fold","old","unfold","withhold","behold","enrolled","controlled","consoled","manifold","household","threshold","stronghold"],
-  ["beat","heat","street","complete","repeat","defeat","compete","elite","athlete","heartbeat","deadbeat","retreat","deceit","receipt","neat","feat","meat","seat","treat","wheat","cheat","greet","fleet","sleet","sweet","tweet","concrete","discrete","obsolete","delete","deplete","secrete","discreet","excrete"],
-  ["need","lead","freed","greed","creed","speed","bleed","feed","seed","weed","proceed","succeed","indeed","concede","agreed","guaranteed","stampede","plant the seed","take the lead","in the lead"],
-  ["live","give","drive","thrive","survive","arrive","revive","derive","connive","contrive","deprive","alive","high five","nosedive","overdrive","archive","beehive"],
-  ["heart","start","smart","apart","depart","impart","restart","sweetheart","artwork","chart","dart","cart","part","tart","art","counterpart","masterart","breakthrough","breakthrough"],
-  ["call","fall","wall","hall","tall","ball","crawl","stall","install","recall","overall","downfall","rainfall","nightfall","windfall","freefall","enthrall","befall","appall","forestall"],
-  ["ride","side","hide","guide","pride","tried","cried","denied","applied","relied","supplied","inside","outside","worldwide","override","provide","divide","reside","confide","decide","beside","collide","subside","upside","downside","fireside","riverside","landslide","riptide","suicide","homicide","coincide"],
-  ["stress","bless","less","yes","guess","mess","address","express","impress","confess","success","progress","access","excess","darkness","weakness","sadness","madness","gladness","princess","fortress","nevertheless","nonetheless","loneliness","happiness","emptiness","bitterness","tenderness"],
-  ["grind","mind","find","blind","kind","bind","remind","behind","mankind","unwind","rewind","designed","defined","refined","aligned","combined","confined","declined","reclined","intertwined","mastermind"],
-  ["free","see","be","me","key","tree","agree","degree","guarantee","destiny","energy","memory","victory","history","mystery","category","territory","possibility","opportunity","ability","reality","mentality","brutality","loyalty","royalty","penalty","specialty"],
-  ["top","stop","drop","shop","pop","hop","non-stop","rooftop","desktop","teardrop","backdrop","raindrop","dewdrop","hilltop","mountaintop","workshop","laptop"],
-  ["up","cut","gut","but","what","shut","strut","rut","mutt","putt","abrupt","erupt","corrupt","disrupt","interrupt","construct","destruct","instruct","obstruct"],
-  ["run","done","one","gun","sun","fun","won","begun","outdone","outrun","undone","overcome","lifetime","someone","anyone","everyone","none","bun","nun","pun","spun","stun","ton"],
-  ["own","grown","shown","blown","known","thrown","flown","sewn","postpone","outgrown","overthrown","fullblown","homegrown","full-grown"],
+  // -eep / -eap / -ee sounds
+  ["jeep","deep","sleep","keep","sweep","creep","leap","heap","reap","cheap","steep","beep","weep","peep","seep","sheep","fleet","street","beat","feat","heat","meat","neat","seat","treat","tweet","concrete","elite","compete","repeat","defeat","retreat","complete","athlete","heartbeat","deadbeat","discreet","delete","deplete"],
+  // -ack / -act / -ax
+  ["back","track","stack","black","crack","attack","setback","flashback","payback","comeback","feedback","kickback","throwback","knack","hack","slack","pack","rack","lack","jack","shack","snack","smack","whack","fact","act","pact","exact","impact","abstract","contract","extract","distract","attract","interact","react"],
+  // -ay / -ey / -ade
+  ["day","way","say","play","stay","pray","pay","slay","okay","away","today","highway","relay","display","portray","betray","decay","convey","hooray","spray","stray","bay","clay","gray","lay","may","ray","sway","blade","shade","fade","grade","made","trade","wade","arcade","decade","cascade","blockade","crusade","parade","upgrade","grenade","lemonade"],
+  // -ight / -ite / -yte
+  ["night","right","fight","light","sight","might","tight","bright","flight","white","ignite","despite","delight","tonight","midnight","highlight","moonlight","flashlight","insight","invite","excite","unite","recite","polite","alight","fright","height","kite","quite","write","bite","dynamite","satellite","parasite","appetite","overnight","spotlight","gunfight","fistfight","dogfight"],
+  // -ow / -ow (long o)
+  ["know","flow","show","glow","grow","slow","go","though","below","bestow","shadow","tomorrow","sorrow","follow","hollow","borrow","plateau","although","ago","radio","studio","vertigo","overflow","overthrow","undertow","rainbow","elbow","window","outgrow","forgo"],
+  // -een / -ean / -ine
+  ["seen","mean","clean","dream","team","scheme","supreme","between","machine","routine","serene","marine","obscene","intervene","magazine","lean","keen","queen","screen","scene","bean","green","preen","sheen","teen","wean","mainstream","downstream","upstream","daydream","nightmare","moonbeam","sunbeam"],
+  // -ine / -ime / -ind
+  ["mine","shine","fine","line","time","crime","rhyme","sublime","overtime","prime","dime","lime","grime","vine","wine","pine","nine","spine","divine","design","align","define","refine","combine","decline","confine","outline","sunshine","moonshine","sideline","deadline","grind","mind","find","blind","kind","bind","remind","behind","mankind","unwind","rewind","mastermind","intertwined"],
+  // -ake / -ake
+  ["take","make","break","shake","wake","fake","mistake","heartbreak","forsake","earthquake","stake","lake","bake","rake","sake","cake","flake","snake","awake","intake","overtake","remake","cupcake","snowflake","namesake","daybreak","outbreak","jailbreak","handshake","keepsake"],
+  // -one / -oan / -own (long o)
+  ["alone","phone","throne","zone","stone","bone","tone","moan","groan","unknown","microphone","milestone","cornerstone","shown","blown","grown","flown","own","known","thrown","postpone","ozone","cyclone","backbone","jawbone","headstone","limestone","gravestone","home","roam","foam","chrome","dome","gnome","poem","loam","syndrome","metronome","palindrome"],
+  // -ound / -own (rhymes with crown)
+  ["ground","found","sound","around","bound","pound","profound","surround","background","underground","playground","rebound","compound","astound","abound","renowned","expound","confound","dumbfound","crown","down","town","drown","clown","brown","frown","gown","noun","renown","downtown","uptown","countdown","breakdown","rundown","showdown","shutdown","lockdown","meltdown"],
+  // -eal / -eel / -eal
+  ["real","feel","deal","heal","steel","wheel","appeal","reveal","conceal","ideal","ordeal","surreal","kneel","meal","seal","zeal","peel","repeal","congeal","genteel","squeal","teal","veal","unreal","steel-toed","on one knee","let it be free"],
+  // -ame / -aim / -ame
+  ["same","name","game","flame","claim","frame","blame","shame","fame","came","tame","aim","exclaim","proclaim","acclaim","defame","inflame","became","reclaim","rename","nickname","ballgame","endgame","war game","mind game","wild game"],
+  // -old / -olled
+  ["told","bold","cold","gold","hold","sold","fold","old","unfold","withhold","behold","enrolled","controlled","consoled","manifold","household","threshold","stronghold","blindfold","marigold","pot of gold"],
+  // -ead / -ed / -ead (rhymes with dead)
+  ["dead","head","said","bread","spread","thread","dread","led","red","fed","bed","shed","instead","ahead","misled","mislead","unread","widespread","forehead","godhead","hothead","deadhead","figurehead","overhead"],
+  // -eed / -ead (rhymes with lead)
+  ["need","lead","freed","greed","creed","speed","bleed","feed","seed","weed","proceed","succeed","indeed","concede","agreed","guaranteed","stampede","supersede","centipede","proceed"],
+  // -ive / -ive (long i)
+  ["live","give","drive","thrive","survive","arrive","revive","derive","connive","contrive","deprive","alive","nosedive","overdrive","archive","beehive","high five","deep dive","swan dive","crash and dive"],
+  // -art / -eart
+  ["heart","start","smart","apart","depart","impart","restart","sweetheart","chart","dart","cart","part","tart","art","counterpart","fall apart","shopping cart","sacred heart","state of the art","change of heart","broken heart"],
+  // -all / -aul / -awl
+  ["call","fall","wall","hall","tall","ball","crawl","stall","install","recall","overall","downfall","rainfall","nightfall","windfall","freefall","enthrall","befall","appall","forestall","protocol","alcohol","wherewithal","Montreal","free-for-all","behind the ball"],
+  // -ide / -ied
+  ["ride","side","hide","guide","pride","tried","cried","denied","applied","relied","supplied","inside","outside","worldwide","override","provide","divide","reside","confide","decide","beside","collide","subside","upside","downside","fireside","riverside","landslide","riptide","homicide","coincide","justified","amplified","satisfied","glorified","modified","occupied","terrified","unified","verified","certified","identified","notified","solidified"],
+  // -ess / -est
+  ["stress","bless","less","yes","guess","mess","address","express","impress","confess","success","progress","access","excess","darkness","weakness","sadness","madness","gladness","princess","fortress","nevertheless","loneliness","happiness","emptiness","bitterness","best","rest","test","west","quest","chest","nest","pest","vest","arrest","contest","invest","protest","suggest","manifest","interest","forest","harvest"],
+  // -ee / -ee (free, see)
+  ["free","see","be","me","key","tree","agree","degree","guarantee","destiny","energy","memory","victory","history","mystery","category","territory","possibility","opportunity","ability","reality","mentality","brutality","loyalty","royalty","penalty","specialty","philosophy","democracy","conspiracy","emergency","currency","frequency","legacy","advocacy","diplomacy","pharmacy","privacy","prophecy","therapy","mystery","poetry","properly","separately","differently","together with me","set us free","what's meant to be","eventually","naturally","finally free","independently"],
+  // -un / -one (rhymes with sun)
+  ["run","done","one","gun","sun","fun","won","begun","outdone","outrun","undone","overcome","someone","anyone","everyone","none","bun","nun","pun","spun","stun","number one","on the run","under the gun","get it done","all as one","second to none","hit and run","just begun","kingdom come"],
+  // -ong / -ong
+  ["strong","long","song","wrong","along","belong","prolong","lifelong","headstrong","all along","sing along","come along","play along","get along","before long","stay strong","be strong","move along","go along","tagalong","singalong","all night long","carry on","move on","carry strong"],
+  // -ock / -op / -ot
+  ["block","clock","knock","lock","mock","rock","shock","sock","stock","dock","flock","unlock","deadlock","gridlock","padlock","o clock","hard knock","around the clock","hip hop","nonstop","rooftop","desktop","backdrop","raindrop","hilltop"],
+  // -ool / -ule / -ool
+  ["cool","fool","rule","school","tool","pool","fuel","duel","jewel","cruel","overrule","old school","swimming pool","golden rule","April fool","beautiful","powerful","masterful","meaningful","wonderful","colorful","plentiful","bountiful","dutiful","merciful","successful","faithful","grateful","hateful","wasteful","peaceful","cheerful","fearful","careful","tearful","playful","hopeful","soulful","truthful","youthful"],
+  // -op / -op
+  ["drop","stop","shop","pop","hop","crop","flop","mop","prop","swap","top","nonstop","laptop","rooftop","backdrop","raindrop","teardrop","dewdrop","hilltop","workshop","hip hop","tip top","over the top","drop by drop","ready to drop","can't stop won't stop"],
+  // -uck / -ug / -unk
+  ["stuck","luck","duck","truck","chuck","pluck","struck","muck","buck","cluck","amuck","starstruck","dumbstruck","thunderstruck","lady luck","down on my luck","pass the buck","out of luck"],
+  // -ug / -ub / -ud
+  ["thug","drug","bug","hug","jug","mug","plug","rug","shrug","slug","snug","tug","dug","grub","club","hub","rub","sub","tub","shrub","nightclub","hot tub","sugarplum","overcome","come from","kingdom come"],
 ];
+
+
 
 // Sentence templates for building suggestions
 const TEMPLATES = [
@@ -525,13 +558,34 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
     const words    = lastLine.split(" ").filter(w => w.length > 0);
     const lastWord = words[words.length - 1].replace(/[^a-zA-Z]/gi, "").toLowerCase();
 
-    // Find rhyming words
+    // Find rhyming words - check exact match first, then suffix match
     const found = [];
+    // Pass 1: exact word match
     for (const group of RHYME_GROUPS) {
-      if (group.some(w => w === lastWord || lastWord.endsWith(w.slice(-3)) || w.endsWith(lastWord.slice(-3)))) {
-        const others = group.filter(w => w !== lastWord);
-        found.push(...others);
+      if (group.includes(lastWord)) {
+        found.push(...group.filter(w => w !== lastWord));
         break;
+      }
+    }
+    // Pass 2: suffix match (last 3 chars)
+    if (found.length === 0 && lastWord.length >= 3) {
+      const tail3 = lastWord.slice(-3);
+      const tail2 = lastWord.slice(-2);
+      for (const group of RHYME_GROUPS) {
+        if (group.some(w => w.endsWith(tail3) || (tail2.length === 2 && w.endsWith(tail2)))) {
+          found.push(...group.filter(w => w !== lastWord));
+          break;
+        }
+      }
+    }
+    // Pass 3: any partial match
+    if (found.length === 0 && lastWord.length >= 2) {
+      const tail2 = lastWord.slice(-2);
+      for (const group of RHYME_GROUPS) {
+        if (group.some(w => w.endsWith(tail2))) {
+          found.push(...group.filter(w => w !== lastWord));
+          break;
+        }
       }
     }
 
