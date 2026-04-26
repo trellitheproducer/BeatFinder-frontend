@@ -373,6 +373,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric }) {
       text:      text.trim(),
       beatTitle: beat ? beat.title : "",
       beatId:    beat ? beat.videoId : "",
+      beat:      beat || null,
       savedAt:   new Date().toISOString(),
     };
     onSaveLyric(lyric);
@@ -439,13 +440,23 @@ function LyricsNotepad({ beat, onClose, onSaveLyric }) {
       />
 
       <div style={{
-        padding: "8px 16px", background: "#0a0a0a",
+        padding: "12px 16px", background: "#0a0a0a",
         borderTop: "1px solid #1a1a1a",
-        paddingBottom: "calc(8px + env(safe-area-inset-bottom))",
+        paddingBottom: "calc(12px + env(safe-area-inset-bottom))",
+        display: "flex", flexDirection: "column", gap: 8,
       }}>
-        <div style={{ color: "#333", fontSize: 11, textAlign: "center" }}>
-          {text.length} characters · {text.split(/\s+/).filter(Boolean).length} words
+        <div style={{ color: "#444", fontSize: 11, textAlign: "center" }}>
+          {text.length} characters · {text.split(" ").filter(function(w){return w.length > 0;}).length} words
         </div>
+        <button onClick={handleSave} style={{
+          width: "100%", borderRadius: 14, padding: "15px",
+          fontWeight: 800, fontSize: 16, cursor: "pointer", border: "none",
+          background: saved ? "#22C55E" : "#C026D3",
+          color: "white",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+        }}>
+          {saved ? "✅ Lyrics Saved!" : "💾 Save Lyrics"}
+        </button>
       </div>
     </div>
   );
@@ -1229,10 +1240,68 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
   );
 }
 
+
+// =============================================================================
+// LYRIC CARD — shows saved lyric with beat, opens full lyric view
+// =============================================================================
+function LyricCard({ lyric, onDelete, onPlayBeat }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div style={{ background: "#111", borderRadius: 14, marginBottom: 12, border: "1px solid #1e1e1e", overflow: "hidden" }}>
+      <div style={{ padding: "14px 16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+          <div style={{ color: "white", fontWeight: 700, fontSize: 15, flex: 1, paddingRight: 8 }}>{lyric.title}</div>
+          <button onClick={onDelete} style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer", flexShrink: 0 }}>✕</button>
+        </div>
+
+        {lyric.beatTitle && (
+          <div
+            onClick={() => {
+              if (lyric.beat) onPlayBeat(lyric.beat);
+            }}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, marginBottom: 10,
+              background: "rgba(192,38,211,0.1)", border: "1px solid rgba(192,38,211,0.25)",
+              borderRadius: 10, padding: "8px 12px",
+              cursor: lyric.beat ? "pointer" : "default",
+            }}
+          >
+            <span style={{ fontSize: 16 }}>🎵</span>
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              <div style={{ color: "#C026D3", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {lyric.beatTitle}
+              </div>
+              {lyric.beat && <div style={{ color: "#888", fontSize: 10, marginTop: 2 }}>Tap to play this beat</div>}
+            </div>
+            {lyric.beat && <span style={{ color: "#C026D3", fontSize: 18 }}>▶</span>}
+          </div>
+        )}
+
+        <div style={{ color: "#aaa", fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+          {expanded ? lyric.text : (lyric.text.length > 150 ? lyric.text.slice(0, 150) + "..." : lyric.text)}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
+          <div style={{ color: "#444", fontSize: 11 }}>
+            {new Date(lyric.savedAt).toLocaleDateString()}
+          </div>
+          {lyric.text.length > 150 && (
+            <button onClick={() => setExpanded(!expanded)}
+              style={{ background: "none", border: "none", color: "#C026D3", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+              {expanded ? "Show less" : "Read all"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // =============================================================================
 // PROFILE SCREEN
 // =============================================================================
-function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics }) {
+function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat }) {
   const [mode,        setMode]        = useState("landing");
   const [email,       setEmail]       = useState("");
   const [pw,          setPw]          = useState("");
@@ -1362,31 +1431,16 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics }) {
             </div>
           ) : (
             savedLyrics.map((lyric, i) => (
-              <div key={lyric.id || i} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid #1e1e1e" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                  <div style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{lyric.title}</div>
-                  <button
-                    onClick={() => {
-                      const next = savedLyrics.filter((_, idx) => idx !== i);
-                      setSavedLyrics(next);
-                      try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch {}
-                    }}
-                    style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer" }}>
-                    ✕
-                  </button>
-                </div>
-                {lyric.beatTitle && (
-                  <div style={{ color: "#C026D3", fontSize: 11, fontWeight: 600, marginBottom: 8 }}>
-                    🎵 {lyric.beatTitle}
-                  </div>
-                )}
-                <div style={{ color: "#aaa", fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
-                  {lyric.text.length > 200 ? lyric.text.slice(0, 200) + "..." : lyric.text}
-                </div>
-                <div style={{ color: "#444", fontSize: 11, marginTop: 8 }}>
-                  {new Date(lyric.savedAt).toLocaleDateString()}
-                </div>
-              </div>
+              <LyricCard
+                key={lyric.id || i}
+                lyric={lyric}
+                onDelete={() => {
+                  const next = savedLyrics.filter((_, idx) => idx !== i);
+                  setSavedLyrics(next);
+                  try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch {}
+                }}
+                onPlayBeat={onPlayBeat}
+              />
             ))
           )}
         </div>
@@ -1647,7 +1701,7 @@ export default function BeatFinder() {
         {tab === "exclusive" && (
           <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />
         )}
-        {tab === "profile"   && <ProfileScreen user={user} setUser={setUser} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} />}
+        {tab === "profile"   && <ProfileScreen user={user} setUser={setUser} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} />}
       </div>
 
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "rgba(10,10,10,0.97)", borderTop: "1px solid #1a1a1a", display: "flex", height: "calc(72px + env(safe-area-inset-bottom))", zIndex: 100, backdropFilter: "blur(20px)", paddingBottom: "env(safe-area-inset-bottom)" }}>
