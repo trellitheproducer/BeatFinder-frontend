@@ -2198,6 +2198,158 @@ function MyUploadsSection({ user }) {
   );
 }
 
+
+
+// =============================================================================
+// RESET PASSWORD SCREEN — shown when user visits app with ?reset_token=
+// =============================================================================
+function ResetPasswordScreen({ token, onDone }) {
+  const [newPw,    setNewPw]    = useState("");
+  const [confirmPw,setConfirmPw]= useState("");
+  const [loading,  setLoading]  = useState(false);
+  const [msg,      setMsg]      = useState("");
+  const [done,     setDone]     = useState(false);
+
+  const inp = {
+    width: "100%", background: "#1a1a1a", border: "1px solid #333",
+    borderRadius: 12, padding: "14px 16px", color: "white",
+    fontSize: 16, outline: "none", marginBottom: 14, boxSizing: "border-box",
+  };
+
+  const handleReset = async () => {
+    if (!newPw || !confirmPw) return;
+    if (newPw !== confirmPw) { setMsg("Passwords do not match"); return; }
+    if (newPw.length < 6)    { setMsg("Password must be at least 6 characters"); return; }
+    setLoading(true);
+    setMsg("");
+    try {
+      await apiFetch("/api/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify({ token, new_password: newPw }),
+      });
+      setDone(true);
+    } catch (e) {
+      setMsg("Error: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ padding: "60px 24px 100px", fontFamily: "'DM Sans',sans-serif" }}>
+      <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 2, marginBottom: 8 }}>
+        RESET PASSWORD
+      </div>
+      <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 28 }}>
+        Enter your new password below.
+      </div>
+
+      {!done ? (
+        <>
+          <input value={newPw}     onChange={e => setNewPw(e.target.value)}     type="password" placeholder="New password"     style={inp} />
+          <input value={confirmPw} onChange={e => setConfirmPw(e.target.value)} type="password" placeholder="Confirm password" style={inp} />
+          {msg && <div style={{ color: msg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, marginBottom: 12 }}>{msg}</div>}
+          <button onClick={handleReset} disabled={loading} style={{ width: "100%", background: loading ? "#333" : "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: loading ? "not-allowed" : "pointer" }}>
+            {loading ? "Resetting..." : "Set New Password"}
+          </button>
+        </>
+      ) : (
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
+          <div style={{ color: "#22C55E", fontWeight: 800, fontSize: 18, marginBottom: 8 }}>Password Reset!</div>
+          <div style={{ color: "#888", fontSize: 14, marginBottom: 24 }}>You can now log in with your new password.</div>
+          <button onClick={onDone} style={{ background: "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: "14px 40px", fontSize: 16, cursor: "pointer" }}>
+            Go to Log In
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// FORGOT PASSWORD SCREEN
+// =============================================================================
+function ForgotPasswordScreen({ onBack }) {
+  const [email,   setEmail]   = useState("");
+  const [loading, setLoading] = useState(false);
+  const [msg,     setMsg]     = useState("");
+  const [sent,    setSent]    = useState(false);
+
+  const handleSubmit = async () => {
+    if (!email.trim()) return;
+    setLoading(true);
+    setMsg("");
+    try {
+      await apiFetch("/api/auth/forgot-password", {
+        method: "POST",
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      setSent(true);
+      setMsg("Reset link sent! Check your email inbox.");
+    } catch (e) {
+      setMsg("Error: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const inp = {
+    width: "100%", background: "#1a1a1a", border: "1px solid #333",
+    borderRadius: 12, padding: "14px 16px", color: "white",
+    fontSize: 16, outline: "none", marginBottom: 16, boxSizing: "border-box",
+  };
+
+  return (
+    <div style={{ padding: "40px 24px 100px" }}>
+      <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer", marginBottom: 20 }}>‹</button>
+      <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 2, marginBottom: 8 }}>
+        FORGOT PASSWORD
+      </div>
+      <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 28 }}>
+        Enter the email address you used to sign up and we'll send you a link to reset your password.
+      </div>
+
+      {!sent ? (
+        <>
+          <input
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="Your email address"
+            type="email"
+            style={inp}
+          />
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            style={{ width: "100%", background: loading ? "#333" : "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: loading ? "not-allowed" : "pointer" }}
+          >
+            {loading ? "Sending..." : "Send Reset Link"}
+          </button>
+        </>
+      ) : (
+        <div style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 14, padding: 20, textAlign: "center" }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📧</div>
+          <div style={{ color: "#22C55E", fontWeight: 800, fontSize: 16, marginBottom: 8 }}>Email Sent!</div>
+          <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7 }}>
+            Check your inbox at <span style={{ color: "white", fontWeight: 600 }}>{email}</span> for a password reset link. It expires in 1 hour.
+          </div>
+        </div>
+      )}
+
+      {msg && !sent && (
+        <div style={{ color: msg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, textAlign: "center", marginTop: 12 }}>{msg}</div>
+      )}
+
+      <div style={{ textAlign: "center", marginTop: 24 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: "#06B6D4", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+          Back to Log In
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // =============================================================================
 // PROFILE SCREEN
 // =============================================================================
@@ -2221,6 +2373,12 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
   const [activationCode,   setActivationCode]   = useState("");
   const [activationErr,    setActivationErr]    = useState("");
   const [activationSuccess,setActivationSuccess]= useState("");
+  const [settingsOpen,     setSettingsOpen]     = useState(false);
+  const [newUsername,      setNewUsername]      = useState("");
+  const [currentPw,        setCurrentPw]        = useState("");
+  const [newPw,            setNewPw]            = useState("");
+  const [confirmPw,        setConfirmPw]        = useState("");
+  const [settingsMsg,      setSettingsMsg]      = useState("");
   const [authErr,     setAuthErr]     = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [rememberMe,  setRememberMe]  = useState(() => {
@@ -2248,10 +2406,98 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
     <div style={{ padding: "0 16px 100px" }}>
       <div style={{ padding: "20px 0 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>My Profile</div>
-        <button onClick={() => { AuthAPI.logout(); setUser(null); setMode("landing"); }}
-          style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 10, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
-          Log out
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", position: "relative" }}>
+          <button onClick={() => setSettingsOpen(!settingsOpen)}
+            style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 10, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
+            ⚙️ Settings
+          </button>
+          <button onClick={() => { AuthAPI.logout(); setUser(null); setMode("landing"); }}
+            style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 10, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
+            Log out
+          </button>
+          {settingsOpen && (
+            <div style={{
+              position: "absolute", top: 44, right: 0, zIndex: 100,
+              background: "#111", border: "1px solid #333", borderRadius: 14,
+              padding: 20, width: 300, boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <div style={{ color: "white", fontWeight: 800, fontSize: 16 }}>⚙️ Settings</div>
+                <button onClick={() => setSettingsOpen(false)} style={{ background: "none", border: "none", color: "#555", fontSize: 20, cursor: "pointer" }}>✕</button>
+              </div>
+
+              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>USERNAME</div>
+              <input
+                value={newUsername}
+                onChange={e => setNewUsername(e.target.value)}
+                placeholder={user.username || "Set your username"}
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
+              />
+              <button
+                onClick={async () => {
+                  if (!newUsername.trim()) return;
+                  try {
+                    await apiFetch("/api/auth/set-username", { method: "POST", body: JSON.stringify({ username: newUsername.trim() }) });
+                    setUser({ ...user, username: newUsername.trim() });
+                    setNewUsername("");
+                    setSettingsMsg("Username updated!");
+                    setTimeout(() => setSettingsMsg(""), 2500);
+                  } catch (e) { setSettingsMsg("Error: " + e.message); }
+                }}
+                style={{ width: "100%", background: "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: "10px", fontSize: 14, cursor: "pointer", marginBottom: 16 }}
+              >
+                {user.username ? "Update Username" : "Set Username"}
+              </button>
+
+              <div style={{ height: 1, background: "#1e1e1e", marginBottom: 16 }} />
+
+              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>CHANGE PASSWORD</div>
+              <input
+                value={currentPw}
+                onChange={e => setCurrentPw(e.target.value)}
+                type="password"
+                placeholder="Current password"
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
+              />
+              <input
+                value={newPw}
+                onChange={e => setNewPw(e.target.value)}
+                type="password"
+                placeholder="New password"
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
+              />
+              <input
+                value={confirmPw}
+                onChange={e => setConfirmPw(e.target.value)}
+                type="password"
+                placeholder="Confirm new password"
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
+              />
+              <button
+                onClick={async () => {
+                  if (!currentPw || !newPw) return;
+                  if (newPw !== confirmPw) { setSettingsMsg("Passwords do not match"); return; }
+                  if (newPw.length < 6) { setSettingsMsg("Password must be at least 6 characters"); return; }
+                  try {
+                    await apiFetch("/api/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPw, new_password: newPw }) });
+                    setCurrentPw(""); setNewPw(""); setConfirmPw("");
+                    setSettingsMsg("Password changed successfully!");
+                    setTimeout(() => setSettingsMsg(""), 2500);
+                  } catch (e) { setSettingsMsg("Error: " + e.message); }
+                }}
+                style={{ width: "100%", background: "#1a1a1a", border: "1.5px solid #333", borderRadius: 10, color: "#aaa", fontWeight: 800, padding: "10px", fontSize: 14, cursor: "pointer", marginBottom: 8 }}
+              >
+                Change Password
+              </button>
+
+              {settingsMsg && (
+                <div style={{ color: settingsMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, textAlign: "center", fontWeight: 600 }}>
+                  {settingsMsg}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
       <div style={{ background: "#111", borderRadius: 16, padding: 20, marginBottom: 20, border: "1px solid rgba(255,255,255,0.07)", textAlign: "center" }}>
         <div style={{ width: 80, height: 80, borderRadius: "50%", background: "linear-gradient(135deg,#7C2D12,#C026D3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, color: "white", fontWeight: 800, margin: "0 auto 12px" }}>
@@ -2265,52 +2511,9 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
           <div style={{ marginTop: 6, color: "#555", fontSize: 12 }}>@{user.username}</div>
         )}
       </div>
-      {(user.isPro || user.isArtistPro) && (
-        <div style={{ marginBottom: 24 }}>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Your Username</div>
-          <div style={{ color: "#666", fontSize: 13, marginBottom: 14 }}>
-            {user.username ? "Your public profile name. Others can find and view your profile." : "Create a username so others can find your public profile."}
-          </div>
-          <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #222" }}>
-            <input
-              value={usernameInput}
-              onChange={e => setUsernameInput(e.target.value.replace(/[^a-zA-Z0-9_. ]/g, ""))}
-              placeholder={user.username ? user.username : "Choose a username..."}
-              style={{ ...inp, marginBottom: 12 }}
-              maxLength={30}
-            />
-            {usernameMsg && (
-              <div style={{ color: usernameMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, marginBottom: 10, textAlign: "center", fontWeight: 600 }}>
-                {usernameMsg}
-              </div>
-            )}
-            <button
-              onClick={async () => {
-                if (!usernameInput.trim()) return;
-                setUsernameMsg("");
-                try {
-                  const token = localStorage.getItem("bf_token");
-                  const res   = await fetch(API_BASE + "/api/auth/username", {
-                    method:  "POST",
-                    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
-                    body:    JSON.stringify({ username: usernameInput.trim() }),
-                  });
-                  const data = await res.json();
-                  if (!res.ok) throw new Error(data.detail || "Failed");
-                  setUser({ ...user, username: data.username });
-                  setUsernameMsg("Username saved!");
-                } catch (e) {
-                  setUsernameMsg("Error: " + e.message);
-                }
-              }}
-              style={{ width: "100%", background: "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: 13, fontSize: 15, cursor: "pointer" }}>
-              {user.username ? "Update Username" : "Set Username"}
-            </button>
-          </div>
-        </div>
-      )}
 
-      {user.isPro && (
+
+            {user.isPro && (
         <div style={{ marginBottom: 24 }}>
           <StripeConnectSection />
         </div>
@@ -2532,6 +2735,8 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
     </div>
   );
 
+  if (mode === "forgot") return <ForgotPasswordScreen onBack={() => setMode("login")} />;
+
   return (
     <div style={{ padding: "40px 24px 100px" }}>
       <button onClick={() => setMode("landing")} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer", marginBottom: 20 }}>‹</button>
@@ -2599,6 +2804,14 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
           {mode === "signup" ? "Log In" : "Sign Up"}
         </button>
       </div>
+      {mode === "login" && (
+        <div style={{ textAlign: "center", marginTop: 12 }}>
+          <button onClick={() => setMode("forgot")}
+            style={{ background: "none", border: "none", color: "#666", fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>
+            Forgot your password?
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2628,6 +2841,9 @@ export default function BeatFinder() {
   // savedMap: { [videoId]: beat } — localStorage for guests, backend for logged-in users
   const [savedMap, setSavedMap] = useState(loadSaved);
   const savedIds = new Set(Object.keys(savedMap));
+
+  // Handle reset token from URL
+  const resetToken = new URLSearchParams(window.location.search).get("reset_token");
 
   // Restore session from stored JWT on app load
   useEffect(() => {
@@ -2718,6 +2934,14 @@ export default function BeatFinder() {
       return next;
     });
   }, []);
+
+  if (resetToken) {
+    return (
+      <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
+        <ResetPasswordScreen token={resetToken} onDone={() => { window.history.replaceState({}, "", "/"); window.location.reload(); }} />
+      </div>
+    );
+  }
 
   return (
     <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
