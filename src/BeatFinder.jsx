@@ -908,40 +908,58 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
         >
           {savedIds.has(beat.videoId) ? "🔖 Saved to Favourites" : "🔖 Save to Favourites"}
         </button>
-        {isArtistPro && (() => {
+        {(() => {
           const existingLyric = savedLyrics ? savedLyrics.find(l => l.beatId === beat.videoId) : null;
           const existingIndex = savedLyrics ? savedLyrics.findIndex(l => l.beatId === beat.videoId) : -1;
-          return (
-            <>
-              <button
-                onClick={() => onOpenLyrics(beat)}
-                style={{
-                  marginTop: 10, width: "100%", borderRadius: 14, padding: "15px",
-                  fontWeight: 800, fontSize: 16, cursor: "pointer",
-                  background: "rgba(192,38,211,0.1)",
-                  border: "1.5px solid #C026D3",
-                  color: "#C026D3",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-                }}
-              >
-                ✍️ Write Lyrics to This Beat
-              </button>
-              {existingLyric && (
+
+          if (isArtistPro) {
+            return (
+              <>
                 <button
-                  onClick={() => onEditLyric(existingLyric, existingIndex)}
+                  onClick={() => onOpenLyrics(beat)}
                   style={{
                     marginTop: 10, width: "100%", borderRadius: 14, padding: "15px",
-                    fontWeight: 800, fontSize: 15, cursor: "pointer",
-                    background: "rgba(34,197,94,0.1)",
-                    border: "1.5px solid #22C55E",
-                    color: "#22C55E",
+                    fontWeight: 800, fontSize: 16, cursor: "pointer",
+                    background: "rgba(192,38,211,0.1)",
+                    border: "1.5px solid #C026D3", color: "#C026D3",
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
                   }}
                 >
-                  📄 Open Existing Lyrics — {existingLyric.title}
+                  ✍️ Write Lyrics to This Beat
                 </button>
-              )}
-            </>
+                {existingLyric && (
+                  <button
+                    onClick={() => onEditLyric(existingLyric, existingIndex)}
+                    style={{
+                      marginTop: 10, width: "100%", borderRadius: 14, padding: "15px",
+                      fontWeight: 800, fontSize: 15, cursor: "pointer",
+                      background: "rgba(34,197,94,0.1)",
+                      border: "1.5px solid #22C55E", color: "#22C55E",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                    }}
+                  >
+                    📄 Open Existing Lyrics — {existingLyric.title}
+                  </button>
+                )}
+              </>
+            );
+          }
+
+          // Locked state for non-subscribers
+          return (
+            <button
+              onClick={() => onClose()}
+              style={{
+                marginTop: 10, width: "100%", borderRadius: 14, padding: "15px",
+                fontWeight: 800, fontSize: 15, cursor: "pointer",
+                background: "#111",
+                border: "1.5px solid #333",
+                color: "#555",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              }}
+            >
+              🔒 Subscribe to Write Lyrics
+            </button>
           );
         })()}
 
