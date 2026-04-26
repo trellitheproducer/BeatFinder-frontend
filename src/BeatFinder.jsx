@@ -2206,6 +2206,113 @@ function MyUploadsSection({ user }) {
 
 
 
+
+// =============================================================================
+// ROOT AUTH SCREEN — shown at app root when no user logged in
+// =============================================================================
+function RootAuthScreen({ onLogin }) {
+  const [mode,        setMode]        = useState("landing");
+  const [name,        setName]        = useState("");
+  const [email,       setEmail]       = useState("");
+  const [pw,          setPw]          = useState("");
+  const [rememberMe,  setRememberMe]  = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authErr,     setAuthErr]     = useState("");
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("bf_saved_email");
+      if (saved) { setEmail(saved); setRememberMe(true); }
+    } catch {}
+  }, []);
+
+  const inp = {
+    width: "100%", background: "#1a1a1a", border: "1px solid #333",
+    borderRadius: 12, padding: "14px 16px", color: "white",
+    fontSize: 16, outline: "none", marginBottom: 16, boxSizing: "border-box",
+  };
+
+  if (mode === "forgot") return <ForgotPasswordScreen onBack={() => setMode("login")} />;
+
+  if (mode === "landing") return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", padding: 32, textAlign: "center" }}>
+      <img src="https://i.ibb.co/9myqbFB7/2-BB02064-13-F6-476-C-89-FF-B1-EDDAE0-C709.png" alt="BeatFinder" style={{ width: "100%", maxWidth: 300, marginBottom: 32 }} />
+      <div style={{ color: "#aaa", fontSize: 14, marginBottom: 36, lineHeight: 1.7 }}>
+        Create a free account to save beats,<br />or subscribe as an artist or producer.
+      </div>
+      <button onClick={() => setMode("signup")}
+        style={{ width: "100%", background: "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: "pointer", marginBottom: 16 }}>
+        Create Account
+      </button>
+      <button onClick={() => setMode("login")}
+        style={{ background: "none", border: "none", color: "#06B6D4", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
+        I already have an account
+      </button>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "40px 24px 100px" }}>
+      <button onClick={() => setMode("landing")} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer", marginBottom: 20 }}>
+        &#8592;
+      </button>
+      <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 2, marginBottom: 24 }}>
+        {mode === "signup" ? "CREATE ACCOUNT" : "WELCOME BACK"}
+      </div>
+      {mode === "signup" && <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" style={inp} />}
+      <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email address" type="email" style={inp} />
+      <input value={pw} onChange={e => setPw(e.target.value)} placeholder="Password" type="password" style={{ ...inp, marginBottom: 16 }} />
+      {mode === "login" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} id="rm" />
+          <label htmlFor="rm" style={{ color: "#888", fontSize: 13 }}>Remember my login</label>
+        </div>
+      )}
+      <button
+        disabled={authLoading}
+        onClick={async () => {
+          setAuthErr("");
+          if (mode === "login" && !pw.trim()) { setAuthErr("Please enter your password"); return; }
+          setAuthLoading(true);
+          try {
+            const u = mode === "signup"
+              ? await AuthAPI.register(name || email.split("@")[0], email, pw)
+              : await AuthAPI.login(email, pw);
+            if (rememberMe) {
+              try { localStorage.setItem("bf_saved_email", email); } catch {}
+            } else {
+              try { localStorage.removeItem("bf_saved_email"); } catch {}
+            }
+            onLogin(u);
+          } catch (e) {
+            setAuthErr(e.message);
+          } finally {
+            setAuthLoading(false);
+          }
+        }}
+        style={{ width: "100%", background: authLoading ? "#555" : "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: "pointer", opacity: authLoading ? 0.6 : 1 }}>
+        {authLoading ? "Please wait..." : mode === "signup" ? "Create Account" : "Log In"}
+      </button>
+      {authErr && <div style={{ color: "#F87171", fontSize: 13, textAlign: "center", marginTop: 12 }}>{authErr}</div>}
+      <div style={{ textAlign: "center", marginTop: 20 }}>
+        <span style={{ color: "#888", fontSize: 14 }}>{mode === "signup" ? "Already have an account? " : "No account? "}</span>
+        <button onClick={() => { setAuthErr(""); setMode(mode === "signup" ? "login" : "signup"); }}
+          style={{ background: "none", border: "none", color: "#06B6D4", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+          {mode === "signup" ? "Log In" : "Sign Up"}
+        </button>
+      </div>
+      {mode === "login" && (
+        <div style={{ textAlign: "center", marginTop: 12 }}>
+          <button onClick={e => { e.preventDefault(); e.stopPropagation(); setMode("forgot"); }}
+            style={{ background: "none", border: "none", color: "#666", fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>
+            Forgot your password?
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // =============================================================================
 // RESET PASSWORD SCREEN - shown when user visits app with ?reset_token=
 // =============================================================================
@@ -2417,7 +2524,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 10, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
             ⚙️ Settings
           </button>
-          <button onClick={() => { onLogout && onLogout(); setMode("landing"); }}
+          <button onClick={() => { onLogout(); }}
             style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 10, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
             Log out
           </button>
@@ -2797,7 +2904,6 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             try { localStorage.removeItem("bf_saved_email"); } catch {}
           }
           setUser(u);
-          setMode("landing");
         } catch (e) {
           setAuthErr(e.message);
         } finally {
@@ -2868,8 +2974,6 @@ export default function BeatFinder() {
           isPro:       u.plan === "producer",
           isArtistPro: u.plan === "artist" || u.plan === "producer",
         });
-        setTab("home");
-        setVisitedTabs(new Set(["home"]));
       })
       .catch(() => clearToken());
   }, []);
@@ -2903,13 +3007,9 @@ export default function BeatFinder() {
   }, [user]);
 
   const handlePlay = useCallback(beat => setPlaying(beat), []);
-  const [visitedTabs, setVisitedTabs] = useState(() => new Set(["home", "profile"]));
-
   const goTab = id => {
     setPlaying(null);
     setTab(id);
-    setVisitedTabs(prev => new Set([...prev, id]));
-    // Never reset artist - Artists tab manages its own state
   };
 
   // Lyrics state
@@ -2977,13 +3077,13 @@ export default function BeatFinder() {
       )}
 
       <div style={{ overflowY: "auto", height: "calc(100vh - 72px)" }}>
-        {visitedTabs.has("home")      && <div style={{ display: tab === "home"      ? "block" : "none" }}><HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => setTab("exclusive")} /></div>}
-        {visitedTabs.has("artists")   && <div style={{ display: tab === "artists"   ? "block" : "none" }}><ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>}
-        {visitedTabs.has("trending")  && <div style={{ display: tab === "trending"  ? "block" : "none" }}><TrendingScreen  savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>}
-        {visitedTabs.has("search")    && <div style={{ display: tab === "search"    ? "block" : "none" }}><SearchScreen    savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>}
-        {visitedTabs.has("saved")     && <div style={{ display: tab === "saved"     ? "block" : "none" }}><SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} /></div>}
-        {visitedTabs.has("exclusive") && <div style={{ display: tab === "exclusive" ? "block" : "none" }}><ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>}
-        {visitedTabs.has("profile")   && <div style={{ display: tab === "profile"   ? "block" : "none" }}><ProfileScreen user={user} setUser={u => { setUser(u); if (u) { setTab("home"); setVisitedTabs(new Set(["home", "profile"])); } }} onLogout={() => { AuthAPI.logout(); setUser(null); setTab("home"); setVisitedTabs(new Set(["home", "profile"])); }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} /></div>}
+        <div style={{ display: tab === "home"      ? "block" : "none" }}><HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => setTab("exclusive")} /></div>
+        <div style={{ display: tab === "artists"   ? "block" : "none" }}><ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>
+        <div style={{ display: tab === "trending"  ? "block" : "none" }}><TrendingScreen  savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>
+        <div style={{ display: tab === "search"    ? "block" : "none" }}><SearchScreen    savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>
+        <div style={{ display: tab === "saved"     ? "block" : "none" }}><SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} /></div>
+        <div style={{ display: tab === "exclusive" ? "block" : "none" }}><ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>
+        <div style={{ display: tab === "profile" ? "block" : "none" }}><ProfileScreen user={user} setUser={u => { setUser(u); if (u) setTab("home"); }} onLogout={() => { AuthAPI.logout(); setUser(null); setTab("home"); }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} /></div>
       </div>
 
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "rgba(10,10,10,0.97)", borderTop: "1px solid #1a1a1a", display: "flex", height: "calc(72px + env(safe-area-inset-bottom))", zIndex: 100, backdropFilter: "blur(20px)", paddingBottom: "env(safe-area-inset-bottom)" }}>
