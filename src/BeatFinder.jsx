@@ -387,35 +387,61 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
 
   return (
     <div style={{
-      position: "fixed", inset: 0, zIndex: 10000,
-      background: "rgba(0,0,0,0.95)", display: "flex",
+      position: "fixed", inset: 0, zIndex: 10001,
+      background: "#0a0a0a", display: "flex",
       flexDirection: "column", fontFamily: "'DM Sans',sans-serif",
       paddingTop: "env(safe-area-inset-top)",
     }}>
-      <div style={{
-        display: "flex", alignItems: "center", gap: 12,
-        padding: "14px 16px", borderBottom: "1px solid #1a1a1a",
-        background: "#0a0a0a", flexShrink: 0,
-      }}>
-        <button onClick={onClose} style={{
-          background: "#1a1a1a", border: "1px solid #333", borderRadius: "50%",
-          color: "white", width: 36, height: 36, fontSize: 20, cursor: "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          ‹
-        </button>
-        <div style={{ flex: 1 }}>
-          <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13 }}>✍️ Lyrics Notepad</div>
-          {beat && <div style={{ color: "#555", fontSize: 11, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{beat.title}</div>}
+      <div style={{ background: "#0a0a0a", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderBottom: "1px solid #1a1a1a" }}>
+          <button onClick={onClose} style={{
+            background: "#1a1a1a", border: "1px solid #333", borderRadius: "50%",
+            color: "white", width: 36, height: 36, fontSize: 20, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            ‹
+          </button>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13 }}>✍️ Lyrics Notepad</div>
+          </div>
+          <button onClick={handleSave} style={{
+            background: saved ? "#22C55E" : "#C026D3",
+            border: "none", borderRadius: 20, color: "white",
+            fontWeight: 800, fontSize: 13, padding: "8px 16px", cursor: "pointer",
+          }}>
+            {saved ? "Saved!" : "Save"}
+          </button>
         </div>
-        <button onClick={handleSave} style={{
-          background: saved ? "#22C55E" : "#C026D3",
-          border: "none", borderRadius: 20, color: "white",
-          fontWeight: 800, fontSize: 13, padding: "8px 16px", cursor: "pointer",
-          transition: "background 0.3s",
-        }}>
-          {saved ? "Saved!" : "Save"}
-        </button>
+
+        {beat && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "10px 16px", borderBottom: "1px solid #1a1a1a",
+            background: "#0d0d0d",
+          }}>
+            {beat.thumbnail && (
+              <img src={beat.thumbnail} alt={beat.title} style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
+            )}
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              <div style={{ color: "white", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {beat.title}
+              </div>
+              <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>{beat.channel}</div>
+            </div>
+            <a
+              href={"https://www.youtube.com/watch?v=" + beat.videoId}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                background: "#FF0000", borderRadius: 8, padding: "6px 12px",
+                color: "white", fontWeight: 700, fontSize: 12, textDecoration: "none",
+                flexShrink: 0, display: "flex", alignItems: "center", gap: 4,
+              }}
+            >
+              ▶ Play
+            </a>
+          </div>
+        )}
       </div>
 
       <div style={{ padding: "12px 16px 8px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
@@ -469,7 +495,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
 // =============================================================================
 // FULL-SCREEN PLAYER
 // =============================================================================
-function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics }) {
+function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, savedLyrics, onEditLyric }) {
   return (
     <div style={{
       position: "fixed", inset: 0, zIndex: 9999, background: "#000",
@@ -542,21 +568,42 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics }) 
         >
           {savedIds.has(beat.videoId) ? "🔖 Saved to Favourites" : "🔖 Save to Favourites"}
         </button>
-        {isArtistPro && (
-          <button
-            onClick={() => onOpenLyrics(beat)}
-            style={{
-              marginTop: 10, width: "100%", borderRadius: 14, padding: "15px",
-              fontWeight: 800, fontSize: 16, cursor: "pointer",
-              background: "rgba(192,38,211,0.1)",
-              border: "1.5px solid #C026D3",
-              color: "#C026D3",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-            }}
-          >
-            ✍️ Write Lyrics to This Beat
-          </button>
-        )}
+        {isArtistPro && (() => {
+          const existingLyric = savedLyrics ? savedLyrics.find(l => l.beatId === beat.videoId) : null;
+          const existingIndex = savedLyrics ? savedLyrics.findIndex(l => l.beatId === beat.videoId) : -1;
+          return (
+            <>
+              <button
+                onClick={() => onOpenLyrics(beat)}
+                style={{
+                  marginTop: 10, width: "100%", borderRadius: 14, padding: "15px",
+                  fontWeight: 800, fontSize: 16, cursor: "pointer",
+                  background: "rgba(192,38,211,0.1)",
+                  border: "1.5px solid #C026D3",
+                  color: "#C026D3",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                }}
+              >
+                ✍️ Write Lyrics to This Beat
+              </button>
+              {existingLyric && (
+                <button
+                  onClick={() => onEditLyric(existingLyric, existingIndex)}
+                  style={{
+                    marginTop: 10, width: "100%", borderRadius: 14, padding: "15px",
+                    fontWeight: 800, fontSize: 15, cursor: "pointer",
+                    background: "rgba(34,197,94,0.1)",
+                    border: "1.5px solid #22C55E",
+                    color: "#22C55E",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                  }}
+                >
+                  📄 Open Existing Lyrics — {existingLyric.title}
+                </button>
+              )}
+            </>
+          );
+        })()}
 
       </div>
     </div>
@@ -1045,8 +1092,12 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave }) {
             </div>
           </div>
 
-          <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>
-            By {beat.producer} · {beat.downloads} downloads
+          <div style={{ color: "#666", fontSize: 12, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+            By <span
+              onClick={() => beat.producer && setPublicProfile(beat.producer)}
+              style={{ color: "#C026D3", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>
+              {beat.producer}
+            </span> · {beat.downloads} downloads
           </div>
 
           <button
@@ -1353,6 +1404,98 @@ function LyricCard({ lyric, lyricIndex, onDelete, onEditLyric }) {
   );
 }
 
+
+// =============================================================================
+// PUBLIC PROFILE SCREEN
+// =============================================================================
+function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave }) {
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(null);
+
+  useEffect(() => {
+    apiFetch("/api/auth/profile/" + encodeURIComponent(username))
+      .then(d => { setProfile(d); setLoading(false); })
+      .catch(e => { setError(e.message); setLoading(false); });
+  }, [username]);
+
+  if (loading) return (
+    <div style={{ textAlign: "center", padding: "80px 24px", color: "#555" }}>
+      <div style={{ fontSize: 36, marginBottom: 10 }}>👤</div>
+      <div style={{ fontSize: 13 }}>Loading profile...</div>
+    </div>
+  );
+
+  if (error || !profile) return (
+    <div style={{ textAlign: "center", padding: "80px 24px", color: "#555" }}>
+      <div style={{ fontSize: 36, marginBottom: 10 }}>😕</div>
+      <div style={{ fontSize: 15, color: "#888" }}>Profile not found</div>
+      <button onClick={onBack} style={{ marginTop: 20, background: "#1a1a1a", border: "1px solid #333", borderRadius: 12, color: "white", padding: "10px 24px", cursor: "pointer" }}>Go Back</button>
+    </div>
+  );
+
+  const planLabel = profile.plan === "producer" ? "⭐ Producer Pro" : profile.plan === "artist" ? "🎤 Artist Pro" : null;
+  const planColor = profile.plan === "producer" ? "#C026D3" : "#F59E0B";
+
+  const handleDownload = async (beat) => {
+    try {
+      await apiFetch("/api/producer/beats/" + beat.id + "/download", { method: "POST" });
+      const a = document.createElement("a");
+      a.href = beat.url; a.download = beat.title + ".mp3"; a.target = "_blank";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    } catch (e) { console.error(e); }
+  };
+
+  return (
+    <div style={{ padding: "0 0 100px" }}>
+      <div style={{ padding: "16px 16px 0" }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer" }}>‹</button>
+      </div>
+
+      <div style={{ margin: "8px 16px 20px", background: "#111", borderRadius: 16, padding: 20, border: "1px solid rgba(255,255,255,0.07)", textAlign: "center" }}>
+        <div style={{ width: 72, height: 72, borderRadius: "50%", background: "linear-gradient(135deg,#6B21A8,#C026D3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 12px" }}>
+          👤
+        </div>
+        <div style={{ color: "white", fontSize: 22, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
+          {profile.username}
+        </div>
+        <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>{profile.name}</div>
+        {planLabel && (
+          <div style={{ marginTop: 8, display: "inline-block", background: "rgba(192,38,211,0.15)", border: "1px solid " + planColor, borderRadius: 20, padding: "4px 14px", color: planColor, fontWeight: 800, fontSize: 12 }}>
+            {planLabel}
+          </div>
+        )}
+      </div>
+
+      {profile.beats && profile.beats.length > 0 && (
+        <div style={{ padding: "0 16px" }}>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 14 }}>🎵 Beats by {profile.username}</div>
+          {profile.beats.map(beat => (
+            <div key={beat.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(245,158,11,0.2)" }}>
+              <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{beat.title}</div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>
+                <div style={{ background: beat.price === "free" ? "rgba(34,197,94,0.15)" : "rgba(192,38,211,0.15)", border: "1px solid " + (beat.price === "free" ? "rgba(34,197,94,0.3)" : "rgba(192,38,211,0.3)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: beat.price === "free" ? "#22C55E" : "#C026D3", fontWeight: 700 }}>{beat.price === "free" ? "FREE" : beat.price}</div>
+              </div>
+              <div style={{ color: "#555", fontSize: 12, marginBottom: 12 }}>{beat.downloads} downloads</div>
+              <button onClick={() => handleDownload(beat)} style={{ width: "100%", borderRadius: 12, padding: "13px", background: "linear-gradient(135deg,#F59E0B,#EF4444)", border: "none", color: "white", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
+                ⬇️ Download MP3
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(!profile.beats || profile.beats.length === 0) && (
+        <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
+          <div style={{ fontSize: 36, marginBottom: 10 }}>🎛</div>
+          <div style={{ fontSize: 14 }}>No beats uploaded yet</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // =============================================================================
 // PROFILE SCREEN
 // =============================================================================
@@ -1366,6 +1509,8 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
   const [ytLink,        setYtLink]        = useState("");
   const [uploads,       setUploads]       = useState([]);
   const [plan,          setPlan]          = useState(null);
+  const [usernameInput,    setUsernameInput]    = useState(user?.username || "");
+  const [usernameMsg,      setUsernameMsg]      = useState("");
   const [uploadGenre,      setUploadGenre]      = useState("");
   const [uploadPrice,      setUploadPrice]      = useState("");
   const [uploadFile,       setUploadFile]       = useState(null);
@@ -1414,7 +1559,55 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
         <div style={{ color: "#888", fontSize: 13 }}>{user.email}</div>
         {user.isPro && <div style={{ marginTop: 8, display: "inline-block", background: "rgba(192,38,211,0.2)", border: "1px solid #C026D3", borderRadius: 20, padding: "4px 14px", color: "#C026D3", fontWeight: 800, fontSize: 13 }}>⭐ Producer Pro</div>}
         {user.isArtistPro && !user.isPro && <div style={{ marginTop: 8, display: "inline-block", background: "rgba(245,158,11,0.2)", border: "1px solid #F59E0B", borderRadius: 20, padding: "4px 14px", color: "#F59E0B", fontWeight: 800, fontSize: 13 }}>🎤 Artist Pro</div>}
+        {user.username && (
+          <div style={{ marginTop: 6, color: "#555", fontSize: 12 }}>@{user.username}</div>
+        )}
       </div>
+      {(user.isPro || user.isArtistPro) && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Your Username</div>
+          <div style={{ color: "#666", fontSize: 13, marginBottom: 14 }}>
+            {user.username ? "Your public profile name. Others can find and view your profile." : "Create a username so others can find your public profile."}
+          </div>
+          <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #222" }}>
+            <input
+              value={usernameInput}
+              onChange={e => setUsernameInput(e.target.value.replace(/[^a-zA-Z0-9_. ]/g, ""))}
+              placeholder={user.username ? user.username : "Choose a username..."}
+              style={{ ...inp, marginBottom: 12 }}
+              maxLength={30}
+            />
+            {usernameMsg && (
+              <div style={{ color: usernameMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, marginBottom: 10, textAlign: "center", fontWeight: 600 }}>
+                {usernameMsg}
+              </div>
+            )}
+            <button
+              onClick={async () => {
+                if (!usernameInput.trim()) return;
+                setUsernameMsg("");
+                try {
+                  const token = localStorage.getItem("bf_token");
+                  const res   = await fetch(API_BASE + "/api/auth/username", {
+                    method:  "POST",
+                    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+                    body:    JSON.stringify({ username: usernameInput.trim() }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.detail || "Failed");
+                  setUser({ ...user, username: data.username });
+                  setUsernameMsg("Username saved!");
+                } catch (e) {
+                  setUsernameMsg("Error: " + e.message);
+                }
+              }}
+              style={{ width: "100%", background: "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: 13, fontSize: 15, cursor: "pointer" }}>
+              {user.username ? "Update Username" : "Set Username"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {user.isPro && (
         <div>
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Upload Your Beats</div>
@@ -1761,6 +1954,7 @@ export default function BeatFinder() {
   const [lyricsBeat,    setLyricsBeat]    = useState(null);
   const [editingLyric,  setEditingLyric]  = useState(null);
   const [editingIndex,  setEditingIndex]  = useState(null);
+  const [publicProfile, setPublicProfile] = useState(null);
   const [savedLyrics,  setSavedLyrics]  = useState(() => {
     try { return JSON.parse(localStorage.getItem("bf_lyrics") || "[]"); } catch { return []; }
   });
@@ -1778,8 +1972,11 @@ export default function BeatFinder() {
     setEditingLyric(lyric);
     setEditingIndex(index);
     setLyricsBeat(lyric.beat || null);
+    // Play beat first, then open notepad on top
+    if (lyric.beat) {
+      setPlaying(lyric.beat);
+    }
     setLyricsOpen(true);
-    if (lyric.beat) handlePlay(lyric.beat);
   }, []);
 
   const handleSaveLyric = useCallback((lyric, editIndex) => {
@@ -1799,8 +1996,13 @@ export default function BeatFinder() {
     <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
-      {playing && <Player beat={playing} onClose={() => setPlaying(null)} savedIds={savedIds} onSave={toggleSave} isArtistPro={isArtistPro} onOpenLyrics={handleOpenLyrics} />}
+      {playing && <Player beat={playing} onClose={() => setPlaying(null)} savedIds={savedIds} onSave={toggleSave} isArtistPro={isArtistPro} onOpenLyrics={handleOpenLyrics} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
       {lyricsOpen && <LyricsNotepad beat={lyricsBeat} onClose={() => { setLyricsOpen(false); setEditingLyric(null); setEditingIndex(null); }} onSaveLyric={handleSaveLyric} initialLyric={editingLyric} lyricIndex={editingIndex} />}
+      {publicProfile && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "#0a0a0a", overflowY: "auto", paddingTop: "env(safe-area-inset-top)" }}>
+          <PublicProfileScreen username={publicProfile} onBack={() => setPublicProfile(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />
+        </div>
+      )}
 
       <div style={{ overflowY: "auto", height: "calc(100vh - 72px)" }}>
         {tab === "home"      && <HomeScreen     savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
