@@ -2359,7 +2359,7 @@ function ForgotPasswordScreen({ onBack }) {
 // =============================================================================
 // PROFILE SCREEN
 // =============================================================================
-function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric }) {
+function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric }) {
   const [mode,        setMode]        = useState("landing");
   const [email,       setEmail]       = useState(() => {
     try { return localStorage.getItem("bf_remember") === "1" ? (localStorage.getItem("bf_saved_email") || "") : ""; } catch { return ""; }
@@ -2417,7 +2417,7 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
             style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 10, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
             ⚙️ Settings
           </button>
-          <button onClick={() => { AuthAPI.logout(); setUser(null); setMode("landing"); }}
+          <button onClick={() => { onLogout && onLogout(); setMode("landing"); }}
             style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 10, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
             Log out
           </button>
@@ -2983,7 +2983,7 @@ export default function BeatFinder() {
         {visitedTabs.has("search")    && <div style={{ display: tab === "search"    ? "block" : "none" }}><SearchScreen    savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>}
         {visitedTabs.has("saved")     && <div style={{ display: tab === "saved"     ? "block" : "none" }}><SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} /></div>}
         {visitedTabs.has("exclusive") && <div style={{ display: tab === "exclusive" ? "block" : "none" }}><ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>}
-        {visitedTabs.has("profile")   && <div style={{ display: tab === "profile"   ? "block" : "none" }}><ProfileScreen user={user} setUser={u => { setUser(u); if (u) { setTab("home"); setVisitedTabs(new Set(["home"])); } }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} /></div>}
+        {visitedTabs.has("profile")   && <div style={{ display: tab === "profile"   ? "block" : "none" }}><ProfileScreen user={user} setUser={u => { setUser(u); if (u) { setTab("home"); setVisitedTabs(new Set(["home", "profile"])); } }} onLogout={() => { AuthAPI.logout(); setUser(null); setTab("home"); setVisitedTabs(new Set(["home", "profile"])); }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} /></div>}
       </div>
 
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "rgba(10,10,10,0.97)", borderTop: "1px solid #1a1a1a", display: "flex", height: "calc(72px + env(safe-area-inset-bottom))", zIndex: 100, backdropFilter: "blur(20px)", paddingBottom: "env(safe-area-inset-bottom)" }}>
