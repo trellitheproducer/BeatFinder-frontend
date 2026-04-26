@@ -362,23 +362,25 @@ function Av({ name, size = 88, idx = 0, img }) {
 // =============================================================================
 // LYRICS NOTEPAD — Artist Pro only, appears over the player
 // =============================================================================
-function LyricsNotepad({ beat, onClose, onSaveLyric }) {
-  const [text, setText] = useState("");
-  const [title, setTitle] = useState("");
+function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex }) {
+  const [text,  setText]  = useState(initialLyric ? initialLyric.text  : "");
+  const [title, setTitle] = useState(initialLyric ? initialLyric.title : "");
   const [saved, setSaved] = useState(false);
+  const isEditing = initialLyric !== undefined && initialLyric !== null;
 
   const handleSave = () => {
     if (!text.trim()) return;
     const lyric = {
-      id:        Date.now(),
+      id:        isEditing ? initialLyric.id : Date.now(),
       title:     title.trim() || (beat ? beat.title : "Untitled"),
       text:      text.trim(),
-      beatTitle: beat ? beat.title : "",
-      beatId:    beat ? beat.videoId : "",
-      beat:      beat || null,
-      savedAt:   new Date().toISOString(),
+      beatTitle: beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
+      beatId:    beat ? beat.videoId : (initialLyric ? initialLyric.beatId : ""),
+      beat:      beat || (initialLyric ? initialLyric.beat : null),
+      savedAt:   isEditing ? initialLyric.savedAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
-    onSaveLyric(lyric);
+    onSaveLyric(lyric, isEditing ? lyricIndex : null);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -677,6 +679,38 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
     return () => { alive = false; };
   }, [artistName, page]);
 
+  const PageNav = () => showPagination ? (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, background: "#111", borderRadius: 12, padding: "10px 14px", border: "1px solid #1e1e1e" }}>
+      <button
+        onClick={() => { if (page > 1) setPage(p => p - 1); }}
+        disabled={page === 1}
+        style={{
+          background: page === 1 ? "transparent" : "#1a1a1a",
+          border: page === 1 ? "1px solid #222" : "1px solid #444",
+          borderRadius: 10, color: page === 1 ? "#333" : "white",
+          fontWeight: 800, fontSize: 14, padding: "8px 16px", cursor: page === 1 ? "not-allowed" : "pointer",
+          display: "flex", alignItems: "center", gap: 6,
+        }}>
+        ‹ Prev
+      </button>
+      <div style={{ color: "#888", fontSize: 13, fontWeight: 600 }}>
+        Page {page} of {TOTAL_PAGES}
+      </div>
+      <button
+        onClick={() => { if (page < TOTAL_PAGES) setPage(p => p + 1); }}
+        disabled={page === TOTAL_PAGES}
+        style={{
+          background: page === TOTAL_PAGES ? "transparent" : "#C026D3",
+          border: page === TOTAL_PAGES ? "1px solid #222" : "none",
+          borderRadius: 10, color: page === TOTAL_PAGES ? "#333" : "white",
+          fontWeight: 800, fontSize: 14, padding: "8px 16px", cursor: page === TOTAL_PAGES ? "not-allowed" : "pointer",
+          display: "flex", alignItems: "center", gap: 6,
+        }}>
+        Next ›
+      </button>
+    </div>
+  ) : null;
+
   if (loading) return (
     <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
       <div style={{ fontSize: 36, marginBottom: 10 }}>🎵</div>
@@ -700,6 +734,7 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
 
   return (
     <>
+      <PageNav />
       {beats.map(beat => (
         <BeatCard
           key={beat.videoId}
@@ -1193,15 +1228,45 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
         Subscribe to <span style={{ color: "#F59E0B", fontWeight: 800 }}>Artist Pro</span> or <span style={{ color: "#C026D3", fontWeight: 800 }}>Producer Pro</span> to unlock exclusive beats and downloadable MP3s.
       </div>
       {[
-        { label: "🎤 Artist Pro",   price: "4.99/mo",  color: "#F59E0B", desc: "Exclusive beats + MP3 downloads" },
-        { label: "🎛 Producer Pro", price: "8.99/mo",  color: "#C026D3", desc: "Upload beats + exclusive access + MP3s" },
+        {
+          label: "🎤 Artist Pro",
+          price: "4.99/mo",
+          color: "#F59E0B",
+          perks: [
+            "Write lyrics while beats play",
+            "Save & edit your lyrics anytime",
+            "Access exclusive members beats",
+            "Download MP3s from producers",
+            "Purchase leases directly from producers",
+            "Bookmark unlimited beats",
+          ],
+        },
+        {
+          label: "🎛 Producer Pro",
+          price: "8.99/mo",
+          color: "#C026D3",
+          perks: [
+            "Everything in Artist Pro",
+            "Upload your beats as MP3s",
+            "Sell MP3 leases to artists",
+            "Get your beats heard by artists",
+            "Track your beat download stats",
+            "Producer verified badge",
+            "Featured in beat rotation",
+          ],
+        },
       ].map(p => (
-        <div key={p.label} style={{ background: "#111", border: `1.5px solid ${p.color}`, borderRadius: 14, padding: "14px 18px", marginBottom: 12, textAlign: "left", width: "100%", maxWidth: 320 }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <div style={{ color: "white", fontWeight: 800, fontSize: 16 }}>{p.label}</div>
-            <div style={{ color: p.color, fontWeight: 800 }}>£{p.price}</div>
+        <div key={p.label} style={{ background: "#111", border: "1.5px solid " + p.color, borderRadius: 14, padding: "16px 18px", marginBottom: 14, textAlign: "left", width: "100%", maxWidth: 340 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+            <div style={{ color: "white", fontWeight: 800, fontSize: 17 }}>{p.label}</div>
+            <div style={{ color: p.color, fontWeight: 800, fontSize: 17 }}>£{p.price}</div>
           </div>
-          <div style={{ color: "#888", fontSize: 12, marginTop: 6 }}>{p.desc}</div>
+          {p.perks.map(perk => (
+            <div key={perk} style={{ color: "#ccc", fontSize: 13, marginBottom: 7, lineHeight: 1.4, display: "flex", alignItems: "flex-start", gap: 8 }}>
+              <span style={{ color: p.color, fontWeight: 900, flexShrink: 0 }}>•</span>
+              <span>{perk}</span>
+            </div>
+          ))}
         </div>
       ))}
       <button onClick={onGoProfile}
@@ -1246,54 +1311,42 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
 // =============================================================================
 // LYRIC CARD — shows saved lyric with beat, opens full lyric view
 // =============================================================================
-function LyricCard({ lyric, onDelete, onPlayBeat }) {
-  const [expanded, setExpanded] = useState(false);
-
+function LyricCard({ lyric, lyricIndex, onDelete, onEditLyric }) {
   return (
     <div style={{ background: "#111", borderRadius: 14, marginBottom: 12, border: "1px solid #1e1e1e", overflow: "hidden" }}>
-      <div style={{ padding: "14px 16px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-          <div style={{ color: "white", fontWeight: 700, fontSize: 15, flex: 1, paddingRight: 8 }}>{lyric.title}</div>
-          <button onClick={onDelete} style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer", flexShrink: 0 }}>✕</button>
+      <div
+        onClick={() => onEditLyric(lyric, lyricIndex)}
+        style={{ padding: "16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 14 }}
+      >
+        <div style={{
+          width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+          background: "linear-gradient(135deg,#6B21A8,#C026D3)",
+          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20,
+        }}>
+          ✍️
         </div>
-
-        {lyric.beatTitle && (
-          <div
-            onClick={() => {
-              if (lyric.beat) onPlayBeat(lyric.beat);
-            }}
-            style={{
-              display: "flex", alignItems: "center", gap: 8, marginBottom: 10,
-              background: "rgba(192,38,211,0.1)", border: "1px solid rgba(192,38,211,0.25)",
-              borderRadius: 10, padding: "8px 12px",
-              cursor: lyric.beat ? "pointer" : "default",
-            }}
-          >
-            <span style={{ fontSize: 16 }}>🎵</span>
-            <div style={{ flex: 1, overflow: "hidden" }}>
-              <div style={{ color: "#C026D3", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {lyric.beatTitle}
-              </div>
-              {lyric.beat && <div style={{ color: "#888", fontSize: 10, marginTop: 2 }}>Tap to play this beat</div>}
+        <div style={{ flex: 1, overflow: "hidden" }}>
+          <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {lyric.title}
+          </div>
+          {lyric.beatTitle && (
+            <div style={{ color: "#C026D3", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              🎵 {lyric.beatTitle}
             </div>
-            {lyric.beat && <span style={{ color: "#C026D3", fontSize: 18 }}>▶</span>}
-          </div>
-        )}
-
-        <div style={{ color: "#aaa", fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
-          {expanded ? lyric.text : (lyric.text.length > 150 ? lyric.text.slice(0, 150) + "..." : lyric.text)}
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
-          <div style={{ color: "#444", fontSize: 11 }}>
-            {new Date(lyric.savedAt).toLocaleDateString()}
-          </div>
-          {lyric.text.length > 150 && (
-            <button onClick={() => setExpanded(!expanded)}
-              style={{ background: "none", border: "none", color: "#C026D3", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-              {expanded ? "Show less" : "Read all"}
-            </button>
           )}
+          <div style={{ color: "#555", fontSize: 11, marginTop: 3 }}>
+            {lyric.updatedAt
+              ? "Edited " + new Date(lyric.updatedAt).toLocaleDateString()
+              : new Date(lyric.savedAt).toLocaleDateString()}
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <span style={{ color: "#444", fontSize: 18 }}>›</span>
+          <button
+            onClick={e => { e.stopPropagation(); onDelete(); }}
+            style={{ background: "none", border: "none", color: "#555", fontSize: 16, cursor: "pointer", padding: 4 }}>
+            🗑
+          </button>
         </div>
       </div>
     </div>
@@ -1303,9 +1356,11 @@ function LyricCard({ lyric, onDelete, onPlayBeat }) {
 // =============================================================================
 // PROFILE SCREEN
 // =============================================================================
-function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat }) {
+function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric }) {
   const [mode,        setMode]        = useState("landing");
-  const [email,       setEmail]       = useState("");
+  const [email,       setEmail]       = useState(() => {
+    try { return localStorage.getItem("bf_remember") === "1" ? (localStorage.getItem("bf_saved_email") || "") : ""; } catch { return ""; }
+  });
   const [pw,          setPw]          = useState("");
   const [name,        setName]        = useState("");
   const [ytLink,        setYtLink]        = useState("");
@@ -1321,6 +1376,9 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat 
   const [activationSuccess,setActivationSuccess]= useState("");
   const [authErr,     setAuthErr]     = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  const [rememberMe,  setRememberMe]  = useState(() => {
+    try { return localStorage.getItem("bf_remember") === "1"; } catch { return false; }
+  });
 
   const inp = {
     width: "100%", background: "#1a1a1a", border: "1px solid #333",
@@ -1436,12 +1494,13 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat 
               <LyricCard
                 key={lyric.id || i}
                 lyric={lyric}
+                lyricIndex={i}
                 onDelete={() => {
                   const next = savedLyrics.filter((_, idx) => idx !== i);
                   setSavedLyrics(next);
                   try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch {}
                 }}
-                onPlayBeat={onPlayBeat}
+                onEditLyric={onEditLyric}
               />
             ))
           )}
@@ -1562,7 +1621,33 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat 
       </div>
       {mode === "signup" && <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" style={inp} />}
       <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email address" style={inp} />
-      <input value={pw} onChange={e => setPw(e.target.value)} placeholder="Password" type="password" style={{ ...inp, marginBottom: 24 }} />
+      <input value={pw} onChange={e => setPw(e.target.value)} placeholder="Password" type="password" style={{ ...inp, marginBottom: 16 }} />
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
+        <div
+          onClick={() => {
+            const next = !rememberMe;
+            setRememberMe(next);
+            try { localStorage.setItem("bf_remember", next ? "1" : "0"); } catch {}
+          }}
+          style={{
+            width: 22, height: 22, borderRadius: 6, flexShrink: 0, cursor: "pointer",
+            background: rememberMe ? "#C026D3" : "transparent",
+            border: rememberMe ? "2px solid #C026D3" : "2px solid #444",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          {rememberMe && <span style={{ color: "white", fontSize: 14, fontWeight: 900 }}>✓</span>}
+        </div>
+        <span style={{ color: "#aaa", fontSize: 14, cursor: "pointer" }} onClick={() => {
+          const next = !rememberMe;
+          setRememberMe(next);
+          try { localStorage.setItem("bf_remember", next ? "1" : "0"); } catch {}
+        }}>
+          Remember my login
+        </span>
+      </div>
+
       <button onClick={async () => {
         if (!email || !pw) return;
         setAuthErr("");
@@ -1571,6 +1656,11 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat 
           const u = mode === "signup"
             ? await AuthAPI.register(name || email.split("@")[0], email, pw)
             : await AuthAPI.login(email, pw);
+          if (rememberMe) {
+            try { localStorage.setItem("bf_saved_email", email); } catch {}
+          } else {
+            try { localStorage.removeItem("bf_saved_email"); } catch {}
+          }
           setUser(u);
         } catch (e) {
           setAuthErr(e.message);
@@ -1667,8 +1757,10 @@ export default function BeatFinder() {
   const goTab = id => { setTab(id); if (id !== "artists") setArtist(null); };
 
   // Lyrics state
-  const [lyricsOpen,   setLyricsOpen]   = useState(false);
-  const [lyricsBeat,   setLyricsBeat]   = useState(null);
+  const [lyricsOpen,    setLyricsOpen]    = useState(false);
+  const [lyricsBeat,    setLyricsBeat]    = useState(null);
+  const [editingLyric,  setEditingLyric]  = useState(null);
+  const [editingIndex,  setEditingIndex]  = useState(null);
   const [savedLyrics,  setSavedLyrics]  = useState(() => {
     try { return JSON.parse(localStorage.getItem("bf_lyrics") || "[]"); } catch { return []; }
   });
@@ -1677,12 +1769,27 @@ export default function BeatFinder() {
 
   const handleOpenLyrics = useCallback(beat => {
     setLyricsBeat(beat);
+    setEditingLyric(null);
+    setEditingIndex(null);
     setLyricsOpen(true);
   }, []);
 
-  const handleSaveLyric = useCallback(lyric => {
+  const handleEditLyric = useCallback((lyric, index) => {
+    setEditingLyric(lyric);
+    setEditingIndex(index);
+    setLyricsBeat(lyric.beat || null);
+    setLyricsOpen(true);
+    if (lyric.beat) handlePlay(lyric.beat);
+  }, []);
+
+  const handleSaveLyric = useCallback((lyric, editIndex) => {
     setSavedLyrics(prev => {
-      const next = [lyric, ...prev];
+      let next;
+      if (editIndex !== null && editIndex !== undefined) {
+        next = prev.map((l, i) => i === editIndex ? lyric : l);
+      } else {
+        next = [lyric, ...prev];
+      }
       try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch {}
       return next;
     });
@@ -1693,7 +1800,7 @@ export default function BeatFinder() {
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
       {playing && <Player beat={playing} onClose={() => setPlaying(null)} savedIds={savedIds} onSave={toggleSave} isArtistPro={isArtistPro} onOpenLyrics={handleOpenLyrics} />}
-      {lyricsOpen && <LyricsNotepad beat={lyricsBeat} onClose={() => setLyricsOpen(false)} onSaveLyric={handleSaveLyric} />}
+      {lyricsOpen && <LyricsNotepad beat={lyricsBeat} onClose={() => { setLyricsOpen(false); setEditingLyric(null); setEditingIndex(null); }} onSaveLyric={handleSaveLyric} initialLyric={editingLyric} lyricIndex={editingIndex} />}
 
       <div style={{ overflowY: "auto", height: "calc(100vh - 72px)" }}>
         {tab === "home"      && <HomeScreen     savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
@@ -1709,7 +1816,7 @@ export default function BeatFinder() {
         {tab === "exclusive" && (
           <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />
         )}
-        {tab === "profile"   && <ProfileScreen user={user} setUser={setUser} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} />}
+        {tab === "profile"   && <ProfileScreen user={user} setUser={setUser} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} />}
       </div>
 
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "rgba(10,10,10,0.97)", borderTop: "1px solid #1a1a1a", display: "flex", height: "calc(72px + env(safe-area-inset-bottom))", zIndex: 100, backdropFilter: "blur(20px)", paddingBottom: "env(safe-area-inset-bottom)" }}>
