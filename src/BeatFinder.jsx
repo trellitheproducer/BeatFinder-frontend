@@ -513,55 +513,101 @@ function generateSuggestions(lyrics, beat, seed) {
 }
 
 function AiLyricAssistant({ text, beat, onSuggest }) {
-  const [suggestions, setSuggestions] = useState(null);
-  const [error,       setError]       = useState("");
-  const [open,        setOpen]        = useState(false);
+  const [results, setResults] = useState(null);
+  const [open,    setOpen]    = useState(false);
+  const [callCount, setCallCount] = useState(0);
 
-  const handleAsk = () => {
-    const lines = text.split("\n").filter(l => l.trim());
-    if (lines.length === 0) {
-      setError("Write at least one line first!");
+  const generate = (currentText, count) => {
+    const lines   = currentText.split("\n").filter(l => l.trim().length > 0);
+    if (lines.length === 0) return null;
+
+    const lastLine = lines[lines.length - 1].trim();
+    const words    = lastLine.split(" ").filter(w => w.length > 0);
+    const lastWord = words[words.length - 1].replace(/[^a-zA-Z]/gi, "").toLowerCase();
+
+    // Find rhyming words
+    const found = [];
+    for (const group of RHYME_GROUPS) {
+      if (group.some(w => w === lastWord || lastWord.endsWith(w.slice(-3)) || w.endsWith(lastWord.slice(-3)))) {
+        const others = group.filter(w => w !== lastWord);
+        found.push(...others);
+        break;
+      }
+    }
+
+    // Rotate through rhymes based on call count so regenerate always differs
+    const pool     = found.length > 0 ? found : ["strong","on","gone","long","along","belong","song","wrong","prolong"];
+    const offset   = (count * 3) % Math.max(1, pool.length);
+    const trio     = [];
+    for (let i = 0; i < 3; i++) {
+      trio.push(pool[(offset + i) % pool.length]);
+    }
+
+    // Build sentences using different templates per call
+    const starters = [
+      ["I been moving", "They watching", "Can't stop now", "Stay focused", "No looking back", "Keep it going", "Eyes on the prize", "Never fold"],
+      ["Came too far", "Built different", "Through the struggle", "From the bottom", "Against all odds", "Grind don't stop", "Real ones know", "On my way"],
+      ["Yeah I", "Watch me", "Told myself", "Every day I", "Since day one I", "Moving in silence", "Let them talk", "Trust the process"],
+    ];
+    const templateSet = starters[count % starters.length];
+
+    const suggestions = trio.map((rhymeWord, i) => {
+      const starter = templateSet[(i + count) % templateSet.length];
+      const middles = ["keep pushing til I find my", "stay solid and I hold my", "never stop until I reach the", "rise above and claim my", "grind it out and earn my", "move in silence chase my"];
+      const middle  = middles[(i + count) % middles.length];
+      return starter + " " + middle + " " + rhymeWord;
+    });
+
+    const scheme = lines.length >= 2 ? detectScheme(lines) : "Building...";
+
+    return {
+      lastLine,
+      lastWord,
+      scheme,
+      suggestions,
+    };
+  };
+
+  const handleOpen = () => {
+    const next = callCount + 1;
+    setCallCount(next);
+    const r = generate(text, next);
+    if (!r) {
       setOpen(true);
+      setResults(null);
       return;
     }
-    setError("");
-    setSuggestions(null); // clear old suggestions first
-    const result = generateSuggestions(text, beat, Date.now());
-    setSuggestions(result);
+    setResults(r);
     setOpen(true);
   };
 
-  const regenerate = () => {
-    const result = generateSuggestions(text, beat, Date.now()); // force new seed
-    setSuggestions(result);
+  const handleRegenerate = () => {
+    const next = callCount + 1;
+    setCallCount(next);
+    const r = generate(text, next);
+    setResults(r);
   };
 
   return (
     <div>
-      <button
-        onClick={handleAsk}
-        style={{
-          width: "100%", borderRadius: 14, padding: "15px",
-          fontWeight: 800, fontSize: 15, cursor: "pointer", border: "none",
-          background: "linear-gradient(135deg,#6B21A8,#C026D3)",
-          color: "white",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-        }}
-      >
+      <button onClick={handleOpen} style={{
+        width: "100%", borderRadius: 14, padding: "15px",
+        fontWeight: 800, fontSize: 15, cursor: "pointer", border: "none",
+        background: "linear-gradient(135deg,#6B21A8,#C026D3)", color: "white",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+      }}>
         ✨ AI Lyric Assistant
       </button>
 
       {open && (
         <div style={{
-          position: "fixed", inset: 0, zIndex: 10002,
-          background: "#0a0a0a", display: "flex",
-          flexDirection: "column", fontFamily: "'DM Sans',sans-serif",
+          position: "fixed", inset: 0, zIndex: 10002, background: "#0a0a0a",
+          display: "flex", flexDirection: "column", fontFamily: "'DM Sans',sans-serif",
           paddingTop: "env(safe-area-inset-top)",
         }}>
           <div style={{
             display: "flex", alignItems: "center", gap: 12,
-            padding: "14px 16px", borderBottom: "1px solid #1a1a1a",
-            background: "#0a0a0a", flexShrink: 0,
+            padding: "14px 16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a",
           }}>
             <button onClick={() => setOpen(false)} style={{
               background: "#1a1a1a", border: "1px solid #333", borderRadius: "50%",
@@ -570,44 +616,38 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
             }}>‹</button>
             <div style={{ flex: 1 }}>
               <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 14 }}>✨ Lyric Assistant</div>
-              <div style={{ color: "#555", fontSize: 11, marginTop: 2 }}>Rhyme scheme analyser</div>
+              <div style={{ color: "#555", fontSize: 11 }}>Tap a suggestion to add it</div>
             </div>
-            <button onClick={regenerate} style={{
-              background: "#C026D3", border: "none",
-              borderRadius: 20, color: "white", fontWeight: 800,
-              fontSize: 12, padding: "7px 14px", cursor: "pointer",
+            <button onClick={handleRegenerate} style={{
+              background: "#C026D3", border: "none", borderRadius: 20,
+              color: "white", fontWeight: 800, fontSize: 12, padding: "7px 16px", cursor: "pointer",
             }}>
-              Regenerate
+              🔄 New Options
             </button>
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-            {error && (
-              <div style={{ color: "#F87171", fontSize: 14, textAlign: "center", padding: "20px 0" }}>{error}</div>
+            {!results && (
+              <div style={{ color: "#F87171", textAlign: "center", padding: 20 }}>
+                Write at least one line first!
+              </div>
             )}
 
-            {suggestions && suggestions.rhyme_scheme && (
+            {results && (
               <>
                 <div style={{ background: "#111", borderRadius: 12, padding: 14, marginBottom: 16, border: "1px solid #1e1e1e" }}>
-                  <div style={{ color: "#C026D3", fontWeight: 700, fontSize: 12, marginBottom: 6 }}>LAST LINE DETECTED</div>
-                  <div style={{ color: "white", fontSize: 13, fontStyle: "italic", marginBottom: 8 }}>"{suggestions.last_line}"</div>
-                  <div style={{ color: "#555", fontSize: 11, marginBottom: 4 }}>Rhyme scheme: <span style={{ color: "#aaa" }}>{suggestions.rhyme_scheme}</span></div>
-                  <div style={{ color: "#555", fontSize: 11 }}>
-                    Rhyming with: <span style={{ color: "#F59E0B", fontWeight: 700 }}>{suggestions.last_rhyme_sound}</span>
-                  </div>
+                  <div style={{ color: "#555", fontSize: 11, marginBottom: 4 }}>ANALYSING LAST LINE</div>
+                  <div style={{ color: "white", fontSize: 13, fontStyle: "italic", marginBottom: 8 }}>"{results.lastLine}"</div>
+                  <div style={{ color: "#555", fontSize: 11 }}>Rhyming with: <span style={{ color: "#F59E0B", fontWeight: 700 }}>"{results.lastWord}"</span> · Scheme: <span style={{ color: "#aaa" }}>{results.scheme}</span></div>
                 </div>
 
-                <div style={{ color: "#888", fontSize: 12, fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>SUGGESTED NEXT LINES</div>
+                <div style={{ color: "#555", fontSize: 11, fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>SUGGESTED NEXT LINES — TAP TO ADD</div>
 
-                {suggestions.suggestions.map((line, i) => (
-                  <div key={i} style={{
-                    background: "#111", borderRadius: 14, padding: 16,
-                    marginBottom: 12, border: "1px solid #1e1e1e", cursor: "pointer",
-                  }}
-                    onClick={() => { onSuggest(line); setOpen(false); }}
-                  >
-                    <div style={{ color: "#555", fontSize: 11, marginBottom: 6, fontWeight: 700 }}>OPTION {i + 1} — TAP TO ADD</div>
-                    <div style={{ color: "white", fontSize: 16, lineHeight: 1.6, fontStyle: "italic" }}>"{line}"</div>
+                {results.suggestions.map((line, i) => (
+                  <div key={i + "-" + callCount} onClick={() => { onSuggest(line); setOpen(false); }}
+                    style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid #1e1e1e", cursor: "pointer" }}>
+                    <div style={{ color: "#555", fontSize: 11, marginBottom: 6, fontWeight: 700 }}>OPTION {i + 1}</div>
+                    <div style={{ color: "white", fontSize: 15, lineHeight: 1.6, fontStyle: "italic" }}>"{line}"</div>
                     <div style={{ color: "#C026D3", fontSize: 12, marginTop: 8, fontWeight: 600 }}>+ Add to lyrics</div>
                   </div>
                 ))}
