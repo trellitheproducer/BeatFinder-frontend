@@ -721,6 +721,9 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
   const [text,  setText]  = useState(initialLyric ? initialLyric.text  : "");
   const [title, setTitle] = useState(initialLyric ? initialLyric.title : "");
   const [saved, setSaved] = useState(false);
+  const scrollRef = useCallback(node => {
+    if (node) node.scrollTop = 0;
+  }, []);
   const isEditing = initialLyric !== undefined && initialLyric !== null;
 
   const handleSave = () => {
@@ -741,7 +744,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
   };
 
   return (
-    <div style={{
+    <div ref={scrollRef} style={{
       position: "fixed", inset: 0, zIndex: 10001,
       background: "#0a0a0a", display: "flex",
       flexDirection: "column", fontFamily: "'DM Sans',sans-serif",
@@ -772,7 +775,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
           <div style={{ borderBottom: "1px solid #1a1a1a", background: "#000" }}>
             <iframe
               key={beat.videoId}
-              src={"https://www.youtube.com/embed/" + beat.videoId + "?autoplay=1&rel=0"}
+              src={"https://www.youtube.com/embed/" + beat.videoId + "?autoplay=0&rel=0"}
               width="100%"
               height="160"
               style={{ display: "block", border: "none" }}
@@ -811,6 +814,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
           flex: 1, background: "#0d0d0d", border: "none", outline: "none",
           color: "white", fontSize: 15, lineHeight: 1.8, padding: "16px",
           resize: "none", fontFamily: "'DM Sans',sans-serif",
+          WebkitUserSelect: "text", userSelect: "text",
         }}
         autoFocus
       />
