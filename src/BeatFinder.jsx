@@ -997,21 +997,29 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
 }
 
 
-// =============================================================================
-// PRODUCER BEATS SCREEN
-// =============================================================================
-function ProducerBeatsScreen({ onPlay, savedIds, onSave }) {
-  const [beats,   setBeats]   = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState(null);
 
-  useEffect(() => {
-    apiFetch("/api/producer/beats")
-      .then(d => { setBeats(d); setLoading(false); })
-      .catch(e => { setError(e.message); setLoading(false); });
-  }, []);
+// =============================================================================
+// BEAT LEASE CARD
+// =============================================================================
+function BeatLeaseCard({ beat, user }) {
+  const [loading, setLoading] = useState(false);
+  const [err,     setErr]     = useState("");
+  const isFree  = beat.price === "free";
 
-  const handleDownload = async (beat) => {
+  const handleBuyLease = async () => {
+    if (!user) { setErr("Please log in to purchase a lease"); return; }
+    setLoading(true);
+    setErr("");
+    try {
+      const result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
+      window.location.href = result.checkout_url;
+    } catch (e) {
+      setErr(e.message);
+      setLoading(false);
+    }
+  };
+
+  const handleDownload = async () => {
     try {
       await apiFetch("/api/producer/beats/" + beat.id + "/download", { method: "POST" });
       const a = document.createElement("a");
@@ -1025,6 +1033,76 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave }) {
       console.error("Download error:", e);
     }
   };
+
+  return (
+    <div style={{ background: "#111", borderRadius: 14, padding: "16px", marginBottom: 14, border: "1px solid rgba(245,158,11,0.2)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ color: "white", fontWeight: 700, fontSize: 15, lineHeight: 1.4, marginBottom: 6 }}>
+            {beat.title}
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>
+              {beat.genre}
+            </div>
+            <div style={{ background: isFree ? "rgba(34,197,94,0.15)" : "rgba(192,38,211,0.15)", border: "1px solid " + (isFree ? "rgba(34,197,94,0.3)" : "rgba(192,38,211,0.3)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: isFree ? "#22C55E" : "#C026D3", fontWeight: 700 }}>
+              {isFree ? "FREE" : beat.price}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>
+        By <span style={{ color: "#C026D3", fontWeight: 700 }}>{beat.producer}</span> · {beat.downloads} downloads
+      </div>
+
+      {err && <div style={{ color: "#F87171", fontSize: 12, marginBottom: 10 }}>{err}</div>}
+
+      {isFree ? (
+        <button onClick={handleDownload} style={{
+          width: "100%", borderRadius: 12, padding: "14px",
+          background: "linear-gradient(135deg,#22C55E,#16A34A)",
+          border: "none", color: "white", fontWeight: 800, fontSize: 15,
+          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        }}>
+          ⬇️ Download Free MP3
+        </button>
+      ) : (
+        <button onClick={handleBuyLease} disabled={loading} style={{
+          width: "100%", borderRadius: 12, padding: "14px",
+          background: loading ? "#333" : "linear-gradient(135deg,#C026D3,#7C3AED)",
+          border: "none", color: "white", fontWeight: 800, fontSize: 15,
+          cursor: loading ? "not-allowed" : "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        }}>
+          {loading ? "Loading..." : "🎵 Buy Lease — " + beat.price}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// PRODUCER BEATS SCREEN
+// =============================================================================
+function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
+  const [beats,   setBeats]   = useState([]);
+  const [leases,  setLeases]  = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(null);
+
+  useEffect(() => {
+    Promise.all([
+      apiFetch("/api/producer/beats"),
+      user ? apiFetch("/api/producer/my-leases").catch(() => []) : Promise.resolve([]),
+    ]).then(([b, l]) => {
+      setBeats(b);
+      setLeases(l);
+      setLoading(false);
+    }).catch(e => { setError(e.message); setLoading(false); });
+  }, [user]);
+
+
 
   return (
     <div style={{ padding: "0 16px 100px" }}>
@@ -1062,47 +1140,35 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave }) {
         </div>
       )}
 
-      {!loading && beats.map(beat => (
-        <div key={beat.id} style={{
-          background: "#111", borderRadius: 14, padding: "16px", marginBottom: 14,
-          border: "1px solid rgba(245,158,11,0.2)",
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ color: "white", fontWeight: 700, fontSize: 15, lineHeight: 1.4, marginBottom: 4 }}>
-                {beat.title}
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>
-                  {beat.genre}
-                </div>
-                <div style={{ background: beat.price === "free" ? "rgba(34,197,94,0.15)" : "rgba(192,38,211,0.15)", border: "1px solid " + (beat.price === "free" ? "rgba(34,197,94,0.3)" : "rgba(192,38,211,0.3)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: beat.price === "free" ? "#22C55E" : "#C026D3", fontWeight: 700 }}>
-                  {beat.price === "free" ? "FREE" : beat.price}
-                </div>
-              </div>
+      {!loading && leases.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 12 }}>✅ Your Purchased Leases</div>
+          {leases.map(lease => (
+            <div key={lease.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(34,197,94,0.3)" }}>
+              <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{lease.beat_title}</div>
+              <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>By {lease.producer} · {lease.price} · {new Date(lease.purchased_at).toLocaleDateString()}</div>
+              <button
+                onClick={() => {
+                  const a = document.createElement("a");
+                  a.href = lease.beat_url;
+                  a.download = lease.beat_title + ".mp3";
+                  a.target = "_blank";
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                }}
+                style={{ width: "100%", borderRadius: 12, padding: "13px", background: "linear-gradient(135deg,#22C55E,#16A34A)", border: "none", color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
+                ⬇️ Download Your Lease MP3
+              </button>
             </div>
-          </div>
-
-          <div style={{ color: "#666", fontSize: 12, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
-            By <span
-              onClick={() => beat.producer && setPublicProfile(beat.producer)}
-              style={{ color: "#C026D3", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>
-              {beat.producer}
-            </span> · {beat.downloads} downloads
-          </div>
-
-          <button
-            onClick={() => handleDownload(beat)}
-            style={{
-              width: "100%", borderRadius: 12, padding: "14px",
-              background: "linear-gradient(135deg,#F59E0B,#EF4444)",
-              border: "none", color: "white", fontWeight: 800, fontSize: 15,
-              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-            }}
-          >
-            ⬇️ Download MP3
-          </button>
+          ))}
+          <div style={{ height: 1, background: "#1a1a1a", marginBottom: 20 }} />
+          <div style={{ color: "#888", fontWeight: 700, fontSize: 14, marginBottom: 12 }}>All Available Beats</div>
         </div>
+      )}
+
+      {!loading && beats.map(beat => (
+        <BeatLeaseCard key={beat.id} beat={beat} user={user} />
       ))}
     </div>
   );
@@ -1343,7 +1409,7 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
         <BeatFeed artistName="exclusive premium" exclusive savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} />
       )}
       {tab === "mp3s" && (
-        <ProducerBeatsScreen onPlay={onPlay} savedIds={savedIds} onSave={onSave} />
+        <ProducerBeatsScreen onPlay={onPlay} savedIds={savedIds} onSave={onSave} user={user} />
       )}
     </div>
   );
@@ -1487,6 +1553,64 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave }) {
   );
 }
 
+
+// =============================================================================
+// STRIPE CONNECT SECTION — for Producer Pro profile
+// =============================================================================
+function StripeConnectSection({ user }) {
+  const [status,  setStatus]  = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
+
+  useEffect(() => {
+    apiFetch("/api/producer/stripe-status")
+      .then(d => { setStatus(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    try {
+      const result = await apiFetch("/api/producer/connect-stripe", { method: "POST" });
+      window.location.href = result.url;
+    } catch (e) {
+      setConnecting(false);
+      alert("Error: " + e.message);
+    }
+  };
+
+  return (
+    <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #222", marginBottom: 4 }}>
+      <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 6 }}>💳 Stripe Payouts</div>
+      <div style={{ color: "#666", fontSize: 13, marginBottom: 14, lineHeight: 1.6 }}>
+        Connect your Stripe account to receive payments when artists buy your beat leases.
+      </div>
+      {loading ? (
+        <div style={{ color: "#555", fontSize: 13 }}>Checking status...</div>
+      ) : status?.connected ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 20, padding: "6px 14px", color: "#22C55E", fontWeight: 700, fontSize: 13 }}>
+            ✓ Stripe Connected
+          </div>
+          <div style={{ color: "#555", fontSize: 12 }}>Payouts {status.payouts_enabled ? "enabled" : "pending"}</div>
+        </div>
+      ) : (
+        <button
+          onClick={handleConnect}
+          disabled={connecting}
+          style={{
+            width: "100%", background: connecting ? "#333" : "linear-gradient(135deg,#635BFF,#8B5CF6)",
+            border: "none", borderRadius: 12, color: "white",
+            fontWeight: 800, fontSize: 15, padding: "13px", cursor: connecting ? "not-allowed" : "pointer",
+          }}
+        >
+          {connecting ? "Redirecting to Stripe..." : "Connect Stripe Account"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // =============================================================================
 // PROFILE SCREEN
 // =============================================================================
@@ -1596,6 +1720,12 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
               {user.username ? "Update Username" : "Set Username"}
             </button>
           </div>
+        </div>
+      )}
+
+      {user.isPro && (
+        <div style={{ marginBottom: 24 }}>
+          <StripeConnectSection />
         </div>
       )}
 
