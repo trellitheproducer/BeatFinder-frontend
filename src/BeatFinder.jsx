@@ -414,32 +414,23 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
         </div>
 
         {beat && (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 12,
-            padding: "10px 16px", borderBottom: "1px solid #1a1a1a",
-            background: "#0d0d0d",
-          }}>
-            {beat.thumbnail && (
-              <img src={beat.thumbnail} alt={beat.title} style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
-            )}
-            <div style={{ flex: 1, overflow: "hidden" }}>
+          <div style={{ borderBottom: "1px solid #1a1a1a", background: "#000" }}>
+            <iframe
+              key={beat.videoId}
+              src={"https://www.youtube.com/embed/" + beat.videoId + "?autoplay=1&rel=0"}
+              width="100%"
+              height="160"
+              style={{ display: "block", border: "none" }}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              title={beat.title}
+            />
+            <div style={{ padding: "8px 16px", background: "#0d0d0d" }}>
               <div style={{ color: "white", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {beat.title}
               </div>
               <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>{beat.channel}</div>
             </div>
-            <a
-              href={"https://www.youtube.com/watch?v=" + beat.videoId}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                background: "#FF0000", borderRadius: 8, padding: "6px 12px",
-                color: "white", fontWeight: 700, fontSize: 12, textDecoration: "none",
-                flexShrink: 0, display: "flex", alignItems: "center", gap: 4,
-              }}
-            >
-              ▶ Play
-            </a>
           </div>
         )}
       </div>
