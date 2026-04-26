@@ -2283,7 +2283,7 @@ function RootAuthScreen({ onLogin }) {
             } else {
               try { localStorage.removeItem("bf_saved_email"); } catch {}
             }
-            onLogin(u);
+            setTimeout(() => onLogin(u), 0);
           } catch (e) {
             setAuthErr(e.message);
           } finally {
@@ -2903,7 +2903,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
           } else {
             try { localStorage.removeItem("bf_saved_email"); } catch {}
           }
-          setUser(u);
+          setTimeout(() => setUser(u), 0);
         } catch (e) {
           setAuthErr(e.message);
         } finally {
@@ -3065,7 +3065,7 @@ export default function BeatFinder() {
   }
 
   return (
-    <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
+    <div key="app-root" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
       {playing && <Player beat={playing} onClose={() => setPlaying(null)} savedIds={savedIds} onSave={toggleSave} isArtistPro={isArtistPro} onOpenLyrics={handleOpenLyrics} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoMembers={() => { setPlaying(null); setTab("exclusive"); }} />}
@@ -3083,7 +3083,7 @@ export default function BeatFinder() {
         <div style={{ display: tab === "search"    ? "block" : "none" }}><SearchScreen    savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>
         <div style={{ display: tab === "saved"     ? "block" : "none" }}><SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} /></div>
         <div style={{ display: tab === "exclusive" ? "block" : "none" }}><ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>
-        <div style={{ display: tab === "profile" ? "block" : "none" }}><ProfileScreen user={user} setUser={u => { setUser(u); if (u) setTab("home"); }} onLogout={() => { AuthAPI.logout(); setUser(null); setTab("home"); }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} /></div>
+        <div style={{ display: tab === "profile" ? "block" : "none" }}><ProfileScreen user={user} setUser={setUser} onLogout={() => { AuthAPI.logout(); setTimeout(() => setUser(null), 0); }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} /></div>
       </div>
 
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "rgba(10,10,10,0.97)", borderTop: "1px solid #1a1a1a", display: "flex", height: "calc(72px + env(safe-area-inset-bottom))", zIndex: 100, backdropFilter: "blur(20px)", paddingBottom: "env(safe-area-inset-bottom)" }}>
