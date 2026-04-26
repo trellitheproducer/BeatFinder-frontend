@@ -838,7 +838,7 @@ Writer's block? Tap the ✨ AI Lyric Assistant button below — it will analyse 
 function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, savedLyrics, onEditLyric, onGoMembers }) {
   return (
     <div style={{
-      position: "fixed", inset: 0, zIndex: 9999, background: "#000",
+      position: "fixed", top: 0, left: 0, right: 0, bottom: "calc(72px + env(safe-area-inset-bottom))", zIndex: 9999, background: "#000",
       display: "flex", flexDirection: "column", fontFamily: "'DM Sans',sans-serif",
     }}>
       <div style={{
@@ -2952,20 +2952,18 @@ export default function BeatFinder() {
       )}
 
       <div style={{ overflowY: "auto", height: "calc(100vh - 72px)" }}>
-        {tab === "home"      && <HomeScreen     savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => setTab("exclusive")} />}
-        {tab === "artists"   && !artist && <ArtistsScreen onArtistSelect={setArtist} />}
-        {tab === "artists"   &&  artist && (
-          <ArtistDetailScreen artist={artist} onBack={() => setArtist(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />
-        )}
-        {tab === "trending"  && <TrendingScreen  savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
-        {tab === "search"    && <SearchScreen    savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
-        {tab === "saved"     && (
-          <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} />
-        )}
-        {tab === "exclusive" && (
-          <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />
-        )}
-        {tab === "profile"   && <ProfileScreen user={user} setUser={setUser} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} />}
+        <div style={{ display: tab === "home"      ? "block" : "none" }}><HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => setTab("exclusive")} /></div>
+        <div style={{ display: tab === "artists"   ? "block" : "none" }}>
+          {!artist
+            ? <ArtistsScreen onArtistSelect={setArtist} />
+            : <ArtistDetailScreen artist={artist} onBack={() => setArtist(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />
+          }
+        </div>
+        <div style={{ display: tab === "trending"  ? "block" : "none" }}><TrendingScreen  savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>
+        <div style={{ display: tab === "search"    ? "block" : "none" }}><SearchScreen    savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>
+        <div style={{ display: tab === "saved"     ? "block" : "none" }}><SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} /></div>
+        <div style={{ display: tab === "exclusive" ? "block" : "none" }}><ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>
+        <div style={{ display: tab === "profile"   ? "block" : "none" }}><ProfileScreen user={user} setUser={setUser} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} /></div>
       </div>
 
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "rgba(10,10,10,0.97)", borderTop: "1px solid #1a1a1a", display: "flex", height: "calc(72px + env(safe-area-inset-bottom))", zIndex: 100, backdropFilter: "blur(20px)", paddingBottom: "env(safe-area-inset-bottom)" }}>
