@@ -835,7 +835,7 @@ Stuck? Tap the ✨ AI Lyric Assistant button below — it will analyse your rhym
 // =============================================================================
 // FULL-SCREEN PLAYER
 // =============================================================================
-function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, savedLyrics, onEditLyric }) {
+function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, savedLyrics, onEditLyric, onGoMembers }) {
   return (
     <div style={{
       position: "fixed", inset: 0, zIndex: 9999, background: "#000",
@@ -948,13 +948,13 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
           // Locked state for non-subscribers
           return (
             <button
-              onClick={() => onClose()}
+              onClick={() => { onClose(); onGoMembers && onGoMembers(); }}
               style={{
                 marginTop: 10, width: "100%", borderRadius: 14, padding: "15px",
                 fontWeight: 800, fontSize: 15, cursor: "pointer",
-                background: "#111",
-                border: "1.5px solid #333",
-                color: "#555",
+                background: "linear-gradient(135deg,rgba(192,38,211,0.15),rgba(107,33,168,0.15))",
+                border: "1.5px solid #6B21A8",
+                color: "#C026D3",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
               }}
             >
@@ -2697,7 +2697,7 @@ export default function BeatFinder() {
     <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
-      {playing && <Player beat={playing} onClose={() => setPlaying(null)} savedIds={savedIds} onSave={toggleSave} isArtistPro={isArtistPro} onOpenLyrics={handleOpenLyrics} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
+      {playing && <Player beat={playing} onClose={() => setPlaying(null)} savedIds={savedIds} onSave={toggleSave} isArtistPro={isArtistPro} onOpenLyrics={handleOpenLyrics} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoMembers={() => { setPlaying(null); setTab("exclusive"); }} />}
       {lyricsOpen && <LyricsNotepad beat={lyricsBeat} onClose={() => { setLyricsOpen(false); setEditingLyric(null); setEditingIndex(null); }} onSaveLyric={handleSaveLyric} initialLyric={editingLyric} lyricIndex={editingIndex} />}
       {publicProfile && (
         <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "#0a0a0a", overflowY: "auto", paddingTop: "env(safe-area-inset-top)" }}>
