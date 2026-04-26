@@ -16,7 +16,7 @@ const CACHE_TTL = 10 * 60 * 1000;
 
 // =============================================================================
 // API HELPERS
-// These call your FastAPI backend — which in turn calls YouTube server-side.
+// These call your FastAPI backend - which in turn calls YouTube server-side.
 // This fixes the iOS Safari CORS block permanently.
 // =============================================================================
 
@@ -53,7 +53,7 @@ async function apiFetch(path, options = {}) {
 }
 
 // =============================================================================
-// YOUTUBE — calls /api/youtube/search on your FastAPI backend
+// YOUTUBE - calls /api/youtube/search on your FastAPI backend
 // Backend makes the real googleapis.com call server-side (no CORS issues)
 // =============================================================================
 async function fetchBeats(artistName, page, filterTitle, maxResults) {
@@ -90,7 +90,7 @@ async function fetchBeats(artistName, page, filterTitle, maxResults) {
 }
 
 // =============================================================================
-// AUTH API — register / login / me / upgrade plan
+// AUTH API - register / login / me / upgrade plan
 // =============================================================================
 const AuthAPI = {
   async register(name, email, password) {
@@ -130,7 +130,7 @@ const AuthAPI = {
 };
 
 // =============================================================================
-// SAVED BEATS API — syncs with MongoDB via backend
+// SAVED BEATS API - syncs with MongoDB via backend
 // =============================================================================
 const BeatsAPI = {
   async list() {
@@ -368,14 +368,14 @@ function Av({ name, size = 88, idx = 0, img }) {
 
 
 // =============================================================================
-// AI LYRIC ASSISTANT — local rhyme engine, no API needed, 100% free
+// AI LYRIC ASSISTANT - local rhyme engine, no API needed, 100% free
 // =============================================================================
 
 // =============================================================================
-// LYRIC ASSISTANT ENGINE — local rhyme generator
+// LYRIC ASSISTANT ENGINE - local rhyme generator
 // =============================================================================
 
-// Large rhyme groups — words grouped by shared ending sound
+// Large rhyme groups - words grouped by shared ending sound
 const RHYME_GROUPS = [
   // -eep / -eap / -ee sounds
   ["jeep","deep","sleep","keep","sweep","creep","leap","heap","reap","cheap","steep","beep","weep","peep","seep","sheep","fleet","street","beat","feat","heat","meat","neat","seat","treat","tweet","concrete","elite","compete","repeat","defeat","retreat","complete","athlete","heartbeat","deadbeat","discreet","delete","deplete"],
@@ -695,7 +695,7 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
                   <div style={{ color: "#555", fontSize: 11 }}>Rhyming with: <span style={{ color: "#F59E0B", fontWeight: 700 }}>"{results.lastWord}"</span> · Scheme: <span style={{ color: "#aaa" }}>{results.scheme}</span></div>
                 </div>
 
-                <div style={{ color: "#555", fontSize: 11, fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>SUGGESTED NEXT LINES — TAP TO ADD</div>
+                <div style={{ color: "#555", fontSize: 11, fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>SUGGESTED NEXT LINES - TAP TO ADD</div>
 
                 {results.suggestions.map((line, i) => (
                   <div key={i + "-" + callCount} onClick={() => { onSuggest(line); setOpen(false); }}
@@ -715,7 +715,7 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
 }
 
 // =============================================================================
-// LYRICS NOTEPAD — Artist Pro only, appears over the player
+// LYRICS NOTEPAD - Artist Pro only, appears over the player
 // =============================================================================
 function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex }) {
   const [text,  setText]  = useState(initialLyric ? initialLyric.text  : "");
@@ -808,7 +808,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
         onChange={e => setText(e.target.value)}
         placeholder="Start writing your lyrics here...
 
-Writer's block? Tap the ✨ AI Lyric Assistant button below — it will analyse your rhyme scheme and suggest the perfect next line to keep you flowing."
+Writer's block? Tap the ✨ AI Lyric Assistant button below - it will analyse your rhyme scheme and suggest the perfect next line to keep you flowing."
         style={{
           flex: 1, background: "#0d0d0d", border: "none", outline: "none",
           color: "white", fontSize: 15, lineHeight: 1.8, padding: "16px",
@@ -938,7 +938,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
                       display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
                     }}
                   >
-                    📄 Open Existing Lyrics — {existingLyric.title}
+                    📄 Open Existing Lyrics - {existingLyric.title}
                   </button>
                 )}
               </>
@@ -1120,7 +1120,7 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
     <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
       <div style={{ fontSize: 36, marginBottom: 10 }}>🎵</div>
       <div style={{ fontSize: 13 }}>Finding {artistName} type beats...</div>
-      {page === 1 && <div style={{ fontSize: 11, color: "#444", marginTop: 6 }}>First load builds the full beat library — may take a few seconds</div>}
+      {page === 1 && <div style={{ fontSize: 11, color: "#444", marginTop: 6 }}>First load builds the full beat library - may take a few seconds</div>}
     </div>
   );
 
@@ -1223,7 +1223,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers }) {
             border: "none", borderRadius: 12, color: "white",
             fontWeight: 800, fontSize: 15, padding: "13px", cursor: "pointer",
           }}>
-            View Plans — From £4.99/mo
+            View Plans - From £4.99/mo
           </button>
         </div>
       )}
@@ -1234,7 +1234,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers }) {
       </div>
       <div style={{ background: "#111", borderRadius: 12, padding: "10px 14px", marginBottom: 20, border: "1px solid #1e1e1e" }}>
         <div style={{ color: "#666", fontSize: 12, lineHeight: 1.6 }}>
-          🎵 Featured beats from producers worldwide — tap any video to play beats instantly.
+          🎵 Featured beats from producers worldwide - tap any video to play beats instantly.
         </div>
       </div>
       <BeatFeed artistName="best free beats" featured savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} max={10} />
@@ -1495,7 +1495,7 @@ function BeatLeaseCard({ beat, user }) {
           cursor: loading ? "not-allowed" : "pointer",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
         }}>
-          {loading ? "Loading..." : "🎵 Buy Lease — " + beat.price}
+          {loading ? "Loading..." : "🎵 Buy Lease - " + beat.price}
         </button>
       )}
     </div>
@@ -1841,7 +1841,7 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
 
 
 // =============================================================================
-// LYRIC CARD — shows saved lyric with beat, opens full lyric view
+// LYRIC CARD - shows saved lyric with beat, opens full lyric view
 // =============================================================================
 function LyricCard({ lyric, lyricIndex, onDelete, onEditLyric }) {
   return (
@@ -1979,7 +1979,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave }) {
 
 
 // =============================================================================
-// STRIPE CONNECT SECTION — for Producer Pro profile
+// STRIPE CONNECT SECTION - for Producer Pro profile
 // =============================================================================
 function StripeConnectSection({ user }) {
   const [status,  setStatus]  = useState(null);
@@ -2059,7 +2059,7 @@ function StripeConnectSection({ user }) {
 
 
 // =============================================================================
-// MY UPLOADS — Producer Pro tab to manage uploaded beats
+// MY UPLOADS - Producer Pro tab to manage uploaded beats
 // =============================================================================
 function MyUploadsSection({ user }) {
   const [beats,    setBeats]    = useState([]);
@@ -2192,7 +2192,7 @@ function MyUploadsSection({ user }) {
 
 
 // =============================================================================
-// RESET PASSWORD SCREEN — shown when user visits app with ?reset_token=
+// RESET PASSWORD SCREEN - shown when user visits app with ?reset_token=
 // =============================================================================
 function ResetPasswordScreen({ token, onDone }) {
   const [newPw,    setNewPw]    = useState("");
@@ -2529,7 +2529,7 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
 
           {producerTab === "upload" && <div>
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Upload Your Beats</div>
-          <div style={{ color: "#666", fontSize: 13, marginBottom: 14 }}>Upload MP3 files — they appear in the MP3s tab for users to download.</div>
+          <div style={{ color: "#666", fontSize: 13, marginBottom: 14 }}>Upload MP3 files - they appear in the MP3s tab for users to download.</div>
           <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #222" }}>
             <input value={ytLink} onChange={e => setYtLink(e.target.value)} placeholder="Beat title e.g. Dark Trap Beat" style={inp} />
             <input value={uploadGenre || ""} onChange={e => setUploadGenre(e.target.value)} placeholder="Genre e.g. Trap, R&B, Afrobeats" style={inp} />
@@ -2664,7 +2664,7 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
                   </button>
 
                   <div style={{ color: "#555", fontSize: 12, textAlign: "center", marginBottom: 16 }}>
-                    — or enter your activation code below —
+                    - or enter your activation code below -
                   </div>
 
                   <input
@@ -2834,7 +2834,7 @@ export default function BeatFinder() {
   const [user,    setUser]    = useState(null);
   const [playing, setPlaying] = useState(null);
 
-  // savedMap: { [videoId]: beat } — localStorage for guests, backend for logged-in users
+  // savedMap: { [videoId]: beat } - localStorage for guests, backend for logged-in users
   const [savedMap, setSavedMap] = useState(loadSaved);
   const savedIds = new Set(Object.keys(savedMap));
 
@@ -2993,3 +2993,4 @@ export default function BeatFinder() {
       </div>
     </div>
   );
+}
