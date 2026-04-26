@@ -2796,6 +2796,8 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
           } else {
             try { localStorage.removeItem("bf_saved_email"); } catch {}
           }
+          setVisitedTabs(new Set(["home"]));
+          setTab("home");
           setUser(u);
         } catch (e) {
           setAuthErr(e.message);
@@ -2867,6 +2869,8 @@ export default function BeatFinder() {
           isPro:       u.plan === "producer",
           isArtistPro: u.plan === "artist" || u.plan === "producer",
         });
+        setTab("home");
+        setVisitedTabs(new Set(["home"]));
       })
       .catch(() => clearToken());
   }, []);
