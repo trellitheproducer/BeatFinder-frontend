@@ -952,9 +952,9 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
               style={{
                 marginTop: 10, width: "100%", borderRadius: 14, padding: "15px",
                 fontWeight: 800, fontSize: 15, cursor: "pointer",
-                background: "linear-gradient(135deg,rgba(192,38,211,0.15),rgba(107,33,168,0.15))",
-                border: "1.5px solid #6B21A8",
-                color: "#C026D3",
+                background: "#111",
+                border: "1.5px solid #2a2a2a",
+                color: "#444",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
               }}
             >
