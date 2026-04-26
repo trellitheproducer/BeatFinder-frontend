@@ -808,7 +808,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
         onChange={e => setText(e.target.value)}
         placeholder="Start writing your lyrics here...
 
-Stuck? Tap the ✨ AI Lyric Assistant button below — it will analyse your rhyme scheme and suggest the perfect next line to keep you flowing."
+Writer's block? Tap the ✨ AI Lyric Assistant button below — it will analyse your rhyme scheme and suggest the perfect next line to keep you flowing."
         style={{
           flex: 1, background: "#0d0d0d", border: "none", outline: "none",
           color: "white", fontSize: 15, lineHeight: 1.8, padding: "16px",
@@ -1190,7 +1190,7 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
 // =============================================================================
 // HOME SCREEN
 // =============================================================================
-function HomeScreen({ savedIds, onSave, onPlay }) {
+function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers }) {
   return (
     <div style={{ padding: "0 16px 100px" }}>
       <div style={{ textAlign: "center", padding: "44px 0 30px" }}>
@@ -1209,13 +1209,41 @@ function HomeScreen({ savedIds, onSave, onPlay }) {
           Welcome to the World's <span style={{ color: "#C026D3", fontWeight: 800 }}>#1</span> Beat Finder App
         </div>
       </div>
+      {(!user || (!user.isPro && !user.isArtistPro)) && (
+        <div style={{
+          background: "linear-gradient(135deg,#1a0a2e,#2d1060)",
+          border: "1.5px solid rgba(192,38,211,0.4)",
+          borderRadius: 16, padding: "18px 20px", marginBottom: 20,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <div style={{ fontSize: 22 }}>🔒</div>
+            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>PRO FEATURES AVAILABLE</div>
+          </div>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 10, lineHeight: 1.4 }}>
+            Take your music further with a Pro plan
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
+            {["✍️  Write lyrics while beats play", "💾  Save & edit your lyrics anytime", "🎵  Access exclusive member beats", "⬇️  Download & buy MP3 leases", "✨  AI Lyric Assistant for writer's block", "🎛️  Upload & sell your own beats"].map(f => (
+              <div key={f} style={{ color: "#bbb", fontSize: 12 }}>{f}</div>
+            ))}
+          </div>
+          <button onClick={onGoMembers} style={{
+            width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+            border: "none", borderRadius: 12, color: "white",
+            fontWeight: 800, fontSize: 15, padding: "13px", cursor: "pointer",
+          }}>
+            View Plans — From £4.99/mo
+          </button>
+        </div>
+      )}
+
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>⭐ Featured Beats</div>
         <div style={{ color: "#888", fontSize: 12 }}>Live from YouTube</div>
       </div>
       <div style={{ background: "#111", borderRadius: 12, padding: "10px 14px", marginBottom: 20, border: "1px solid #1e1e1e" }}>
         <div style={{ color: "#666", fontSize: 12, lineHeight: 1.6 }}>
-          🎵 Real YouTube results — tap any artist to find their type beats instantly.
+          🎵 Featured beats from producers worldwide — tap any video to play beats instantly.
         </div>
       </div>
       <BeatFeed artistName="best free beats" featured savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} max={10} />
@@ -1251,9 +1279,7 @@ function ArtistsScreen({ onArtistSelect }) {
           <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 32, letterSpacing: 2 }}>BEATFINDER</div>
           <div style={{ color: "#888", fontSize: 13 }}>Type beats, organized.</div>
         </div>
-        <div style={{ border: "1.5px solid #06B6D4", borderRadius: 24, padding: "7px 14px", fontSize: 13, fontWeight: 700, color: "#06B6D4" }}>
-          ✦ AI Picks
-        </div>
+
       </div>
       <div style={{ background: "#1a1a1a", borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, marginBottom: 12, border: "1px solid #222" }}>
         <span style={{ color: "#555" }}>🔍</span>
@@ -2706,7 +2732,7 @@ export default function BeatFinder() {
       )}
 
       <div style={{ overflowY: "auto", height: "calc(100vh - 72px)" }}>
-        {tab === "home"      && <HomeScreen     savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
+        {tab === "home"      && <HomeScreen     savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => setTab("exclusive")} />}
         {tab === "artists"   && !artist && <ArtistsScreen onArtistSelect={setArtist} />}
         {tab === "artists"   &&  artist && (
           <ArtistDetailScreen artist={artist} onBack={() => setArtist(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />
