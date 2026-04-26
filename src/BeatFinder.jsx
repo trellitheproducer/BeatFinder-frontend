@@ -2777,6 +2777,11 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
         setAuthErr("");
         setAuthLoading(true);
         try {
+          if (mode === "login" && !pw.trim()) {
+            setAuthErr("Please enter your password");
+            setAuthLoading(false);
+            return;
+          }
           const u = mode === "signup"
             ? await AuthAPI.register(name || email.split("@")[0], email, pw)
             : await AuthAPI.login(email, pw);
@@ -2806,7 +2811,7 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
       </div>
       {mode === "login" && (
         <div style={{ textAlign: "center", marginTop: 12 }}>
-          <button onClick={() => setMode("forgot")}
+          <button onClick={e => { e.preventDefault(); e.stopPropagation(); setMode("forgot"); }}
             style={{ background: "none", border: "none", color: "#666", fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>
             Forgot your password?
           </button>
