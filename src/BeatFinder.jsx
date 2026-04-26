@@ -377,7 +377,7 @@ function Av({ name, size = 88, idx = 0, img }) {
 
 
 // =============================================================================
-// AI LYRIC ASSISTANT ENGINE -- Datamuse multi-syllable rhyme system
+// AI LYRIC ASSISTANT ENGINE -- Real rhyme database, professional bar writing
 // =============================================================================
 
 function getLastLine(lyrics) {
@@ -385,181 +385,187 @@ function getLastLine(lyrics) {
   return lines.length > 0 ? lines[lines.length - 1].trim() : "";
 }
 
-function cleanWord(w) {
-  return w.replace(/[^a-zA-Z]/g, "").toLowerCase();
-}
+function cleanWord(w) { return w.replace(/[^a-zA-Z]/g, "").toLowerCase(); }
 
-// Extract final 2-3 syllable sound cluster for multi-syllable rhyming
-function extractRhymeTarget(line) {
-  var words = line.trim().split(" ").filter(function(w){ return w.length > 0; });
-  var cleaned = words.map(cleanWord);
+// Extract final 1-3 word rhyme target from a line
+// e.g. "i got weed so i might bill it" -> { word: "it", twoWord: "bill it", threeWord: "might bill it", phrase: "bill it" }
+function extractTarget(line) {
+  var words = line.trim().split(" ").filter(function(w){ return w.trim().length > 0; });
+  var cleaned = words.map(cleanWord).filter(function(w){ return w.length > 0; });
   var w1 = cleaned.length > 0 ? cleaned[cleaned.length - 1] : "";
   var w2 = cleaned.length > 1 ? cleaned[cleaned.length - 2] : "";
-  var phrase = w2 ? w2 + " " + w1 : w1;
-  return { word: w1, phrase: phrase };
+  var twoWord = w2 ? (w2 + " " + w1) : w1;
+  return { word: w1, twoWord: twoWord, rhymeOn: w2 ? twoWord : w1 };
 }
 
-function countSyllables(word) {
-  var w = word.toLowerCase().replace(/[^a-z]/g, "");
-  if (!w) return 1;
-  var v = w.match(/[aeiouy]+/g);
-  return v ? v.length : 1;
+// Common filler/junk words to reject as rhyme words
+var JUNK_WORDS = ["a","an","the","and","or","but","if","in","on","at","to","for","of","with","by","as","is","it","be","we","he","she","they","i","you","my","your","our","their","this","that","these","those","was","were","are","am","had","has","have","do","did","not","no","yes","so","up","up","oh","ah","uh"];
+
+function isUsable(word) {
+  if (!word) return false;
+  if (word.length < 2) return false;
+  if (JUNK_WORDS.indexOf(word.toLowerCase()) > -1) return false;
+  // reject words with numbers or special chars
+  if (/[^a-z\s]/.test(word.toLowerCase())) return false;
+  // reject very obscure words (usually too long and weird)
+  if (word.length > 14) return false;
+  return true;
 }
 
 function detectScheme(lines) {
   if (lines.length < 2) return "AA";
-  var endings = lines.slice(-4).map(function(l){
+  var ends = lines.slice(-4).map(function(l){
     var ws = l.trim().split(" ");
     return cleanWord(ws[ws.length - 1]);
   });
-  if (endings.length >= 4 && endings[0] === endings[2] && endings[1] === endings[3]) return "ABAB";
-  if (endings.length >= 4 && endings[0] === endings[1] && endings[2] === endings[3]) return "AABB";
-  if (endings.length >= 2 && endings[endings.length-1] === endings[endings.length-2]) return "AA";
-  return "ABAB";
+  if (ends.length >= 4 && ends[0] === ends[2] && ends[1] === ends[3]) return "ABAB";
+  if (ends.length >= 4 && ends[0] === ends[1] && ends[2] === ends[3]) return "AABB";
+  return "AA";
 }
 
-// Strict quality check - reject bars that don't make sense
-function qualityCheck(bar, rhymeWord) {
-  if (!bar) return false;
-  var words = bar.split(" ");
-  // Must be 6-16 words
-  if (words.length < 6 || words.length > 16) return false;
-  // Must end with the rhyme word
-  var lastWord = cleanWord(words[words.length - 1]);
-  if (lastWord !== cleanWord(rhymeWord)) return false;
-  // Reject bars with weird long compound words
-  if (words.some(function(w){ return w.length > 18; })) return false;
-  // Must have at least 2 "real" words (longer than 2 chars)
-  var realWords = words.filter(function(w){ return w.length > 2; });
-  if (realWords.length < 4) return false;
-  return true;
+// Fetch rhymes from Datamuse for a target phrase/word
+// Returns { words: [], source: "phrase"|"word" }
+function fetchRhymesFromDB(target) {
+  var phraseUrl = target.twoWord !== target.word
+    ? "https://api.datamuse.com/words?sl=" + encodeURIComponent(target.twoWord) + "&max=30&md=f"
+    : null;
+  var perfUrl = "https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(target.word) + "&max=50&md=f";
+  var nearUrl = "https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(target.word) + "&max=30&md=f";
+
+  return Promise.all([
+    phraseUrl ? fetch(phraseUrl).then(function(r){ return r.json(); }).catch(function(){ return []; }) : Promise.resolve([]),
+    fetch(perfUrl).then(function(r){ return r.json(); }).catch(function(){ return []; }),
+    fetch(nearUrl).then(function(r){ return r.json(); }).catch(function(){ return []; }),
+  ]).then(function(all) {
+    var phraseRes = all[0];
+    var perfRes   = all[1];
+    var nearRes   = all[2];
+
+    // Filter each list to usable real words only
+    var phraseWords = phraseRes.map(function(w){ return w.word; }).filter(isUsable);
+    var perfWords   = perfRes.map(function(w){ return w.word; }).filter(isUsable);
+    var nearWords   = nearRes.map(function(w){ return w.word; }).filter(isUsable)
+                             .filter(function(w){ return perfWords.indexOf(w) === -1; });
+
+    // If phrase rhymes give us enough, use them (multi-syllable match)
+    if (phraseWords.length >= 4) {
+      return { words: phraseWords, near: perfWords.slice(0, 10), source: "phrase", rhymeOn: target.twoWord };
+    }
+    return { words: perfWords, near: nearWords, source: "word", rhymeOn: target.word };
+  }).catch(function() {
+    return { words: [], near: [], source: "error", rhymeOn: target.word };
+  });
 }
 
-// Bar builder - each template is a complete grammatical sentence
-// IMPORTANT: rhyme word is ALWAYS the last word and fits naturally
-var BAR_BUILDERS = [
-  // ---- NOUN/ABSTRACT rhyme endings (pain, fame, game, name, lane, rain) ----
-  { test: /pain|strain|rain|chain|grain|lane|plain|brain|stain|drain|vain|gain|claim|flame|name|fame|game|came|same|blame|frame|shame|aim|aim$/, 
+// ---- BAR WRITING SYSTEM ----
+// Each builder takes a rhyme word and returns a complete grammatical bar
+// The rhyme word MUST be the last word and the sentence MUST make sense
+
+// Hardcoded phrase patterns for multi-syllable rhymes (e.g. "bill it", "feel it")
+var PHRASE_PATTERNS = [
+  // -ill it / -eal it / -eel it
+  { re: /ill it$|eal it$|eel it$|ull it$|ull$|fill$|kill$|spill$|will$|drill$|skill$|still$|mill$|hill$|pill$|bill$|thrill$|chill$/,
     bars: [
-      function(r){ return "Lost nights and cold roads led me through the " + r; },
-      function(r){ return "I put my blood sweat and tears into this " + r; },
-      function(r){ return "They never seen a young one rise through this " + r; },
-      function(r){ return "God built me for the pressure and the " + r; },
-      function(r){ return "Real ones know the grind behind the " + r; },
+      function(r){ return "I got the vision now I'm out here tryna " + r; },
+      function(r){ return "They said it couldn't happen, had to go and " + r; },
+      function(r){ return "Ice cold minded, had to pause and just " + r; },
+      function(r){ return "Had the recipe for greatness had to " + r; },
+      function(r){ return "Pressure tried to break me couldn't even " + r; },
     ]
   },
-  // ---- VERB/ACTION rhyme endings (ride, grind, shine, rise, drive, thrive) ----
-  { test: /ride|hide|slide|glide|guide|pride|tide|wide|side|grind|find|mind|blind|bind|shine|mine|vine|fine|line|sign|rise|eyes|skies|ties|lies|size|wise|thrive|live|give|drive|strive|survive|arrive|fly|high|sky|die|try|cry|why/,
+  // -ight / -ite
+  { re: /ight$|ite$|night$|right$|light$|fight$|might$|tight$|bright$|sight$|white$|write$/,
     bars: [
-      function(r){ return "Every single day I wake up and " + r; },
-      function(r){ return "They tried to hold me down but I still " + r; },
-      function(r){ return "Came from nothing now I'm built to " + r; },
-      function(r){ return "Put it all on the line just to " + r; },
-      function(r){ return "God gave me the hunger so I " + r; },
-      function(r){ return "Pressure make the diamond, watch me " + r; },
-      function(r){ return "All my real ones know exactly why I " + r; },
+      function(r){ return "Moving through the darkness chasing after the " + r; },
+      function(r){ return "They never thought I'd make it now I'm in the " + r; },
+      function(r){ return "Came from nothing, I am shining in the " + r; },
+      function(r){ return "God had a plan and it feels like it's " + r; },
+      function(r){ return "Every single battle I been winning every " + r; },
     ]
   },
-  // ---- -ING rhyme endings (grinding, winning, running, living) ----
-  { test: /ing$/,
+  // -ane / -ain / -ame / -ame
+  { re: /ain$|ane$|ame$|laim$|lame$|pain$|rain$|game$|name$|fame$|flame$|chain$|brain$|plain$|strain$/,
     bars: [
-      function(r){ return "Couldn't stop me, I was built to keep " + r; },
-      function(r){ return "While they sleeping I was up here " + r; },
-      function(r){ return "No days off, I stay forever " + r; },
-      function(r){ return "Cold winters never stopped me from " + r; },
-      function(r){ return "They doubted but I never stopped " + r; },
+      function(r){ return "I put my heart in it, they'll never know the " + r; },
+      function(r){ return "Cold nights and long roads, I never got to complain, had to accept the " + r; },
+      function(r){ return "These streets don't love you but I learned to play the " + r; },
+      function(r){ return "I been building from the dirt so you can know my " + r; },
+      function(r){ return "They tried to stop my rise but I kept going, that's the " + r; },
     ]
   },
-  // ---- -LY rhyme endings (daily, clearly, really, barely) ----
-  { test: /ly$/,
+  // -ow / -ow (flow, know, show, grow)
+  { re: /ow$|ow$|flow$|know$|show$|grow$|glow$|blow$|slow$|go$|though$/,
     bars: [
-      function(r){ return "Moved in silence but they see me now so " + r; },
-      function(r){ return "Everything I built I built it " + r; },
-      function(r){ return "God kept me standing when they pushed me " + r; },
-      function(r){ return "I don't cap, everything I say is " + r; },
+      function(r){ return "Watch me move in silence, that's the way I " + r; },
+      function(r){ return "I put the work in every single day to " + r; },
+      function(r){ return "Real ones understand the way the grind will " + r; },
+      function(r){ return "They couldn't see my vision, had to let them " + r; },
+      function(r){ return "Came from the mud, I let my talent " + r; },
     ]
   },
-  // ---- -ED rhyme endings (proved, moved, survived, grinded) ----
-  { test: /ed$/,
+  // -ive / -ive (survive, thrive, live, drive)
+  { re: /ive$|rive$|ive$|live$|give$|drive$|thrive$|survive$|arrive$|strive$/,
     bars: [
-      function(r){ return "Back against the wall and still I " + r; },
-      function(r){ return "Everything they said I couldn't, I " + r; },
-      function(r){ return "God had a plan even when I " + r; },
-      function(r){ return "Through every storm and every setback I " + r; },
+      function(r){ return "Everything they put me through just made me " + r; },
+      function(r){ return "Pressure never stopped me, I was born to " + r; },
+      function(r){ return "Came from nothing, still I found a way to " + r; },
+      function(r){ return "God kept pushing me and I chose to " + r; },
+      function(r){ return "They tried to bury me, I came alive to " + r; },
     ]
   },
-  // ---- MULTI-SYLLABLE phrase endings (pick it up, give it up, sicker stuff) ----
-  { test: /up$|off$|out$|down$|back$|round$|around$/,
+  // -ound / -own
+  { re: /ound$|own$|round$|down$|town$|crown$|ground$|found$|sound$|bound$|pound$|wound$/,
     bars: [
-      function(r){ return "Real talk, they told me I should give it " + r; },
-      function(r){ return "When the pressure hits I never fold I pull it " + r; },
-      function(r){ return "Came from zero but I fought and built it " + r; },
-      function(r){ return "Cold nights and rough roads never let me slow it " + r; },
-      function(r){ return "They tried to bury me but couldn't keep me " + r; },
+      function(r){ return "They never seen a king rise up from the " + r; },
+      function(r){ return "Stayed low moved smart, they couldn't keep me " + r; },
+      function(r){ return "I built my empire from the underground " + r; },
+      function(r){ return "Real ones stand tall, we never will back " + r; },
+      function(r){ return "Every single obstacle I ran it straight " + r; },
     ]
   },
-  // ---- DEFAULT - works for anything ----
-  { test: /.*/,
+  // -ing (grinding, winning, running)
+  { re: /ing$/,
     bars: [
-      function(r){ return "They slept on me, I rose above and became a " + r; },
-      function(r){ return "Hustle in my veins since birth, I am a " + r; },
-      function(r){ return "God wrote my story and I play a different " + r; },
-      function(r){ return "Came too far to fold now, I am built for " + r; },
-      function(r){ return "Different breed entirely, call me a " + r; },
-      function(r){ return "Every sacrifice I made was for a " + r; },
-      function(r){ return "Never let the pressure dim my light or be a " + r; },
+      function(r){ return "No off switch, I stay forever " + r; },
+      function(r){ return "While the city sleeps I'm up here " + r; },
+      function(r){ return "They couldn't understand the life I'm " + r; },
+      function(r){ return "God blessed the work that I been " + r; },
+      function(r){ return "Real ones know the hours that I spent " + r; },
     ]
   },
 ];
 
+// Default bars for any word type not matched above
+var DEFAULT_BARS = [
+  function(r){ return "Came too far to ever let go now I claim my " + r; },
+  function(r){ return "Every battle made me stronger, this my " + r; },
+  function(r){ return "God put purpose in my veins, this is my " + r; },
+  function(r){ return "They slept on me for years, now watch me rise above the " + r; },
+  function(r){ return "Built different from the start, I got a different " + r; },
+  function(r){ return "Late nights and sacrifice, I paid the price for my " + r; },
+  function(r){ return "All my real ones stood beside me, that's the " + r; },
+];
+
 function buildBar(rhymeWord, index) {
-  // Find matching template set
-  var templateSet = BAR_BUILDERS[BAR_BUILDERS.length - 1]; // default
-  for (var i = 0; i < BAR_BUILDERS.length - 1; i++) {
-    if (BAR_BUILDERS[i].test.test(rhymeWord)) {
-      templateSet = BAR_BUILDERS[i];
+  // Find matching pattern
+  var chosen = null;
+  for (var i = 0; i < PHRASE_PATTERNS.length; i++) {
+    if (PHRASE_PATTERNS[i].re.test(rhymeWord)) {
+      chosen = PHRASE_PATTERNS[i].bars;
       break;
     }
   }
-  var template = templateSet.bars[index % templateSet.bars.length];
-  var bar = template(rhymeWord);
-  // Quality check
-  if (!qualityCheck(bar, rhymeWord)) {
-    // fallback to default
-    var fb = BAR_BUILDERS[BAR_BUILDERS.length - 1].bars[index % BAR_BUILDERS[BAR_BUILDERS.length - 1].bars.length];
-    return fb(rhymeWord);
-  }
-  return bar;
+  if (!chosen) chosen = DEFAULT_BARS;
+  return chosen[index % chosen.length](rhymeWord);
 }
 
-function fetchMultiRhymes(target) {
-  var phraseUrl = target.phrase && target.phrase.indexOf(" ") > -1
-    ? "https://api.datamuse.com/words?sl=" + encodeURIComponent(target.phrase) + "&max=30"
-    : null;
-  var perfUrl = "https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(target.word) + "&max=50";
-  var nearUrl = "https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(target.word) + "&max=20";
-
-  return Promise.all([
-    phraseUrl
-      ? fetch(phraseUrl).then(function(r){ return r.json(); }).catch(function(){ return []; })
-      : Promise.resolve([]),
-    fetch(perfUrl).then(function(r){ return r.json(); }).catch(function(){ return []; }),
-    fetch(nearUrl).then(function(r){ return r.json(); }).catch(function(){ return []; }),
-  ]).then(function(all) {
-    var phraseWords = all[0].map(function(w){ return w.word; });
-    var perfWords   = all[1].map(function(w){ return w.word; });
-    var nearWords   = all[2].map(function(w){ return w.word; });
-    // Use phrase rhymes if we got enough, else use word rhymes
-    var perfect = phraseWords.length >= 4 ? phraseWords : perfWords;
-    var near    = nearWords.filter(function(w){ return perfect.indexOf(w) === -1; });
-    return {
-      perfect: perfect,
-      near:    near,
-      isPhrase: phraseWords.length >= 4,
-    };
-  }).catch(function(){
-    return { perfect: [], near: [], isPhrase: false };
-  });
+function barQuality(bar, rhymeWord) {
+  if (!bar || typeof bar !== "string") return false;
+  var words = bar.trim().split(" ");
+  if (words.length < 5 || words.length > 18) return false;
+  var lastW = cleanWord(words[words.length - 1]);
+  if (lastW !== cleanWord(rhymeWord)) return false;
+  return true;
 }
 
 
@@ -574,50 +580,51 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
     var lastLine = getLastLine(currentText);
     if (!lastLine) return;
 
-    var target = extractRhymeTarget(lastLine);
+    var target = extractTarget(lastLine);
     var scheme = detectScheme(currentText.split(String.fromCharCode(10)).filter(function(l){ return l.trim(); }));
 
     setLoading(true);
     setError("");
     setResults(null);
 
-    fetchMultiRhymes(target).then(function(rhymes) {
-      var pool = rhymes.perfect.length >= 3 ? rhymes.perfect : rhymes.perfect.concat(rhymes.near);
+    fetchRhymesFromDB(target).then(function(rhymes) {
+      var pool = rhymes.words.length > 0 ? rhymes.words : rhymes.near;
 
       if (pool.length === 0) {
-        setError("No rhymes found for '" + target.word + "'. Try a different last word.");
+        setError("No rhymes found for '" + target.rhymeOn + "'. Try a different last word.");
         setLoading(false);
         return;
       }
 
+      // Rotate through pool on regenerate
       var offset = (count * 3) % pool.length;
       var picked = [];
       for (var i = 0; i < Math.min(8, pool.length); i++) {
         picked.push(pool[(offset + i) % pool.length]);
       }
 
-      // Build bars, quality check each one, deduplicate
+      // Build bars with quality gate
       var suggestions = [];
       var attempt = 0;
-      while (suggestions.length < 3 && attempt < picked.length * 2) {
+      while (suggestions.length < 3 && attempt < picked.length * 3) {
         var rw  = picked[attempt % picked.length];
         var bar = buildBar(rw, count + attempt);
-        if (qualityCheck(bar, rw) && suggestions.indexOf(bar) === -1) {
+        if (barQuality(bar, rw) && suggestions.indexOf(bar) === -1) {
           suggestions.push(bar);
         }
         attempt++;
       }
-      // Fallback if quality check too strict
+      // Fallback if quality gate too strict
       if (suggestions.length === 0) {
         suggestions = picked.slice(0, 3).map(function(rw, i){ return buildBar(rw, count + i); });
       }
 
       setResults({
         lastLine:     lastLine,
-        lastWord:     target.word,
-        phrase:       rhymes.isPhrase ? target.phrase : null,
+        rhymeOn:      rhymes.rhymeOn,
+        source:       rhymes.source,
         scheme:       scheme,
-        perfectCount: rhymes.perfect.length,
+        perfectCount: rhymes.words.length,
         nearCount:    rhymes.near.length,
         suggestions:  suggestions,
       });
@@ -706,7 +713,7 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
                   <div style={{ color: "white", fontSize: 13, fontStyle: "italic", marginBottom: 8 }}>"{results.lastLine}"</div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#C026D3" }}>
-                      {results.phrase ? "Phrase: " + results.phrase : "Word: " + results.lastWord}
+                      {results.source === "phrase" ? "Multi-syllable: " + results.rhymeOn : "Rhyming: " + results.rhymeOn}
                     </div>
                     <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#F59E0B" }}>
                       {results.perfectCount} perfect + {results.nearCount} near rhymes
