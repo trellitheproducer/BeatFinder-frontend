@@ -419,39 +419,89 @@ async function fetchRhymes(word) {
   }
 }
 
-// Fetch words with similar meaning/context to enrich line content
-async function fetchContextWords(word) {
-  try {
-    const res = await fetch(
-      "https://api.datamuse.com/words?ml=" + encodeURIComponent(word) + "&max=20"
-    );
-    const data = await res.json();
-    return data.map(w => w.word);
-  } catch {
-    return [];
-  }
+// Rhyme word category detector - so we pick templates that make sense
+function categorizeRhymeWord(word) {
+  const w = word.toLowerCase();
+  if (/ing$/.test(w)) return "gerund";
+  if (/tion$|sion$/.test(w)) return "noun_abstract";
+  if (/ly$/.test(w)) return "adverb";
+  if (/ed$/.test(w)) return "past";
+  const actionWords = ["run","go","know","show","flow","glow","fly","rise","shine","grind","climb","win","lead","bleed","feed","succeed","proceed","breathe","believe","achieve","receive","live","give","thrive","survive","drive","strive"];
+  if (actionWords.includes(w)) return "action";
+  const nounWords = ["pain","rain","game","name","fame","flame","chain","lane","strain","brain","day","way","stay","play","say","pray","night","light","fight","might","sight","right","bright","flight","mind","grind","kind","blind","time","crime","rhyme","dime","line","shine","fine","vine"];
+  if (nounWords.includes(w)) return "noun";
+  return "general";
 }
 
-// Rap line templates - slot rhyme word at end
-const RAP_TEMPLATES = [
-  (rw, sw) => "They " + (sw || "never") + " thought I'd make it but I " + rw,
-  (rw, sw) => "I been " + (sw || "grinding") + " every night, now I " + rw,
-  (rw, sw) => "From the " + (sw || "bottom") + " of the city watch me " + rw,
-  (rw, sw) => "Told myself I " + (sw || "won't") + " stop 'til I " + rw,
-  (rw, sw) => "All my " + (sw || "people") + " know the way I " + rw,
-  (rw, sw) => "Moving different, watch the way I " + rw,
-  (rw, sw) => "Stay " + (sw || "solid") + " through the struggle, I " + rw,
-  (rw, sw) => "Built from " + (sw || "nothing") + ", now they all " + rw,
-  (rw, sw) => "Through the " + (sw || "pain") + " and through the dark I " + rw,
-  (rw, sw) => "Eyes on the prize, I never " + rw,
-];
+// Smart templates by rhyme word category
+const TEMPLATES_BY_TYPE = {
+  action: [
+    (rw) => "Came from nothing, watch me " + rw,
+    (rw) => "Every day I wake up and " + rw,
+    (rw) => "They doubted me but I continue to " + rw,
+    (rw) => "Pressure tried to break me but I " + rw,
+    (rw) => "While they sleep at night I " + rw,
+    (rw) => "God blessed me and I " + rw,
+    (rw) => "Never looked back, I was born to " + rw,
+    (rw) => "Told myself I'd make it, watch me " + rw,
+  ],
+  noun: [
+    (rw) => "Built different, I been through the " + rw,
+    (rw) => "Real ones understand the " + rw,
+    (rw) => "From the mud I rose above the " + rw,
+    (rw) => "They'll remember me for all the " + rw,
+    (rw) => "Sacrificed it all to get this " + rw,
+    (rw) => "Late nights, early mornings, all this " + rw,
+    (rw) => "Loyalty over everything, that's the " + rw,
+    (rw) => "I put my soul into this " + rw,
+  ],
+  adverb: [
+    (rw) => "Moving different now I'm living " + rw,
+    (rw) => "They said I'd never make it, proved em " + rw,
+    (rw) => "Stayed low, now I'm winning " + rw,
+    (rw) => "I don't talk much, I just move " + rw,
+    (rw) => "Every step I take I'm walking " + rw,
+    (rw) => "Since day one I been going " + rw,
+  ],
+  gerund: [
+    (rw) => "No days off, I stay " + rw,
+    (rw) => "While they're sleeping I am " + rw,
+    (rw) => "Never stopped, I always keep " + rw,
+    (rw) => "Since the bottom I been " + rw,
+    (rw) => "Put the work in, I been " + rw,
+    (rw) => "Eyes wide open, never " + rw,
+  ],
+  past: [
+    (rw) => "Everything they said I couldn't, I " + rw,
+    (rw) => "Back against the wall but still I " + rw,
+    (rw) => "Came from nothing, still I " + rw,
+    (rw) => "The ones that left me, I " + rw,
+    (rw) => "Through every storm I " + rw,
+  ],
+  noun_abstract: [
+    (rw) => "This the life I chose, my " + rw,
+    (rw) => "God gave me this, it's my " + rw,
+    (rw) => "Built on sacrifice and " + rw,
+    (rw) => "Can't explain it, call it " + rw,
+    (rw) => "Everything I do is for the " + rw,
+  ],
+  general: [
+    (rw) => "Came too far to stop now, I'm a " + rw,
+    (rw) => "Real ones only, no time for a " + rw,
+    (rw) => "Moving in silence, I stay on my " + rw,
+    (rw) => "They slept on me, I proved I'm not a " + rw,
+    (rw) => "From the bottom to the top, that's a " + rw,
+    (rw) => "Built from struggle, call it what it's " + rw,
+    (rw) => "Every day I'm on a different " + rw,
+    (rw) => "I been grinding since they said it's not a " + rw,
+  ],
+};
 
-function buildLine(rhymeWord, contextWords, templateIndex, syllableTarget) {
-  const sw = contextWords.length > 0
-    ? contextWords[Math.floor(Math.random() * Math.min(contextWords.length, 10))]
-    : null;
-  const template = RAP_TEMPLATES[templateIndex % RAP_TEMPLATES.length];
-  return template(rhymeWord, sw);
+function buildLine(rhymeWord, templateIndex) {
+  const category  = categorizeRhymeWord(rhymeWord);
+  const templates = TEMPLATES_BY_TYPE[category] || TEMPLATES_BY_TYPE.general;
+  const template  = templates[templateIndex % templates.length];
+  return template(rhymeWord);
 }
 
 function detectScheme(lines) {
@@ -486,10 +536,7 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
     setError("");
 
     try {
-      const [rhymes, context] = await Promise.all([
-        fetchRhymes(lastWord),
-        fetchContextWords(lastWord),
-      ]);
+      const rhymes = await fetchRhymes(lastWord);
 
       // Pick best rhyme words - prefer perfect, fall back to near
       const pool = rhymes.perfect.length >= 3
@@ -511,7 +558,7 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
 
       // Build 3-5 lines
       const suggestions = picked.slice(0, 5).map((rw, i) =>
-        buildLine(rw, context, (count + i) % RAP_TEMPLATES.length, sylCount)
+        buildLine(rw, (count + i))
       );
 
       return {
