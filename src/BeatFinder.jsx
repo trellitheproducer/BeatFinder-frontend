@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 
 // =============================================================================
 // CONFIG
@@ -2796,8 +2796,6 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
           } else {
             try { localStorage.removeItem("bf_saved_email"); } catch {}
           }
-          setVisitedTabs(new Set(["home"]));
-          setTab("home");
           setUser(u);
         } catch (e) {
           setAuthErr(e.message);
@@ -2905,6 +2903,18 @@ export default function BeatFinder() {
 
   const handlePlay = useCallback(beat => setPlaying(beat), []);
   const [visitedTabs, setVisitedTabs] = useState(() => new Set(["home"]));
+
+  // Reset to home tab cleanly when user logs in
+  const prevUserRef = useRef(null);
+  useEffect(() => {
+    const wasNull = prevUserRef.current === null;
+    const isNowSet = user !== null;
+    if (wasNull && isNowSet) {
+      setVisitedTabs(new Set(["home"]));
+      setTab("home");
+    }
+    prevUserRef.current = user;
+  }, [user]);
 
   const goTab = id => {
     setPlaying(null);
