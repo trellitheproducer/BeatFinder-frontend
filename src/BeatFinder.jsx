@@ -377,144 +377,190 @@ function Av({ name, size = 88, idx = 0, img }) {
 
 
 // =============================================================================
-// AI LYRIC ASSISTANT ENGINE -- Datamuse API powered (free, no key needed)
+// AI LYRIC ASSISTANT ENGINE -- Multi-syllable Datamuse powered
 // =============================================================================
 
-function getLastWord(line) {
-  const words = line.trim().split(" ").filter(function(w){return w.length > 0;});
-  const last  = words[words.length - 1];
-  return last.replace(/[^a-zA-Z']/g, "").toLowerCase();
+// Extract last 1, 2, or 3 words as rhyme targets (multi-syllable detection)
+function extractRhymeTargets(line) {
+  const words = line.trim().split(" ").filter(function(w){ return w.length > 0; });
+  const clean = words.map(function(w){ return w.replace(/[^a-zA-Z']/g,"").toLowerCase(); });
+  if (clean.length === 0) return { word1: "", word2: "", word3: "", phrase2: "", phrase3: "" };
+  const w1 = clean[clean.length - 1];
+  const w2 = clean.length >= 2 ? clean[clean.length - 2] : "";
+  const w3 = clean.length >= 3 ? clean[clean.length - 3] : "";
+  return {
+    word1:   w1,
+    word2:   w2,
+    word3:   w3,
+    phrase2: w2 ? w2 + " " + w1 : w1,
+    phrase3: w3 ? w3 + " " + w2 + " " + w1 : (w2 ? w2 + " " + w1 : w1),
+  };
 }
 
 function getLastLine(lyrics) {
-  const lines = lyrics.split("\n").filter(l => l.trim().length > 0);
+  const lines = lyrics.split(String.fromCharCode(10)).filter(function(l){ return l.trim().length > 0; });
   return lines.length > 0 ? lines[lines.length - 1].trim() : "";
 }
 
 function countSyllables(word) {
-  word = word.toLowerCase().replace(/[^a-z]/g, "");
-  if (!word) return 1;
-  const vowelGroups = word.match(/[aeiouy]+/g);
-  return vowelGroups ? vowelGroups.length : 1;
+  const w = word.toLowerCase().replace(/[^a-z]/g,"");
+  if (!w) return 1;
+  const v = w.match(/[aeiouy]+/g);
+  return v ? v.length : 1;
 }
 
 function countLineSyllables(line) {
-  return line.split(" ").filter(function(w){return w.length > 0;}).reduce((sum, w) => sum + countSyllables(w), 0);
-}
-
-// Fetch rhymes from Datamuse API
-async function fetchRhymes(word) {
-  try {
-    const [perfect, near] = await Promise.all([
-      fetch("https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(word) + "&max=40")
-        .then(r => r.json()).catch(() => []),
-      fetch("https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(word) + "&max=20")
-        .then(r => r.json()).catch(() => []),
-    ]);
-    const perfWords = perfect.map(w => w.word);
-    const nearWords = near.map(w => w.word).filter(w => !perfWords.includes(w));
-    return { perfect: perfWords, near: nearWords };
-  } catch {
-    return { perfect: [], near: [] };
-  }
-}
-
-// Rhyme word category detector - so we pick templates that make sense
-function categorizeRhymeWord(word) {
-  const w = word.toLowerCase();
-  if (/ing$/.test(w)) return "gerund";
-  if (/tion$|sion$/.test(w)) return "noun_abstract";
-  if (/ly$/.test(w)) return "adverb";
-  if (/ed$/.test(w)) return "past";
-  const actionWords = ["run","go","know","show","flow","glow","fly","rise","shine","grind","climb","win","lead","bleed","feed","succeed","proceed","breathe","believe","achieve","receive","live","give","thrive","survive","drive","strive"];
-  if (actionWords.includes(w)) return "action";
-  const nounWords = ["pain","rain","game","name","fame","flame","chain","lane","strain","brain","day","way","stay","play","say","pray","night","light","fight","might","sight","right","bright","flight","mind","grind","kind","blind","time","crime","rhyme","dime","line","shine","fine","vine"];
-  if (nounWords.includes(w)) return "noun";
-  return "general";
-}
-
-// Smart templates by rhyme word category
-const TEMPLATES_BY_TYPE = {
-  action: [
-    (rw) => "Came from nothing, watch me " + rw,
-    (rw) => "Every day I wake up and " + rw,
-    (rw) => "They doubted me but I continue to " + rw,
-    (rw) => "Pressure tried to break me but I " + rw,
-    (rw) => "While they sleep at night I " + rw,
-    (rw) => "God blessed me and I " + rw,
-    (rw) => "Never looked back, I was born to " + rw,
-    (rw) => "Told myself I'd make it, watch me " + rw,
-  ],
-  noun: [
-    (rw) => "Built different, I been through the " + rw,
-    (rw) => "Real ones understand the " + rw,
-    (rw) => "From the mud I rose above the " + rw,
-    (rw) => "They'll remember me for all the " + rw,
-    (rw) => "Sacrificed it all to get this " + rw,
-    (rw) => "Late nights, early mornings, all this " + rw,
-    (rw) => "Loyalty over everything, that's the " + rw,
-    (rw) => "I put my soul into this " + rw,
-  ],
-  adverb: [
-    (rw) => "Moving different now I'm living " + rw,
-    (rw) => "They said I'd never make it, proved em " + rw,
-    (rw) => "Stayed low, now I'm winning " + rw,
-    (rw) => "I don't talk much, I just move " + rw,
-    (rw) => "Every step I take I'm walking " + rw,
-    (rw) => "Since day one I been going " + rw,
-  ],
-  gerund: [
-    (rw) => "No days off, I stay " + rw,
-    (rw) => "While they're sleeping I am " + rw,
-    (rw) => "Never stopped, I always keep " + rw,
-    (rw) => "Since the bottom I been " + rw,
-    (rw) => "Put the work in, I been " + rw,
-    (rw) => "Eyes wide open, never " + rw,
-  ],
-  past: [
-    (rw) => "Everything they said I couldn't, I " + rw,
-    (rw) => "Back against the wall but still I " + rw,
-    (rw) => "Came from nothing, still I " + rw,
-    (rw) => "The ones that left me, I " + rw,
-    (rw) => "Through every storm I " + rw,
-  ],
-  noun_abstract: [
-    (rw) => "This the life I chose, my " + rw,
-    (rw) => "God gave me this, it's my " + rw,
-    (rw) => "Built on sacrifice and " + rw,
-    (rw) => "Can't explain it, call it " + rw,
-    (rw) => "Everything I do is for the " + rw,
-  ],
-  general: [
-    (rw) => "Came too far to stop now, I'm a " + rw,
-    (rw) => "Real ones only, no time for a " + rw,
-    (rw) => "Moving in silence, I stay on my " + rw,
-    (rw) => "They slept on me, I proved I'm not a " + rw,
-    (rw) => "From the bottom to the top, that's a " + rw,
-    (rw) => "Built from struggle, call it what it's " + rw,
-    (rw) => "Every day I'm on a different " + rw,
-    (rw) => "I been grinding since they said it's not a " + rw,
-  ],
-};
-
-function buildLine(rhymeWord, templateIndex) {
-  const category  = categorizeRhymeWord(rhymeWord);
-  const templates = TEMPLATES_BY_TYPE[category] || TEMPLATES_BY_TYPE.general;
-  const template  = templates[templateIndex % templates.length];
-  return template(rhymeWord);
+  return line.split(" ").filter(function(w){ return w.length > 0; }).reduce(function(s,w){ return s + countSyllables(w); }, 0);
 }
 
 function detectScheme(lines) {
   if (lines.length < 2) return "Building...";
-  const endings = lines.slice(-4).map(l => getLastWord(l));
+  const endings = lines.slice(-4).map(function(l){
+    const ws = l.trim().split(" ");
+    return ws[ws.length-1].replace(/[^a-zA-Z]/g,"").toLowerCase();
+  });
   if (endings.length >= 4) {
-    const [a, b, c, d] = endings;
-    if (a === c && b === d) return "ABAB";
-    if (a === b && c === d) return "AABB";
-    if (b === d) return "ABAB";
-    if (a === b) return "AA (couplet)";
+    const a = endings[0], b = endings[1], c = endings[2], d = endings[3];
+    if (a===c && b===d) return "ABAB";
+    if (a===b && c===d) return "AABB";
+    if (b===d) return "ABAB";
+    if (a===b) return "AA couplet";
   }
   return "ABAB";
+}
+
+// Fetch rhymes from Datamuse - tries multi-syllable phrase first, falls back
+function fetchMultiRhymes(targets) {
+  var phraseUrl = targets.phrase2 && targets.phrase2.indexOf(" ") > -1
+    ? "https://api.datamuse.com/words?sl=" + encodeURIComponent(targets.phrase2) + "&max=30"
+    : null;
+  var perfUrl = "https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(targets.word1) + "&max=40";
+  var nearUrl = "https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(targets.word1) + "&max=20";
+
+  return Promise.all([
+    phraseUrl
+      ? fetch(phraseUrl).then(function(r){ return r.json(); }).catch(function(){ return []; })
+      : Promise.resolve([]),
+    fetch(perfUrl).then(function(r){ return r.json(); }).catch(function(){ return []; }),
+    fetch(nearUrl).then(function(r){ return r.json(); }).catch(function(){ return []; }),
+  ]).then(function(all) {
+    var phraseWords = all[0].map(function(w){ return w.word; });
+    var perfWords   = all[1].map(function(w){ return w.word; });
+    var nearWords   = all[2].map(function(w){ return w.word; });
+    if (phraseWords.length >= 3) {
+      return {
+        perfect: phraseWords,
+        near:    perfWords.filter(function(w){ return phraseWords.indexOf(w) === -1; }),
+        source:  "phrase",
+      };
+    }
+    return {
+      perfect: perfWords,
+      near:    nearWords.filter(function(w){ return perfWords.indexOf(w) === -1; }),
+      source:  "word",
+    };
+  }).catch(function() {
+    return { perfect: [], near: [], source: "error" };
+  });
+}
+
+// Elite rap bar templates by rhyme word type - coherent full bars only
+function categorizeWord(word) {
+  const w = word.toLowerCase();
+  if (/ing$/.test(w)) return "ing";
+  if (/tion$|sion$|ness$/.test(w)) return "abstract";
+  if (/ly$/.test(w)) return "ly";
+  if (/ed$/.test(w)) return "ed";
+  const actions = ["run","go","know","show","flow","glow","fly","rise","shine","grind",
+    "climb","win","lead","bleed","feed","breathe","achieve","live","thrive","survive",
+    "drive","strive","ride","glide","hide","slide","guide","decide","provide","divide"];
+  if (actions.indexOf(w) > -1) return "action";
+  const nouns = ["pain","rain","game","name","fame","flame","chain","lane","strain","brain",
+    "day","way","stay","play","night","light","fight","might","sight","right","bright",
+    "mind","grind","time","crime","rhyme","line","shine","life","strife","knife","wife",
+    "street","beat","heat","feat","dream","team","scheme","king","ring","thing","bring"];
+  if (nouns.indexOf(w) > -1) return "noun";
+  return "general";
+}
+
+const ELITE_BARS = {
+  action: [
+    function(rw){ return "Came from nothing, watch a young king " + rw; },
+    function(rw){ return "They told me quit, I just continued to " + rw; },
+    function(rw){ return "God put it in my blood, I was born to " + rw; },
+    function(rw){ return "Pressure tried to break me, still I " + rw; },
+    function(rw){ return "Every setback made me stronger, watch me " + rw; },
+    function(rw){ return "While the city sleeps I stay up and " + rw; },
+    function(rw){ return "They said I'd never make it, now they watch me " + rw; },
+    function(rw){ return "I put it all on the line just to " + rw; },
+  ],
+  noun: [
+    function(rw){ return "Sacrificed my sleep and peace for this " + rw; },
+    function(rw){ return "Built different, born into the " + rw; },
+    function(rw){ return "Late nights, cold winters, all this " + rw; },
+    function(rw){ return "Real ones know exactly what I mean by " + rw; },
+    function(rw){ return "I put my whole soul into this " + rw; },
+    function(rw){ return "From the mud I rose above the " + rw; },
+    function(rw){ return "Loyalty and hunger that's my only " + rw; },
+    function(rw){ return "They'll tell my story when they speak of " + rw; },
+  ],
+  ing: [
+    function(rw){ return "No days off, I stay up " + rw; },
+    function(rw){ return "While they talking, I was out here " + rw; },
+    function(rw){ return "Since the bottom, I ain't never stopped " + rw; },
+    function(rw){ return "They slept on me but I kept " + rw; },
+    function(rw){ return "God watching over everything I'm " + rw; },
+    function(rw){ return "Couldn't stop me even when the odds were " + rw; },
+  ],
+  ly: [
+    function(rw){ return "Moved in silence, came up " + rw; },
+    function(rw){ return "Everything I built, I built it " + rw; },
+    function(rw){ return "They doubted me, I proved em wrong " + rw; },
+    function(rw){ return "I don't sleep, I grind " + rw; },
+    function(rw){ return "Stay low, move smart and keep it " + rw; },
+  ],
+  ed: [
+    function(rw){ return "Back against the wall, still I " + rw; },
+    function(rw){ return "Everything they said I couldn't, I " + rw; },
+    function(rw){ return "Came from nothing and I never " + rw; },
+    function(rw){ return "Through every storm I still " + rw; },
+    function(rw){ return "The ones that left me never " + rw; },
+  ],
+  abstract: [
+    function(rw){ return "This the life I chose, this my " + rw; },
+    function(rw){ return "God gave me this gift, call it my " + rw; },
+    function(rw){ return "Built on sacrifice and " + rw; },
+    function(rw){ return "Can't explain it, only call it " + rw; },
+    function(rw){ return "Everything I do comes from " + rw; },
+  ],
+  general: [
+    function(rw){ return "From the bottom, now I'm living in a " + rw; },
+    function(rw){ return "Real ones only, no time for a " + rw; },
+    function(rw){ return "I don't chase it, I become a " + rw; },
+    function(rw){ return "Different breed, I ain't your average " + rw; },
+    function(rw){ return "They tried to box me in, I broke the " + rw; },
+    function(rw){ return "Every move I make is calculated " + rw + "like"; },
+    function(rw){ return "Hustle in my veins, I was built for " + rw; },
+    function(rw){ return "God said rise, I stepped into my " + rw; },
+  ],
+};
+
+// Filter out bars that are clearly nonsensical (very long rhyme words jammed in)
+function isCoherentBar(bar) {
+  if (bar.split(" ").length < 5) return false;
+  if (bar.split(" ").length > 18) return false;
+  // reject if rhyme word is a multi-word phrase crammed at end
+  const lastWord = bar.split(" ").pop();
+  if (lastWord.length > 20) return false;
+  return true;
+}
+
+function buildEliteBar(rhymeWord, index) {
+  const category  = categorizeWord(rhymeWord);
+  const templates = ELITE_BARS[category] || ELITE_BARS.general;
+  const template  = templates[index % templates.length];
+  const bar = template(rhymeWord);
+  return isCoherentBar(bar) ? bar : ELITE_BARS.general[index % ELITE_BARS.general.length](rhymeWord);
 }
 
 function AiLyricAssistant({ text, beat, onSuggest }) {
@@ -524,82 +570,73 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
   const [open,      setOpen]      = useState(false);
   const [callCount, setCallCount] = useState(0);
 
-  const generate = async (currentText, count) => {
-    const lastLine = getLastLine(currentText);
-    if (!lastLine) return null;
+  function runGenerate(currentText, count) {
+    var lastLine = getLastLine(currentText);
+    if (!lastLine) return;
 
-    const lastWord      = getLastWord(lastLine);
-    const sylCount      = countLineSyllables(lastLine);
-    const scheme        = detectScheme(currentText.split("\n").filter(l => l.trim()));
+    var targets  = extractRhymeTargets(lastLine);
+    var sylCount = countLineSyllables(lastLine);
+    var scheme   = detectScheme(currentText.split(String.fromCharCode(10)).filter(function(l){ return l.trim(); }));
 
     setLoading(true);
     setError("");
+    setResults(null);
 
-    try {
-      const rhymes = await fetchRhymes(lastWord);
-
-      // Pick best rhyme words - prefer perfect, fall back to near
-      const pool = rhymes.perfect.length >= 3
-        ? rhymes.perfect
-        : [...rhymes.perfect, ...rhymes.near];
+    // Try phrase rhyme first, then word rhyme
+    fetchMultiRhymes(targets).then(function(rhymes) {
+      var pool = rhymes.perfect.length >= 3 ? rhymes.perfect : rhymes.perfect.concat(rhymes.near);
 
       if (pool.length === 0) {
-        setError('Could not find rhymes for "' + lastWord + '". Try a more common word.');
+        setError("No rhymes found for '" + targets.word1 + "' - try a different last word.");
         setLoading(false);
         return;
       }
 
-      // Shuffle pool offset by callCount so regenerate gives new words
-      const offset    = (count * 3) % pool.length;
-      const picked    = [];
-      for (let i = 0; i < Math.min(5, pool.length); i++) {
+      var offset  = (count * 3) % pool.length;
+      var picked  = [];
+      for (var i = 0; i < Math.min(5, pool.length); i++) {
         picked.push(pool[(offset + i) % pool.length]);
       }
 
-      // Build 3-5 lines
-      const suggestions = picked.slice(0, 5).map((rw, i) =>
-        buildLine(rw, (count + i))
-      );
+      var suggestions = picked.map(function(rw, i){
+        return buildEliteBar(rw, count + i);
+      }).filter(isCoherentBar);
 
-      return {
-        lastLine,
-        lastWord,
-        scheme,
-        syllables:   sylCount,
+      setResults({
+        lastLine:     lastLine,
+        lastWord:     targets.word1,
+        phrase:       rhymes.source === "phrase" ? targets.phrase2 : null,
+        scheme:       scheme,
+        syllables:    sylCount,
         perfectCount: rhymes.perfect.length,
         nearCount:    rhymes.near.length,
-        suggestions,
-      };
-    } catch (e) {
+        suggestions:  suggestions,
+      });
+      setLoading(false);
+    }).catch(function() {
       setError("Network error - check your connection.");
       setLoading(false);
-      return null;
-    }
-  };
+    });
+  }
 
-  const handleOpen = async () => {
-    const lines = text.split("\n").filter(l => l.trim());
+  function handleOpen() {
+    var lines = text.split(String.fromCharCode(10)).filter(function(l){ return l.trim(); });
     if (lines.length === 0) {
       setError("Write at least one line first!");
       setOpen(true);
       return;
     }
     setOpen(true);
-    const next = callCount + 1;
+    var next = callCount + 1;
     setCallCount(next);
-    const r = await generate(text, next);
-    setLoading(false);
-    if (r) setResults(r);
-  };
+    runGenerate(text, next);
+  }
 
-  const handleRegenerate = async () => {
-    const next = callCount + 1;
+  function handleRegenerate() {
+    var next = callCount + 1;
     setCallCount(next);
-    setResults(null);
-    const r = await generate(text, next);
-    setLoading(false);
-    if (r) setResults(r);
-  };
+    runGenerate(text, next);
+  }
 
   return (
     <div>
@@ -620,16 +657,17 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
         }}>
           <div style={{
             display: "flex", alignItems: "center", gap: 12,
-            padding: "14px 16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a", flexShrink: 0,
+            padding: "14px 16px", borderBottom: "1px solid #1a1a1a",
+            background: "#0a0a0a", flexShrink: 0,
           }}>
-            <button onClick={() => setOpen(false)} style={{
+            <button onClick={function(){ setOpen(false); }} style={{
               background: "#1a1a1a", border: "1px solid #333", borderRadius: "50%",
               color: "white", width: 36, height: 36, fontSize: 20, cursor: "pointer",
               display: "flex", alignItems: "center", justifyContent: "center",
             }}>&#8592;</button>
             <div style={{ flex: 1 }}>
               <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 14 }}>AI Lyric Assistant</div>
-              <div style={{ color: "#555", fontSize: 11 }}>Powered by Datamuse Rhyme API</div>
+              <div style={{ color: "#555", fontSize: 11 }}>Multi-syllable rhyme engine</div>
             </div>
             <button onClick={handleRegenerate} disabled={loading} style={{
               background: loading ? "#333" : "#C026D3", border: "none",
@@ -644,7 +682,7 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
             {loading && (
               <div style={{ textAlign: "center", padding: "60px 0" }}>
                 <div style={{ fontSize: 32, marginBottom: 12 }}>&#10024;</div>
-                <div style={{ color: "#888", fontSize: 14 }}>Finding rhymes for your line...</div>
+                <div style={{ color: "#888", fontSize: 14 }}>Searching rhyme database...</div>
               </div>
             )}
 
@@ -653,16 +691,16 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
             )}
 
             {results && !loading && (
-              <>
+              <div>
                 <div style={{ background: "#111", borderRadius: 12, padding: 14, marginBottom: 16, border: "1px solid #1e1e1e" }}>
-                  <div style={{ color: "#555", fontSize: 11, marginBottom: 4 }}>ANALYSING LAST LINE</div>
+                  <div style={{ color: "#555", fontSize: 11, marginBottom: 4 }}>RHYME TARGET</div>
                   <div style={{ color: "white", fontSize: 13, fontStyle: "italic", marginBottom: 8 }}>"{results.lastLine}"</div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#C026D3" }}>
-                      Rhyming: "{results.lastWord}"
+                      {results.phrase ? "Phrase: " + results.phrase : "Word: " + results.lastWord}
                     </div>
                     <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#F59E0B" }}>
-                      {results.perfectCount} perfect + {results.nearCount} near rhymes found
+                      {results.perfectCount} perfect + {results.nearCount} near rhymes
                     </div>
                     <div style={{ background: "rgba(99,91,255,0.15)", border: "1px solid rgba(99,91,255,0.3)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#818CF8" }}>
                       {results.syllables} syllables
@@ -671,22 +709,24 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
                 </div>
 
                 <div style={{ color: "#555", fontSize: 11, fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>
-                  SUGGESTED NEXT LINES - TAP TO ADD
+                  SUGGESTED BARS - TAP TO ADD
                 </div>
 
-                {results.suggestions.map((line, i) => (
-                  <div key={i + "-" + callCount}
-                    onClick={() => { onSuggest(line); setOpen(false); }}
-                    style={{
-                      background: "#111", borderRadius: 14, padding: 16,
-                      marginBottom: 12, border: "1px solid #1e1e1e", cursor: "pointer",
-                    }}>
-                    <div style={{ color: "#555", fontSize: 11, marginBottom: 6, fontWeight: 700 }}>OPTION {i + 1}</div>
-                    <div style={{ color: "white", fontSize: 15, lineHeight: 1.6, fontStyle: "italic" }}>"{line}"</div>
-                    <div style={{ color: "#C026D3", fontSize: 12, marginTop: 8, fontWeight: 600 }}>+ Add to lyrics</div>
-                  </div>
-                ))}
-              </>
+                {results.suggestions.map(function(line, i){
+                  return (
+                    <div key={String(i) + "-" + String(callCount)}
+                      onClick={function(){ onSuggest(line); setOpen(false); }}
+                      style={{
+                        background: "#111", borderRadius: 14, padding: 16,
+                        marginBottom: 12, border: "1px solid #1e1e1e", cursor: "pointer",
+                      }}>
+                      <div style={{ color: "#555", fontSize: 11, marginBottom: 6, fontWeight: 700 }}>BAR {i + 1}</div>
+                      <div style={{ color: "white", fontSize: 15, lineHeight: 1.6, fontStyle: "italic" }}>"{line}"</div>
+                      <div style={{ color: "#C026D3", fontSize: 12, marginTop: 8, fontWeight: 600 }}>+ Add to lyrics</div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
@@ -694,7 +734,6 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
     </div>
   );
 }
-
 
 function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex }) {
   const [text,  setText]  = useState(initialLyric ? initialLyric.text  : "");
