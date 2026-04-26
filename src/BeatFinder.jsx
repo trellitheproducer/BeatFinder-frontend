@@ -4,13 +4,13 @@ import { useState, useEffect, useCallback } from "react";
 // CONFIG
 // =============================================================================
 
-// ── Backend URL ──────────────────────────────────────────────────────────────
+// -- Backend URL --------------------------------------------------------------
 // When developing locally:   http://localhost:8000
 // When deployed on Render:   https://your-app.onrender.com
 // Set this to your Render/Railway URL after deployment.
 const API_BASE = "https://beatfinder-backend.onrender.com";
 
-// ── In-memory cache (10 minutes TTL) ─────────────────────────────────────────
+// -- In-memory cache (10 minutes TTL) -----------------------------------------
 const cache = {};
 const CACHE_TTL = 10 * 60 * 1000;
 
@@ -667,7 +667,7 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
               background: "#1a1a1a", border: "1px solid #333", borderRadius: "50%",
               color: "white", width: 36, height: 36, fontSize: 20, cursor: "pointer",
               display: "flex", alignItems: "center", justifyContent: "center",
-            }}>‹</button>
+            }}>←</button>
             <div style={{ flex: 1 }}>
               <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 14 }}>✨ Lyric Assistant</div>
               <div style={{ color: "#555", fontSize: 11 }}>Tap a suggestion to add it</div>
@@ -692,7 +692,7 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
                 <div style={{ background: "#111", borderRadius: 12, padding: 14, marginBottom: 16, border: "1px solid #1e1e1e" }}>
                   <div style={{ color: "#555", fontSize: 11, marginBottom: 4 }}>ANALYSING LAST LINE</div>
                   <div style={{ color: "white", fontSize: 13, fontStyle: "italic", marginBottom: 8 }}>"{results.lastLine}"</div>
-                  <div style={{ color: "#555", fontSize: 11 }}>Rhyming with: <span style={{ color: "#F59E0B", fontWeight: 700 }}>"{results.lastWord}"</span> · Scheme: <span style={{ color: "#aaa" }}>{results.scheme}</span></div>
+                  <div style={{ color: "#555", fontSize: 11 }}>Rhyming with: <span style={{ color: "#F59E0B", fontWeight: 700 }}>"{results.lastWord}"</span> • Scheme: <span style={{ color: "#aaa" }}>{results.scheme}</span></div>
                 </div>
 
                 <div style={{ color: "#555", fontSize: 11, fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>SUGGESTED NEXT LINES - TAP TO ADD</div>
@@ -754,7 +754,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
             color: "white", width: 36, height: 36, fontSize: 20, cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center",
           }}>
-            ‹
+            ←
           </button>
           <div style={{ flex: 1 }}>
             <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13 }}>✍️ Lyrics Notepad</div>
@@ -822,9 +822,9 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
         display: "flex", flexDirection: "column", gap: 8,
       }}>
         <div style={{ color: "#444", fontSize: 11, textAlign: "center" }}>
-          {text.length} characters · {text.split(" ").filter(function(w){return w.length > 0;}).length} words
+          {text.length} characters • {text.split(" ").filter(function(w){return w.length > 0;}).length} words
         </div>
-        <AiLyricAssistant text={text} beat={beat} onSuggest={suggestion => setText(prev => prev + (prev.endsWith("\n") || prev === "" ? "" : "\n") + suggestion)} />
+        <AiLyricAssistant text={text} beat={beat} onSuggest={s => { setText(p => p ? p + String.fromCharCode(10) + s : s); }} />
       </div>
     </div>
   );
@@ -850,7 +850,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
           color: "white", width: 36, height: 36, fontSize: 20, cursor: "pointer",
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
-          ‹
+          ←
         </button>
         <div style={{ flex: 1, overflow: "hidden" }}>
           <div style={{
@@ -1082,7 +1082,9 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
     return () => { alive = false; };
   }, [artistName, page]);
 
-  const PageNav = () => showPagination ? (
+  const PageNav = () => {
+    if (!showPagination) return null;
+    return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, background: "#111", borderRadius: 12, padding: "10px 14px", border: "1px solid #1e1e1e" }}>
       <button
         onClick={() => { if (page > 1) setPage(p => p - 1); }}
@@ -1094,7 +1096,7 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
           fontWeight: 800, fontSize: 14, padding: "8px 16px", cursor: page === 1 ? "not-allowed" : "pointer",
           display: "flex", alignItems: "center", gap: 6,
         }}>
-        ‹ Prev
+        Prev
       </button>
       <div style={{ color: "#888", fontSize: 13, fontWeight: 600 }}>
         Page {page} of {TOTAL_PAGES}
@@ -1109,10 +1111,11 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
           fontWeight: 800, fontSize: 14, padding: "8px 16px", cursor: page === TOTAL_PAGES ? "not-allowed" : "pointer",
           display: "flex", alignItems: "center", gap: 6,
         }}>
-        Next ›
+        Next
       </button>
     </div>
-  ) : null;
+    );
+  };
 
   if (loading) return (
     <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
@@ -1243,10 +1246,24 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers }) {
 // =============================================================================
 // ARTISTS SCREEN
 // =============================================================================
-function ArtistsScreen({ onArtistSelect }) {
-  const [region, setRegion] = useState("USA");
-  const [cat,    setCat]    = useState("All");
-  const [search, setSearch] = useState("");
+function ArtistsScreen({ onPlay, savedIds, onSave }) {
+  const [region,       setRegion]       = useState("USA");
+  const [cat,          setCat]          = useState("All");
+  const [search,       setSearch]       = useState("");
+  const [selectedArtist, setSelectedArtist] = useState(null);
+
+  // If an artist is selected, show their beat page
+  if (selectedArtist) {
+    return (
+      <ArtistDetailScreen
+        artist={selectedArtist}
+        onBack={() => setSelectedArtist(null)}
+        onPlay={onPlay}
+        savedIds={savedIds}
+        onSave={onSave}
+      />
+    );
+  }
 
   const REGION_MAP = {
     USA:     { artists: ARTISTS_USA,     cats: USA_CATS     },
@@ -1308,7 +1325,7 @@ function ArtistsScreen({ onArtistSelect }) {
       <div style={{ color: "#555", fontSize: 12, marginBottom: 14 }}>{list.length} artists</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "20px 10px" }}>
         {list.map((a, i) => (
-          <div key={a.id} onClick={() => onArtistSelect(a)}
+          <div key={a.id} onClick={() => setSelectedArtist(a)}
             style={{ display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer" }}>
             <Av name={a.name} size={88} idx={i} img={a.img} />
             <div style={{ color: "white", fontSize: 11, fontWeight: 600, marginTop: 8, textAlign: "center", lineHeight: 1.3 }}>
@@ -1352,7 +1369,7 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
     <div style={{ padding: "0 0 100px" }}>
       <div style={{ padding: "16px 16px 0" }}>
         <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer" }}>
-          ‹
+          ←
         </button>
       </div>
       <div style={{
@@ -1362,7 +1379,7 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
         <Av name={artist.name} size={72} idx={idx >= 0 ? idx : 0} img={artist.img} />
         <div>
           <div style={{ color: "#aaa", fontSize: 12, marginBottom: 4 }}>
-            {artist.flag} {artist.flag === "🇺🇸" ? "USA" : artist.flag === "🇬🇧" ? "UK" : artist.flag === "🇯🇲" ? "Jamaica" : "Africa"} · <span style={{ color: cc }}>{artist.cat}</span>
+            {artist.flag} {artist.flag === "🇺🇸" ? "USA" : artist.flag === "🇬🇧" ? "UK" : artist.flag === "🇯🇲" ? "Jamaica" : "Africa"} • <span style={{ color: cc }}>{artist.cat}</span>
           </div>
           <div style={{ color: "white", fontSize: 21, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
             {artist.name}
@@ -1437,7 +1454,7 @@ function BeatLeaseCard({ beat, user }) {
       </div>
 
       <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>
-        By <span style={{ color: "#C026D3", fontWeight: 700 }}>{beat.producer}</span> · {beat.downloads} downloads
+        By <span style={{ color: "#C026D3", fontWeight: 700 }}>{beat.producer}</span> • {beat.downloads} downloads
       </div>
 
       {err && <div style={{ color: "#F87171", fontSize: 12, marginBottom: 10 }}>{err}</div>}
@@ -1564,7 +1581,7 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
           {leases.map(lease => (
             <div key={lease.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(34,197,94,0.3)" }}>
               <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{lease.beat_title}</div>
-              <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>By {lease.producer} · {lease.price} · {new Date(lease.purchased_at).toLocaleDateString()}</div>
+              <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>By {lease.producer} • {lease.price} • {new Date(lease.purchased_at).toLocaleDateString()}</div>
               <button
                 onClick={() => {
                   const a = document.createElement("a");
@@ -1871,7 +1888,7 @@ function LyricCard({ lyric, lyricIndex, onDelete, onEditLyric }) {
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          <span style={{ color: "#444", fontSize: 18 }}>›</span>
+          <span style={{ color: "#444", fontSize: 18 }}>></span>
           <button
             onClick={e => { e.stopPropagation(); onDelete(); }}
             style={{ background: "none", border: "none", color: "#555", fontSize: 16, cursor: "pointer", padding: 4 }}>
@@ -1928,7 +1945,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave }) {
   return (
     <div style={{ padding: "0 0 100px" }}>
       <div style={{ padding: "16px 16px 0" }}>
-        <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer" }}>‹</button>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer" }}>←</button>
       </div>
 
       <div style={{ margin: "8px 16px 20px", background: "#111", borderRadius: 16, padding: 20, border: "1px solid rgba(255,255,255,0.07)", textAlign: "center" }}>
@@ -2291,7 +2308,7 @@ function ForgotPasswordScreen({ onBack }) {
 
   return (
     <div style={{ padding: "40px 24px 100px" }}>
-      <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer", marginBottom: 20 }}>‹</button>
+      <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer", marginBottom: 20 }}>←</button>
       <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 2, marginBottom: 8 }}>
         FORGOT PASSWORD
       </div>
@@ -2582,7 +2599,7 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
               {uploads.map((b, i) => (
                 <div key={b.id || i} style={{ background: "#111", borderRadius: 12, padding: "12px 14px", marginBottom: 10, border: "1px solid #222" }}>
                   <div style={{ color: "#C026D3", fontWeight: 700, fontSize: 13 }}>{b.title}</div>
-                  <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>{b.genre} · {b.price}</div>
+                  <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>{b.genre} • {b.price}</div>
                 </div>
               ))}
             </div>
@@ -2728,7 +2745,7 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
 
   return (
     <div style={{ padding: "40px 24px 100px" }}>
-      <button onClick={() => setMode("landing")} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer", marginBottom: 20 }}>‹</button>
+      <button onClick={() => setMode("landing")} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer", marginBottom: 20 }}>←</button>
       <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 2, marginBottom: 24 }}>
         {mode === "signup" ? "CREATE ACCOUNT" : "WELCOME BACK"}
       </div>
@@ -2828,7 +2845,7 @@ const NAV = [
 // =============================================================================
 export default function BeatFinder() {
   const [tab,     setTab]     = useState("home");
-  const [artist,  setArtist]  = useState(null);
+  const [artist,  setArtist]  = useState(null); // kept for compatibility
   const [user,    setUser]    = useState(null);
   const [playing, setPlaying] = useState(null);
 
@@ -2883,7 +2900,14 @@ export default function BeatFinder() {
   }, [user]);
 
   const handlePlay = useCallback(beat => setPlaying(beat), []);
-  const goTab = id => { setTab(id); if (id !== "artists") setArtist(null); };
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set(["home"]));
+
+  const goTab = id => {
+    setPlaying(null);
+    setTab(id);
+    setVisitedTabs(prev => new Set([...prev, id]));
+    // Never reset artist - Artists tab manages its own state
+  };
 
   // Lyrics state
   const [lyricsOpen,    setLyricsOpen]    = useState(false);
@@ -2950,18 +2974,13 @@ export default function BeatFinder() {
       )}
 
       <div style={{ overflowY: "auto", height: "calc(100vh - 72px)" }}>
-        <div style={{ display: tab === "home"      ? "block" : "none" }}><HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => setTab("exclusive")} /></div>
-        <div style={{ display: tab === "artists"   ? "block" : "none" }}>
-          {!artist
-            ? <ArtistsScreen onArtistSelect={setArtist} />
-            : <ArtistDetailScreen artist={artist} onBack={() => setArtist(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />
-          }
-        </div>
-        <div style={{ display: tab === "trending"  ? "block" : "none" }}><TrendingScreen  savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>
-        <div style={{ display: tab === "search"    ? "block" : "none" }}><SearchScreen    savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>
-        <div style={{ display: tab === "saved"     ? "block" : "none" }}><SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} /></div>
-        <div style={{ display: tab === "exclusive" ? "block" : "none" }}><ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>
-        <div style={{ display: tab === "profile"   ? "block" : "none" }}><ProfileScreen user={user} setUser={setUser} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} /></div>
+        {visitedTabs.has("home")      && <div style={{ display: tab === "home"      ? "block" : "none" }}><HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => setTab("exclusive")} /></div>}
+        {visitedTabs.has("artists")   && <div style={{ display: tab === "artists"   ? "block" : "none" }}><ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>}
+        {visitedTabs.has("trending")  && <div style={{ display: tab === "trending"  ? "block" : "none" }}><TrendingScreen  savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>}
+        {visitedTabs.has("search")    && <div style={{ display: tab === "search"    ? "block" : "none" }}><SearchScreen    savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>}
+        {visitedTabs.has("saved")     && <div style={{ display: tab === "saved"     ? "block" : "none" }}><SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} /></div>}
+        {visitedTabs.has("exclusive") && <div style={{ display: tab === "exclusive" ? "block" : "none" }}><ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>}
+        {visitedTabs.has("profile")   && <div style={{ display: tab === "profile"   ? "block" : "none" }}><ProfileScreen user={user} setUser={setUser} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} /></div>}
       </div>
 
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "rgba(10,10,10,0.97)", borderTop: "1px solid #1a1a1a", display: "flex", height: "calc(72px + env(safe-area-inset-bottom))", zIndex: 100, backdropFilter: "blur(20px)", paddingBottom: "env(safe-area-inset-bottom)" }}>
