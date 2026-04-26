@@ -1002,8 +1002,9 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
 // BEAT LEASE CARD
 // =============================================================================
 function BeatLeaseCard({ beat, user }) {
-  const [loading, setLoading] = useState(false);
-  const [err,     setErr]     = useState("");
+  const [loading,   setLoading]   = useState(false);
+  const [err,       setErr]       = useState("");
+  const [previewing,setPreviewing]= useState(false);
   const isFree  = beat.price === "free";
 
   const handleBuyLease = async () => {
@@ -1057,6 +1058,40 @@ function BeatLeaseCard({ beat, user }) {
       </div>
 
       {err && <div style={{ color: "#F87171", fontSize: 12, marginBottom: 10 }}>{err}</div>}
+
+      <button
+        onClick={() => setPreviewing(!previewing)}
+        style={{
+          width: "100%", borderRadius: 12, padding: "11px",
+          background: previewing ? "rgba(99,91,255,0.2)" : "transparent",
+          border: "1.5px solid " + (previewing ? "#635BFF" : "#333"),
+          color: previewing ? "#635BFF" : "#888",
+          fontWeight: 700, fontSize: 14, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          marginBottom: 10,
+        }}
+      >
+        {previewing ? "⏹ Stop Preview" : "▶ Preview Beat"}
+      </button>
+
+      {previewing && beat.url && (
+        <audio
+          src={beat.url + "#t=60,90"}
+          autoPlay
+          controls
+          controlsList="nodownload"
+          style={{ width: "100%", marginBottom: 10, borderRadius: 8, height: 36 }}
+          onTimeUpdate={e => {
+            const el = e.target;
+            // Stop at 30 seconds of playback (1:00 - 1:30)
+            if (el.currentTime >= 90) {
+              el.pause();
+              setPreviewing(false);
+            }
+          }}
+          onEnded={() => setPreviewing(false)}
+        />
+      )}
 
       {isFree ? (
         <button onClick={handleDownload} style={{
@@ -1614,6 +1649,153 @@ function StripeConnectSection({ user }) {
           </button>
         </>
       )}
+      {status?.connected && (
+        <button
+          onClick={async () => {
+            try {
+              const r = await apiFetch("/api/producer/sync-stripe", { method: "POST" });
+              alert("Synced! " + r.updated + " beat(s) updated.");
+            } catch (e) {
+              alert("Error: " + e.message);
+            }
+          }}
+          style={{ marginTop: 10, width: "100%", background: "transparent", border: "1px solid #333", borderRadius: 12, color: "#888", fontWeight: 600, fontSize: 13, padding: "10px", cursor: "pointer" }}
+        >
+          Sync Stripe to My Beats
+        </button>
+      )}
+    </div>
+  );
+}
+
+
+// =============================================================================
+// MY UPLOADS — Producer Pro tab to manage uploaded beats
+// =============================================================================
+function MyUploadsSection({ user }) {
+  const [beats,    setBeats]    = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [editId,   setEditId]   = useState(null);
+  const [editTitle,setEditTitle]= useState("");
+  const [editGenre,setEditGenre]= useState("");
+  const [editPrice,setEditPrice]= useState("");
+  const [saving,   setSaving]   = useState(false);
+  const [msg,      setMsg]      = useState("");
+
+  const load = () => {
+    setLoading(true);
+    apiFetch("/api/producer/my-beats")
+      .then(d => { setBeats(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleEdit = (beat) => {
+    setEditId(beat.id);
+    setEditTitle(beat.title);
+    setEditGenre(beat.genre);
+    setEditPrice(beat.price);
+    setMsg("");
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setMsg("");
+    try {
+      await apiFetch("/api/producer/beats/" + editId + "/update", {
+        method: "POST",
+        body: JSON.stringify({ title: editTitle, genre: editGenre, price: editPrice }),
+      });
+      setMsg("Updated!");
+      setEditId(null);
+      load();
+    } catch (e) {
+      setMsg("Error: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (beatId, title) => {
+    if (!window.confirm("Delete " + title + "? This cannot be undone.")) return;
+    try {
+      await apiFetch("/api/producer/beats/" + beatId, { method: "DELETE" });
+      setBeats(prev => prev.filter(b => b.id !== beatId));
+    } catch (e) {
+      setMsg("Error: " + e.message);
+    }
+  };
+
+  if (loading) return <div style={{ color: "#555", fontSize: 13, padding: "20px 0" }}>Loading your beats...</div>;
+
+  return (
+    <div>
+      <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>🎛 My Uploaded Beats</div>
+      <div style={{ color: "#666", fontSize: 13, marginBottom: 16 }}>Edit or delete your uploaded beats.</div>
+
+      {msg && <div style={{ color: msg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, marginBottom: 12, textAlign: "center", fontWeight: 600 }}>{msg}</div>}
+
+      {beats.length === 0 && (
+        <div style={{ background: "#111", borderRadius: 14, padding: 20, textAlign: "center", border: "1px solid #222" }}>
+          <div style={{ fontSize: 36, marginBottom: 10 }}>🎵</div>
+          <div style={{ color: "#555", fontSize: 14 }}>No beats uploaded yet.</div>
+        </div>
+      )}
+
+      {beats.map(beat => (
+        <div key={beat.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid #1e1e1e" }}>
+          {editId === beat.id ? (
+            <div>
+              <input
+                value={editTitle}
+                onChange={e => setEditTitle(e.target.value)}
+                placeholder="Beat title"
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
+              />
+              <input
+                value={editGenre}
+                onChange={e => setEditGenre(e.target.value)}
+                placeholder="Genre"
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
+              />
+              <input
+                value={editPrice}
+                onChange={e => setEditPrice(e.target.value)}
+                placeholder="Price e.g. free or £50"
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 12 }}
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={handleSave} disabled={saving} style={{ flex: 1, background: "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: "11px", fontSize: 14, cursor: "pointer" }}>
+                  {saving ? "Saving..." : "Save Changes"}
+                </button>
+                <button onClick={() => setEditId(null)} style={{ flex: 1, background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, color: "#aaa", fontWeight: 700, padding: "11px", fontSize: 14, cursor: "pointer" }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                <div style={{ color: "white", fontWeight: 700, fontSize: 15, flex: 1 }}>{beat.title}</div>
+                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  <button onClick={() => handleEdit(beat)} style={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8, color: "#aaa", fontSize: 13, padding: "5px 12px", cursor: "pointer", fontWeight: 600 }}>
+                    Edit
+                  </button>
+                  <button onClick={() => handleDelete(beat.id, beat.title)} style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, color: "#F87171", fontSize: 13, padding: "5px 12px", cursor: "pointer", fontWeight: 600 }}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>
+                <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#C026D3", fontWeight: 700 }}>{beat.price}</div>
+                <div style={{ background: "rgba(255,255,255,0.05)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#555" }}>{beat.downloads} downloads</div>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -1736,8 +1918,24 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
         </div>
       )}
 
-      {user.isPro && (
+      {user.isPro && (() => {
+        const [producerTab, setProducerTab] = useState("upload");
+        return (
         <div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <button onClick={() => setProducerTab("upload")}
+              style={{ flex: 1, padding: "10px", borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: "pointer", border: producerTab === "upload" ? "2px solid #C026D3" : "1.5px solid #333", background: producerTab === "upload" ? "rgba(192,38,211,0.15)" : "transparent", color: producerTab === "upload" ? "#C026D3" : "#666" }}>
+              ⬆️ Upload Beat
+            </button>
+            <button onClick={() => setProducerTab("manage")}
+              style={{ flex: 1, padding: "10px", borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: "pointer", border: producerTab === "manage" ? "2px solid #F59E0B" : "1.5px solid #333", background: producerTab === "manage" ? "rgba(245,158,11,0.15)" : "transparent", color: producerTab === "manage" ? "#F59E0B" : "#666" }}>
+              🎛 My Uploads
+            </button>
+          </div>
+
+          {producerTab === "manage" && <MyUploadsSection user={user} />}
+
+          {producerTab === "upload" && <div>
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Upload Your Beats</div>
           <div style={{ color: "#666", fontSize: 13, marginBottom: 14 }}>Upload MP3 files — they appear in the MP3s tab for users to download.</div>
           <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #222" }}>
@@ -1799,8 +1997,10 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
               ))}
             </div>
           )}
+          </div>}
         </div>
-      )}
+        );
+      })()}
       {(user.isPro || user.isArtistPro || user.plan === "artist" || user.plan === "producer") && (
         <div style={{ marginBottom: 24 }}>
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>✍️ My Lyrics</div>
