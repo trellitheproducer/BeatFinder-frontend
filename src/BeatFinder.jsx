@@ -1195,7 +1195,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers }) {
     <div style={{ padding: "0 16px 100px" }}>
       <div style={{ textAlign: "center", padding: "24px 0 20px" }}>
         <img
-          src="https://i.ibb.co/Mk5hsmwq/D1-DBF030-C611-4-FEB-844-F-AF3-FEBBF9-C2-B.png"
+          src="https://i.ibb.co/9myqbFB7/2-BB02064-13-F6-476-C-89-FF-B1-EDDAE0-C709.png"
           alt="BeatFinder"
           style={{ width: "100%", maxWidth: 380, display: "block", margin: "0 auto" }}
         />
