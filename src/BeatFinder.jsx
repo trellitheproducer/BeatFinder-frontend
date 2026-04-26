@@ -1575,7 +1575,7 @@ function StripeConnectSection({ user }) {
       window.location.href = result.url;
     } catch (e) {
       setConnecting(false);
-      alert("Error: " + e.message);
+      setStatus({ connected: false, error: e.message });
     }
   };
 
@@ -1595,17 +1595,24 @@ function StripeConnectSection({ user }) {
           <div style={{ color: "#555", fontSize: 12 }}>Payouts {status.payouts_enabled ? "enabled" : "pending"}</div>
         </div>
       ) : (
-        <button
-          onClick={handleConnect}
-          disabled={connecting}
-          style={{
-            width: "100%", background: connecting ? "#333" : "linear-gradient(135deg,#635BFF,#8B5CF6)",
-            border: "none", borderRadius: 12, color: "white",
-            fontWeight: 800, fontSize: 15, padding: "13px", cursor: connecting ? "not-allowed" : "pointer",
-          }}
-        >
-          {connecting ? "Redirecting to Stripe..." : "Connect Stripe Account"}
-        </button>
+        <>
+          {status?.error && (
+            <div style={{ color: "#F87171", fontSize: 12, marginBottom: 10, background: "rgba(220,38,38,0.1)", borderRadius: 8, padding: "8px 12px" }}>
+              {status.error}
+            </div>
+          )}
+          <button
+            onClick={handleConnect}
+            disabled={connecting}
+            style={{
+              width: "100%", background: connecting ? "#333" : "linear-gradient(135deg,#635BFF,#8B5CF6)",
+              border: "none", borderRadius: 12, color: "white",
+              fontWeight: 800, fontSize: 15, padding: "13px", cursor: connecting ? "not-allowed" : "pointer",
+            }}
+          >
+            {connecting ? "Redirecting to Stripe..." : "Connect Stripe Account"}
+          </button>
+        </>
       )}
     </div>
   );
