@@ -725,6 +725,11 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
     if (node) node.scrollTop = 0;
   }, []);
   const isEditing = initialLyric !== undefined && initialLyric !== null;
+  const [editorReady, setEditorReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setEditorReady(true), 400);
+    return () => clearTimeout(t);
+  }, []);
 
   const handleSave = () => {
     if (!text.trim()) return;
@@ -793,43 +798,50 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
         )}
       </div>
 
-      <div style={{ padding: "12px 16px 8px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
-        <input
-          value={title}
-          onChange={e => setTitle(e.target.value)}
-          placeholder="Song title (optional)"
-          style={{
-            width: "100%", background: "#1a1a1a", border: "1px solid #333",
-            borderRadius: 10, padding: "10px 14px", color: "white",
-            fontSize: 14, outline: "none", boxSizing: "border-box",
-          }}
-        />
-      </div>
+      {editorReady ? (
+        <>
+          <div style={{ padding: "12px 16px 8px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a", flexShrink: 0 }}>
+            <input
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="Song title (optional)"
+              tabIndex={-1}
+              style={{
+                width: "100%", background: "#1a1a1a", border: "1px solid #333",
+                borderRadius: 10, padding: "10px 14px", color: "white",
+                fontSize: 14, outline: "none", boxSizing: "border-box",
+              }}
+            />
+          </div>
 
-      <textarea
-        value={text}
-        onChange={e => setText(e.target.value)}
-        placeholder="Start writing your lyrics here... Writer's block? Tap the AI Lyric Assistant button below - it will analyse your rhyme scheme and suggest the perfect next line to keep you flowing."
-        style={{
-          flex: 1, background: "#0d0d0d", border: "none", outline: "none",
-          color: "white", fontSize: 15, lineHeight: 1.8, padding: "16px",
-          resize: "none", fontFamily: "'DM Sans',sans-serif",
-          WebkitUserSelect: "text", userSelect: "text",
-        }}
-        autoFocus
-      />
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            placeholder="Start writing your lyrics here... Writer's block? Tap the AI Lyric Assistant button below - it will analyse your rhyme scheme and suggest the perfect next line to keep you flowing."
+            style={{
+              flex: 1, background: "#0d0d0d", border: "none", outline: "none",
+              color: "white", fontSize: 15, lineHeight: 1.8, padding: "16px",
+              resize: "none", fontFamily: "'DM Sans',sans-serif",
+            }}
+          />
 
-      <div style={{
-        padding: "12px 16px", background: "#0a0a0a",
-        borderTop: "1px solid #1a1a1a",
-        paddingBottom: "calc(12px + env(safe-area-inset-bottom))",
-        display: "flex", flexDirection: "column", gap: 8,
-      }}>
-        <div style={{ color: "#444", fontSize: 11, textAlign: "center" }}>
-          {text.length} characters • {text.split(" ").filter(function(w){return w.length > 0;}).length} words
+          <div style={{
+            padding: "12px 16px", background: "#0a0a0a",
+            borderTop: "1px solid #1a1a1a",
+            paddingBottom: "calc(12px + env(safe-area-inset-bottom))",
+            display: "flex", flexDirection: "column", gap: 8, flexShrink: 0,
+          }}>
+            <div style={{ color: "#444", fontSize: 11, textAlign: "center" }}>
+              {text.length} characters {text.split(" ").filter(function(w){return w.length > 0;}).length} words
+            </div>
+            <AiLyricAssistant text={text} beat={beat} onSuggest={s => { setText(p => p ? p + String.fromCharCode(10) + s : s); }} />
+          </div>
+        </>
+      ) : (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ color: "#333", fontSize: 13 }}>Loading editor...</div>
         </div>
-        <AiLyricAssistant text={text} beat={beat} onSuggest={s => { setText(p => p ? p + String.fromCharCode(10) + s : s); }} />
-      </div>
+      )}
     </div>
   );
 }
@@ -2212,7 +2224,7 @@ function MyUploadsSection({ user }) {
 
 
 // =============================================================================
-// ROOT AUTH SCREEN — shown at app root when no user logged in
+// ROOT AUTH SCREEN - shown at app root when no user logged in
 // =============================================================================
 function RootAuthScreen({ onLogin }) {
   const [mode,        setMode]        = useState("landing");
