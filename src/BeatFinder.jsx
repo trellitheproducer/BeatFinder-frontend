@@ -58,7 +58,7 @@ async function apiFetch(path, options = {}) {
 // =============================================================================
 async function fetchBeats(artistName, page, filterTitle, maxResults) {
   const pageNum     = page || 1;
-  const maxNum      = maxResults || 20;
+  const maxNum      = maxResults || 10;
   const doFilter    = filterTitle !== false;
   const query       = artistName + "|page" + pageNum + "|filter" + doFilter + "|max" + maxNum;
   if (cache[query] && Date.now() - cache[query].ts < CACHE_TTL) {
@@ -66,19 +66,26 @@ async function fetchBeats(artistName, page, filterTitle, maxResults) {
   }
 
   const filterParam = doFilter ? "true" : "false";
-  console.log("[BeatFinder] Searching: " + artistName + " page " + pageNum + " filter=" + filterParam + " max=" + maxNum);
-  try {
-    const data = await apiFetch(
-      "/api/youtube/search?artist=" + encodeURIComponent(artistName) +
-      "&max=" + maxNum + "&page=" + pageNum +
-      "&filter_title=" + filterParam
-    );
-    const beats = data.beats || [];
-    cache[query] = { data: beats, ts: Date.now() };
-    return { beats, error: null };
-  } catch (err) {
-    console.error("[BeatFinder] fetchBeats error:", err);
-    return { beats: [], error: err.message };
+  const url = "/api/youtube/search?artist=" + encodeURIComponent(artistName) +
+              "&max=" + maxNum + "&page=" + pageNum +
+              "&filter_title=" + filterParam;
+
+  // Try up to 2 times - first page of an artist builds the master cache
+  // which can take a few seconds on Render free tier
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const data  = await apiFetch(url);
+      const beats = data.beats || [];
+      cache[query] = { data: beats, ts: Date.now() };
+      return { beats, error: null };
+    } catch (err) {
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 3000)); // wait 3s then retry
+      } else {
+        console.error("[BeatFinder] fetchBeats error:", err);
+        return { beats: [], error: err.message };
+      }
+    }
   }
 }
 
@@ -752,7 +759,8 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
   if (loading) return (
     <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
       <div style={{ fontSize: 36, marginBottom: 10 }}>🎵</div>
-      <div style={{ fontSize: 13 }}>Finding {artistName} type beats... page {page}</div>
+      <div style={{ fontSize: 13 }}>Finding {artistName} type beats...</div>
+      {page === 1 && <div style={{ fontSize: 11, color: "#444", marginTop: 6 }}>First load builds the full beat library — may take a few seconds</div>}
     </div>
   );
 
@@ -1363,57 +1371,61 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
   const [tab, setTab] = useState("beats");
 
   if (!isPro) return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "75vh", padding: 28, textAlign: "center" }}>
-      <div style={{ fontSize: 72, marginBottom: 16 }}>🔒</div>
-      <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 32, letterSpacing: 2, color: "#F59E0B", marginBottom: 8 }}>MEMBERS ONLY</div>
-      <div style={{ color: "white", fontSize: 20, fontWeight: 800, marginBottom: 12 }}>Exclusive Access</div>
-      <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 20 }}>
-        Subscribe to <span style={{ color: "#F59E0B", fontWeight: 800 }}>Artist Pro</span> or <span style={{ color: "#C026D3", fontWeight: 800 }}>Producer Pro</span> to unlock exclusive beats and downloadable MP3s.
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", height: "calc(100vh - 80px)",
+      padding: "0 20px", textAlign: "center", overflow: "hidden",
+    }}>
+      <div style={{ fontSize: 40, marginBottom: 8 }}>🔒</div>
+      <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 28, letterSpacing: 2, color: "#F59E0B", marginBottom: 4 }}>MEMBERS ONLY</div>
+      <div style={{ color: "#888", fontSize: 13, lineHeight: 1.5, marginBottom: 14 }}>
+        Unlock exclusive beats, MP3s and more.
       </div>
-      {[
-        {
-          label: "🎤 Artist Pro",
-          price: "4.99/mo",
-          color: "#F59E0B",
-          perks: [
-            "Write lyrics while beats play",
-            "Save & edit your lyrics anytime",
-            "Access exclusive members beats",
-            "Download MP3s from producers",
-            "Purchase leases directly from producers",
-            "Bookmark unlimited beats",
-          ],
-        },
-        {
-          label: "🎛 Producer Pro",
-          price: "8.99/mo",
-          color: "#C026D3",
-          perks: [
-            "Everything in Artist Pro",
-            "Upload your beats as MP3s",
-            "Sell MP3 leases to artists",
-            "Get your beats heard by artists",
-            "Track your beat download stats",
-            "Producer verified badge",
-            "Featured in beat rotation",
-          ],
-        },
-      ].map(p => (
-        <div key={p.label} style={{ background: "#111", border: "1.5px solid " + p.color, borderRadius: 14, padding: "16px 18px", marginBottom: 14, textAlign: "left", width: "100%", maxWidth: 340 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-            <div style={{ color: "white", fontWeight: 800, fontSize: 17 }}>{p.label}</div>
-            <div style={{ color: p.color, fontWeight: 800, fontSize: 17 }}>£{p.price}</div>
+
+      <div style={{ display: "flex", gap: 10, width: "100%", marginBottom: 14 }}>
+        {[
+          {
+            label: "🎤 Artist Pro",
+            price: "£4.99/mo",
+            color: "#F59E0B",
+            perks: [
+              "Write lyrics to beats",
+              "Save & edit lyrics",
+              "Exclusive member beats",
+              "Download MP3s",
+              "Purchase leases",
+              "Bookmark unlimited beats",
+            ],
+          },
+          {
+            label: "🎛 Producer Pro",
+            price: "£8.99/mo",
+            color: "#C026D3",
+            perks: [
+              "Everything in Artist Pro",
+              "Upload & sell beats",
+              "Sell MP3 leases",
+              "Download stats",
+              "Verified badge",
+              "Featured in rotation",
+            ],
+          },
+        ].map(p => (
+          <div key={p.label} style={{ flex: 1, background: "#111", border: "1.5px solid " + p.color, borderRadius: 14, padding: "12px", textAlign: "left" }}>
+            <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>{p.label}</div>
+            <div style={{ color: p.color, fontWeight: 800, fontSize: 13, marginBottom: 10 }}>{p.price}</div>
+            {p.perks.map(perk => (
+              <div key={perk} style={{ color: "#bbb", fontSize: 11, marginBottom: 5, lineHeight: 1.3, display: "flex", alignItems: "flex-start", gap: 5 }}>
+                <span style={{ color: p.color, fontWeight: 900, flexShrink: 0 }}>•</span>
+                <span>{perk}</span>
+              </div>
+            ))}
           </div>
-          {p.perks.map(perk => (
-            <div key={perk} style={{ color: "#ccc", fontSize: 13, marginBottom: 7, lineHeight: 1.4, display: "flex", alignItems: "flex-start", gap: 8 }}>
-              <span style={{ color: p.color, fontWeight: 900, flexShrink: 0 }}>•</span>
-              <span>{perk}</span>
-            </div>
-          ))}
-        </div>
-      ))}
+        ))}
+      </div>
+
       <button onClick={onGoProfile}
-        style={{ background: "linear-gradient(135deg,#F59E0B,#C026D3)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: "16px 40px", fontSize: 16, cursor: "pointer", width: "100%", maxWidth: 320, marginTop: 8 }}>
+        style={{ background: "linear-gradient(135deg,#F59E0B,#C026D3)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: "14px 40px", fontSize: 16, cursor: "pointer", width: "100%" }}>
         Unlock Access
       </button>
     </div>
