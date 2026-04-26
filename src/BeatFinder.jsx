@@ -806,9 +806,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
       <textarea
         value={text}
         onChange={e => setText(e.target.value)}
-        placeholder="Start writing your lyrics here...
-
-Writer's block? Tap the ✨ AI Lyric Assistant button below - it will analyse your rhyme scheme and suggest the perfect next line to keep you flowing."
+        placeholder="Start writing your lyrics here... Writer's block? Tap the AI Lyric Assistant button below - it will analyse your rhyme scheme and suggest the perfect next line to keep you flowing."
         style={{
           flex: 1, background: "#0d0d0d", border: "none", outline: "none",
           color: "white", fontSize: 15, lineHeight: 1.8, padding: "16px",
