@@ -366,6 +366,181 @@ function Av({ name, size = 88, idx = 0, img }) {
 }
 
 
+
+// =============================================================================
+// AI LYRIC ASSISTANT — suggests next lines based on written lyrics and beat
+// =============================================================================
+function AiLyricAssistant({ text, beat, onSuggest }) {
+  const [loading,     setLoading]     = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [error,       setError]       = useState("");
+  const [open,        setOpen]        = useState(false);
+
+  const getLastLines = (lyrics) => {
+    const lines = lyrics.split("\n").filter(l => l.trim());
+    return lines.slice(-4).join("\n");
+  };
+
+  const handleAsk = async () => {
+    const lastLines = getLastLines(text);
+    if (!lastLines) {
+      setError("Write at least one line first!");
+      setOpen(true);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setSuggestions([]);
+    setOpen(true);
+
+    const beatContext = beat ? "The beat is called \"" + beat.title + "\" by " + beat.channel + ". " : "";
+
+    const prompt = `You are an expert hip-hop/R&B lyricist and ghostwriter. ${beatContext}
+
+The artist has written these lyrics so far:
+${text.trim()}
+
+Your task:
+1. Analyse the rhyme scheme of the last 4 lines
+2. Identify the last word/sound that needs to be rhymed
+3. Write 3 different next-line suggestions that:
+   - Match the rhyme scheme precisely
+   - Flow naturally from what was written
+   - Match the energy and style of the existing lyrics
+   - Are fresh, creative and not cliché
+
+Format your response as JSON only, no other text:
+{
+  "rhyme_scheme": "brief description e.g. AABB or ABAB",
+  "last_rhyme_sound": "the sound/word being rhymed",
+  "suggestions": [
+    "suggestion line 1",
+    "suggestion line 2", 
+    "suggestion line 3"
+  ]
+}`;
+
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+
+      const data = await response.json();
+      const raw  = data.content?.[0]?.text || "";
+
+      // Parse JSON from response
+      const clean   = raw.replace(/```json|```/g, "").trim();
+      const parsed  = JSON.parse(clean);
+
+      setSuggestions(parsed);
+    } catch (e) {
+      setError("Could not get suggestions. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <button
+        onClick={handleAsk}
+        disabled={loading}
+        style={{
+          width: "100%", borderRadius: 14, padding: "15px",
+          fontWeight: 800, fontSize: 15, cursor: loading ? "not-allowed" : "pointer",
+          border: "none",
+          background: loading ? "#333" : "linear-gradient(135deg,#6B21A8,#C026D3)",
+          color: "white",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+        }}
+      >
+        {loading ? "✨ Thinking..." : "✨ AI Lyric Assistant"}
+      </button>
+
+      {open && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 10002,
+          background: "rgba(0,0,0,0.92)", display: "flex",
+          flexDirection: "column", fontFamily: "'DM Sans',sans-serif",
+          paddingTop: "env(safe-area-inset-top)",
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "14px 16px", borderBottom: "1px solid #1a1a1a",
+            background: "#0a0a0a", flexShrink: 0,
+          }}>
+            <button onClick={() => setOpen(false)} style={{
+              background: "#1a1a1a", border: "1px solid #333", borderRadius: "50%",
+              color: "white", width: 36, height: 36, fontSize: 20, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>‹</button>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 14 }}>✨ AI Lyric Assistant</div>
+              <div style={{ color: "#555", fontSize: 11, marginTop: 2 }}>Powered by Claude AI</div>
+            </div>
+            <button onClick={handleAsk} disabled={loading} style={{
+              background: loading ? "#333" : "#C026D3", border: "none",
+              borderRadius: 20, color: "white", fontWeight: 800,
+              fontSize: 12, padding: "7px 14px", cursor: "pointer",
+            }}>
+              {loading ? "..." : "Regenerate"}
+            </button>
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+            {loading && (
+              <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
+                <div style={{ fontSize: 36, marginBottom: 12 }}>✨</div>
+                <div style={{ fontSize: 14, color: "#888" }}>Analysing your rhyme scheme...</div>
+                <div style={{ fontSize: 12, color: "#555", marginTop: 8 }}>Finding the perfect next line</div>
+              </div>
+            )}
+
+            {error && (
+              <div style={{ color: "#F87171", fontSize: 14, textAlign: "center", padding: "20px 0" }}>{error}</div>
+            )}
+
+            {suggestions.rhyme_scheme && !loading && (
+              <>
+                <div style={{ background: "#111", borderRadius: 12, padding: 14, marginBottom: 16, border: "1px solid #1e1e1e" }}>
+                  <div style={{ color: "#C026D3", fontWeight: 700, fontSize: 12, marginBottom: 6 }}>RHYME SCHEME DETECTED</div>
+                  <div style={{ color: "white", fontSize: 14, fontWeight: 600 }}>{suggestions.rhyme_scheme}</div>
+                  <div style={{ color: "#888", fontSize: 12, marginTop: 4 }}>
+                    Rhyming with: <span style={{ color: "#F59E0B", fontWeight: 700 }}>"{suggestions.last_rhyme_sound}"</span>
+                  </div>
+                </div>
+
+                <div style={{ color: "#888", fontSize: 12, fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>SUGGESTED NEXT LINES</div>
+
+                {suggestions.suggestions?.map((line, i) => (
+                  <div key={i} style={{
+                    background: "#111", borderRadius: 14, padding: 16,
+                    marginBottom: 12, border: "1px solid #1e1e1e",
+                    cursor: "pointer",
+                  }}
+                    onClick={() => { onSuggest(line); setOpen(false); }}
+                  >
+                    <div style={{ color: "#555", fontSize: 11, marginBottom: 6, fontWeight: 700 }}>OPTION {i + 1} — TAP TO ADD</div>
+                    <div style={{ color: "white", fontSize: 16, lineHeight: 1.6, fontStyle: "italic" }}>"{line}"</div>
+                    <div style={{ color: "#C026D3", fontSize: 12, marginTop: 8, fontWeight: 600 }}>+ Add to lyrics</div>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // =============================================================================
 // LYRICS NOTEPAD — Artist Pro only, appears over the player
 // =============================================================================
@@ -458,7 +633,9 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
       <textarea
         value={text}
         onChange={e => setText(e.target.value)}
-        placeholder="Start writing your lyrics here..."
+        placeholder="Start writing your lyrics here...
+
+Stuck? Tap the ✨ AI Lyric Assistant button below — it will analyse your rhyme scheme and suggest the perfect next line to keep you flowing."
         style={{
           flex: 1, background: "#0d0d0d", border: "none", outline: "none",
           color: "white", fontSize: 15, lineHeight: 1.8, padding: "16px",
@@ -476,15 +653,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
         <div style={{ color: "#444", fontSize: 11, textAlign: "center" }}>
           {text.length} characters · {text.split(" ").filter(function(w){return w.length > 0;}).length} words
         </div>
-        <button onClick={handleSave} style={{
-          width: "100%", borderRadius: 14, padding: "15px",
-          fontWeight: 800, fontSize: 16, cursor: "pointer", border: "none",
-          background: saved ? "#22C55E" : "#C026D3",
-          color: "white",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-        }}>
-          {saved ? "✅ Lyrics Saved!" : "💾 Save Lyrics"}
-        </button>
+        <AiLyricAssistant text={text} beat={beat} onSuggest={suggestion => setText(prev => prev + (prev.endsWith("\n") || prev === "" ? "" : "\n") + suggestion)} />
       </div>
     </div>
   );
@@ -2302,6 +2471,7 @@ export default function BeatFinder() {
   const isArtistPro = user?.isPro || user?.isArtistPro || user?.plan === "artist" || user?.plan === "producer";
 
   const handleOpenLyrics = useCallback(beat => {
+    setPlaying(null);   // stop the YouTube player
     setLyricsBeat(beat);
     setEditingLyric(null);
     setEditingIndex(null);
