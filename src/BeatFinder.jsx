@@ -1193,21 +1193,12 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
 function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers }) {
   return (
     <div style={{ padding: "0 16px 100px" }}>
-      <div style={{ textAlign: "center", padding: "44px 0 30px" }}>
-        <div style={{
-          fontFamily: "'Bebas Neue',sans-serif", fontSize: 52, letterSpacing: 5, lineHeight: 1,
-          background: "linear-gradient(135deg,#C026D3,#9333EA,#06B6D4)",
-          WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-        }}>
-          BEATFINDER
-        </div>
-        <div style={{
-          height: 3, background: "linear-gradient(90deg,#C026D3,#9333EA,#06B6D4)",
-          borderRadius: 2, margin: "6px auto 0", maxWidth: 200,
-        }} />
-        <div style={{ color: "#aaa", fontSize: 14, fontWeight: 600, marginTop: 14, lineHeight: 1.6 }}>
-          Welcome to the World's <span style={{ color: "#C026D3", fontWeight: 800 }}>#1</span> Beat Finder App
-        </div>
+      <div style={{ textAlign: "center", padding: "24px 0 20px" }}>
+        <img
+          src="https://i.ibb.co/Mk5hsmwq/D1-DBF030-C611-4-FEB-844-F-AF3-FEBBF9-C2-B.png"
+          alt="BeatFinder"
+          style={{ width: "100%", maxWidth: 380, display: "block", margin: "0 auto" }}
+        />
       </div>
       {(!user || (!user.isPro && !user.isArtistPro)) && (
         <div style={{
