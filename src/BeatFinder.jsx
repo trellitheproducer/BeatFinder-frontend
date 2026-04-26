@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 
 // =============================================================================
 // CONFIG
@@ -2797,6 +2797,7 @@ function ProfileScreen({ user, setUser, savedLyrics, setSavedLyrics, onPlayBeat,
             try { localStorage.removeItem("bf_saved_email"); } catch {}
           }
           setUser(u);
+          setMode("landing");
         } catch (e) {
           setAuthErr(e.message);
         } finally {
@@ -2902,19 +2903,7 @@ export default function BeatFinder() {
   }, [user]);
 
   const handlePlay = useCallback(beat => setPlaying(beat), []);
-  const [visitedTabs, setVisitedTabs] = useState(() => new Set(["home"]));
-
-  // Reset to home tab cleanly when user logs in
-  const prevUserRef = useRef(null);
-  useEffect(() => {
-    const wasNull = prevUserRef.current === null;
-    const isNowSet = user !== null;
-    if (wasNull && isNowSet) {
-      setVisitedTabs(new Set(["home"]));
-      setTab("home");
-    }
-    prevUserRef.current = user;
-  }, [user]);
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set(["home", "profile"]));
 
   const goTab = id => {
     setPlaying(null);
@@ -2994,7 +2983,7 @@ export default function BeatFinder() {
         {visitedTabs.has("search")    && <div style={{ display: tab === "search"    ? "block" : "none" }}><SearchScreen    savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>}
         {visitedTabs.has("saved")     && <div style={{ display: tab === "saved"     ? "block" : "none" }}><SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} /></div>}
         {visitedTabs.has("exclusive") && <div style={{ display: tab === "exclusive" ? "block" : "none" }}><ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>}
-        {visitedTabs.has("profile")   && <div style={{ display: tab === "profile"   ? "block" : "none" }}><ProfileScreen user={user} setUser={setUser} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} /></div>}
+        {visitedTabs.has("profile")   && <div style={{ display: tab === "profile"   ? "block" : "none" }}><ProfileScreen user={user} setUser={u => { setUser(u); if (u) { setTab("home"); setVisitedTabs(new Set(["home"])); } }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} /></div>}
       </div>
 
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "rgba(10,10,10,0.97)", borderTop: "1px solid #1a1a1a", display: "flex", height: "calc(72px + env(safe-area-inset-bottom))", zIndex: 100, backdropFilter: "blur(20px)", paddingBottom: "env(safe-area-inset-bottom)" }}>
