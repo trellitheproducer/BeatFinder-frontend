@@ -447,20 +447,30 @@ function buildSuggestion(rhymeWord, lastLine) {
   return starter + " " + filler + ", " + rhymeWord;
 }
 
-function generateSuggestions(lyrics, beat) {
-  const lines     = lyrics.split("\n").filter(l => l.trim());
+function generateSuggestions(lyrics, beat, seed) {
+  const lines = lyrics.split("\n").filter(l => l.trim());
   if (lines.length === 0) return null;
 
-  const lastLine  = lines[lines.length - 1];
-  const lastWord  = getLastWord(lastLine);
-  const sound     = detectRhymeSound(lastWord);
-  const scheme    = detectScheme(lines);
-  const rhymes    = getRhymingWords(sound).filter(w => w !== lastWord);
+  // Always focus on the LAST line written
+  const lastLine = lines[lines.length - 1];
+  const lastWord = getLastWord(lastLine);
+  const sound    = detectRhymeSound(lastWord);
+  const scheme   = detectScheme(lines);
 
-  // Pick 3 different rhyming words
-  const shuffled  = rhymes.sort(() => Math.random() - 0.5).slice(0, 3);
-  const suggestions = shuffled.length > 0
-    ? shuffled.map(rw => buildSuggestion(rw, lastLine))
+  // Get all rhyming words and exclude the last word itself
+  const rhymes   = getRhymingWords(sound).filter(w => w.toLowerCase() !== lastWord.toLowerCase());
+
+  // Shuffle differently each call using seed
+  const shuffled = [...rhymes].sort(() => Math.random() - 0.5);
+
+  // Pick 3 unique rhyming words, rotate based on call count
+  const picked = shuffled.slice(0, Math.min(9, shuffled.length));
+  const offset = seed ? Math.floor(seed / 100) % Math.max(1, picked.length - 2) : 0;
+  const trio   = picked.slice(offset, offset + 3).concat(picked.slice(0, Math.max(0, 3 - (picked.length - offset))));
+  const final3 = trio.slice(0, 3);
+
+  const suggestions = final3.length > 0
+    ? final3.map(rw => buildSuggestion(rw, lastLine))
     : [
         "Keep pushing forward, never look back",
         "Stay focused on the path I'm on",
@@ -468,8 +478,9 @@ function generateSuggestions(lyrics, beat) {
       ];
 
   return {
-    rhyme_scheme:      scheme,
-    last_rhyme_sound:  lastWord + ' ("' + sound + '" sound)',
+    rhyme_scheme:     scheme,
+    last_rhyme_sound: '"' + lastWord + '" (' + sound + ' sound)',
+    last_line:        lastLine,
     suggestions,
   };
 }
@@ -487,13 +498,14 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
       return;
     }
     setError("");
-    const result = generateSuggestions(text, beat);
+    setSuggestions(null); // clear old suggestions first
+    const result = generateSuggestions(text, beat, Date.now());
     setSuggestions(result);
     setOpen(true);
   };
 
   const regenerate = () => {
-    const result = generateSuggestions(text, beat);
+    const result = generateSuggestions(text, beat, Date.now()); // force new seed
     setSuggestions(result);
   };
 
@@ -550,10 +562,11 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
             {suggestions && suggestions.rhyme_scheme && (
               <>
                 <div style={{ background: "#111", borderRadius: 12, padding: 14, marginBottom: 16, border: "1px solid #1e1e1e" }}>
-                  <div style={{ color: "#C026D3", fontWeight: 700, fontSize: 12, marginBottom: 6 }}>RHYME SCHEME DETECTED</div>
-                  <div style={{ color: "white", fontSize: 14, fontWeight: 600 }}>{suggestions.rhyme_scheme}</div>
-                  <div style={{ color: "#888", fontSize: 12, marginTop: 4 }}>
-                    Rhyming with: <span style={{ color: "#F59E0B", fontWeight: 700 }}>"{suggestions.last_rhyme_sound}"</span>
+                  <div style={{ color: "#C026D3", fontWeight: 700, fontSize: 12, marginBottom: 6 }}>LAST LINE DETECTED</div>
+                  <div style={{ color: "white", fontSize: 13, fontStyle: "italic", marginBottom: 8 }}>"{suggestions.last_line}"</div>
+                  <div style={{ color: "#555", fontSize: 11, marginBottom: 4 }}>Rhyme scheme: <span style={{ color: "#aaa" }}>{suggestions.rhyme_scheme}</span></div>
+                  <div style={{ color: "#555", fontSize: 11 }}>
+                    Rhyming with: <span style={{ color: "#F59E0B", fontWeight: 700 }}>{suggestions.last_rhyme_sound}</span>
                   </div>
                 </div>
 
