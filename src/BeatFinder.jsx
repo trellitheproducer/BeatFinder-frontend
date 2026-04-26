@@ -375,271 +375,183 @@ function Av({ name, size = 88, idx = 0, img }) {
 // LYRIC ASSISTANT ENGINE - local rhyme generator
 // =============================================================================
 
-// Large rhyme groups - words grouped by shared ending sound
-const RHYME_GROUPS = [
-  // -eep / -eap / -ee sounds
-  ["jeep","deep","sleep","keep","sweep","creep","leap","heap","reap","cheap","steep","beep","weep","peep","seep","sheep","fleet","street","beat","feat","heat","meat","neat","seat","treat","tweet","concrete","elite","compete","repeat","defeat","retreat","complete","athlete","heartbeat","deadbeat","discreet","delete","deplete"],
-  // -ack / -act / -ax
-  ["back","track","stack","black","crack","attack","setback","flashback","payback","comeback","feedback","kickback","throwback","knack","hack","slack","pack","rack","lack","jack","shack","snack","smack","whack","fact","act","pact","exact","impact","abstract","contract","extract","distract","attract","interact","react"],
-  // -ay / -ey / -ade
-  ["day","way","say","play","stay","pray","pay","slay","okay","away","today","highway","relay","display","portray","betray","decay","convey","hooray","spray","stray","bay","clay","gray","lay","may","ray","sway","blade","shade","fade","grade","made","trade","wade","arcade","decade","cascade","blockade","crusade","parade","upgrade","grenade","lemonade"],
-  // -ight / -ite / -yte
-  ["night","right","fight","light","sight","might","tight","bright","flight","white","ignite","despite","delight","tonight","midnight","highlight","moonlight","flashlight","insight","invite","excite","unite","recite","polite","alight","fright","height","kite","quite","write","bite","dynamite","satellite","parasite","appetite","overnight","spotlight","gunfight","fistfight","dogfight"],
-  // -ow / -ow (long o)
-  ["know","flow","show","glow","grow","slow","go","though","below","bestow","shadow","tomorrow","sorrow","follow","hollow","borrow","plateau","although","ago","radio","studio","vertigo","overflow","overthrow","undertow","rainbow","elbow","window","outgrow","forgo"],
-  // -een / -ean / -ine
-  ["seen","mean","clean","dream","team","scheme","supreme","between","machine","routine","serene","marine","obscene","intervene","magazine","lean","keen","queen","screen","scene","bean","green","preen","sheen","teen","wean","mainstream","downstream","upstream","daydream","nightmare","moonbeam","sunbeam"],
-  // -ine / -ime / -ind
-  ["mine","shine","fine","line","time","crime","rhyme","sublime","overtime","prime","dime","lime","grime","vine","wine","pine","nine","spine","divine","design","align","define","refine","combine","decline","confine","outline","sunshine","moonshine","sideline","deadline","grind","mind","find","blind","kind","bind","remind","behind","mankind","unwind","rewind","mastermind","intertwined"],
-  // -ake / -ake
-  ["take","make","break","shake","wake","fake","mistake","heartbreak","forsake","earthquake","stake","lake","bake","rake","sake","cake","flake","snake","awake","intake","overtake","remake","cupcake","snowflake","namesake","daybreak","outbreak","jailbreak","handshake","keepsake"],
-  // -one / -oan / -own (long o)
-  ["alone","phone","throne","zone","stone","bone","tone","moan","groan","unknown","microphone","milestone","cornerstone","shown","blown","grown","flown","own","known","thrown","postpone","ozone","cyclone","backbone","jawbone","headstone","limestone","gravestone","home","roam","foam","chrome","dome","gnome","poem","loam","syndrome","metronome","palindrome"],
-  // -ound / -own (rhymes with crown)
-  ["ground","found","sound","around","bound","pound","profound","surround","background","underground","playground","rebound","compound","astound","abound","renowned","expound","confound","dumbfound","crown","down","town","drown","clown","brown","frown","gown","noun","renown","downtown","uptown","countdown","breakdown","rundown","showdown","shutdown","lockdown","meltdown"],
-  // -eal / -eel / -eal
-  ["real","feel","deal","heal","steel","wheel","appeal","reveal","conceal","ideal","ordeal","surreal","kneel","meal","seal","zeal","peel","repeal","congeal","genteel","squeal","teal","veal","unreal","steel-toed","on one knee","let it be free"],
-  // -ame / -aim / -ame
-  ["same","name","game","flame","claim","frame","blame","shame","fame","came","tame","aim","exclaim","proclaim","acclaim","defame","inflame","became","reclaim","rename","nickname","ballgame","endgame","war game","mind game","wild game"],
-  // -old / -olled
-  ["told","bold","cold","gold","hold","sold","fold","old","unfold","withhold","behold","enrolled","controlled","consoled","manifold","household","threshold","stronghold","blindfold","marigold","pot of gold"],
-  // -ead / -ed / -ead (rhymes with dead)
-  ["dead","head","said","bread","spread","thread","dread","led","red","fed","bed","shed","instead","ahead","misled","mislead","unread","widespread","forehead","godhead","hothead","deadhead","figurehead","overhead"],
-  // -eed / -ead (rhymes with lead)
-  ["need","lead","freed","greed","creed","speed","bleed","feed","seed","weed","proceed","succeed","indeed","concede","agreed","guaranteed","stampede","supersede","centipede","proceed"],
-  // -ive / -ive (long i)
-  ["live","give","drive","thrive","survive","arrive","revive","derive","connive","contrive","deprive","alive","nosedive","overdrive","archive","beehive","high five","deep dive","swan dive","crash and dive"],
-  // -art / -eart
-  ["heart","start","smart","apart","depart","impart","restart","sweetheart","chart","dart","cart","part","tart","art","counterpart","fall apart","shopping cart","sacred heart","state of the art","change of heart","broken heart"],
-  // -all / -aul / -awl
-  ["call","fall","wall","hall","tall","ball","crawl","stall","install","recall","overall","downfall","rainfall","nightfall","windfall","freefall","enthrall","befall","appall","forestall","protocol","alcohol","wherewithal","Montreal","free-for-all","behind the ball"],
-  // -ide / -ied
-  ["ride","side","hide","guide","pride","tried","cried","denied","applied","relied","supplied","inside","outside","worldwide","override","provide","divide","reside","confide","decide","beside","collide","subside","upside","downside","fireside","riverside","landslide","riptide","homicide","coincide","justified","amplified","satisfied","glorified","modified","occupied","terrified","unified","verified","certified","identified","notified","solidified"],
-  // -ess / -est
-  ["stress","bless","less","yes","guess","mess","address","express","impress","confess","success","progress","access","excess","darkness","weakness","sadness","madness","gladness","princess","fortress","nevertheless","loneliness","happiness","emptiness","bitterness","best","rest","test","west","quest","chest","nest","pest","vest","arrest","contest","invest","protest","suggest","manifest","interest","forest","harvest"],
-  // -ee / -ee (free, see)
-  ["free","see","be","me","key","tree","agree","degree","guarantee","destiny","energy","memory","victory","history","mystery","category","territory","possibility","opportunity","ability","reality","mentality","brutality","loyalty","royalty","penalty","specialty","philosophy","democracy","conspiracy","emergency","currency","frequency","legacy","advocacy","diplomacy","pharmacy","privacy","prophecy","therapy","mystery","poetry","properly","separately","differently","together with me","set us free","what's meant to be","eventually","naturally","finally free","independently"],
-  // -un / -one (rhymes with sun)
-  ["run","done","one","gun","sun","fun","won","begun","outdone","outrun","undone","overcome","someone","anyone","everyone","none","bun","nun","pun","spun","stun","number one","on the run","under the gun","get it done","all as one","second to none","hit and run","just begun","kingdom come"],
-  // -ong / -ong
-  ["strong","long","song","wrong","along","belong","prolong","lifelong","headstrong","all along","sing along","come along","play along","get along","before long","stay strong","be strong","move along","go along","tagalong","singalong","all night long","carry on","move on","carry strong"],
-  // -ock / -op / -ot
-  ["block","clock","knock","lock","mock","rock","shock","sock","stock","dock","flock","unlock","deadlock","gridlock","padlock","o clock","hard knock","around the clock","hip hop","nonstop","rooftop","desktop","backdrop","raindrop","hilltop"],
-  // -ool / -ule / -ool
-  ["cool","fool","rule","school","tool","pool","fuel","duel","jewel","cruel","overrule","old school","swimming pool","golden rule","April fool","beautiful","powerful","masterful","meaningful","wonderful","colorful","plentiful","bountiful","dutiful","merciful","successful","faithful","grateful","hateful","wasteful","peaceful","cheerful","fearful","careful","tearful","playful","hopeful","soulful","truthful","youthful"],
-  // -op / -op
-  ["drop","stop","shop","pop","hop","crop","flop","mop","prop","swap","top","nonstop","laptop","rooftop","backdrop","raindrop","teardrop","dewdrop","hilltop","workshop","hip hop","tip top","over the top","drop by drop","ready to drop","can't stop won't stop"],
-  // -uck / -ug / -unk
-  ["stuck","luck","duck","truck","chuck","pluck","struck","muck","buck","cluck","amuck","starstruck","dumbstruck","thunderstruck","lady luck","down on my luck","pass the buck","out of luck"],
-  // -ug / -ub / -ud
-  ["thug","drug","bug","hug","jug","mug","plug","rug","shrug","slug","snug","tug","dug","grub","club","hub","rub","sub","tub","shrub","nightclub","hot tub","sugarplum","overcome","come from","kingdom come"],
-];
 
-
-
-// Sentence templates for building suggestions
-const TEMPLATES = [
-  (w) => "I been " + randomFrom(["moving","working","grinding","fighting","climbing","building","pushing"]) + " ever since I found my " + w,
-  (w) => "They " + randomFrom(["can't","won't","don't"]) + " understand the way I " + randomFrom(["feel","move","think","shine","flow"]) + ", I " + randomFrom(["stay","keep","hold"]) + " true to my " + w,
-  (w) => randomFrom(["Yeah","Aye","Look","Real talk"]) + ", " + randomFrom(["every","all","through the"]) + " " + randomFrom(["night","day","moment","season"]) + " I " + randomFrom(["chase","seek","find","hold"]) + " the " + w,
-  (w) => randomFrom(["Came too far","Gone too deep","Moved too fast"]) + " to ever " + randomFrom(["stop now","turn back","slow down"]) + ", I own my " + w,
-  (w) => randomFrom(["Stay","Keep","Hold"]) + " " + randomFrom(["solid","focused","patient","humble","moving"]) + ", " + randomFrom(["never","won't","can't"]) + " " + randomFrom(["fold","break","stop","fall"]) + ", I live by the " + w,
-  (w) => "From the " + randomFrom(["bottom","struggle","darkness","mud","ground"]) + " I " + randomFrom(["rose","climbed","fought my way"]) + " to the " + w,
-  (w) => randomFrom(["No cap","On God","Facts","Real"]) + ", " + randomFrom(["everything I","all I ever","only thing I"]) + " " + randomFrom(["touch","build","chase","want"]) + " turns to " + w,
-  (w) => "Through " + randomFrom(["the rain","the pain","every storm","the dark"]) + " I " + randomFrom(["found","kept","held onto"]) + " my " + w,
-];
-
-function randomFrom(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+// =============================================================================
+// AI LYRIC ASSISTANT ENGINE -- Datamuse API powered (free, no key needed)
+// =============================================================================
 
 function getLastWord(line) {
-  const words = line.trim().split(" ").filter(w => w.length > 0);
-  return words[words.length - 1].replace(/[^a-zA-Z]/g, "").toLowerCase();
+  const words = line.trim().split(" ").filter(function(w){return w.length > 0;});
+  const last  = words[words.length - 1];
+  return last.replace(/[^a-zA-Z']/g, "").toLowerCase();
 }
 
-function findRhymeGroup(word) {
-  // Find which group contains this word
-  for (const group of RHYME_GROUPS) {
-    if (group.includes(word)) return group;
+function getLastLine(lyrics) {
+  const lines = lyrics.split("\n").filter(l => l.trim().length > 0);
+  return lines.length > 0 ? lines[lines.length - 1].trim() : "";
+}
+
+function countSyllables(word) {
+  word = word.toLowerCase().replace(/[^a-z]/g, "");
+  if (!word) return 1;
+  const vowelGroups = word.match(/[aeiouy]+/g);
+  return vowelGroups ? vowelGroups.length : 1;
+}
+
+function countLineSyllables(line) {
+  return line.split(" ").filter(function(w){return w.length > 0;}).reduce((sum, w) => sum + countSyllables(w), 0);
+}
+
+// Fetch rhymes from Datamuse API
+async function fetchRhymes(word) {
+  try {
+    const [perfect, near] = await Promise.all([
+      fetch("https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(word) + "&max=40")
+        .then(r => r.json()).catch(() => []),
+      fetch("https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(word) + "&max=20")
+        .then(r => r.json()).catch(() => []),
+    ]);
+    const perfWords = perfect.map(w => w.word);
+    const nearWords = near.map(w => w.word).filter(w => !perfWords.includes(w));
+    return { perfect: perfWords, near: nearWords };
+  } catch {
+    return { perfect: [], near: [] };
   }
-  // Try suffix matching
-  const suffixes = ["ight","ound","ame","old","eat","eed","ide","all","ack","eal","one","ow","ay","ine","ake","ive","art","ee","op","un","ess","ind","own","top"];
-  for (const suf of suffixes) {
-    if (word.endsWith(suf)) {
-      const group = RHYME_GROUPS.find(g => g[0].endsWith(suf));
-      if (group) return group;
-    }
+}
+
+// Fetch words with similar meaning/context to enrich line content
+async function fetchContextWords(word) {
+  try {
+    const res = await fetch(
+      "https://api.datamuse.com/words?ml=" + encodeURIComponent(word) + "&max=20"
+    );
+    const data = await res.json();
+    return data.map(w => w.word);
+  } catch {
+    return [];
   }
-  // Last resort - find partial matches
-  if (word.length >= 3) {
-    const tail = word.slice(-3);
-    const group = RHYME_GROUPS.find(g => g.some(w => w.endsWith(tail)));
-    if (group) return group;
-  }
-  return null;
+}
+
+// Rap line templates - slot rhyme word at end
+const RAP_TEMPLATES = [
+  (rw, sw) => "They " + (sw || "never") + " thought I'd make it but I " + rw,
+  (rw, sw) => "I been " + (sw || "grinding") + " every night, now I " + rw,
+  (rw, sw) => "From the " + (sw || "bottom") + " of the city watch me " + rw,
+  (rw, sw) => "Told myself I " + (sw || "won't") + " stop 'til I " + rw,
+  (rw, sw) => "All my " + (sw || "people") + " know the way I " + rw,
+  (rw, sw) => "Moving different, watch the way I " + rw,
+  (rw, sw) => "Stay " + (sw || "solid") + " through the struggle, I " + rw,
+  (rw, sw) => "Built from " + (sw || "nothing") + ", now they all " + rw,
+  (rw, sw) => "Through the " + (sw || "pain") + " and through the dark I " + rw,
+  (rw, sw) => "Eyes on the prize, I never " + rw,
+];
+
+function buildLine(rhymeWord, contextWords, templateIndex, syllableTarget) {
+  const sw = contextWords.length > 0
+    ? contextWords[Math.floor(Math.random() * Math.min(contextWords.length, 10))]
+    : null;
+  const template = RAP_TEMPLATES[templateIndex % RAP_TEMPLATES.length];
+  return template(rhymeWord, sw);
 }
 
 function detectScheme(lines) {
-  if (lines.length < 2) return "Couplet (AA)";
-  const last4 = lines.slice(-4).map(l => getLastWord(l));
-  const groups = last4.map(w => {
-    const g = findRhymeGroup(w);
-    return g ? g[0] : w;
-  });
-  if (lines.length >= 4) {
-    const [a, b, c, d] = groups;
+  if (lines.length < 2) return "Building...";
+  const endings = lines.slice(-4).map(l => getLastWord(l));
+  if (endings.length >= 4) {
+    const [a, b, c, d] = endings;
     if (a === c && b === d) return "ABAB";
     if (a === b && c === d) return "AABB";
-    if (b === d) return "ABAB (cross rhyme)";
-    if (a === b) return "AABB (couplet)";
+    if (b === d) return "ABAB";
+    if (a === b) return "AA (couplet)";
   }
-  if (groups[0] === groups[1]) return "AA (couplet)";
-  return "AB (alternating)";
-}
-
-function generateSuggestions(lyrics, beat, seed) {
-  const lines = lyrics.split("\n").filter(l => l.trim());
-  if (lines.length === 0) return null;
-
-  const lastLine = lines[lines.length - 1];
-  const lastWord = getLastWord(lastLine);
-  const scheme   = detectScheme(lines);
-
-  // Find rhyme group for last word
-  const group    = findRhymeGroup(lastWord);
-  const rhymes   = group ? group.filter(w => w !== lastWord) : [];
-
-  // Shuffle using seed for variety
-  const shuffleArr = (arr, s) => {
-    const a   = [...arr];
-    let   idx = s ? (s % Math.max(1, a.length)) : 0;
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = (Math.floor(Math.random() * (i + 1)) + idx) % (i + 1);
-      [a[i], a[j]] = [a[j], a[i]];
-      idx++;
-    }
-    return a;
-  };
-
-  const shuffled = shuffleArr(rhymes, seed || Date.now());
-  const trio     = shuffled.slice(0, 3);
-
-  const templates = shuffleArr(TEMPLATES, seed ? seed + 1 : Date.now() + 1);
-
-  const suggestions = trio.length >= 3
-    ? trio.map((rw, i) => templates[i % templates.length](rw))
-    : trio.length > 0
-    ? trio.map((rw, i) => templates[i % templates.length](rw))
-    : [
-        "Keep pushing forward, never look back",
-        "Stay focused on the path, never slack",
-        "Through the struggle I remain on track",
-      ];
-
-  return {
-    rhyme_scheme:     scheme,
-    last_rhyme_sound: '"' + lastWord + '"',
-    last_line:        lastLine,
-    suggestions,
-  };
+  return "ABAB";
 }
 
 function AiLyricAssistant({ text, beat, onSuggest }) {
-  const [results, setResults] = useState(null);
-  const [open,    setOpen]    = useState(false);
+  const [results,   setResults]   = useState(null);
+  const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState("");
+  const [open,      setOpen]      = useState(false);
   const [callCount, setCallCount] = useState(0);
 
-  const generate = (currentText, count) => {
-    const lines   = currentText.split("\n").filter(l => l.trim().length > 0);
-    if (lines.length === 0) return null;
+  const generate = async (currentText, count) => {
+    const lastLine = getLastLine(currentText);
+    if (!lastLine) return null;
 
-    const lastLine = lines[lines.length - 1].trim();
-    const words    = lastLine.split(" ").filter(w => w.length > 0);
-    const lastWord = words[words.length - 1].replace(/[^a-zA-Z]/gi, "").toLowerCase();
+    const lastWord      = getLastWord(lastLine);
+    const sylCount      = countLineSyllables(lastLine);
+    const scheme        = detectScheme(currentText.split("\n").filter(l => l.trim()));
 
-    // Find rhyming words - check exact match first, then suffix match
-    const found = [];
-    // Pass 1: exact word match
-    for (const group of RHYME_GROUPS) {
-      if (group.includes(lastWord)) {
-        found.push(...group.filter(w => w !== lastWord));
-        break;
+    setLoading(true);
+    setError("");
+
+    try {
+      const [rhymes, context] = await Promise.all([
+        fetchRhymes(lastWord),
+        fetchContextWords(lastWord),
+      ]);
+
+      // Pick best rhyme words - prefer perfect, fall back to near
+      const pool = rhymes.perfect.length >= 3
+        ? rhymes.perfect
+        : [...rhymes.perfect, ...rhymes.near];
+
+      if (pool.length === 0) {
+        setError('Could not find rhymes for "' + lastWord + '". Try a more common word.');
+        setLoading(false);
+        return;
       }
-    }
-    // Pass 2: suffix match (last 3 chars)
-    if (found.length === 0 && lastWord.length >= 3) {
-      const tail3 = lastWord.slice(-3);
-      const tail2 = lastWord.slice(-2);
-      for (const group of RHYME_GROUPS) {
-        if (group.some(w => w.endsWith(tail3) || (tail2.length === 2 && w.endsWith(tail2)))) {
-          found.push(...group.filter(w => w !== lastWord));
-          break;
-        }
+
+      // Shuffle pool offset by callCount so regenerate gives new words
+      const offset    = (count * 3) % pool.length;
+      const picked    = [];
+      for (let i = 0; i < Math.min(5, pool.length); i++) {
+        picked.push(pool[(offset + i) % pool.length]);
       }
+
+      // Build 3-5 lines
+      const suggestions = picked.slice(0, 5).map((rw, i) =>
+        buildLine(rw, context, (count + i) % RAP_TEMPLATES.length, sylCount)
+      );
+
+      return {
+        lastLine,
+        lastWord,
+        scheme,
+        syllables:   sylCount,
+        perfectCount: rhymes.perfect.length,
+        nearCount:    rhymes.near.length,
+        suggestions,
+      };
+    } catch (e) {
+      setError("Network error - check your connection.");
+      setLoading(false);
+      return null;
     }
-    // Pass 3: any partial match
-    if (found.length === 0 && lastWord.length >= 2) {
-      const tail2 = lastWord.slice(-2);
-      for (const group of RHYME_GROUPS) {
-        if (group.some(w => w.endsWith(tail2))) {
-          found.push(...group.filter(w => w !== lastWord));
-          break;
-        }
-      }
-    }
-
-    // Rotate through rhymes based on call count so regenerate always differs
-    const pool     = found.length > 0 ? found : ["strong","on","gone","long","along","belong","song","wrong","prolong"];
-    const offset   = (count * 3) % Math.max(1, pool.length);
-    const trio     = [];
-    for (let i = 0; i < 3; i++) {
-      trio.push(pool[(offset + i) % pool.length]);
-    }
-
-    // Build sentences using different templates per call
-    const starters = [
-      ["I been moving", "They watching", "Can't stop now", "Stay focused", "No looking back", "Keep it going", "Eyes on the prize", "Never fold"],
-      ["Came too far", "Built different", "Through the struggle", "From the bottom", "Against all odds", "Grind don't stop", "Real ones know", "On my way"],
-      ["Yeah I", "Watch me", "Told myself", "Every day I", "Since day one I", "Moving in silence", "Let them talk", "Trust the process"],
-    ];
-    const templateSet = starters[count % starters.length];
-
-    const suggestions = trio.map((rhymeWord, i) => {
-      const starter = templateSet[(i + count) % templateSet.length];
-      const middles = ["keep pushing til I find my", "stay solid and I hold my", "never stop until I reach the", "rise above and claim my", "grind it out and earn my", "move in silence chase my"];
-      const middle  = middles[(i + count) % middles.length];
-      return starter + " " + middle + " " + rhymeWord;
-    });
-
-    const scheme = lines.length >= 2 ? detectScheme(lines) : "Building...";
-
-    return {
-      lastLine,
-      lastWord,
-      scheme,
-      suggestions,
-    };
   };
 
-  const handleOpen = () => {
-    const next = callCount + 1;
-    setCallCount(next);
-    const r = generate(text, next);
-    if (!r) {
+  const handleOpen = async () => {
+    const lines = text.split("\n").filter(l => l.trim());
+    if (lines.length === 0) {
+      setError("Write at least one line first!");
       setOpen(true);
-      setResults(null);
       return;
     }
-    setResults(r);
     setOpen(true);
-  };
-
-  const handleRegenerate = () => {
     const next = callCount + 1;
     setCallCount(next);
-    const r = generate(text, next);
-    setResults(r);
+    const r = await generate(text, next);
+    setLoading(false);
+    if (r) setResults(r);
+  };
+
+  const handleRegenerate = async () => {
+    const next = callCount + 1;
+    setCallCount(next);
+    setResults(null);
+    const r = await generate(text, next);
+    setLoading(false);
+    if (r) setResults(r);
   };
 
   return (
@@ -650,7 +562,7 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
         background: "linear-gradient(135deg,#6B21A8,#C026D3)", color: "white",
         display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
       }}>
-        ✨ AI Lyric Assistant
+        AI Lyric Assistant
       </button>
 
       {open && (
@@ -661,45 +573,67 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
         }}>
           <div style={{
             display: "flex", alignItems: "center", gap: 12,
-            padding: "14px 16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a",
+            padding: "14px 16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a", flexShrink: 0,
           }}>
             <button onClick={() => setOpen(false)} style={{
               background: "#1a1a1a", border: "1px solid #333", borderRadius: "50%",
               color: "white", width: 36, height: 36, fontSize: 20, cursor: "pointer",
               display: "flex", alignItems: "center", justifyContent: "center",
-            }}>←</button>
+            }}>&#8592;</button>
             <div style={{ flex: 1 }}>
-              <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 14 }}>✨ Lyric Assistant</div>
-              <div style={{ color: "#555", fontSize: 11 }}>Tap a suggestion to add it</div>
+              <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 14 }}>AI Lyric Assistant</div>
+              <div style={{ color: "#555", fontSize: 11 }}>Powered by Datamuse Rhyme API</div>
             </div>
-            <button onClick={handleRegenerate} style={{
-              background: "#C026D3", border: "none", borderRadius: 20,
-              color: "white", fontWeight: 800, fontSize: 12, padding: "7px 16px", cursor: "pointer",
+            <button onClick={handleRegenerate} disabled={loading} style={{
+              background: loading ? "#333" : "#C026D3", border: "none",
+              borderRadius: 20, color: "white", fontWeight: 800,
+              fontSize: 12, padding: "7px 16px", cursor: loading ? "not-allowed" : "pointer",
             }}>
-              🔄 New Options
+              {loading ? "..." : "New Options"}
             </button>
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-            {!results && (
-              <div style={{ color: "#F87171", textAlign: "center", padding: 20 }}>
-                Write at least one line first!
+            {loading && (
+              <div style={{ textAlign: "center", padding: "60px 0" }}>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>&#10024;</div>
+                <div style={{ color: "#888", fontSize: 14 }}>Finding rhymes for your line...</div>
               </div>
             )}
 
-            {results && (
+            {error && !loading && (
+              <div style={{ color: "#F87171", fontSize: 14, textAlign: "center", padding: "20px 0" }}>{error}</div>
+            )}
+
+            {results && !loading && (
               <>
                 <div style={{ background: "#111", borderRadius: 12, padding: 14, marginBottom: 16, border: "1px solid #1e1e1e" }}>
                   <div style={{ color: "#555", fontSize: 11, marginBottom: 4 }}>ANALYSING LAST LINE</div>
                   <div style={{ color: "white", fontSize: 13, fontStyle: "italic", marginBottom: 8 }}>"{results.lastLine}"</div>
-                  <div style={{ color: "#555", fontSize: 11 }}>Rhyming with: <span style={{ color: "#F59E0B", fontWeight: 700 }}>"{results.lastWord}"</span> • Scheme: <span style={{ color: "#aaa" }}>{results.scheme}</span></div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#C026D3" }}>
+                      Rhyming: "{results.lastWord}"
+                    </div>
+                    <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#F59E0B" }}>
+                      {results.perfectCount} perfect + {results.nearCount} near rhymes found
+                    </div>
+                    <div style={{ background: "rgba(99,91,255,0.15)", border: "1px solid rgba(99,91,255,0.3)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#818CF8" }}>
+                      {results.syllables} syllables
+                    </div>
+                  </div>
                 </div>
 
-                <div style={{ color: "#555", fontSize: 11, fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>SUGGESTED NEXT LINES - TAP TO ADD</div>
+                <div style={{ color: "#555", fontSize: 11, fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>
+                  SUGGESTED NEXT LINES - TAP TO ADD
+                </div>
 
                 {results.suggestions.map((line, i) => (
-                  <div key={i + "-" + callCount} onClick={() => { onSuggest(line); setOpen(false); }}
-                    style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid #1e1e1e", cursor: "pointer" }}>
+                  <div key={i + "-" + callCount}
+                    onClick={() => { onSuggest(line); setOpen(false); }}
+                    style={{
+                      background: "#111", borderRadius: 14, padding: 16,
+                      marginBottom: 12, border: "1px solid #1e1e1e", cursor: "pointer",
+                    }}>
                     <div style={{ color: "#555", fontSize: 11, marginBottom: 6, fontWeight: 700 }}>OPTION {i + 1}</div>
                     <div style={{ color: "white", fontSize: 15, lineHeight: 1.6, fontStyle: "italic" }}>"{line}"</div>
                     <div style={{ color: "#C026D3", fontSize: 12, marginTop: 8, fontWeight: 600 }}>+ Add to lyrics</div>
@@ -714,9 +648,7 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
   );
 }
 
-// =============================================================================
-// LYRICS NOTEPAD - Artist Pro only, appears over the player
-// =============================================================================
+
 function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex }) {
   const [text,  setText]  = useState(initialLyric ? initialLyric.text  : "");
   const [title, setTitle] = useState(initialLyric ? initialLyric.title : "");
@@ -725,11 +657,6 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
     if (node) node.scrollTop = 0;
   }, []);
   const isEditing = initialLyric !== undefined && initialLyric !== null;
-  const [editorReady, setEditorReady] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setEditorReady(true), 400);
-    return () => clearTimeout(t);
-  }, []);
 
   const handleSave = () => {
     if (!text.trim()) return;
@@ -798,50 +725,42 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
         )}
       </div>
 
-      {editorReady ? (
-        <>
-          <div style={{ padding: "12px 16px 8px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a", flexShrink: 0 }}>
-            <input
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              placeholder="Song title (optional)"
-              tabIndex={-1}
-              style={{
-                width: "100%", background: "#1a1a1a", border: "1px solid #333",
-                borderRadius: 10, padding: "10px 14px", color: "white",
-                fontSize: 14, outline: "none", boxSizing: "border-box",
-              }}
-            />
-          </div>
+      <div style={{ padding: "12px 16px 8px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
+        <input
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          placeholder="Song title (optional)"
+          style={{
+            width: "100%", background: "#1a1a1a", border: "1px solid #333",
+            borderRadius: 10, padding: "10px 14px", color: "white",
+            fontSize: 14, outline: "none", boxSizing: "border-box",
+          }}
+        />
+      </div>
 
-          <textarea
-            value={text}
-            onChange={e => setText(e.target.value)}
-            placeholder="Start writing your lyrics here... Writer's block? Tap the AI Lyric Assistant button below - it will analyse your rhyme scheme and suggest the perfect next line to keep you flowing."
-            style={{
-              flex: 1, background: "#0d0d0d", border: "none", outline: "none",
-              color: "white", fontSize: 15, lineHeight: 1.8, padding: "16px",
-              resize: "none", fontFamily: "'DM Sans',sans-serif",
-            }}
-          />
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder="Start writing your lyrics here... Writer's block? Tap the AI Lyric Assistant button below - it will analyse your rhyme scheme and suggest the perfect next line to keep you flowing."
+        style={{
+          flex: 1, background: "#0d0d0d", border: "none", outline: "none",
+          color: "white", fontSize: 15, lineHeight: 1.8, padding: "16px",
+          resize: "none", fontFamily: "'DM Sans',sans-serif",
+          WebkitUserSelect: "text", userSelect: "text",
+        }}
+      />
 
-          <div style={{
-            padding: "12px 16px", background: "#0a0a0a",
-            borderTop: "1px solid #1a1a1a",
-            paddingBottom: "calc(12px + env(safe-area-inset-bottom))",
-            display: "flex", flexDirection: "column", gap: 8, flexShrink: 0,
-          }}>
-            <div style={{ color: "#444", fontSize: 11, textAlign: "center" }}>
-              {text.length} characters {text.split(" ").filter(function(w){return w.length > 0;}).length} words
-            </div>
-            <AiLyricAssistant text={text} beat={beat} onSuggest={s => { setText(p => p ? p + String.fromCharCode(10) + s : s); }} />
-          </div>
-        </>
-      ) : (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ color: "#333", fontSize: 13 }}>Loading editor...</div>
+      <div style={{
+        padding: "12px 16px", background: "#0a0a0a",
+        borderTop: "1px solid #1a1a1a",
+        paddingBottom: "calc(12px + env(safe-area-inset-bottom))",
+        display: "flex", flexDirection: "column", gap: 8,
+      }}>
+        <div style={{ color: "#444", fontSize: 11, textAlign: "center" }}>
+          {text.length} characters • {text.split(" ").filter(function(w){return w.length > 0;}).length} words
         </div>
-      )}
+        <AiLyricAssistant text={text} beat={beat} onSuggest={s => { setText(p => p ? p + String.fromCharCode(10) + s : s); }} />
+      </div>
     </div>
   );
 }
