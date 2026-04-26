@@ -371,115 +371,142 @@ function Av({ name, size = 88, idx = 0, img }) {
 // AI LYRIC ASSISTANT — local rhyme engine, no API needed, 100% free
 // =============================================================================
 
-// Rhyme dictionary — common end sounds mapped to rhyming words/phrases
-const RHYME_BANK = {
-  "ay": ["day","way","say","play","stay","pray","pay","slay","display","okay","hooray","relay","betray","delay","convey","portray","decay","away","today","yesterday","highway","midway","runway"],
-  "ight": ["night","right","fight","light","sight","might","tight","bright","flight","white","write","ignite","despite","delight","tonight","midnight","highlight","moonlight","flashlight","insight"],
-  "ow": ["know","flow","show","glow","grow","slow","go","though","below","bestow","overthrow","plateau","shadow","window","follow","hollow","borrow","tomorrow","sorrow","narrow"],
-  "een": ["seen","mean","clean","dream","team","scheme","supreme","regime","between","machine","routine","serene","marine","obscene","intervene","quarantine","magazine","gasoline","tambourine"],
-  "ine": ["mine","shine","fine","line","time","crime","rhyme","climb","sublime","overtime","paradigm","pantomime","bedtime","lifetime","nighttime","prime","slime","dime","lime","grime"],
-  "ake": ["take","make","break","shake","wake","fake","mistake","heartbreak","overtake","forsake","earthquake","keepsake","handshake","cupcake","snowflake","stake","lake","bake","rake","sake"],
-  "one": ["alone","phone","throne","zone","stone","bone","tone","moan","groan","unknown","overthrown","microphone","headphone","milestone","cornerstone","stepping stone","twilight zone"],
-  "ack": ["back","track","stack","black","crack","lack","attack","setback","flashback","payback","comeback","feedback","kickback","cutback","throwback","ransack","knack","hack","slack","pack"],
-  "ound": ["ground","found","sound","around","bound","pound","crown","down","town","noun","drown","profound","surround","background","underground","playground","rebound","compound","astound"],
-  "ove": ["love","above","shove","dove","glove","nothing","something","coming","running","stunning","cunning","hunting","fronting","bumping","jumping","pumping","dumping","lumping","stumping"],
-  "eal": ["real","feel","deal","heal","steel","wheel","appeal","reveal","conceal","ideal","ordeal","surreal","kneel","meal","seal","zeal","peel","repeal","congeal","genteel"],
-  "ame": ["same","name","game","flame","claim","frame","blame","shame","fame","came","tame","aim","claim","exclaim","proclaim","acclaim","defame","inflame","became","reclaim"],
-  "old": ["told","bold","cold","gold","hold","sold","fold","mold","old","unfold","withhold","behold","enrolled","controlled","consoled","patrolled","extolled","manifold","household"],
-  "eat": ["beat","heat","street","complete","repeat","defeat","compete","concrete","discrete","elite","athlete","heartbeat","deadbeat","offbeat","upbeat","retreat","deceit","receipt","conceit"],
-  "eed": ["need","lead","freed","greed","creed","speed","bleed","feed","seed","weed","proceed","succeed","indeed","concede","decreed","agreed","guaranteed","stampede","supersede"],
-  "ive": ["live","give","drive","thrive","survive","arrive","revive","derive","connive","contrive","archive","deprive","alive","beehive","nosedive","overdrive","high-five"],
-  "art": ["heart","start","smart","apart","depart","impart","restart","upstart","sweetheart","heartbreak","artwork","marketplace","chart","dart","cart","part","tart","mart"],
-  "all": ["call","fall","wall","hall","tall","ball","crawl","stall","install","recall","overall","downfall","rainfall","footfall","nightfall","windfall","freefall","enthrall","befall"],
-  "ide": ["ride","side","hide","guide","pride","tried","cried","denied","applied","relied","supplied","inside","outside","worldwide","homicide","override","provide","divide","reside","confide"],
-  "ess": ["stress","bless","less","yes","guess","mess","address","express","impress","confess","success","progress","access","excess","princess","darkness","weakness","sadness","madness","gladness"],
-};
+// =============================================================================
+// LYRIC ASSISTANT ENGINE — local rhyme generator
+// =============================================================================
+
+// Large rhyme groups — words grouped by shared ending sound
+const RHYME_GROUPS = [
+  ["day","way","say","play","stay","pray","pay","slay","okay","away","today","highway","relay","display","portray","betray","decay","convey","hooray","spray","stray","bay","clay","gray","lay","may","ray","sway","tray"],
+  ["night","right","fight","light","sight","might","tight","bright","flight","white","ignite","despite","delight","tonight","midnight","highlight","moonlight","flashlight","insight","invite","excite","unite","recite","polite","alight","fright","height","kite","quite","write","bite","cite","mite","smite","sprite"],
+  ["know","flow","show","glow","grow","slow","go","though","below","bestow","shadow","tomorrow","sorrow","follow","hollow","borrow","plateau","although","ago","radio","studio","vertigo"],
+  ["seen","mean","clean","dream","team","scheme","supreme","between","machine","routine","serene","marine","obscene","intervene","magazine","gasoline","lean","keen","queen","screen","scene","bean","dean","green","preen","sheen","teen","wean"],
+  ["mine","shine","fine","line","time","crime","rhyme","sublime","overtime","prime","dime","lime","grime","vine","wine","pine","nine","spine","twine","divine","design","align","define","refine","combine","decline","confine","outline","sunshine","moonshine","sideline","deadline"],
+  ["take","make","break","shake","wake","fake","mistake","heartbreak","forsake","earthquake","stake","lake","bake","rake","sake","cake","drake","flake","snake","awake","intake","overtake","remake","cupcake","snowflake","namesake"],
+  ["alone","phone","throne","zone","stone","bone","tone","moan","groan","unknown","microphone","milestone","cornerstone","shown","blown","grown","flown","own","known","sewn","thrown","postpone","ozone","cyclone","backbone","jawbone","headstone","limestone","gravestone"],
+  ["back","track","stack","black","crack","attack","setback","flashback","payback","comeback","feedback","kickback","cutback","throwback","knack","hack","slack","pack","rack","lack","jack","mac","shack","snack","smack","whack","knack"],
+  ["ground","found","sound","around","bound","pound","profound","surround","background","underground","playground","rebound","compound","astound","abound","renowned","expound","confound","dumbfound"],
+  ["real","feel","deal","heal","steel","wheel","appeal","reveal","conceal","ideal","ordeal","surreal","kneel","meal","seal","zeal","peel","repeal","congeal","genteel","squeal","teal","veal","weal","unreal","ordeal"],
+  ["same","name","game","flame","claim","frame","blame","shame","fame","came","tame","aim","exclaim","proclaim","acclaim","defame","inflame","became","reclaim","proclaim","rename","nickname","lastname","ballgame","endgame"],
+  ["told","bold","cold","gold","hold","sold","fold","old","unfold","withhold","behold","enrolled","controlled","consoled","manifold","household","threshold","stronghold"],
+  ["beat","heat","street","complete","repeat","defeat","compete","elite","athlete","heartbeat","deadbeat","retreat","deceit","receipt","neat","feat","meat","seat","treat","wheat","cheat","greet","fleet","sleet","sweet","tweet","concrete","discrete","obsolete","delete","deplete","secrete","discreet","excrete"],
+  ["need","lead","freed","greed","creed","speed","bleed","feed","seed","weed","proceed","succeed","indeed","concede","agreed","guaranteed","stampede","plant the seed","take the lead","in the lead"],
+  ["live","give","drive","thrive","survive","arrive","revive","derive","connive","contrive","deprive","alive","high five","nosedive","overdrive","archive","beehive"],
+  ["heart","start","smart","apart","depart","impart","restart","sweetheart","artwork","chart","dart","cart","part","tart","art","counterpart","masterart","breakthrough","breakthrough"],
+  ["call","fall","wall","hall","tall","ball","crawl","stall","install","recall","overall","downfall","rainfall","nightfall","windfall","freefall","enthrall","befall","appall","forestall"],
+  ["ride","side","hide","guide","pride","tried","cried","denied","applied","relied","supplied","inside","outside","worldwide","override","provide","divide","reside","confide","decide","beside","collide","subside","upside","downside","fireside","riverside","landslide","riptide","suicide","homicide","coincide"],
+  ["stress","bless","less","yes","guess","mess","address","express","impress","confess","success","progress","access","excess","darkness","weakness","sadness","madness","gladness","princess","fortress","nevertheless","nonetheless","loneliness","happiness","emptiness","bitterness","tenderness"],
+  ["grind","mind","find","blind","kind","bind","remind","behind","mankind","unwind","rewind","designed","defined","refined","aligned","combined","confined","declined","reclined","intertwined","mastermind"],
+  ["free","see","be","me","key","tree","agree","degree","guarantee","destiny","energy","memory","victory","history","mystery","category","territory","possibility","opportunity","ability","reality","mentality","brutality","loyalty","royalty","penalty","specialty"],
+  ["top","stop","drop","shop","pop","hop","non-stop","rooftop","desktop","teardrop","backdrop","raindrop","dewdrop","hilltop","mountaintop","workshop","laptop"],
+  ["up","cut","gut","but","what","shut","strut","rut","mutt","putt","abrupt","erupt","corrupt","disrupt","interrupt","construct","destruct","instruct","obstruct"],
+  ["run","done","one","gun","sun","fun","won","begun","outdone","outrun","undone","overcome","lifetime","someone","anyone","everyone","none","bun","nun","pun","spun","stun","ton"],
+  ["own","grown","shown","blown","known","thrown","flown","sewn","postpone","outgrown","overthrown","fullblown","homegrown","full-grown"],
+];
+
+// Sentence templates for building suggestions
+const TEMPLATES = [
+  (w) => "I been " + randomFrom(["moving","working","grinding","fighting","climbing","building","pushing"]) + " ever since I found my " + w,
+  (w) => "They " + randomFrom(["can't","won't","don't"]) + " understand the way I " + randomFrom(["feel","move","think","shine","flow"]) + ", I " + randomFrom(["stay","keep","hold"]) + " true to my " + w,
+  (w) => randomFrom(["Yeah","Aye","Look","Real talk"]) + ", " + randomFrom(["every","all","through the"]) + " " + randomFrom(["night","day","moment","season"]) + " I " + randomFrom(["chase","seek","find","hold"]) + " the " + w,
+  (w) => randomFrom(["Came too far","Gone too deep","Moved too fast"]) + " to ever " + randomFrom(["stop now","turn back","slow down"]) + ", I own my " + w,
+  (w) => randomFrom(["Stay","Keep","Hold"]) + " " + randomFrom(["solid","focused","patient","humble","moving"]) + ", " + randomFrom(["never","won't","can't"]) + " " + randomFrom(["fold","break","stop","fall"]) + ", I live by the " + w,
+  (w) => "From the " + randomFrom(["bottom","struggle","darkness","mud","ground"]) + " I " + randomFrom(["rose","climbed","fought my way"]) + " to the " + w,
+  (w) => randomFrom(["No cap","On God","Facts","Real"]) + ", " + randomFrom(["everything I","all I ever","only thing I"]) + " " + randomFrom(["touch","build","chase","want"]) + " turns to " + w,
+  (w) => "Through " + randomFrom(["the rain","the pain","every storm","the dark"]) + " I " + randomFrom(["found","kept","held onto"]) + " my " + w,
+];
+
+function randomFrom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
 
 function getLastWord(line) {
-  const words = line.trim().split(/\s+/);
+  const words = line.trim().split(" ").filter(w => w.length > 0);
   return words[words.length - 1].replace(/[^a-zA-Z]/g, "").toLowerCase();
 }
 
-function detectRhymeSound(word) {
-  // Try to match end of word to rhyme bank keys
-  for (const sound of Object.keys(RHYME_BANK)) {
-    if (word.endsWith(sound)) return sound;
+function findRhymeGroup(word) {
+  // Find which group contains this word
+  for (const group of RHYME_GROUPS) {
+    if (group.includes(word)) return group;
   }
-  // Fallback: last 2-3 letters
-  if (word.length >= 3) return word.slice(-3);
-  return word.slice(-2);
-}
-
-function getRhymingWords(sound) {
-  return RHYME_BANK[sound] || RHYME_BANK[Object.keys(RHYME_BANK).find(k => sound.endsWith(k))] || [];
+  // Try suffix matching
+  const suffixes = ["ight","ound","ame","old","eat","eed","ide","all","ack","eal","one","ow","ay","ine","ake","ive","art","ee","op","un","ess","ind","own","top"];
+  for (const suf of suffixes) {
+    if (word.endsWith(suf)) {
+      const group = RHYME_GROUPS.find(g => g[0].endsWith(suf));
+      if (group) return group;
+    }
+  }
+  // Last resort - find partial matches
+  if (word.length >= 3) {
+    const tail = word.slice(-3);
+    const group = RHYME_GROUPS.find(g => g.some(w => w.endsWith(tail)));
+    if (group) return group;
+  }
+  return null;
 }
 
 function detectScheme(lines) {
-  if (lines.length < 2) return "AA";
-  const lastWords = lines.map(getLastWord);
-  const sounds    = lastWords.map(detectRhymeSound);
-  // Check last 2
-  if (sounds[sounds.length - 1] === sounds[sounds.length - 2]) return "AA (couplet)";
+  if (lines.length < 2) return "Couplet (AA)";
+  const last4 = lines.slice(-4).map(l => getLastWord(l));
+  const groups = last4.map(w => {
+    const g = findRhymeGroup(w);
+    return g ? g[0] : w;
+  });
   if (lines.length >= 4) {
-    const [a, b, c, d] = sounds.slice(-4);
+    const [a, b, c, d] = groups;
     if (a === c && b === d) return "ABAB";
     if (a === b && c === d) return "AABB";
-    if (b === d) return "ABAB";
+    if (b === d) return "ABAB (cross rhyme)";
+    if (a === b) return "AABB (couplet)";
   }
-  return "ABAB";
-}
-
-// Line starters for different vibes
-const LINE_STARTERS = [
-  "I been", "They say", "All I know is", "Can't stop now",
-  "Yeah, I", "Told myself", "Every night I", "Watch me",
-  "No cap,", "On my grind,", "Since day one,", "Never fold,",
-  "Stay solid,", "Through the pain,", "In my zone,", "Moving different,",
-  "Back against the wall but", "Came too far to", "They never thought I'd",
-  "Living proof that", "From the bottom now", "Eyes on the prize,",
-];
-
-function buildSuggestion(rhymeWord, lastLine) {
-  const starters = LINE_STARTERS;
-  const starter  = starters[Math.floor(Math.random() * starters.length)];
-  const fillers  = ["keep it moving", "staying true", "never lose", "chase the dream", "hold it down", "make my move", "find my way", "rise above", "break the chains", "claim my throne"];
-  const filler   = fillers[Math.floor(Math.random() * fillers.length)];
-  return starter + " " + filler + ", " + rhymeWord;
+  if (groups[0] === groups[1]) return "AA (couplet)";
+  return "AB (alternating)";
 }
 
 function generateSuggestions(lyrics, beat, seed) {
   const lines = lyrics.split("\n").filter(l => l.trim());
   if (lines.length === 0) return null;
 
-  // Always focus on the LAST line written
   const lastLine = lines[lines.length - 1];
   const lastWord = getLastWord(lastLine);
-  const sound    = detectRhymeSound(lastWord);
   const scheme   = detectScheme(lines);
 
-  // Get all rhyming words and exclude the last word itself
-  const rhymes   = getRhymingWords(sound).filter(w => w.toLowerCase() !== lastWord.toLowerCase());
+  // Find rhyme group for last word
+  const group    = findRhymeGroup(lastWord);
+  const rhymes   = group ? group.filter(w => w !== lastWord) : [];
 
-  // Shuffle differently each call using seed
-  const shuffled = [...rhymes].sort(() => Math.random() - 0.5);
+  // Shuffle using seed for variety
+  const shuffleArr = (arr, s) => {
+    const a   = [...arr];
+    let   idx = s ? (s % Math.max(1, a.length)) : 0;
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = (Math.floor(Math.random() * (i + 1)) + idx) % (i + 1);
+      [a[i], a[j]] = [a[j], a[i]];
+      idx++;
+    }
+    return a;
+  };
 
-  // Pick 3 unique rhyming words, rotate based on call count
-  const picked = shuffled.slice(0, Math.min(9, shuffled.length));
-  const offset = seed ? Math.floor(seed / 100) % Math.max(1, picked.length - 2) : 0;
-  const trio   = picked.slice(offset, offset + 3).concat(picked.slice(0, Math.max(0, 3 - (picked.length - offset))));
-  const final3 = trio.slice(0, 3);
+  const shuffled = shuffleArr(rhymes, seed || Date.now());
+  const trio     = shuffled.slice(0, 3);
 
-  const suggestions = final3.length > 0
-    ? final3.map(rw => buildSuggestion(rw, lastLine))
+  const templates = shuffleArr(TEMPLATES, seed ? seed + 1 : Date.now() + 1);
+
+  const suggestions = trio.length >= 3
+    ? trio.map((rw, i) => templates[i % templates.length](rw))
+    : trio.length > 0
+    ? trio.map((rw, i) => templates[i % templates.length](rw))
     : [
         "Keep pushing forward, never look back",
-        "Stay focused on the path I'm on",
-        "Through the struggle I remain strong",
+        "Stay focused on the path, never slack",
+        "Through the struggle I remain on track",
       ];
 
   return {
     rhyme_scheme:     scheme,
-    last_rhyme_sound: '"' + lastWord + '" (' + sound + ' sound)',
+    last_rhyme_sound: '"' + lastWord + '"',
     last_line:        lastLine,
     suggestions,
   };
