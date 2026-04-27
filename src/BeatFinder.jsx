@@ -1054,7 +1054,7 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
     );
   };
 
-  if (loading) return <BFLoader type="bars" text="LOADING BEATS..." />;
+  if (loading) return <BFLoader type="bars" text="LOADING BEATS...PLEASE BE PATIENT." />;
 
   if (error && !beats.length) return (
     <div style={{ padding: "20px 0" }}>
@@ -1525,6 +1525,14 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
       grad: "linear-gradient(135deg,#180800 0%,#3a1500 60%,#F59E0B 100%)",
       cta: "Go Producer Pro",
     },
+    {
+      title: "Write & Save Lyrics",
+      sub: "Write lyrics whilst beats play & save to your profile",
+      emoji: "📝",
+      grad: "linear-gradient(135deg,#1a0030 0%,#3d0060 40%,#7C1FA8 75%,#C026D3 100%)",
+      cta: "Write Lyrics",
+      lyricsSlide: true,
+    },
   ];
 
   const GENRES = [
@@ -1588,10 +1596,13 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
           <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 13,
             marginBottom: 18, lineHeight: 1.5 }}>{slide.sub}</div>
           <button onClick={onGoProfile} style={{
-            background: "rgba(255,255,255,0.15)", backdropFilter: "blur(10px)",
-            border: "1px solid rgba(255,255,255,0.25)", borderRadius: 22,
+            background: slide.lyricsSlide ? "rgba(192,38,211,0.35)" : "rgba(255,255,255,0.15)",
+            backdropFilter: "blur(10px)",
+            border: slide.lyricsSlide ? "1px solid rgba(192,38,211,0.6)" : "1px solid rgba(255,255,255,0.25)",
+            borderRadius: 22,
             color: "white", fontWeight: 800, fontSize: 13,
             padding: "9px 20px", cursor: "pointer",
+            boxShadow: slide.lyricsSlide ? "0 0 16px rgba(192,38,211,0.4)" : "none",
           }}>{slide.cta} →</button>
 
           {/* Dot indicators */}
@@ -1693,7 +1704,7 @@ function FeaturedCarousel({ savedIds, onSave, onPlay }) {
 
   if (loading) return (
     <div style={{ paddingLeft: 16 }}>
-      <BFLoader type="bars" text="LOADING BEATS..." />
+      <BFLoader type="bars" text="LOADING BEATS...PLEASE BE PATIENT." />
     </div>
   );
 
@@ -1770,7 +1781,7 @@ function TrendingStrip({ savedIds, onSave, onPlay }) {
 
   if (loading) return (
     <div style={{ paddingLeft: 16 }}>
-      <BFLoader type="bars" text="LOADING BEATS..." />
+      <BFLoader type="bars" text="LOADING BEATS...PLEASE BE PATIENT." />
     </div>
   );
 
@@ -2152,7 +2163,7 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
         </div>
       </div>
 
-    if (loading) return <BFLoader type="spinner" text="LOADING BEATS..." />;
+    if (loading) return <BFLoader type="spinner" text="LOADING BEATS...PLEASE BE PATIENT." />;
 
       {error && (
         <div style={{ background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 14, padding: 20, textAlign: "center" }}>
@@ -2329,7 +2340,7 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
 
   const LoadingRow = () => (
     <div style={{ paddingLeft: 16, marginBottom: 32 }}>
-      <BFLoader type="bars" text="Loading..." />
+      <BFLoader type="bars" text="Loading beats...please be patient." />
     </div>
   );
 
