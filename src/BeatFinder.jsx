@@ -1618,12 +1618,20 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
   const [rLoading,  setRLoading]  = useState(true);
   const [tError,    setTError]    = useState(null);
   const [rError,    setRError]    = useState(null);
+  const [activeSection, setActiveSection] = useState("trending");
+  const [fresh,    setFresh]    = useState([]);
+  const [fLoading, setFLoading] = useState(true);
 
   useEffect(() => {
     // Fetch trending (1M+ views)
     apiFetch("/api/youtube/trending")
       .then(d => { setTrending(d.beats || []); setTLoading(false); })
       .catch(e => { setTError(e.message); setTLoading(false); });
+
+    // Fresh uploads: sort by date, prioritise recency
+    apiFetch("/api/youtube/search?artist=type+beat&page=1&filter_title=false&max=10")
+      .then(d => { setFresh(d.beats || []); setFLoading(false); })
+      .catch(() => setFLoading(false));
 
     // Rising producers: search recent uploads from smaller producers
     // Use the producer beats from the DB - they are newer/smaller
@@ -1656,15 +1664,47 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
   return (
     <div style={{ padding: "0 16px 100px" }}>
       <div style={{ padding: "20px 0 0" }}>
-        <div style={{ background: "linear-gradient(135deg,#1a1a2e,#6B21A8)", borderRadius: 16, padding: "20px", marginBottom: 24 }}>
+        <div style={{ background: "linear-gradient(135deg,#1a1a2e,#6B21A8)", borderRadius: 16, padding: "20px", marginBottom: 16 }}>
           <div style={{ color: "#F59E0B", fontSize: 13, fontWeight: 800, marginBottom: 4 }}>DISCOVER</div>
           <div style={{ color: "white", fontSize: 26, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>Trending & Rising</div>
           <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>Viral beats + emerging producers</div>
         </div>
+
+        <div style={{
+          display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4, marginBottom: 20,
+          scrollbarWidth: "none", WebkitOverflowScrolling: "touch",
+        }}>
+          {[
+            { id: "trending", emoji: "🔥", label: "YouTube Trending", color: "#F59E0B" },
+            { id: "rising",   emoji: "🚀", label: "Rising Producers", color: "#22C55E" },
+            { id: "fresh",    emoji: "🎯", label: "Fresh Uploads",    color: "#06B6D4" },
+          ].map(function(chip) {
+            var active = activeSection === chip.id;
+            return (
+              <button
+                key={chip.id}
+                onClick={function(){ setActiveSection(chip.id); document.getElementById("section-" + chip.id).scrollIntoView({ behavior: "smooth", block: "start" }); }}
+                style={{
+                  flexShrink: 0, display: "flex", alignItems: "center", gap: 6,
+                  padding: "8px 16px", borderRadius: 24, cursor: "pointer", fontWeight: 700, fontSize: 13,
+                  border: active ? "2px solid " + chip.color : "1.5px solid #2a2a2a",
+                  background: active ? (chip.color === "#F59E0B" ? "rgba(245,158,11,0.15)" : chip.color === "#22C55E" ? "rgba(34,197,94,0.15)" : "rgba(6,182,212,0.15)") : "#111",
+                  color: active ? chip.color : "#666",
+                  transition: "all 0.15s",
+                }}
+              >
+                <span>{chip.emoji}</span>
+                <span>{chip.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       
-      <SectionHeader emoji="🔥" title="TRENDING ON YOUTUBE" subtitle="1M+ views - sorted by most viewed" color="#F59E0B" />
+      <div id="section-trending" style={{ scrollMarginTop: 16 }}>
+        <SectionHeader emoji="🔥" title="TRENDING ON YOUTUBE" subtitle="1M+ views - sorted by most viewed" color="#F59E0B" />
+      </div>
 
       {tLoading && (
         <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>
@@ -1685,7 +1725,7 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
       )}
 
       
-      <div style={{ marginTop: 32, marginBottom: 4 }}>
+      <div id="section-rising" style={{ scrollMarginTop: 16, marginTop: 32 }}>
         <SectionHeader emoji="🚀" title="RISING PRODUCERS" subtitle="New uploads from producers on BeatFinder" color="#22C55E" />
       </div>
 
@@ -1729,6 +1769,24 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
           </div>
         );
       })}
+
+      <div id="section-fresh" style={{ scrollMarginTop: 16, marginTop: 32 }}>
+        <SectionHeader emoji="🎯" title="FRESH UPLOADS" subtitle="Newest beats uploaded recently" color="#06B6D4" />
+      </div>
+
+      {fLoading && (
+        <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>
+          <div style={{ fontSize: 30, marginBottom: 8 }}>🎯</div>
+          <div style={{ fontSize: 13 }}>Loading fresh beats...</div>
+        </div>
+      )}
+      {!fLoading && fresh.length === 0 && (
+        <div style={{ textAlign: "center", padding: "30px 0", color: "#444", fontSize: 13 }}>No fresh beats found.</div>
+      )}
+      {!fLoading && fresh.map(beat => (
+        <BeatCard key={beat.videoId} beat={beat} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
+      ))}
+
     </div>
   );
 }
@@ -1738,10 +1796,56 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
 // SEARCH SCREEN
 // =============================================================================
 function SearchScreen({ savedIds, onSave, onPlay }) {
-  const [input,  setInput]  = useState("");
-  const [active, setActive] = useState(null);
+  const [input,   setInput]   = useState("");
+  const [active,  setActive]  = useState(null);
+  const [recents, setRecents] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("bf_recents") || "[]"); } catch { return []; }
+  });
 
-  const doSearch = () => { if (input.trim()) setActive(input.trim()); };
+  const doSearch = (term) => {
+    const q = (term || input).trim();
+    if (!q) return;
+    setActive(q);
+    setInput(q);
+    // Save to recents
+    setRecents(prev => {
+      const next = [q, ...prev.filter(r => r.toLowerCase() !== q.toLowerCase())].slice(0, 6);
+      try { localStorage.setItem("bf_recents", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  const clearRecents = () => {
+    setRecents([]);
+    try { localStorage.removeItem("bf_recents"); } catch {}
+  };
+
+  const POPULAR = [
+    "Drake", "Travis Scott", "Lil Baby", "Central Cee",
+    "Afrobeat", "UK Drill", "Melodic Trap", "Polo G",
+  ];
+
+  const GENRES = [
+    { label: "Rap",      q: "Rap Type Beat" },
+    { label: "Drill",    q: "UK Drill Type Beat" },
+    { label: "R&B",      q: "R&B Type Beat" },
+    { label: "Afrobeat", q: "Afrobeat Type Beat" },
+    { label: "Melodic",  q: "Melodic Type Beat" },
+    { label: "Trap",     q: "Trap Type Beat" },
+    { label: "Dancehall",q: "Dancehall Riddim" },
+    { label: "Sad",      q: "Sad Type Beat" },
+  ];
+
+  const Chip = ({ label, onPress, color }) => (
+    <button onClick={onPress} style={{
+      flexShrink: 0, padding: "7px 14px", borderRadius: 20, cursor: "pointer",
+      border: "1.5px solid " + (color || "#2a2a2a"),
+      background: color ? "rgba(192,38,211,0.1)" : "#111",
+      color: color || "#888", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap",
+    }}>
+      {label}
+    </button>
+  );
 
   return (
     <div style={{ padding: "0 16px 100px" }}>
@@ -1749,8 +1853,9 @@ function SearchScreen({ savedIds, onSave, onPlay }) {
         <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
           Discover Beats
         </div>
-        <div style={{ color: "#888", fontSize: 14, marginBottom: 14 }}>Search any artist or vibe</div>
-        <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+        <div style={{ color: "#888", fontSize: 13, marginBottom: 14 }}>Search any artist, genre or vibe</div>
+
+        <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
           <div style={{ flex: 1, background: "#1a1a1a", borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, border: "1px solid #333" }}>
             <span style={{ color: "#555" }}>🔍</span>
             <input
@@ -1759,74 +1864,304 @@ function SearchScreen({ savedIds, onSave, onPlay }) {
               placeholder="e.g. Drake, Central Cee, UK drill..."
               style={{ background: "none", border: "none", outline: "none", color: "white", fontSize: 15, flex: 1 }}
             />
+            {input.length > 0 && (
+              <button onClick={() => { setInput(""); setActive(null); }} style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer", padding: 0, lineHeight: 1 }}>
+                &#10005;
+              </button>
+            )}
           </div>
-          <button onClick={doSearch}
-            style={{ background: "#C026D3", border: "none", borderRadius: 12, color: "white", fontWeight: 800, padding: "10px 18px", fontSize: 14, cursor: "pointer" }}>
+          <button onClick={() => doSearch()} style={{ background: "#C026D3", border: "none", borderRadius: 12, color: "white", fontWeight: 800, padding: "10px 18px", fontSize: 14, cursor: "pointer" }}>
             Go
           </button>
         </div>
+
+        {/* Quick genre chips */}
+        <div style={{ overflowX: "auto", scrollbarWidth: "none", marginBottom: 20 }}>
+          <div style={{ display: "flex", gap: 8, paddingBottom: 4 }}>
+            {GENRES.map(g => (
+              <button key={g.label} onClick={() => doSearch(g.q)} style={{
+                flexShrink: 0, padding: "6px 14px", borderRadius: 20, cursor: "pointer",
+                border: "1.5px solid #2a2a2a", background: "#111",
+                color: "#888", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap",
+              }}>
+                {g.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
+
       {!active ? (
-        <div style={{ textAlign: "center", paddingTop: 80, color: "#555" }}>
-          <div style={{ fontSize: 56, marginBottom: 16 }}>🎵</div>
-          <div style={{ fontSize: 14, lineHeight: 1.6 }}>
-            Type an artist name and tap Go.<br />
-            We'll find their type beats on YouTube.
+        <div>
+          {/* Recent searches */}
+          {recents.length > 0 && (
+            <div style={{ marginBottom: 28 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div style={{ color: "#aaa", fontWeight: 700, fontSize: 13 }}>Recent Searches</div>
+                <button onClick={clearRecents} style={{ background: "none", border: "none", color: "#555", fontSize: 12, cursor: "pointer" }}>Clear</button>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {recents.map(r => (
+                  <button key={r} onClick={() => doSearch(r)} style={{
+                    padding: "7px 14px", borderRadius: 20, cursor: "pointer",
+                    border: "1.5px solid #1e1e1e", background: "#111",
+                    color: "#ccc", fontWeight: 600, fontSize: 13,
+                    display: "flex", alignItems: "center", gap: 6,
+                  }}>
+                    <span style={{ fontSize: 11, color: "#555" }}>&#128337;</span>
+                    {r}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Popular searches */}
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ color: "#aaa", fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Popular Searches</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {POPULAR.map(p => (
+                <button key={p} onClick={() => doSearch(p)} style={{
+                  padding: "7px 14px", borderRadius: 20, cursor: "pointer",
+                  border: "1.5px solid rgba(192,38,211,0.3)",
+                  background: "rgba(192,38,211,0.08)",
+                  color: "#C026D3", fontWeight: 700, fontSize: 13,
+                }}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Empty state guidance */}
+          <div style={{ textAlign: "center", paddingTop: 20, color: "#444" }}>
+            <div style={{ fontSize: 44, marginBottom: 12 }}>🎵</div>
+            <div style={{ fontSize: 14, color: "#555", lineHeight: 1.8 }}>
+              Search any artist or tap a genre above<br />
+              to find type beats instantly
+            </div>
           </div>
         </div>
       ) : (
-        <BeatFeed artistName={active} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <div style={{ color: "white", fontWeight: 700, fontSize: 15 }}>Results for "{active}"</div>
+            <button onClick={() => { setActive(null); setInput(""); }} style={{ background: "none", border: "none", color: "#C026D3", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+              Clear
+            </button>
+          </div>
+          <BeatFeed artistName={active} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
+        </div>
       )}
     </div>
   );
 }
+
 
 // =============================================================================
 // SAVED SCREEN
 // =============================================================================
 function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) {
   const list = Object.values(savedMap);
+
+  const [sort,         setSort]         = useState("recent");
+  const [activeFolder, setActiveFolder] = useState("all");
+  const [folders,      setFolders]      = useState(() => {
+    try { return JSON.parse(localStorage.getItem("bf_folders") || "{}"); } catch { return {}; }
+  });
+  const [addingTo,     setAddingTo]     = useState(null); // videoId being added to folder
+  const [newFolder,    setNewFolder]    = useState("");
+
+  const PRESET_FOLDERS = ["Freestyle", "Drill", "R&B", "Favourites", "Fire"];
+
+  const saveFolders = (next) => {
+    setFolders(next);
+    try { localStorage.setItem("bf_folders", JSON.stringify(next)); } catch {}
+  };
+
+  const addToFolder = (videoId, folderName) => {
+    const next = { ...folders };
+    if (!next[folderName]) next[folderName] = [];
+    if (next[folderName].indexOf(videoId) === -1) next[folderName].push(videoId);
+    saveFolders(next);
+    setAddingTo(null);
+  };
+
+  const removeFromFolder = (videoId, folderName) => {
+    const next = { ...folders };
+    if (next[folderName]) next[folderName] = next[folderName].filter(id => id !== videoId);
+    saveFolders(next);
+  };
+
+  const createAndAdd = (videoId) => {
+    if (!newFolder.trim()) return;
+    addToFolder(videoId, newFolder.trim());
+    setNewFolder("");
+  };
+
+  const allFolderNames = Object.keys(folders).filter(f => folders[f].length > 0);
+
+  const filteredList = activeFolder === "all"
+    ? list
+    : list.filter(b => folders[activeFolder] && folders[activeFolder].indexOf(b.videoId) > -1);
+
+  const sortedList = [...filteredList].sort((a, b) => {
+    if (sort === "recent") return 0; // already in insertion order
+    if (sort === "alpha")  return (a.title || "").localeCompare(b.title || "");
+    return 0;
+  });
+
   if (!user) return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "60vh", padding: 24, textAlign: "center" }}>
       <div style={{ fontSize: 64, marginBottom: 20, opacity: 0.3 }}>🔖</div>
-      <div style={{ color: "white", fontSize: 22, fontWeight: 800, marginBottom: 10 }}>Save your favourite beats</div>
-      <div style={{ color: "#888", fontSize: 15, marginBottom: 24 }}>Log in to sync saves across devices.</div>
+      <div style={{ color: "white", fontSize: 22, fontWeight: 800, marginBottom: 10 }}>Your Beat Library</div>
+      <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 24 }}>Log in to save beats, create collections and sync across devices.</div>
       {list.length > 0 && (
         <div style={{ width: "100%", marginBottom: 24 }}>
-          <div style={{ color: "#888", fontSize: 13, marginBottom: 12 }}>
-            {list.length} beat{list.length !== 1 ? "s" : ""} saved locally
-          </div>
-          {list.map(beat => (
+          <div style={{ color: "#888", fontSize: 13, marginBottom: 12 }}>{list.length} beat{list.length !== 1 ? "s" : ""} saved locally</div>
+          {list.slice(0, 3).map(beat => (
             <BeatCard key={beat.videoId} beat={beat} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
           ))}
         </div>
       )}
-      <button onClick={onGoProfile}
-        style={{ background: "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: "16px 48px", fontSize: 16, cursor: "pointer", width: "100%", maxWidth: 300 }}>
+      <button onClick={onGoProfile} style={{ background: "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: "16px 48px", fontSize: 16, cursor: "pointer", width: "100%", maxWidth: 300 }}>
         Log In / Sign Up
       </button>
     </div>
   );
+
   return (
     <div style={{ padding: "0 16px 100px" }}>
-      <div style={{ padding: "20px 0 16px" }}>
-        <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
-          Saved Beats
+      <div style={{ padding: "20px 0 12px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 }}>
+          <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>Beat Library</div>
+          <div style={{ color: "#555", fontSize: 13 }}>{list.length} saved</div>
         </div>
+        <div style={{ color: "#666", fontSize: 13, marginBottom: 16 }}>Your personal beat collection</div>
+
+        {/* Sort options */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          {[{ id: "recent", label: "Recently Saved" }, { id: "alpha", label: "A - Z" }].map(s => (
+            <button key={s.id} onClick={() => setSort(s.id)} style={{
+              padding: "6px 14px", borderRadius: 20, cursor: "pointer", fontWeight: 700, fontSize: 12,
+              border: sort === s.id ? "1.5px solid #C026D3" : "1.5px solid #2a2a2a",
+              background: sort === s.id ? "rgba(192,38,211,0.12)" : "#111",
+              color: sort === s.id ? "#C026D3" : "#666",
+            }}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Folder chips */}
+        {(allFolderNames.length > 0 || list.length > 0) && (
+          <div style={{ overflowX: "auto", scrollbarWidth: "none", marginBottom: 4 }}>
+            <div style={{ display: "flex", gap: 8, paddingBottom: 4 }}>
+              <button onClick={() => setActiveFolder("all")} style={{
+                flexShrink: 0, padding: "6px 14px", borderRadius: 20, cursor: "pointer", fontWeight: 700, fontSize: 12,
+                border: activeFolder === "all" ? "1.5px solid #C026D3" : "1.5px solid #2a2a2a",
+                background: activeFolder === "all" ? "rgba(192,38,211,0.12)" : "#111",
+                color: activeFolder === "all" ? "#C026D3" : "#666",
+              }}>
+                All ({list.length})
+              </button>
+              {allFolderNames.map(f => (
+                <button key={f} onClick={() => setActiveFolder(f)} style={{
+                  flexShrink: 0, padding: "6px 14px", borderRadius: 20, cursor: "pointer", fontWeight: 700, fontSize: 12,
+                  border: activeFolder === f ? "1.5px solid #F59E0B" : "1.5px solid #2a2a2a",
+                  background: activeFolder === f ? "rgba(245,158,11,0.12)" : "#111",
+                  color: activeFolder === f ? "#F59E0B" : "#666",
+                }}>
+                  {f} ({folders[f] ? folders[f].length : 0})
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Empty state */}
       {list.length === 0 ? (
-        <div style={{ textAlign: "center", paddingTop: 60, color: "#555" }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>🔖</div>
-          <div>No saved beats yet.<br />Tap 🔖 on any beat!</div>
+        <div style={{ textAlign: "center", paddingTop: 60 }}>
+          <div style={{ fontSize: 56, marginBottom: 16 }}>🔖</div>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 8 }}>No beats saved yet</div>
+          <div style={{ color: "#555", fontSize: 14, lineHeight: 1.8, marginBottom: 24 }}>
+            Tap the 🔖 bookmark icon on any beat<br />to start building your library
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+            {["Browse Artists", "Check Trending", "Search a Vibe"].map(t => (
+              <div key={t} style={{ padding: "8px 16px", borderRadius: 20, border: "1.5px solid #2a2a2a", color: "#555", fontSize: 13 }}>{t}</div>
+            ))}
+          </div>
+        </div>
+      ) : filteredList.length === 0 ? (
+        <div style={{ textAlign: "center", paddingTop: 40 }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📂</div>
+          <div style={{ color: "#555", fontSize: 14 }}>No beats in this collection yet</div>
+          <div style={{ color: "#444", fontSize: 12, marginTop: 6 }}>Tap the folder icon on any beat to add it here</div>
         </div>
       ) : (
-        list.map(beat => (
-          <BeatCard key={beat.videoId} beat={beat} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
+        sortedList.map(beat => (
+          <div key={beat.videoId} style={{ position: "relative" }}>
+            <BeatCard beat={beat} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
+
+            {/* Add to collection button */}
+            <div style={{ marginTop: -8, marginBottom: 14, display: "flex", gap: 6, flexWrap: "wrap", paddingLeft: 4 }}>
+              {addingTo === beat.videoId ? (
+                <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 12, padding: "10px 12px", width: "100%", boxSizing: "border-box" }}>
+                  <div style={{ color: "#aaa", fontSize: 12, fontWeight: 700, marginBottom: 8 }}>ADD TO COLLECTION</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                    {PRESET_FOLDERS.filter(f => !folders[f] || folders[f].indexOf(beat.videoId) === -1).map(f => (
+                      <button key={f} onClick={() => addToFolder(beat.videoId, f)} style={{
+                        padding: "5px 12px", borderRadius: 20, cursor: "pointer", fontWeight: 600, fontSize: 12,
+                        border: "1.5px solid #F59E0B", background: "rgba(245,158,11,0.1)", color: "#F59E0B",
+                      }}>{f}</button>
+                    ))}
+                    {allFolderNames.filter(f => PRESET_FOLDERS.indexOf(f) === -1 && (!folders[f] || folders[f].indexOf(beat.videoId) === -1)).map(f => (
+                      <button key={f} onClick={() => addToFolder(beat.videoId, f)} style={{
+                        padding: "5px 12px", borderRadius: 20, cursor: "pointer", fontWeight: 600, fontSize: 12,
+                        border: "1.5px solid #C026D3", background: "rgba(192,38,211,0.1)", color: "#C026D3",
+                      }}>{f}</button>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input value={newFolder} onChange={e => setNewFolder(e.target.value)}
+                      placeholder="New collection name..."
+                      onKeyDown={e => e.key === "Enter" && createAndAdd(beat.videoId)}
+                      style={{ flex: 1, background: "#1a1a1a", border: "1px solid #333", borderRadius: 8, padding: "7px 10px", color: "white", fontSize: 13, outline: "none" }}
+                    />
+                    <button onClick={() => createAndAdd(beat.videoId)} style={{ background: "#C026D3", border: "none", borderRadius: 8, color: "white", fontWeight: 700, fontSize: 12, padding: "7px 12px", cursor: "pointer" }}>
+                      Create
+                    </button>
+                    <button onClick={() => setAddingTo(null)} style={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8, color: "#555", fontSize: 12, padding: "7px 10px", cursor: "pointer" }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <button onClick={() => setAddingTo(beat.videoId)} style={{
+                    padding: "4px 12px", borderRadius: 20, cursor: "pointer", fontWeight: 600, fontSize: 11,
+                    border: "1.5px solid #2a2a2a", background: "transparent", color: "#555",
+                  }}>
+                    + Collection
+                  </button>
+                  {allFolderNames.filter(f => folders[f] && folders[f].indexOf(beat.videoId) > -1).map(f => (
+                    <div key={f} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 20, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)" }}>
+                      <span style={{ color: "#F59E0B", fontSize: 11, fontWeight: 700 }}>{f}</span>
+                      <button onClick={() => removeFromFolder(beat.videoId, f)} style={{ background: "none", border: "none", color: "#888", fontSize: 12, cursor: "pointer", padding: 0, lineHeight: 1 }}>&#10005;</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         ))
       )}
     </div>
   );
 }
+
 
 // =============================================================================
 // EXCLUSIVE MEMBERS SCREEN
