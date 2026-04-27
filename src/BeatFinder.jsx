@@ -888,6 +888,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
               }}
             >
+              🔐 Purchase plan to write lyrics
             </button>
           );
         })()}
@@ -3389,6 +3390,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {[
                   
+                  { id: "lyrics",  icon: "✍️", label: "My Lyrics",    desc: savedLyrics.length + " saved",    color: "#C026D3" },
                   { id: "members", icon: "🎵", label: "Members Area", desc: "Exclusive beats",                 color: "#F59E0B" },
                 ].map(item => (
                   <button key={item.id} onClick={() => goSection(item.id)}
@@ -3476,6 +3478,39 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
       
 
       
+
+      {activeSection === "lyrics" && (
+        <div>
+          <SectionBack onBack={() => setActiveSection(null)} label="Back to Dashboard" />
+          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>My Lyrics</div>
+          <div style={{ color: "#666", fontSize: 13, marginBottom: 16 }}>Tap any lyric to continue writing</div>
+          {savedLyrics.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>✍️</div>
+              <div>No saved lyrics yet. Open a beat and tap Write Lyrics.</div>
+            </div>
+          ) : savedLyrics.map(function(lyric, i) {
+            return (
+              <div key={i} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid #1e1e1e" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{lyric.title || "Untitled"}</div>
+                    <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>{lyric.beatTitle}</div>
+                  </div>
+                  <button onClick={function(){ setSavedLyrics(function(prev){ var next = prev.filter(function(_, j){ return j !== i; }); try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch(e){} return next; }); }}
+                    style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, color: "#F87171", fontSize: 12, padding: "4px 10px", cursor: "pointer" }}>
+                    Delete
+                  </button>
+                </div>
+                <button onClick={function(){ onEditLyric(lyric, i); }}
+                  style={{ width: "100%", background: "rgba(192,38,211,0.1)", border: "1.5px solid #C026D3", borderRadius: 10, color: "#C026D3", fontWeight: 700, fontSize: 14, padding: "10px", cursor: "pointer", marginTop: 6 }}>
+                  ✍️ Continue Writing
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {activeSection === "upload" && (
         <div>
