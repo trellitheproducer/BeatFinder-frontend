@@ -2151,38 +2151,55 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
 
 
 
-  return (
+  const header = (
+    <div style={{ padding: "20px 0 16px" }}>
+      <div style={{ background: "linear-gradient(135deg,#1C1917,rgba(245,158,11,0.2))", borderRadius: 16, padding: "24px 20px", marginBottom: 20, border: "1.5px solid rgba(245,158,11,0.3)" }}>
+        <div style={{ color: "#F59E0B", fontSize: 13, fontWeight: 800, marginBottom: 6 }}>🎵 PRODUCER BEATS</div>
+        <div style={{ color: "white", fontSize: 26, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
+          Download MP3s
+        </div>
+        <div style={{ color: "#aaa", fontSize: 13, marginTop: 4 }}>Beats uploaded by verified producers</div>
+      </div>
+    </div>
+  );
+
+  if (loading) return (
     <div style={{ padding: "0 16px 100px" }}>
-      <div style={{ padding: "20px 0 16px" }}>
-        <div style={{ background: "linear-gradient(135deg,#1C1917,rgba(245,158,11,0.2))", borderRadius: 16, padding: "24px 20px", marginBottom: 20, border: "1.5px solid rgba(245,158,11,0.3)" }}>
-          <div style={{ color: "#F59E0B", fontSize: 13, fontWeight: 800, marginBottom: 6 }}>🎵 PRODUCER BEATS</div>
-          <div style={{ color: "white", fontSize: 26, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
-            Download MP3s
-          </div>
-          <div style={{ color: "#aaa", fontSize: 13, marginTop: 4 }}>Beats uploaded by verified producers</div>
+      {header}
+      <BFLoader type="spinner" text="LOADING BEATS...PLEASE BE PATIENT." />
+    </div>
+  );
+
+  if (error) return (
+    <div style={{ padding: "0 16px 100px" }}>
+      {header}
+      <div style={{ background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 14, padding: 20, textAlign: "center" }}>
+        <div style={{ color: "#F87171", fontWeight: 700, fontSize: 15 }}>Could not load beats</div>
+        <div style={{ color: "#888", fontSize: 13, marginTop: 8 }}>{error}</div>
+      </div>
+    </div>
+  );
+
+  if (beats.length === 0) return (
+    <div style={{ padding: "0 16px 100px" }}>
+      {header}
+      <div style={{ textAlign: "center", padding: "60px 0" }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🎛</div>
+        <div style={{ color: "white", fontWeight: 800, fontSize: 17, marginBottom: 8 }}>
+          No beats have been uploaded yet.
+        </div>
+        <div style={{ color: "#555", fontSize: 13, lineHeight: 1.7 }}>
+          Producer Pro members can upload beats<br />from their Profile tab.
         </div>
       </div>
+    </div>
+  );
 
-    if (loading) return <BFLoader type="spinner" text="LOADING BEATS...PLEASE BE PATIENT." />;
+  return (
+    <div style={{ padding: "0 16px 100px" }}>
+      {header}
 
-      {error && (
-        <div style={{ background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 14, padding: 20, textAlign: "center" }}>
-          <div style={{ color: "#F87171", fontWeight: 700, fontSize: 15 }}>Could not load beats</div>
-          <div style={{ color: "#888", fontSize: 13, marginTop: 8 }}>{error}</div>
-        </div>
-      )}
-
-      {!loading && beats.length === 0 && !error && (
-        <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>🎛</div>
-          <div style={{ fontSize: 15, color: "#888", lineHeight: 1.7 }}>
-            No beats uploaded yet.<br />
-            Producer Pro members can upload beats<br />from their Profile tab.
-          </div>
-        </div>
-      )}
-
-      {!loading && leases.length > 0 && (
+      {leases.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 12 }}>✅ Your Purchased Leases</div>
           {leases.map(lease => (
@@ -2209,7 +2226,7 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
         </div>
       )}
 
-      {!loading && beats.map(beat => (
+      {beats.map(beat => (
         <BeatLeaseCard key={beat.id} beat={beat} user={user} />
       ))}
     </div>
