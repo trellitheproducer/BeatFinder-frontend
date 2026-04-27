@@ -364,7 +364,7 @@ const ARTISTS_UK = [
   {id:"ajtracey",      name:"AJ Tracey",       cat:"Grime", flag:"🇬🇧", img:"https://i.ibb.co/KjMjGVhN/IMG-0480.jpg"},
   {id:"aitch",         name:"Aitch",           cat:"UK Rap", flag:"🇬🇧", img:"https://i.ibb.co/jdvJ4Zc/IMG-0481.jpg"},
   {id:"centralcee",    name:"Central Cee",     cat:"UK Drill", flag:"🇬🇧", img:"https://i.ibb.co/wZvG4SdH/IMG-0482.jpg"},
-  {id:"dblockeurope",  name:"D Block Europe",  cat:"UK Rap", flag:"🇬🇧", img:"https://i.ibb.co/Zp7BHx0G/IMG-0483.webp"},
+  {id:"dblockeurope",  name:"D Block Europe",  cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/Zp7BHx0G/IMG-0483.webp"},
   {id:"dave",          name:"Dave",            cat:"UK Rap", flag:"🇬🇧", img:"https://i.ibb.co/qLyG67SS/IMG-0484.jpg"},
   {id:"diggad",        name:"Digga D",         cat:"UK Drill", flag:"🇬🇧", img:"https://i.ibb.co/Y4KX0hXn/IMG-0485.jpg"},
   {id:"headieone",     name:"Headie One",      cat:"UK Drill", flag:"🇬🇧", img:"https://i.ibb.co/mCD7Nx50/IMG-0486.png"},
@@ -398,6 +398,12 @@ const ARTISTS_UK = [
    searchOverride:"Dot Rotten Zeph Ellis instrumental",
    filterTitle: false,
    instrumentalOnly: true},
+  {id:"mhuncho",       name:"M Huncho",        cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/HLqRYYFv/IMG-9140.webp"},
+  {id:"nafesmallz",    name:"Nafe Smallz",     cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/s9JR82ym/IMG-9141.jpg"},
+  {id:"yxngbane",      name:"Yxng Bane",       cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/WNj0TwHK/IMG-9142.webp"},
+  {id:"byoung",        name:"B Young",         cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/rf0PdBBq/IMG-9143.jpg"},
+  {id:"yungfume",      name:"Yung Fume",       cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/nN52pN5P/IMG-9144.webp"},
+  {id:"wewantwraiths", name:"wewantwraiths",   cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/6R0qMMG0/IMG-9145.jpg"},
 ];
 
 const ARTISTS_JAMAICA = [
@@ -452,7 +458,7 @@ const ARTISTS_AFRICA = [
 ];
 
 const USA_CATS     = ["All","Rap","R&B M","R&B F","Detroit","Melodic Trap"];
-const UK_CATS      = ["All","UK Rap","UK Drill","UK R&B","Grime"];
+const UK_CATS      = ["All","UK Rap","UK Drill","UK R&B","Grime","UK Melodic Trap"];
 const JAMAICA_CATS = ["All","Reggae","Dancehall","Bashment"];
 const AFRICA_CATS  = ["All","Afrobeats","Tribal House"];
 
@@ -1936,12 +1942,14 @@ function ArtistsScreen({ onPlay, savedIds, onSave }) {
       </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
         {cats.map(c => {
-          const chipColor = c === "Melodic Trap" ? "#38BDF8"
-                          : c === "Detroit"      ? "#F59E0B"
-                          : c === "UK Drill"     ? "#4ADE80"
-                          : c === "Rap"          ? "#EF4444"
-                          : c === "UK Rap"       ? "#EF4444"
-                          : c === "UK R&B"       ? "#EC4899"
+          const chipColor = c === "Melodic Trap"    ? "#38BDF8"
+                          : c === "UK Melodic Trap" ? "#38BDF8"
+                          : c === "Detroit"          ? "#F59E0B"
+                          : c === "UK Drill"         ? "#4ADE80"
+                          : c === "Rap"              ? "#EF4444"
+                          : c === "UK Rap"           ? "#EF4444"
+                          : c === "UK R&B"           ? "#EC4899"
+                          : c === "Grime"            ? "#A78BFA"
                           : "#C026D3";
           const isActive = cat === c;
           return (
@@ -1971,12 +1979,13 @@ function ArtistsScreen({ onPlay, savedIds, onSave }) {
               color: a.cat === "Detroit"                         ? "#F59E0B"
                    : a.cat === "R&B M" || a.cat === "R&B F"    ? "#EC4899"
                    : a.cat === "UK R&B"                         ? "#EC4899"
-                   : a.cat === "Grime"                          ? "#06B6D4"
+                   : a.cat === "Grime"                          ? "#A78BFA"
                    : a.cat === "Reggae"                         ? "#22C55E"
                    : a.cat === "Dancehall" || a.cat === "Bashment" ? "#F97316"
                    : a.cat === "Afrobeats"                      ? "#EAB308"
                    : a.cat === "Tribal House"                   ? "#A78BFA"
                    : a.cat === "Melodic Trap"                   ? "#38BDF8"
+                   : a.cat === "UK Melodic Trap"                ? "#38BDF8"
                    : a.cat === "UK Drill"                       ? "#4ADE80"
                    : a.cat === "Rap" || a.cat === "UK Rap"      ? "#EF4444" : "#666",
             }}>
@@ -1999,12 +2008,13 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
   const cc = artist.cat === "Detroit"                              ? "#F59E0B"
            : artist.cat === "R&B M" || artist.cat === "R&B F"    ? "#EC4899"
            : artist.cat === "UK R&B"                              ? "#EC4899"
-           : artist.cat === "Grime"                               ? "#06B6D4"
+           : artist.cat === "Grime"                               ? "#A78BFA"
            : artist.cat === "Reggae"                              ? "#22C55E"
            : artist.cat === "Dancehall" || artist.cat === "Bashment" ? "#F97316"
            : artist.cat === "Afrobeats"                           ? "#EAB308"
            : artist.cat === "Tribal House"                        ? "#A78BFA"
            : artist.cat === "Melodic Trap"                        ? "#38BDF8"
+           : artist.cat === "UK Melodic Trap"                     ? "#38BDF8"
            : artist.cat === "UK Drill"                            ? "#4ADE80"
            : artist.cat === "Rap" || artist.cat === "UK Rap"      ? "#EF4444" : "#888";
 
