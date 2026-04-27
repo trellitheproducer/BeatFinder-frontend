@@ -132,14 +132,32 @@ async function apiFetch(path, options = {}) {
 // Backend makes the real googleapis.com call server-side (no CORS issues)
 // =============================================================================
 // Words that indicate a track is a song/music video NOT an instrumental beat
+// All signals are matched case-insensitively via .toLowerCase() in isLikelyInstrumental
 const VOCAL_SIGNALS = [
+  // English video signals
   "official video", "official music video", "music video", "official mv",
-  "lyrics video", "lyric video", "visualizer", "audio official",
-  "feat.", "ft.", "featuring", "prod by", "prod.", "(clean)", "(explicit)",
-  "official audio", "sing along", "karaoke", "cover", "remix ft",
-  "out now", "new song", "new single", "official single",
-  "oficial video", "video oficial", "official clip", "clip officiel",
-  "(mv)", "m/v", "music vid", "musicvideo", "vid oficial",
+  "official clip", "official audio", "official single", "official hd",
+  "lyrics video", "lyric video", "with lyrics", "letra",
+  "visualizer", "visual video", "audio visual",
+  // Song/artist signals
+  "feat.", "ft.", " ft ", " feat ", "featuring",
+  "(clean)", "(explicit)", "(dirty)", "(radio edit)",
+  "sing along", "karaoke", "cover", "remix ft",
+  "out now", "new song", "new single", "new music",
+  // Spanish/Portuguese
+  "oficial video", "video oficial", "videoclip oficial",
+  "vid oficial", "clip oficial", "musica oficial",
+  "clipe oficial", "video clipe", "videoclipe",
+  // French/other
+  "clip officiel", "video officielle",
+  // Short forms
+  "(mv)", "[mv]", "m/v", "music vid", "musicvideo",
+  // Streaming/release signals
+  "vevo", "out now", "available now", "stream now",
+  "listen now", "spotify", "apple music",
+  // Other giveaways
+  "dance video", "dance performance", "live performance",
+  "behind the scenes", "bts video", "making of",
 ];
 
 // Words that are GOOD signals (real type beats)
@@ -153,10 +171,10 @@ const BEAT_SIGNALS = [
 function isLikelyInstrumental(title) {
   if (!title) return true;
   const t = title.toLowerCase();
-  // If it has a strong beat signal, always keep it
-  if (BEAT_SIGNALS.some(s => t.includes(s))) return true;
-  // If it has any vocal/video signal, reject it
+  // Reject vocal/video signals FIRST - these override even "type beat" in the title
   if (VOCAL_SIGNALS.some(s => t.includes(s))) return false;
+  // Then allow strong beat signals
+  if (BEAT_SIGNALS.some(s => t.includes(s))) return true;
   // Reject "Artist - Song" pattern with no beat keywords
   if (t.includes(" - ") && !t.includes("beat") && !t.includes("instrumental") && !t.includes("free")) {
     if (t.includes("official") || t.includes("audio") || t.includes("video") || t.includes("vevo")) return false;
