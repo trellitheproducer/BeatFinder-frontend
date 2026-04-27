@@ -3870,7 +3870,17 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                     <div style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{lyric.title || "Untitled"}</div>
                     <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>{lyric.beatTitle}</div>
                   </div>
-                  <button onClick={function(){ setSavedLyrics(function(prev){ var next = prev.filter(function(_, j){ return j !== i; }); try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch(e){} return next; }); }}
+                  <button onClick={function(){ 
+                    var lyricId = lyric.id;
+                    setSavedLyrics(function(prev){ 
+                      var next = prev.filter(function(_, j){ return j !== i; }); 
+                      try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch(e){} 
+                      return next; 
+                    });
+                    if (user) {
+                      apiFetch("/api/lyrics/" + lyricId, { method: "DELETE" }).catch(() => {});
+                    }
+                  }}
                     style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, color: "#F87171", fontSize: 12, padding: "4px 10px", cursor: "pointer" }}>
                     Delete
                   </button>
@@ -4140,10 +4150,15 @@ export default function BeatFinder() {
       } else {
         next = [lyric, ...prev];
       }
+      // Always keep localStorage as guest fallback
       try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch {}
+      // Persist to backend if logged in
+      if (user) {
+        apiFetch("/api/lyrics", { method: "POST", body: JSON.stringify(lyric) }).catch(() => {});
+      }
       return next;
     });
-  }, []);
+  }, [user]);
 
   const handleOpenLyrics = useCallback(beat => {
     setPlaying(null);
@@ -4166,15 +4181,45 @@ export default function BeatFinder() {
     setTab(id);
   };
 
-  // Lyrics state
+  // Lyrics state — backed by MongoDB for logged-in users, localStorage for guests
   const [lyricsOpen,    setLyricsOpen]    = useState(false);
   const [lyricsBeat,    setLyricsBeat]    = useState(null);
   const [editingLyric,  setEditingLyric]  = useState(null);
   const [editingIndex,  setEditingIndex]  = useState(null);
   const [publicProfile, setPublicProfile] = useState(null);
-  const [savedLyrics,  setSavedLyrics]  = useState(() => {
+  const [savedLyrics,   setSavedLyrics]   = useState(() => {
     try { return JSON.parse(localStorage.getItem("bf_lyrics") || "[]"); } catch { return []; }
   });
+
+  // When user logs in: fetch their lyrics from backend, migrate any local ones
+  useEffect(() => {
+    if (!user) return;
+    apiFetch("/api/lyrics")
+      .then(cloudLyrics => {
+        // Check for any local lyrics that aren't in the cloud yet
+        const localLyrics = (() => {
+          try { return JSON.parse(localStorage.getItem("bf_lyrics") || "[]"); } catch { return []; }
+        })();
+        const cloudIds = new Set(cloudLyrics.map(l => l.id));
+        const toMigrate = localLyrics.filter(l => !cloudIds.has(l.id));
+        if (toMigrate.length > 0) {
+          apiFetch("/api/lyrics/bulk-import", {
+            method: "POST",
+            body: JSON.stringify({ lyrics: toMigrate }),
+          }).then(() => {
+            // Merge migrated lyrics into cloud set
+            setSavedLyrics([...cloudLyrics, ...toMigrate]);
+            try { localStorage.removeItem("bf_lyrics"); } catch {}
+          }).catch(() => setSavedLyrics(cloudLyrics));
+        } else {
+          setSavedLyrics(cloudLyrics);
+          try { localStorage.removeItem("bf_lyrics"); } catch {}
+        }
+      })
+      .catch(() => {
+        // Backend unavailable — fall back to localStorage silently
+      });
+  }, [user?.id]);
 
   const isArtistPro = user?.isPro || user?.isArtistPro || user?.plan === "artist" || user?.plan === "producer";
 
