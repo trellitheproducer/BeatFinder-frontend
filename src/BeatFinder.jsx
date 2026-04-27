@@ -88,6 +88,7 @@ const API_BASE = "https://beatfinder-backend.onrender.com";
 // -- In-memory cache (10 minutes TTL) -----------------------------------------
 const cache = {};
 const CACHE_TTL = 10 * 60 * 1000;
+const CACHE_VER = "v2";
 
 // =============================================================================
 // API HELPERS
@@ -189,7 +190,7 @@ async function fetchBeats(artistName, page, filterTitle, maxResults) {
   const pageNum     = page || 1;
   const maxNum      = maxResults || 10;
   const doFilter    = filterTitle !== false;
-  const query       = artistName + "|page" + pageNum + "|filter" + doFilter + "|max" + maxNum;
+  const query       = CACHE_VER + "|" + artistName + "|page" + pageNum + "|filter" + doFilter + "|max" + maxNum;
   if (cache[query] && Date.now() - cache[query].ts < CACHE_TTL) {
     return { beats: cache[query].data, error: null };
   }
