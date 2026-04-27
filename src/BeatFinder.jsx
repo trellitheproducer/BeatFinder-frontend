@@ -3182,9 +3182,6 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   const [uploadFile,       setUploadFile]       = useState(null);
   const [uploadLoading,    setUploadLoading]    = useState(false);
   const [uploadMsg,        setUploadMsg]        = useState("");
-  const [activationCode,   setActivationCode]   = useState("");
-  const [activationErr,    setActivationErr]    = useState("");
-  const [activationSuccess,setActivationSuccess]= useState("");
   const [settingsOpen,     setSettingsOpen]     = useState(false);
   const [newUsername,      setNewUsername]      = useState("");
   const [currentPw,        setCurrentPw]        = useState("");
@@ -3455,23 +3452,6 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
           )}
 
           
-          <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #1e1e1e", marginBottom: 16 }}>
-            <div style={{ color: "#888", fontWeight: 700, fontSize: 13, marginBottom: 10 }}>Activation Code</div>
-            <input value={activationCode} onChange={e => setActivationCode(e.target.value)} placeholder="Enter your code"
-              style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
-            <button onClick={async () => {
-              try {
-                const r = await apiFetch("/api/auth/activate", { method: "POST", body: JSON.stringify({ code: activationCode }) });
-                setActivationSuccess(r.message || "Activated!"); setActivationCode("");
-                const me = await apiFetch("/api/auth/me");
-                setUser({ ...me, isPro: me.plan === "producer", isArtistPro: me.plan === "artist" || me.plan === "producer" });
-              } catch (e) { setActivationErr(e.message); }
-            }} style={{ background: "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: "10px 20px", fontSize: 14, cursor: "pointer" }}>
-              Activate
-            </button>
-            {activationErr     && <div style={{ color: "#F87171", fontSize: 13, marginTop: 8 }}>{activationErr}</div>}
-            {activationSuccess && <div style={{ color: "#22C55E", fontSize: 13, marginTop: 8 }}>{activationSuccess}</div>}
-          </div>
         </div>
       )}
 
