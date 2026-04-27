@@ -2921,6 +2921,15 @@ function ForgotPasswordScreen({ onBack }) {
 // =============================================================================
 // PROFILE SCREEN
 // =============================================================================
+function SectionBack({ label, onBack }) {
+  return (
+    <button onClick={onBack}
+      style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: "#C026D3", fontWeight: 700, fontSize: 14, cursor: "pointer", padding: "0 0 16px" }}>
+      &#8592; {label}
+    </button>
+  );
+}
+
 function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric }) {
   const [mode,        setMode]        = useState("landing");
   const [email,       setEmail]       = useState(() => {
@@ -2971,10 +2980,10 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   ];
 
   // Add activeSection state for dashboard navigation
-  const [activeSection, setActiveSection] = React.useState(null);
-  const [producerStats, setProducerStats] = React.useState(null);
+  const [activeSection, setActiveSection] = useState(null);
+  const [producerStats, setProducerStats] = useState(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (user?.isPro) {
       Promise.all([
         apiFetch("/api/producer/my-beats").catch(() => []),
@@ -2999,15 +3008,74 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
     }
   }, [user]);
 
+  if (!user) {
+    if (mode === "forgot") return <ForgotPasswordScreen onBack={() => setMode("login")} />;
+    if (mode === "landing") return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "75vh", padding: 32, textAlign: "center" }}>
+        <div style={{ fontSize: 56, marginBottom: 16 }}>👤</div>
+        <div style={{ color: "white", fontSize: 24, fontWeight: 800, marginBottom: 8 }}>My Profile</div>
+        <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 32 }}>Log in to access your saved beats, lyrics, and pro features.</div>
+        <button onClick={() => setMode("signup")} style={{ width: "100%", maxWidth: 320, background: "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: "pointer", marginBottom: 14 }}>
+          Create Account
+        </button>
+        <button onClick={() => setMode("login")} style={{ background: "none", border: "none", color: "#06B6D4", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
+          I already have an account
+        </button>
+      </div>
+    );
+    return (
+      <div style={{ padding: "40px 24px 100px" }}>
+        <button onClick={() => setMode("landing")} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer", marginBottom: 20 }}>&#8592;</button>
+        <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 2, marginBottom: 24 }}>
+          {mode === "signup" ? "CREATE ACCOUNT" : "WELCOME BACK"}
+        </div>
+        {mode === "signup" && <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" style={inp} />}
+        <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email address" type="email" style={inp} />
+        <input value={pw} onChange={e => setPw(e.target.value)} placeholder="Password" type="password" style={{ ...inp, marginBottom: 16 }} />
+        {mode === "login" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+            <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} id="rm" />
+            <label htmlFor="rm" style={{ color: "#888", fontSize: 13 }}>Remember my login</label>
+          </div>
+        )}
+        <button disabled={authLoading} onClick={async () => {
+          setAuthErr("");
+          if (mode === "login" && !pw.trim()) { setAuthErr("Please enter your password"); return; }
+          setAuthLoading(true);
+          try {
+            const u = mode === "signup"
+              ? await AuthAPI.register(name || email.split("@")[0], email, pw)
+              : await AuthAPI.login(email, pw);
+            if (rememberMe) { try { localStorage.setItem("bf_saved_email", email); localStorage.setItem("bf_remember", "1"); } catch {} }
+            else { try { localStorage.removeItem("bf_saved_email"); localStorage.removeItem("bf_remember"); } catch {} }
+            setUser(u);
+          } catch (e) { setAuthErr(e.message); }
+          finally { setAuthLoading(false); }
+        }} style={{ width: "100%", background: authLoading ? "#555" : "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: "pointer" }}>
+          {authLoading ? "Please wait..." : mode === "signup" ? "Create Account" : "Log In"}
+        </button>
+        {authErr && <div style={{ color: "#F87171", fontSize: 13, textAlign: "center", marginTop: 12 }}>{authErr}</div>}
+        <div style={{ textAlign: "center", marginTop: 20 }}>
+          <span style={{ color: "#888", fontSize: 14 }}>{mode === "signup" ? "Already have an account? " : "No account? "}</span>
+          <button onClick={() => { setAuthErr(""); setMode(mode === "signup" ? "login" : "signup"); }}
+            style={{ background: "none", border: "none", color: "#06B6D4", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+            {mode === "signup" ? "Log In" : "Sign Up"}
+          </button>
+        </div>
+        {mode === "login" && (
+          <div style={{ textAlign: "center", marginTop: 12 }}>
+            <button onClick={e => { e.preventDefault(); e.stopPropagation(); setMode("forgot"); }}
+              style={{ background: "none", border: "none", color: "#666", fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>
+              Forgot your password?
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (user) {
     const goSection = (s) => setActiveSection(activeSection === s ? null : s);
-
-    const SectionBack = ({ label }) => (
-      <button onClick={() => setActiveSection(null)}
-        style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: "#C026D3", fontWeight: 700, fontSize: 14, cursor: "pointer", padding: "0 0 16px" }}>
-        &#8592; {label}
-      </button>
-    );
 
     return (
     <div style={{ padding: "0 16px 100px" }}>
@@ -3175,7 +3243,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
       {activeSection === "lyrics" && (
         <div>
-          <SectionBack label="Back to Dashboard" />
+          <SectionBack onBack={() => setActiveSection(null)} label="Back to Dashboard" />
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>My Lyrics</div>
           <div style={{ color: "#666", fontSize: 13, marginBottom: 16 }}>Tap any lyric to continue writing</div>
           {savedLyrics.length === 0 ? (
@@ -3207,7 +3275,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
       {activeSection === "upload" && (
         <div>
-          <SectionBack label="Back to Dashboard" />
+          <SectionBack onBack={() => setActiveSection(null)} label="Back to Dashboard" />
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Upload Your Beat</div>
           <div style={{ color: "#666", fontSize: 13, marginBottom: 14 }}>Upload MP3 files to sell leases to artists.</div>
           <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #222" }}>
@@ -3239,14 +3307,14 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
       {activeSection === "manage" && (
         <div>
-          <SectionBack label="Back to Dashboard" />
+          <SectionBack onBack={() => setActiveSection(null)} label="Back to Dashboard" />
           <MyUploadsSection user={user} />
         </div>
       )}
 
       {activeSection === "stripe" && (
         <div>
-          <SectionBack label="Back to Dashboard" />
+          <SectionBack onBack={() => setActiveSection(null)} label="Back to Dashboard" />
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 16 }}>Stripe Payouts</div>
           <StripeConnectSection />
         </div>
@@ -3254,7 +3322,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
       {activeSection === "stats" && (
         <div>
-          <SectionBack label="Back to Dashboard" />
+          <SectionBack onBack={() => setActiveSection(null)} label="Back to Dashboard" />
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 16 }}>Analytics</div>
           {!producerStats ? (
             <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>Loading stats...</div>
@@ -3298,7 +3366,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
       {activeSection === "upgrade" && (
         <div>
-          <SectionBack label="Back to Dashboard" />
+          <SectionBack onBack={() => setActiveSection(null)} label="Back to Dashboard" />
           <div style={{ color: "white", fontWeight: 800, fontSize: 20, marginBottom: 16 }}>Choose Your Plan</div>
           {PLANS.map(plan => (
             <div key={plan.id} style={{ background: "#111", borderRadius: 16, padding: 20, marginBottom: 14, border: "1.5px solid #333" }}>
@@ -3327,6 +3395,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
     </div>
   );
   }
+}
 
 
 // =============================================================================
@@ -3508,4 +3577,4 @@ export default function BeatFinder() {
       </div>
     </div>
   );
-}
+  }
