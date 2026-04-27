@@ -1238,7 +1238,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
             YOUR WORKSPACE
           </div>
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, lineHeight: 1.2 }}>
-            {"Welcome back" + (firstName ? ", " + firstName : "") + " \uD83D\uDC4B"}
+            {"Welcome back" + (firstName ? ", " + firstName : "") + " 👋"}
           </div>
           {isProducer && (
             <div style={{ color: "#C026D3", fontSize: 12, fontWeight: 600, marginTop: 3 }}>Producer Pro</div>
@@ -1248,7 +1248,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
         {/* 1. YOUR VIBE RIGHT NOW */}
         <div style={{ marginBottom: 16 }}>
           <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
-            \uD83C\uDFAF YOUR VIBE RIGHT NOW
+            🎯 YOUR VIBE RIGHT NOW
           </div>
           <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
             {VIBES.map(function(v) {
@@ -1282,7 +1282,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
         {/* 2. TOP GENRE */}
         <div style={{ marginBottom: 16 }}>
           <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
-            \uD83D\uDD25 YOUR TOP GENRE
+            🔥 YOUR TOP GENRE
           </div>
           {topGenre ? (
             <button
@@ -1313,7 +1313,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
         {/* 3. CONTINUE WRITING */}
         <div style={{ marginBottom: 16 }}>
           <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
-            \u270D\uFE0F CONTINUE WRITING
+            ✍️ CONTINUE WRITING
           </div>
           {lastLyric ? (
             <button
@@ -1330,7 +1330,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
                 background: "linear-gradient(135deg,#6B21A8,#C026D3)",
                 display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
               }}>
-                \u270D\uFE0F
+                ✍️
               </div>
               <div style={{ flex: 1, overflow: "hidden" }}>
                 <div style={{ color: "white", fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -1362,7 +1362,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
         {/* 4. BEAT OF THE DAY */}
         <div style={{ marginBottom: isProducer ? 16 : 0 }}>
           <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
-            \uD83C\uDFB5 BEAT OF THE DAY
+            🎵 BEAT OF THE DAY
           </div>
           {botdLoading ? (
             <div style={{ color: "#444", fontSize: 13, padding: "10px 0" }}>Finding your beat...</div>
@@ -1405,7 +1405,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
                   background: savedIds && savedIds.has(beatOfDay.videoId) ? "rgba(192,38,211,0.9)" : "rgba(255,255,255,0.08)",
                   color: savedIds && savedIds.has(beatOfDay.videoId) ? "white" : "rgba(255,255,255,0.5)",
                 }}>
-                \uD83D\uDD16
+                🔖
               </button>
             </div>
           ) : (
@@ -1422,15 +1422,15 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
             {/* 5. PRODUCER EARNINGS SNAPSHOT */}
             <div style={{ marginBottom: 16 }}>
               <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
-                \uD83D\uDCB0 PRODUCER EARNINGS SNAPSHOT
+                💰 PRODUCER EARNINGS SNAPSHOT
               </div>
               {producerStats ? (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   {[
-                    { label: "Beats Uploaded",  value: producerStats.totalBeats,     color: "#C026D3", icon: "\uD83C\uDFB5" },
-                    { label: "Total Downloads",  value: producerStats.totalDownloads, color: "#3B82F6", icon: "\u2B07\uFE0F" },
-                    { label: "Total Revenue",    value: "\u00A3" + producerStats.totalRevenue, color: "#22C55E", icon: "\uD83D\uDCB8" },
-                    { label: "Leases Sold",      value: producerStats.recentSales,   color: "#F59E0B", icon: "\uD83D\uDCDD" },
+                    { label: "Beats Uploaded",  value: producerStats.totalBeats,     color: "#C026D3", icon: "🎵" },
+                    { label: "Total Downloads",  value: producerStats.totalDownloads, color: "#3B82F6", icon: "⬇️" },
+                    { label: "Total Revenue",    value: "£" + producerStats.totalRevenue, color: "#22C55E", icon: "💸" },
+                    { label: "Leases Sold",      value: producerStats.recentSales,   color: "#F59E0B", icon: "📝" },
                   ].map(function(stat) {
                     return (
                       <div key={stat.label} style={{
@@ -1460,7 +1460,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
             {/* 6. BEATFINDER RANK */}
             <div>
               <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
-                \uD83C\uDFC6 YOUR BEATFINDER RANK
+                🏆 YOUR BEATFINDER RANK
               </div>
               <div style={{
                 background: "linear-gradient(135deg,rgba(192,38,211,0.12),rgba(245,158,11,0.12))",
