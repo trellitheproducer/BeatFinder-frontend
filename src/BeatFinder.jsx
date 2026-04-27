@@ -405,7 +405,8 @@ const ARTISTS_UK = [
   {id:"mhuncho",       name:"M Huncho",        cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/HLqRYYFv/IMG-9140.webp"},
   {id:"nafesmallz",    name:"Nafe Smallz",     cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/s9JR82ym/IMG-9141.jpg"},
   {id:"yxngbane",      name:"Yxng Bane",       cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/WNj0TwHK/IMG-9142.webp"},
-  {id:"byoung",        name:"B Young",         cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/rf0PdBBq/IMG-9143.jpg"},
+  {id:"byoung",        name:"B Young",         cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/rf0PdBBq/IMG-9143.jpg",
+   blockedChannels:["Prod.B.Young","BYoungBeats","B Young Beats","prod b young"]},
   {id:"yungfume",      name:"Yung Fume",       cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/nN52pN5P/IMG-9144.webp"},
   {id:"wewantwraiths", name:"wewantwraiths",   cat:"UK Melodic Trap", flag:"🇬🇧", img:"https://i.ibb.co/6R0qMMG0/IMG-9145.jpg"},
 ];
@@ -1005,7 +1006,7 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
 // =============================================================================
 // BEAT FEED
 // =============================================================================
-function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, showPagination, filterTitle, instrumentalOnly, max, extraQueries }) {
+function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, showPagination, filterTitle, instrumentalOnly, max, extraQueries, blockedChannels }) {
   const [beats,   setBeats]   = useState([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
@@ -1021,11 +1022,14 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
 
     fetchBeats(artistName, page, filterTitle, max || 20, extraQueries).then(({ beats: b, error: e }) => {
       if (!alive) return;
-      // Filter to instrumentals only if flag is set (e.g. Dot Rotten)
       const INSTRUMENTAL_KEYWORDS = ["instrumental", "riddim", "beat", "free beat", "backing track"];
-      const filtered = instrumentalOnly
+      let filtered = instrumentalOnly
         ? b.filter(beat => INSTRUMENTAL_KEYWORDS.some(kw => beat.title.toLowerCase().includes(kw)))
         : b;
+      if (blockedChannels && blockedChannels.length > 0) {
+        const blocked = blockedChannels.map(c => c.toLowerCase());
+        filtered = filtered.filter(beat => !blocked.some(c => beat.channel.toLowerCase().includes(c)));
+      }
       setBeats(filtered);
       setError(e);
       setLoading(false);
@@ -2047,7 +2051,7 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
         </div>
       </div>
       <div style={{ padding: "0 16px" }}>
-        <BeatFeed artistName={searchName} savedIds={savedIds} onSave={onSave} onPlay={onPlay} showPagination filterTitle={artist.filterTitle !== false} instrumentalOnly={!!artist.instrumentalOnly} max={10} extraQueries={artist.extraQueries || null} />
+        <BeatFeed artistName={searchName} savedIds={savedIds} onSave={onSave} onPlay={onPlay} showPagination filterTitle={artist.filterTitle !== false} instrumentalOnly={!!artist.instrumentalOnly} max={10} extraQueries={artist.extraQueries || null} blockedChannels={artist.blockedChannels || null} />
       </div>
     </div>
   );
