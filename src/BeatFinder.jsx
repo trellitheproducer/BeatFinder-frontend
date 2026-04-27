@@ -1612,53 +1612,127 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
 // TRENDING SCREEN
 // =============================================================================
 function TrendingScreen({ savedIds, onSave, onPlay }) {
-  const [beats,   setBeats]   = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState(null);
+  const [trending,  setTrending]  = useState([]);
+  const [rising,    setRising]    = useState([]);
+  const [tLoading,  setTLoading]  = useState(true);
+  const [rLoading,  setRLoading]  = useState(true);
+  const [tError,    setTError]    = useState(null);
+  const [rError,    setRError]    = useState(null);
 
   useEffect(() => {
-    setLoading(true);
+    // Fetch trending (1M+ views)
     apiFetch("/api/youtube/trending")
-      .then(d => { setBeats(d.beats || []); setLoading(false); })
-      .catch(e => { setError(e.message); setLoading(false); });
+      .then(d => { setTrending(d.beats || []); setTLoading(false); })
+      .catch(e => { setTError(e.message); setTLoading(false); });
+
+    // Rising producers: search recent uploads from smaller producers
+    // Use the producer beats from the DB - they are newer/smaller
+    apiFetch("/api/producer/beats")
+      .then(d => { setRising(d || []); setRLoading(false); })
+      .catch(() => {
+        // Fallback: search YouTube for recent beats
+        apiFetch("/api/youtube/search?artist=type+beat+2025&page=1&filter_title=false&max=10")
+          .then(d => {
+            setRising((d.beats || []).map(b => ({
+              ...b, producer: b.channel, isYoutube: true,
+            })));
+            setRLoading(false);
+          })
+          .catch(() => setRLoading(false));
+      });
   }, []);
+
+  const SectionHeader = ({ emoji, title, subtitle, color }) => (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <span style={{ fontSize: 22 }}>{emoji}</span>
+        <div style={{ color: color || "#C026D3", fontWeight: 800, fontSize: 17, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>{title}</div>
+      </div>
+      {subtitle && <div style={{ color: "#666", fontSize: 12, marginLeft: 32 }}>{subtitle}</div>}
+      <div style={{ height: 2, background: "linear-gradient(90deg," + (color || "#C026D3") + ",transparent)", borderRadius: 2, marginTop: 8 }} />
+    </div>
+  );
 
   return (
     <div style={{ padding: "0 16px 100px" }}>
       <div style={{ padding: "20px 0 0" }}>
-        <div style={{ background: "linear-gradient(135deg,#1a1a2e,#6B21A8)", borderRadius: 16, padding: "24px 20px", marginBottom: 20 }}>
-          <div style={{ color: "#F59E0B", fontSize: 13, fontWeight: 800, marginBottom: 6 }}>🔥 TRENDING NOW</div>
-          <div style={{ color: "white", fontSize: 26, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
-            Hottest type beats
-          </div>
-          <div style={{ color: "#aaa", fontSize: 13, marginTop: 4 }}>1M+ views only - sorted by most viewed</div>
+        <div style={{ background: "linear-gradient(135deg,#1a1a2e,#6B21A8)", borderRadius: 16, padding: "20px", marginBottom: 24 }}>
+          <div style={{ color: "#F59E0B", fontSize: 13, fontWeight: 800, marginBottom: 4 }}>DISCOVER</div>
+          <div style={{ color: "white", fontSize: 26, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>Trending & Rising</div>
+          <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>Viral beats + emerging producers</div>
         </div>
       </div>
 
-      {loading && (
-        <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
-          <div style={{ fontSize: 36, marginBottom: 10 }}>🔥</div>
-          <div style={{ fontSize: 13 }}>Finding viral beats with 1M+ views...</div>
+      
+      <SectionHeader emoji="🔥" title="TRENDING ON YOUTUBE" subtitle="1M+ views - sorted by most viewed" color="#F59E0B" />
+
+      {tLoading && (
+        <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>
+          <div style={{ fontSize: 30, marginBottom: 8 }}>🔥</div>
+          <div style={{ fontSize: 13 }}>Loading viral beats...</div>
         </div>
       )}
-
-      {error && !beats.length && (
-        <div style={{ background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 14, padding: 20, textAlign: "center" }}>
-          <div style={{ color: "#F87171", fontWeight: 700, fontSize: 15, marginBottom: 8 }}>Could not load trending beats</div>
-          <div style={{ color: "#888", fontSize: 13 }}>{error}</div>
+      {tError && !trending.length && (
+        <div style={{ background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 12, padding: 16, textAlign: "center", marginBottom: 16 }}>
+          <div style={{ color: "#F87171", fontSize: 13 }}>Could not load trending - {tError}</div>
         </div>
       )}
-
-      {!loading && beats.map(beat => (
+      {!tLoading && trending.map(beat => (
         <BeatCard key={beat.videoId} beat={beat} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
       ))}
-
-      {!loading && !beats.length && !error && (
-        <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>No trending beats found.</div>
+      {!tLoading && !trending.length && !tError && (
+        <div style={{ textAlign: "center", padding: "30px 0", color: "#444", fontSize: 13 }}>No trending beats found.</div>
       )}
+
+      
+      <div style={{ marginTop: 32, marginBottom: 4 }}>
+        <SectionHeader emoji="🚀" title="RISING PRODUCERS" subtitle="New uploads from producers on BeatFinder" color="#22C55E" />
+      </div>
+
+      {rLoading && (
+        <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>
+          <div style={{ fontSize: 30, marginBottom: 8 }}>🚀</div>
+          <div style={{ fontSize: 13 }}>Loading rising producers...</div>
+        </div>
+      )}
+      {!rLoading && rising.length === 0 && (
+        <div style={{ background: "#111", borderRadius: 14, padding: 20, textAlign: "center", border: "1px solid #1e1e1e" }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>🎛</div>
+          <div style={{ color: "#aaa", fontSize: 14, fontWeight: 600, marginBottom: 4 }}>No producer uploads yet</div>
+          <div style={{ color: "#555", fontSize: 12 }}>Be the first to upload your beats as a Producer Pro</div>
+        </div>
+      )}
+      {!rLoading && rising.map((beat, i) => {
+        // Producer DB beats have different shape than YouTube beats
+        if (beat.isYoutube || beat.videoId) {
+          return <BeatCard key={beat.videoId || i} beat={beat} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />;
+        }
+        // Producer upload card
+        return (
+          <div key={beat.id || i} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 14, border: "1px solid rgba(34,197,94,0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 4, lineHeight: 1.3 }}>{beat.title}</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#22C55E", fontWeight: 700 }}>{beat.genre}</div>
+                  <div style={{ background: beat.price === "free" ? "rgba(34,197,94,0.1)" : "rgba(192,38,211,0.1)", border: "1px solid " + (beat.price === "free" ? "rgba(34,197,94,0.3)" : "rgba(192,38,211,0.3)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: beat.price === "free" ? "#22C55E" : "#C026D3", fontWeight: 700 }}>{beat.price === "free" ? "FREE" : beat.price}</div>
+                </div>
+              </div>
+              <div style={{ background: "rgba(34,197,94,0.15)", borderRadius: 20, padding: "4px 10px", fontSize: 11, color: "#22C55E", fontWeight: 700, flexShrink: 0 }}>🚀 RISING</div>
+            </div>
+            <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>
+              By <span style={{ color: "#22C55E", fontWeight: 700 }}>{beat.producer}</span> · {beat.downloads} downloads
+            </div>
+            {beat.url && (
+              <audio controls controlsList="nodownload" src={beat.url + "#t=60,90"} style={{ width: "100%", height: 36, borderRadius: 8 }} />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
+
 
 // =============================================================================
 // SEARCH SCREEN
