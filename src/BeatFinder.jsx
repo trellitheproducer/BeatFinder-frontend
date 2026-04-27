@@ -2970,8 +2970,48 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
     },
   ];
 
-  if (user) return (
+  // Add activeSection state for dashboard navigation
+  const [activeSection, setActiveSection] = React.useState(null);
+  const [producerStats, setProducerStats] = React.useState(null);
+
+  React.useEffect(() => {
+    if (user?.isPro) {
+      Promise.all([
+        apiFetch("/api/producer/my-beats").catch(() => []),
+        apiFetch("/api/producer/my-leases").catch(() => []),
+        apiFetch("/api/producer/stripe-status").catch(() => ({})),
+      ]).then(([beats, leases, stripe]) => {
+        const totalDownloads = beats.reduce((s, b) => s + (b.downloads || 0), 0);
+        const totalRevenue   = leases.reduce((s, l) => {
+          const p = parseFloat((l.price || "0").replace(/[^0-9.]/g, ""));
+          return s + (isNaN(p) ? 0 : p);
+        }, 0);
+        const topBeat = beats.reduce((best, b) => (!best || b.downloads > best.downloads) ? b : best, null);
+        setProducerStats({
+          totalBeats: beats.length,
+          totalDownloads,
+          totalRevenue: totalRevenue.toFixed(2),
+          topBeat: topBeat ? topBeat.title : "No beats yet",
+          stripeConnected: stripe.connected || false,
+          recentSales: leases.slice(0, 5),
+        });
+      });
+    }
+  }, [user]);
+
+  if (user) {
+    const goSection = (s) => setActiveSection(activeSection === s ? null : s);
+
+    const SectionBack = ({ label }) => (
+      <button onClick={() => setActiveSection(null)}
+        style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: "#C026D3", fontWeight: 700, fontSize: 14, cursor: "pointer", padding: "0 0 16px" }}>
+        &#8592; {label}
+      </button>
+    );
+
+    return (
     <div style={{ padding: "0 16px 100px" }}>
+      
       <div style={{ padding: "20px 0 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>My Profile</div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", position: "relative" }}>
@@ -2984,488 +3024,310 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             Log out
           </button>
           {settingsOpen && (
-            <div style={{
-              position: "absolute", top: 44, right: 0, zIndex: 100,
-              background: "#111", border: "1px solid #333", borderRadius: 14,
-              padding: 20, width: 300, boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
-            }}>
+            <div style={{ position: "absolute", top: 44, right: 0, zIndex: 100, background: "#111", border: "1px solid #333", borderRadius: 14, padding: 20, width: 300, boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                 <div style={{ color: "white", fontWeight: 800, fontSize: 16 }}>⚙️ Settings</div>
                 <button onClick={() => setSettingsOpen(false)} style={{ background: "none", border: "none", color: "#555", fontSize: 20, cursor: "pointer" }}>✕</button>
               </div>
-
               <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>USERNAME</div>
-              <input
-                value={newUsername}
-                onChange={e => setNewUsername(e.target.value)}
-                placeholder={user.username || "Set your username"}
-                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
-              />
-              <button
-                onClick={async () => {
-                  if (!newUsername.trim()) return;
-                  try {
-                    await apiFetch("/api/auth/set-username", { method: "POST", body: JSON.stringify({ username: newUsername.trim() }) });
-                    setUser({ ...user, username: newUsername.trim() });
-                    setNewUsername("");
-                    setSettingsMsg("Username updated!");
-                    setTimeout(() => setSettingsMsg(""), 2500);
-                  } catch (e) { setSettingsMsg("Error: " + e.message); }
-                }}
-                style={{ width: "100%", background: "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: "10px", fontSize: 14, cursor: "pointer", marginBottom: 16 }}
-              >
+              <input value={newUsername} onChange={e => setNewUsername(e.target.value)} placeholder={user.username || "Set your username"}
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
+              <button onClick={async () => {
+                if (!newUsername.trim()) return;
+                try {
+                  await apiFetch("/api/auth/set-username", { method: "POST", body: JSON.stringify({ username: newUsername.trim() }) });
+                  setUser({ ...user, username: newUsername.trim() }); setNewUsername(""); setSettingsMsg("Username updated!"); setTimeout(() => setSettingsMsg(""), 2500);
+                } catch (e) { setSettingsMsg("Error: " + e.message); }
+              }} style={{ width: "100%", background: "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: "10px", fontSize: 14, cursor: "pointer", marginBottom: 16 }}>
                 {user.username ? "Update Username" : "Set Username"}
               </button>
-
               <div style={{ height: 1, background: "#1e1e1e", marginBottom: 16 }} />
-
               <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>CHANGE PASSWORD</div>
-              <input
-                value={currentPw}
-                onChange={e => setCurrentPw(e.target.value)}
-                type="password"
-                placeholder="Current password"
-                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
-              />
-              <input
-                value={newPw}
-                onChange={e => setNewPw(e.target.value)}
-                type="password"
-                placeholder="New password"
-                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
-              />
-              <input
-                value={confirmPw}
-                onChange={e => setConfirmPw(e.target.value)}
-                type="password"
-                placeholder="Confirm new password"
-                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
-              />
-              <button
-                onClick={async () => {
-                  if (!currentPw || !newPw) return;
-                  if (newPw !== confirmPw) { setSettingsMsg("Passwords do not match"); return; }
-                  if (newPw.length < 6) { setSettingsMsg("Password must be at least 6 characters"); return; }
-                  try {
-                    await apiFetch("/api/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPw, new_password: newPw }) });
-                    setCurrentPw(""); setNewPw(""); setConfirmPw("");
-                    setSettingsMsg("Password changed successfully!");
-                    setTimeout(() => setSettingsMsg(""), 2500);
-                  } catch (e) { setSettingsMsg("Error: " + e.message); }
-                }}
-                style={{ width: "100%", background: "#1a1a1a", border: "1.5px solid #333", borderRadius: 10, color: "#aaa", fontWeight: 800, padding: "10px", fontSize: 14, cursor: "pointer", marginBottom: 8 }}
-              >
+              <input value={currentPw} onChange={e => setCurrentPw(e.target.value)} type="password" placeholder="Current password"
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
+              <input value={newPw} onChange={e => setNewPw(e.target.value)} type="password" placeholder="New password"
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
+              <input value={confirmPw} onChange={e => setConfirmPw(e.target.value)} type="password" placeholder="Confirm new password"
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
+              <button onClick={async () => {
+                if (!currentPw || !newPw) return;
+                if (newPw !== confirmPw) { setSettingsMsg("Passwords do not match"); return; }
+                if (newPw.length < 6) { setSettingsMsg("Password must be at least 6 characters"); return; }
+                try {
+                  await apiFetch("/api/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPw, new_password: newPw }) });
+                  setCurrentPw(""); setNewPw(""); setConfirmPw(""); setSettingsMsg("Password changed!"); setTimeout(() => setSettingsMsg(""), 2500);
+                } catch (e) { setSettingsMsg("Error: " + e.message); }
+              }} style={{ width: "100%", background: "#1a1a1a", border: "1.5px solid #333", borderRadius: 10, color: "#aaa", fontWeight: 800, padding: "10px", fontSize: 14, cursor: "pointer", marginBottom: 8 }}>
                 Change Password
               </button>
+              {settingsMsg && <div style={{ color: settingsMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, textAlign: "center", fontWeight: 600 }}>{settingsMsg}</div>}
+            </div>
+          )}
+        </div>
+      </div>
 
-              {settingsMsg && (
-                <div style={{ color: settingsMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, textAlign: "center", fontWeight: 600 }}>
-                  {settingsMsg}
+      
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>{user.name}</div>
+        <div style={{ color: "#666", fontSize: 13 }}>{user.email}</div>
+        {user.username && <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>@{user.username}</div>}
+        <div style={{ marginTop: 8 }}>
+          {user.isPro && <span style={{ display: "inline-block", background: "rgba(192,38,211,0.2)", border: "1px solid #C026D3", borderRadius: 20, padding: "4px 14px", color: "#C026D3", fontWeight: 800, fontSize: 12, marginRight: 6 }}>⭐ Producer Pro</span>}
+          {user.isArtistPro && !user.isPro && <span style={{ display: "inline-block", background: "rgba(245,158,11,0.2)", border: "1px solid #F59E0B", borderRadius: 20, padding: "4px 14px", color: "#F59E0B", fontWeight: 800, fontSize: 12 }}>🎤 Artist Pro</span>}
+        </div>
+      </div>
+
+      
+      {!activeSection && (
+        <div>
+          
+          {user.isArtistPro && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>🎤 ARTIST TOOLS</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[
+                  { id: "lyrics",  icon: "✍️", label: "My Lyrics",    desc: savedLyrics.length + " saved",    color: "#C026D3" },
+                  { id: "members", icon: "🎵", label: "Members Area", desc: "Exclusive beats",                 color: "#F59E0B" },
+                ].map(item => (
+                  <button key={item.id} onClick={() => goSection(item.id)}
+                    style={{ background: "#111", borderRadius: 14, padding: "16px 12px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
+                    <div style={{ fontSize: 24, marginBottom: 8 }}>{item.icon}</div>
+                    <div style={{ color: "white", fontWeight: 700, fontSize: 14 }}>{item.label}</div>
+                    <div style={{ color: item.color, fontSize: 12, marginTop: 3 }}>{item.desc}</div>
+                  </button>
+                ))}
+              </div>
+
+              
+              {savedLyrics.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ color: "#444", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>RECENT LYRICS</div>
+                  {savedLyrics.slice(0, 2).map((lyric, i) => (
+                    <div key={i} onClick={() => onEditLyric(lyric, i)}
+                      style={{ background: "#111", borderRadius: 10, padding: "10px 14px", marginBottom: 6, border: "1px solid #1e1e1e", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ color: "white", fontWeight: 600, fontSize: 13 }}>{lyric.title || "Untitled"}</div>
+                        <div style={{ color: "#555", fontSize: 11, marginTop: 2 }}>{lyric.beatTitle}</div>
+                      </div>
+                      <span style={{ color: "#C026D3", fontSize: 16 }}>&#9654;</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
           )}
-        </div>
-      </div>
-      <div style={{ background: "#111", borderRadius: 16, padding: 20, marginBottom: 20, border: "1px solid rgba(255,255,255,0.07)", textAlign: "center" }}>
-        <div style={{ width: 80, height: 80, borderRadius: "50%", background: "linear-gradient(135deg,#7C2D12,#C026D3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, color: "white", fontWeight: 800, margin: "0 auto 12px" }}>
-          {user.name[0]?.toUpperCase()}
-        </div>
-        <div style={{ color: "white", fontSize: 20, fontWeight: 800 }}>{user.name}</div>
-        <div style={{ color: "#888", fontSize: 13 }}>{user.email}</div>
-        {user.isPro && <div style={{ marginTop: 8, display: "inline-block", background: "rgba(192,38,211,0.2)", border: "1px solid #C026D3", borderRadius: 20, padding: "4px 14px", color: "#C026D3", fontWeight: 800, fontSize: 13 }}>⭐ Producer Pro</div>}
-        {user.isArtistPro && !user.isPro && <div style={{ marginTop: 8, display: "inline-block", background: "rgba(245,158,11,0.2)", border: "1px solid #F59E0B", borderRadius: 20, padding: "4px 14px", color: "#F59E0B", fontWeight: 800, fontSize: 13 }}>🎤 Artist Pro</div>}
-        {user.username && (
-          <div style={{ marginTop: 6, color: "#555", fontSize: 12 }}>@{user.username}</div>
-        )}
-      </div>
 
-      
-      {user.isArtistPro && (
-        <div style={{ background: "linear-gradient(135deg,#1a0a00,#1a1000)", borderRadius: 16, padding: 16, marginBottom: 20, border: "1px solid rgba(245,158,11,0.25)" }}>
-          <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, letterSpacing: 1, marginBottom: 12 }}>🎤 ARTIST WORKSPACE</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {[
-              { icon: "✍️", label: "Lyrics", desc: savedLyrics.length + " saved", color: "#C026D3" },
-              { icon: "🔖", label: "Saved Beats", desc: "Your library", color: "#F59E0B" },
-              { icon: "🎵", label: "Members Area", desc: "Exclusive beats", color: "#22C55E" },
-              { icon: "✨", label: "AI Assistant", desc: "Writer's block?", color: "#818CF8" },
-            ].map(function(item) {
-              return (
-                <div key={item.label} style={{ background: "#111", borderRadius: 12, padding: "12px 10px", border: "1px solid #1e1e1e" }}>
-                  <div style={{ fontSize: 20, marginBottom: 6 }}>{item.icon}</div>
-                  <div style={{ color: "white", fontWeight: 700, fontSize: 13 }}>{item.label}</div>
-                  <div style={{ color: item.color, fontSize: 11, marginTop: 2 }}>{item.desc}</div>
-                </div>
-              );
-            })}
-          </div>
-          {savedLyrics.length > 0 && (
-            <div style={{ marginTop: 14 }}>
-              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>RECENT LYRICS</div>
-              {savedLyrics.slice(0, 2).map(function(lyric, i) {
-                return (
-                  <div key={i} onClick={function(){ onEditLyric(lyric, i); }}
-                    style={{ background: "#1a1a1a", borderRadius: 10, padding: "10px 12px", marginBottom: 6, border: "1px solid #222", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div>
-                      <div style={{ color: "white", fontWeight: 600, fontSize: 13 }}>{lyric.title || "Untitled"}</div>
-                      <div style={{ color: "#555", fontSize: 11, marginTop: 2 }}>{lyric.beatTitle}</div>
-                    </div>
-                    <div style={{ color: "#C026D3", fontSize: 13 }}>&#9654;</div>
-                  </div>
-                );
-              })}
+          
+          {user.isPro && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>🎹 PRODUCER TOOLS</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[
+                  { id: "upload",  icon: "⬆️", label: "Upload Beat",  desc: "Add new beat",       color: "#C026D3" },
+                  { id: "manage",  icon: "🎛", label: "My Uploads",   desc: uploads.length + " beats", color: "#F59E0B" },
+                  { id: "stripe",  icon: "💳", label: "Stripe Payouts", desc: producerStats?.stripeConnected ? "Connected" : "Not connected", color: "#22C55E" },
+                  { id: "stats",   icon: "📊", label: "Analytics",    desc: producerStats ? producerStats.totalDownloads + " downloads" : "Loading...", color: "#818CF8" },
+                ].map(item => (
+                  <button key={item.id} onClick={() => goSection(item.id)}
+                    style={{ background: "#111", borderRadius: 14, padding: "16px 12px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
+                    <div style={{ fontSize: 24, marginBottom: 8 }}>{item.icon}</div>
+                    <div style={{ color: "white", fontWeight: 700, fontSize: 14 }}>{item.label}</div>
+                    <div style={{ color: item.color, fontSize: 12, marginTop: 3 }}>{item.desc}</div>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
+
+          
+          {!user.isArtistPro && (
+            <div style={{ background: "linear-gradient(135deg,#1a0a00,#1a1000)", borderRadius: 16, padding: 16, marginBottom: 20, border: "1px solid rgba(245,158,11,0.2)" }}>
+              <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Upgrade to Pro</div>
+              <div style={{ color: "#888", fontSize: 13, marginBottom: 14 }}>Unlock lyrics, exclusive beats, MP3 downloads and more from £4.99/mo</div>
+              <button onClick={() => goSection("upgrade")} style={{ background: "linear-gradient(135deg,#F59E0B,#C026D3)", border: "none", borderRadius: 20, color: "white", fontWeight: 800, fontSize: 14, padding: "10px 24px", cursor: "pointer" }}>
+                View Plans
+              </button>
+            </div>
+          )}
+
+          
+          <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #1e1e1e", marginBottom: 16 }}>
+            <div style={{ color: "#888", fontWeight: 700, fontSize: 13, marginBottom: 10 }}>Activation Code</div>
+            <input value={activationCode} onChange={e => setActivationCode(e.target.value)} placeholder="Enter your code"
+              style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
+            <button onClick={async () => {
+              try {
+                const r = await apiFetch("/api/auth/activate", { method: "POST", body: JSON.stringify({ code: activationCode }) });
+                setActivationSuccess(r.message || "Activated!"); setActivationCode("");
+                const me = await apiFetch("/api/auth/me");
+                setUser({ ...me, isPro: me.plan === "producer", isArtistPro: me.plan === "artist" || me.plan === "producer" });
+              } catch (e) { setActivationErr(e.message); }
+            }} style={{ background: "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: "10px 20px", fontSize: 14, cursor: "pointer" }}>
+              Activate
+            </button>
+            {activationErr     && <div style={{ color: "#F87171", fontSize: 13, marginTop: 8 }}>{activationErr}</div>}
+            {activationSuccess && <div style={{ color: "#22C55E", fontSize: 13, marginTop: 8 }}>{activationSuccess}</div>}
+          </div>
         </div>
       )}
 
       
-      {user.isPro && (
-        <div style={{ background: "linear-gradient(135deg,#0a001a,#150030)", borderRadius: 16, padding: 16, marginBottom: 20, border: "1px solid rgba(192,38,211,0.25)" }}>
-          <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 12, letterSpacing: 1, marginBottom: 12 }}>🎹 PRODUCER DASHBOARD</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
-            {[
-              { icon: "⬆️", label: "Upload", desc: "Add beats" },
-              { icon: "🎛", label: "My Beats", desc: "Manage uploads" },
-              { icon: "💳", label: "Payouts", desc: "Stripe" },
-            ].map(function(item) {
-              return (
-                <div key={item.label} style={{ background: "#111", borderRadius: 12, padding: "12px 8px", border: "1px solid #1e1e1e", textAlign: "center" }}>
-                  <div style={{ fontSize: 20, marginBottom: 4 }}>{item.icon}</div>
-                  <div style={{ color: "white", fontWeight: 700, fontSize: 12 }}>{item.label}</div>
-                  <div style={{ color: "#C026D3", fontSize: 10, marginTop: 2 }}>{item.desc}</div>
-                </div>
-              );
-            })}
-          </div>
-          <div style={{ background: "#111", borderRadius: 12, padding: "12px 14px", border: "1px solid #1e1e1e" }}>
-            <div style={{ color: "#555", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>QUICK STATS</div>
-            <div style={{ display: "flex", gap: 0 }}>
-              {[
-                { label: "Beats", value: uploads.length },
-                { label: "Downloads", value: uploads.reduce(function(s, b){ return s + (b.downloads || 0); }, 0) },
-                { label: "Revenue", value: "View" },
-              ].map(function(stat, i) {
-                return (
-                  <div key={stat.label} style={{ flex: 1, textAlign: "center", borderRight: i < 2 ? "1px solid #1e1e1e" : "none" }}>
-                    <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>{stat.value}</div>
-                    <div style={{ color: "#555", fontSize: 11 }}>{stat.label}</div>
-                  </div>
-                );
-              })}
+
+      {activeSection === "lyrics" && (
+        <div>
+          <SectionBack label="Back to Dashboard" />
+          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>My Lyrics</div>
+          <div style={{ color: "#666", fontSize: 13, marginBottom: 16 }}>Tap any lyric to continue writing</div>
+          {savedLyrics.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>✍️</div>
+              <div>No saved lyrics yet. Open a beat and tap Write Lyrics.</div>
             </div>
+          ) : savedLyrics.map((lyric, i) => (
+            <div key={i} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid #1e1e1e" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{lyric.title || "Untitled"}</div>
+                  <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>{lyric.beatTitle}</div>
+                  <div style={{ color: "#444", fontSize: 11, marginTop: 2 }}>{new Date(lyric.savedAt || lyric.updatedAt || "").toLocaleDateString()}</div>
+                </div>
+                <button onClick={() => { setSavedLyrics(prev => { const next = prev.filter((_, j) => j !== i); try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch {} return next; }); }}
+                  style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 8, color: "#F87171", fontSize: 12, padding: "4px 10px", cursor: "pointer" }}>
+                  Delete
+                </button>
+              </div>
+              <button onClick={() => onEditLyric(lyric, i)}
+                style={{ width: "100%", background: "rgba(192,38,211,0.1)", border: "1.5px solid #C026D3", borderRadius: 10, color: "#C026D3", fontWeight: 700, fontSize: 14, padding: "10px", cursor: "pointer", marginTop: 6 }}>
+                ✍️ Continue Writing
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activeSection === "upload" && (
+        <div>
+          <SectionBack label="Back to Dashboard" />
+          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Upload Your Beat</div>
+          <div style={{ color: "#666", fontSize: 13, marginBottom: 14 }}>Upload MP3 files to sell leases to artists.</div>
+          <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #222" }}>
+            <input value={ytLink} onChange={e => setYtLink(e.target.value)} placeholder="Beat title e.g. Dark Trap Beat" style={inp} />
+            <input value={uploadGenre || ""} onChange={e => setUploadGenre(e.target.value)} placeholder="Genre e.g. Trap, R&B, Afrobeats" style={inp} />
+            <input value={uploadPrice || ""} onChange={e => setUploadPrice(e.target.value)} placeholder="Price e.g. free or £9.99" style={inp} />
+            <input type="file" accept=".mp3,audio/mpeg" onChange={e => setUploadFile(e.target.files[0])}
+              style={{ width: "100%", marginBottom: 12, color: "#aaa", fontSize: 14 }} />
+            <button disabled={uploadLoading} onClick={async () => {
+              if (!ytLink.trim() || !uploadFile) { setUploadMsg("Please fill all fields and select an MP3"); return; }
+              setUploadLoading(true); setUploadMsg("");
+              try {
+                const fd = new FormData();
+                fd.append("title", ytLink.trim()); fd.append("genre", uploadGenre || ""); fd.append("price", uploadPrice || "free"); fd.append("file", uploadFile);
+                const token = typeof getToken === "function" ? getToken() : (localStorage.getItem("bf_token") || "");
+                const res = await fetch(API_BASE + "/api/producer/upload", { method: "POST", headers: { "Authorization": "Bearer " + token }, body: fd });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || "Upload failed");
+                setUploads(prev => [data.beat, ...prev]); setUploadMsg("Beat uploaded!"); setYtLink(""); setUploadGenre(""); setUploadPrice(""); setUploadFile(null);
+              } catch (e) { setUploadMsg("Error: " + e.message); }
+              setUploadLoading(false);
+            }} style={{ width: "100%", background: uploadLoading ? "#333" : "#C026D3", border: "none", borderRadius: 12, color: "white", fontWeight: 800, fontSize: 15, padding: "14px", cursor: uploadLoading ? "not-allowed" : "pointer" }}>
+              {uploadLoading ? "Uploading..." : "Upload Beat"}
+            </button>
+            {uploadMsg && <div style={{ marginTop: 10, color: uploadMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, textAlign: "center" }}>{uploadMsg}</div>}
           </div>
         </div>
       )}
 
-            {user.isPro && (
-        <div style={{ marginBottom: 24 }}>
+      {activeSection === "manage" && (
+        <div>
+          <SectionBack label="Back to Dashboard" />
+          <MyUploadsSection user={user} />
+        </div>
+      )}
+
+      {activeSection === "stripe" && (
+        <div>
+          <SectionBack label="Back to Dashboard" />
+          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 16 }}>Stripe Payouts</div>
           <StripeConnectSection />
         </div>
       )}
 
-      {user.isPro && (() => {
-        const [producerTab, setProducerTab] = useState("upload");
-        return (
+      {activeSection === "stats" && (
         <div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            <button onClick={() => setProducerTab("upload")}
-              style={{ flex: 1, padding: "10px", borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: "pointer", border: producerTab === "upload" ? "2px solid #C026D3" : "1.5px solid #333", background: producerTab === "upload" ? "rgba(192,38,211,0.15)" : "transparent", color: producerTab === "upload" ? "#C026D3" : "#666" }}>
-              ⬆️ Upload Beat
-            </button>
-            <button onClick={() => setProducerTab("manage")}
-              style={{ flex: 1, padding: "10px", borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: "pointer", border: producerTab === "manage" ? "2px solid #F59E0B" : "1.5px solid #333", background: producerTab === "manage" ? "rgba(245,158,11,0.15)" : "transparent", color: producerTab === "manage" ? "#F59E0B" : "#666" }}>
-              🎛 My Uploads
-            </button>
-          </div>
-
-          {producerTab === "manage" && <MyUploadsSection user={user} />}
-
-          {producerTab === "upload" && <div>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Upload Your Beats</div>
-          <div style={{ color: "#666", fontSize: 13, marginBottom: 14 }}>Upload MP3 files - they appear in the MP3s tab for users to download.</div>
-          <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #222" }}>
-            <input value={ytLink} onChange={e => setYtLink(e.target.value)} placeholder="Beat title e.g. Dark Trap Beat" style={inp} />
-            <input value={uploadGenre || ""} onChange={e => setUploadGenre(e.target.value)} placeholder="Genre e.g. Trap, R&B, Afrobeats" style={inp} />
-            <input value={uploadPrice || ""} onChange={e => setUploadPrice(e.target.value)} placeholder='Price e.g. free or £9.99' style={inp} />
-            <label style={{ display: "block", background: "#1a1a1a", border: "1.5px dashed #444", borderRadius: 10, padding: "16px", textAlign: "center", cursor: "pointer", marginBottom: 12 }}>
-              <input type="file" accept=".mp3" onChange={e => setUploadFile(e.target.files[0])} style={{ display: "none" }} />
-              <div style={{ fontSize: 24, marginBottom: 6 }}>🎵</div>
-              <div style={{ color: uploadFile ? "#22C55E" : "#666", fontSize: 13, fontWeight: 600 }}>
-                {uploadFile ? uploadFile.name : "Tap to select MP3 file"}
-              </div>
-            </label>
-            <button
-              onClick={async () => {
-                if (!ytLink.trim() || !uploadFile) return;
-                setUploadLoading(true);
-                setUploadMsg("");
-                try {
-                  const token = localStorage.getItem("bf_token");
-                  const form  = new FormData();
-                  form.append("title",  ytLink.trim());
-                  form.append("genre",  uploadGenre || "General");
-                  form.append("price",  uploadPrice || "free");
-                  form.append("file",   uploadFile);
-                  const res = await fetch(API_BASE + "/api/producer/upload", {
-                    method: "POST",
-                    headers: { Authorization: "Bearer " + token },
-                    body: form,
-                  });
-                  const data = await res.json();
-                  if (!res.ok) throw new Error(data.detail || "Upload failed");
-                  setUploads(p => [...p, data.beat]);
-                  setYtLink(""); setUploadGenre(""); setUploadPrice(""); setUploadFile(null);
-                  setUploadMsg("Beat uploaded successfully!");
-                } catch (e) {
-                  setUploadMsg("Error: " + e.message);
-                } finally {
-                  setUploadLoading(false);
-                }
-              }}
-              disabled={uploadLoading}
-              style={{ width: "100%", background: uploadLoading ? "#333" : "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: 13, fontSize: 15, cursor: uploadLoading ? "not-allowed" : "pointer" }}>
-              {uploadLoading ? "Uploading..." : "⬆️ Upload Beat"}
-            </button>
-            {uploadMsg && (
-              <div style={{ marginTop: 10, color: uploadMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, textAlign: "center", fontWeight: 600 }}>
-                {uploadMsg}
-              </div>
-            )}
-          </div>
-          {uploads.length > 0 && (
-            <div style={{ marginTop: 14 }}>
-              {uploads.map((b, i) => (
-                <div key={b.id || i} style={{ background: "#111", borderRadius: 12, padding: "12px 14px", marginBottom: 10, border: "1px solid #222" }}>
-                  <div style={{ color: "#C026D3", fontWeight: 700, fontSize: 13 }}>{b.title}</div>
-                  <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>{b.genre} • {b.price}</div>
-                </div>
-              ))}
-            </div>
-          )}
-          </div>}
-        </div>
-        );
-      })()}
-      {(user.isPro || user.isArtistPro || user.plan === "artist" || user.plan === "producer") && (
-        <div style={{ marginBottom: 24 }}>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>✍️ My Lyrics</div>
-          <div style={{ color: "#666", fontSize: 13, marginBottom: 14 }}>Lyrics you wrote while listening to beats.</div>
-          {(!savedLyrics || savedLyrics.length === 0) ? (
-            <div style={{ background: "#111", borderRadius: 14, padding: 20, border: "1px solid #222", textAlign: "center" }}>
-              <div style={{ fontSize: 36, marginBottom: 10 }}>✍️</div>
-              <div style={{ color: "#555", fontSize: 14 }}>No lyrics saved yet.<br />Play a beat and tap Write Lyrics!</div>
-            </div>
+          <SectionBack label="Back to Dashboard" />
+          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 16 }}>Analytics</div>
+          {!producerStats ? (
+            <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>Loading stats...</div>
           ) : (
-            savedLyrics.map((lyric, i) => (
-              <LyricCard
-                key={lyric.id || i}
-                lyric={lyric}
-                lyricIndex={i}
-                onDelete={() => {
-                  const next = savedLyrics.filter((_, idx) => idx !== i);
-                  setSavedLyrics(next);
-                  try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch {}
-                }}
-                onEditLyric={onEditLyric}
-              />
-            ))
-          )}
-        </div>
-      )}
-
-      {!user.isPro && (
-        <div>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 16 }}>
-            {user.isArtistPro ? "Upgrade to Producer Pro" : "Choose Your Plan"}
-          </div>
-          {PLANS.filter(p => !user.isArtistPro || p.id === "producer").map(pl => (
-            <div key={pl.id}>
-              <div onClick={() => setPlan(pl.id)}
-                style={{ background: plan === pl.id ? "rgba(192,38,211,0.12)" : "#111", border: `1.5px solid ${plan === pl.id ? "#C026D3" : "#222"}`, borderRadius: 16, padding: 18, marginBottom: 12, cursor: "pointer" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                  <div style={{ color: "white", fontWeight: 800, fontSize: 17 }}>{pl.label}</div>
-                  <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 17 }}>£{pl.price}/mo</div>
-                </div>
-                {pl.perks.map(p => (
-                  <div key={p} style={{ color: "#ccc", fontSize: 13, marginBottom: 6, display: "flex", gap: 8 }}>
-                    <span style={{ color: "#C026D3" }}>✓</span>{p}
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+                {[
+                  { label: "Beats Uploaded",   value: producerStats.totalBeats,     color: "#C026D3" },
+                  { label: "Total Downloads",   value: producerStats.totalDownloads, color: "#F59E0B" },
+                  { label: "Total Revenue",     value: "£" + producerStats.totalRevenue, color: "#22C55E" },
+                  { label: "Stripe",            value: producerStats.stripeConnected ? "Connected" : "Not connected", color: "#818CF8" },
+                ].map(stat => (
+                  <div key={stat.label} style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #1e1e1e" }}>
+                    <div style={{ color: stat.color, fontWeight: 800, fontSize: 20 }}>{stat.value}</div>
+                    <div style={{ color: "#555", fontSize: 12, marginTop: 4 }}>{stat.label}</div>
                   </div>
                 ))}
               </div>
-              {plan === pl.id && (
-                <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #222", marginBottom: 16 }}>
-                  <div style={{ color: "#888", fontSize: 13, marginBottom: 16, textAlign: "center", lineHeight: 1.8 }}>
-                    Pay securely with card, Apple Pay or Google Pay.<br />
-                    Your activation code is emailed to you instantly after payment.
-                  </div>
-
-                  <button
-                    onClick={async () => {
-                      setActivationErr("");
-                      try {
-                        const result = await apiFetch("/api/stripe/create-checkout", {
-                          method: "POST",
-                          body: JSON.stringify({ plan: pl.id }),
-                        });
-                        window.location.href = result.checkout_url;
-                      } catch (e) {
-                        setActivationErr(e.message);
-                      }
-                    }}
-                    style={{ width: "100%", background: "linear-gradient(135deg,#635BFF,#8B5CF6)", border: "none", borderRadius: 12, color: "white", fontWeight: 800, padding: 14, fontSize: 16, cursor: "pointer", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
-                    💳 Pay £{pl.price}/mo with Card
-                  </button>
-
-                  <div style={{ color: "#555", fontSize: 12, textAlign: "center", marginBottom: 16 }}>
-                    - or enter your activation code below -
-                  </div>
-
-                  <input
-                    value={activationCode}
-                    onChange={e => setActivationCode(e.target.value.toUpperCase())}
-                    placeholder="Activation code e.g. PRD-A1B2C3"
-                    style={{ width: "100%", background: "#1a1a1a", border: "1.5px solid #444", borderRadius: 12, padding: "13px 14px", color: "white", fontSize: 14, marginBottom: 10, boxSizing: "border-box", outline: "none", letterSpacing: 2, fontWeight: 700 }}
-                  />
-                  {activationErr && <div style={{ color: "#F87171", fontSize: 13, marginBottom: 10, textAlign: "center" }}>{activationErr}</div>}
-                  {activationSuccess && <div style={{ color: "#22C55E", fontSize: 13, marginBottom: 10, textAlign: "center" }}>{activationSuccess}</div>}
-                  <button
-                    onClick={async () => {
-                      if (!activationCode.trim()) return;
-                      setActivationErr("");
-                      setActivationSuccess("");
-                      try {
-                        const result = await apiFetch("/api/auth/activate", {
-                          method: "POST",
-                          body: JSON.stringify({ code: activationCode.trim() }),
-                        });
-                        setActivationSuccess(result.message || "Plan activated!");
-                        setUser({ ...user, plan: result.plan, isPro: result.plan === "producer", isArtistPro: result.plan === "artist" || result.plan === "producer" });
-                      } catch (e) {
-                        setActivationErr(e.message);
-                      }
-                    }}
-                    style={{ width: "100%", background: "#1a1a1a", border: "1.5px solid #C026D3", borderRadius: 12, color: "#C026D3", fontWeight: 800, padding: 13, fontSize: 15, cursor: "pointer" }}>
-                    🔑 Activate with Code
-                  </button>
+              <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #1e1e1e", marginBottom: 16 }}>
+                <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>TOP PERFORMING BEAT</div>
+                <div style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{producerStats.topBeat}</div>
+              </div>
+              {producerStats.recentSales.length > 0 && (
+                <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #1e1e1e" }}>
+                  <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>RECENT SALES</div>
+                  {producerStats.recentSales.map((sale, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 10, marginBottom: 10, borderBottom: i < producerStats.recentSales.length - 1 ? "1px solid #1e1e1e" : "none" }}>
+                      <div>
+                        <div style={{ color: "white", fontSize: 13, fontWeight: 600 }}>{sale.beat_title}</div>
+                        <div style={{ color: "#555", fontSize: 11 }}>{new Date(sale.purchased_at).toLocaleDateString()}</div>
+                      </div>
+                      <div style={{ color: "#22C55E", fontWeight: 800, fontSize: 14 }}>{sale.price}</div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
+          )}
+        </div>
+      )}
+
+      {activeSection === "upgrade" && (
+        <div>
+          <SectionBack label="Back to Dashboard" />
+          <div style={{ color: "white", fontWeight: 800, fontSize: 20, marginBottom: 16 }}>Choose Your Plan</div>
+          {PLANS.map(plan => (
+            <div key={plan.id} style={{ background: "#111", borderRadius: 16, padding: 20, marginBottom: 14, border: "1.5px solid #333" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>{plan.label}</div>
+                <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 18 }}>£{plan.price}/mo</div>
+              </div>
+              {plan.perks.map(perk => (
+                <div key={perk} style={{ color: "#aaa", fontSize: 14, marginBottom: 6, display: "flex", gap: 8 }}>
+                  <span style={{ color: "#C026D3" }}>+</span>{perk}
+                </div>
+              ))}
+              <button onClick={async () => {
+                try {
+                  const priceId = plan.id === "artist" ? "price_1TQDoFFHyNSCxas89UpDKiro" : "price_1TQDpBFHyNSCxas8cktbqw1n";
+                  const r = await apiFetch("/api/stripe/create-checkout", { method: "POST", body: JSON.stringify({ price_id: priceId }) });
+                  window.location.href = r.checkout_url;
+                } catch (e) { alert("Error: " + e.message); }
+              }} style={{ width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 12, color: "white", fontWeight: 800, fontSize: 15, padding: "14px", cursor: "pointer", marginTop: 12 }}>
+                Subscribe - £{plan.price}/mo
+              </button>
+            </div>
           ))}
-          <div style={{ color: "#444", fontSize: 11, textAlign: "center", lineHeight: 1.7, marginTop: 8 }}>
-            Payments processed securely by Stripe.<br />Renews monthly. Cancel anytime.
-          </div>
         </div>
       )}
     </div>
   );
+  }
 
-  if (mode === "landing") return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "75vh", padding: 32, textAlign: "center" }}>
-      <div style={{ width: 80, height: 80, borderRadius: "50%", border: "2.5px solid #C026D3", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
-        <span style={{ fontSize: 38 }}>👤</span>
-      </div>
-      <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 34, letterSpacing: 3, marginBottom: 12 }}>BEATFINDER</div>
-      <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 36 }}>
-        Create a free account to save beats,<br />or subscribe as an artist or producer.
-      </div>
-      <button onClick={() => setMode("signup")}
-        style={{ width: "100%", background: "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: "pointer", marginBottom: 16 }}>
-        Create account
-      </button>
-      <button onClick={() => setMode("login")}
-        style={{ background: "none", border: "none", color: "#06B6D4", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
-        I already have an account
-      </button>
-    </div>
-  );
-
-  if (mode === "forgot") return <ForgotPasswordScreen onBack={() => setMode("login")} />;
-
-  return (
-    <div style={{ padding: "40px 24px 100px" }}>
-      <button onClick={() => setMode("landing")} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer", marginBottom: 20 }}>←</button>
-      <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 2, marginBottom: 24 }}>
-        {mode === "signup" ? "CREATE ACCOUNT" : "WELCOME BACK"}
-      </div>
-      {mode === "signup" && <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" style={inp} />}
-      <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email address" style={inp} />
-      <input value={pw} onChange={e => setPw(e.target.value)} placeholder="Password" type="password" style={{ ...inp, marginBottom: 16 }} />
-
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
-        <div
-          onClick={() => {
-            const next = !rememberMe;
-            setRememberMe(next);
-            try { localStorage.setItem("bf_remember", next ? "1" : "0"); } catch {}
-          }}
-          style={{
-            width: 22, height: 22, borderRadius: 6, flexShrink: 0, cursor: "pointer",
-            background: rememberMe ? "#C026D3" : "transparent",
-            border: rememberMe ? "2px solid #C026D3" : "2px solid #444",
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}
-        >
-          {rememberMe && <span style={{ color: "white", fontSize: 14, fontWeight: 900 }}>✓</span>}
-        </div>
-        <span style={{ color: "#aaa", fontSize: 14, cursor: "pointer" }} onClick={() => {
-          const next = !rememberMe;
-          setRememberMe(next);
-          try { localStorage.setItem("bf_remember", next ? "1" : "0"); } catch {}
-        }}>
-          Remember my login
-        </span>
-      </div>
-
-      <button onClick={async () => {
-        if (!email || !pw) return;
-        setAuthErr("");
-        setAuthLoading(true);
-        try {
-          if (mode === "login" && !pw.trim()) {
-            setAuthErr("Please enter your password");
-            setAuthLoading(false);
-            return;
-          }
-          const u = mode === "signup"
-            ? await AuthAPI.register(name || email.split("@")[0], email, pw)
-            : await AuthAPI.login(email, pw);
-          if (rememberMe) {
-            try { localStorage.setItem("bf_saved_email", email); } catch {}
-          } else {
-            try { localStorage.removeItem("bf_saved_email"); } catch {}
-          }
-          setUser(u);
-        } catch (e) {
-          setAuthErr(e.message);
-        } finally {
-          setAuthLoading(false);
-        }
-      }}
-        disabled={authLoading}
-        style={{ width: "100%", background: "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: "pointer", opacity: authLoading ? 0.6 : 1 }}>
-        {authLoading ? "Please wait..." : mode === "signup" ? "Create Account" : "Log In"}
-      </button>
-      {authErr && <div style={{ color: "#F87171", fontSize: 13, textAlign: "center", marginTop: 12 }}>{authErr}</div>}
-      <div style={{ textAlign: "center", marginTop: 20 }}>
-        <span style={{ color: "#888", fontSize: 14 }}>{mode === "signup" ? "Already have an account? " : "No account? "}</span>
-        <button onClick={() => setMode(mode === "signup" ? "login" : "signup")}
-          style={{ background: "none", border: "none", color: "#06B6D4", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
-          {mode === "signup" ? "Log In" : "Sign Up"}
-        </button>
-      </div>
-      {mode === "login" && (
-        <div style={{ textAlign: "center", marginTop: 12 }}>
-          <button onClick={e => { e.preventDefault(); e.stopPropagation(); setMode("forgot"); }}
-            style={{ background: "none", border: "none", color: "#666", fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>
-            Forgot your password?
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // =============================================================================
 // BOTTOM NAV
