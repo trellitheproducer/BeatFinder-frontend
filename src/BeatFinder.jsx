@@ -1122,7 +1122,385 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
 // =============================================================================
 // HOME SCREEN
 // =============================================================================
-function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch }) {
+// =============================================================================
+// WORKSPACE SECTION - personalised dashboard for Artist Pro & Producer Pro
+// =============================================================================
+function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, onSave, onGenreSearch, onGoMembers }) {
+  const isProducer = user?.isPro || user?.plan === "producer";
+
+  const [beatOfDay,      setBeatOfDay]      = useState(null);
+  const [botdLoading,    setBotdLoading]    = useState(true);
+  const [vibeActive,     setVibeActive]     = useState(null);
+  const [producerStats,  setProducerStats]  = useState(null);
+
+  const VIBES = [
+    { label: "Hype",     q: "hard trap type beat",      emoji: "🔥", color: "#EF4444" },
+    { label: "Chill",    q: "chill lo fi type beat",    emoji: "😌", color: "#3B82F6" },
+    { label: "Dark",     q: "dark drill type beat",     emoji: "🌑", color: "#8B5CF6" },
+    { label: "Melodic",  q: "melodic type beat",        emoji: "🌊", color: "#06B6D4" },
+    { label: "Romantic", q: "romantic r&b type beat",   emoji: "💜", color: "#EC4899" },
+  ];
+
+  // Derive top genre from recent searches stored in localStorage
+  var topGenre = null;
+  try {
+    var recents = JSON.parse(localStorage.getItem("bf_recents") || "[]");
+    var genreKeywords = ["trap","drill","rnb","r&b","afro","melodic","dancehall","sad","lo-fi","lofi","boom bap","reggae","grime"];
+    for (var ri = 0; ri < recents.length; ri++) {
+      var r = recents[ri].toLowerCase();
+      for (var gi = 0; gi < genreKeywords.length; gi++) {
+        if (r.includes(genreKeywords[gi])) { topGenre = recents[ri]; break; }
+      }
+      if (topGenre) break;
+    }
+    if (!topGenre && recents.length > 0) topGenre = recents[0];
+  } catch (e) {}
+
+  // Last unfinished lyric
+  var lastLyric = null;
+  if (savedLyrics && savedLyrics.length > 0) {
+    lastLyric = savedLyrics[savedLyrics.length - 1];
+  }
+
+  // Beat of the Day - fetch once and cache in sessionStorage
+  useEffect(function() {
+    var cacheKey = "bf_botd_" + new Date().toDateString();
+    try {
+      var cached = sessionStorage.getItem(cacheKey);
+      if (cached) { setBeatOfDay(JSON.parse(cached)); setBotdLoading(false); return; }
+    } catch(e) {}
+
+    var queries = ["type beat free 2025", "melodic trap type beat free", "uk drill type beat free"];
+    var q = queries[new Date().getDate() % queries.length];
+    apiFetch("/api/youtube/search?artist=" + encodeURIComponent(q) + "&max=20&page=1&filter_title=false")
+      .then(function(d) {
+        var beats = d.beats || [];
+        if (beats.length > 0) {
+          var pick = beats[new Date().getDate() % beats.length];
+          try { sessionStorage.setItem(cacheKey, JSON.stringify(pick)); } catch(e) {}
+          setBeatOfDay(pick);
+        }
+        setBotdLoading(false);
+      })
+      .catch(function() { setBotdLoading(false); });
+  }, []);
+
+  // Producer stats
+  useEffect(function() {
+    if (!isProducer) return;
+    Promise.all([
+      apiFetch("/api/producer/my-beats").catch(function() { return []; }),
+      apiFetch("/api/producer/my-leases").catch(function() { return []; }),
+    ]).then(function(results) {
+      var beats = results[0];
+      var leases = results[1];
+      var totalRevenue = leases.reduce(function(s, l) {
+        var p = parseFloat((l.price || "0").replace(/[^0-9.]/g, ""));
+        return s + (isNaN(p) ? 0 : p);
+      }, 0);
+      var totalDownloads = beats.reduce(function(s, b) { return s + (b.downloads || 0); }, 0);
+      setProducerStats({
+        totalBeats: beats.length,
+        totalDownloads: totalDownloads,
+        totalRevenue: totalRevenue.toFixed(2),
+        recentSales: leases.length,
+      });
+    });
+  }, [isProducer]);
+
+  // BeatFinder Rank - based on saves count (gamified)
+  var savedCount = savedIds ? savedIds.size : 0;
+  var rank = savedCount >= 50 ? "Top 1%" : savedCount >= 30 ? "Top 5%" : savedCount >= 20 ? "Top 10%" : savedCount >= 10 ? "Top 25%" : savedCount >= 5 ? "Top 50%" : "Rising";
+  var rankEmoji = savedCount >= 30 ? "👑" : savedCount >= 10 ? "⭐" : "🔥";
+  var streak = Math.min(savedCount + (savedLyrics ? savedLyrics.length : 0), 99);
+
+  var firstName = user && user.name ? user.name.split(" ")[0] : "";
+
+  var cardStyle = {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.07)",
+    borderRadius: 14, padding: "14px 12px",
+    cursor: "pointer", textAlign: "left",
+    width: "100%", boxSizing: "border-box",
+  };
+
+  return (
+    <div style={{ padding: "0 16px", marginBottom: 28 }}>
+      <div style={{
+        background: "linear-gradient(135deg,#080014,#10002e,#0a0020)",
+        border: "1px solid rgba(192,38,211,0.25)",
+        borderRadius: 20, padding: "20px 16px",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05)",
+      }}>
+        {/* Header */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ color: "#C026D3", fontSize: 10, fontWeight: 800, letterSpacing: 2.5, marginBottom: 5 }}>
+            YOUR WORKSPACE
+          </div>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 18, lineHeight: 1.2 }}>
+            {"Welcome back" + (firstName ? ", " + firstName : "") + " \uD83D\uDC4B"}
+          </div>
+          {isProducer && (
+            <div style={{ color: "#C026D3", fontSize: 12, fontWeight: 600, marginTop: 3 }}>Producer Pro</div>
+          )}
+        </div>
+
+        {/* 1. YOUR VIBE RIGHT NOW */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
+            \uD83C\uDFAF YOUR VIBE RIGHT NOW
+          </div>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+            {VIBES.map(function(v) {
+              var isActive = vibeActive === v.label;
+              return (
+                <button
+                  key={v.label}
+                  onClick={function() {
+                    setVibeActive(v.label);
+                    onGenreSearch(v.q);
+                  }}
+                  style={{
+                    flexShrink: 0, padding: "7px 13px", borderRadius: 20, cursor: "pointer",
+                    border: "1.5px solid " + (isActive ? v.color : "rgba(255,255,255,0.1)"),
+                    background: isActive ? v.color + "22" : "rgba(255,255,255,0.03)",
+                    color: isActive ? v.color : "#777",
+                    fontWeight: 700, fontSize: 12, display: "flex", alignItems: "center", gap: 5,
+                    transition: "all 0.15s ease",
+                  }}>
+                  <span style={{ fontSize: 13 }}>{v.emoji}</span>
+                  {v.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div style={{ height: 1, background: "rgba(255,255,255,0.05)", marginBottom: 16 }} />
+
+        {/* 2. TOP GENRE */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
+            \uD83D\uDD25 YOUR TOP GENRE
+          </div>
+          {topGenre ? (
+            <button
+              onClick={function() { onGenreSearch(topGenre); }}
+              style={{
+                width: "100%", background: "linear-gradient(135deg,rgba(192,38,211,0.15),rgba(124,58,237,0.15))",
+                border: "1.5px solid rgba(192,38,211,0.35)", borderRadius: 12,
+                padding: "12px 14px", cursor: "pointer", textAlign: "left",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                boxSizing: "border-box",
+              }}>
+              <div>
+                <div style={{ color: "white", fontWeight: 700, fontSize: 14 }}>{topGenre}</div>
+                <div style={{ color: "#C026D3", fontSize: 11, marginTop: 2 }}>You keep coming back to this</div>
+              </div>
+              <span style={{ color: "#C026D3", fontSize: 18 }}>&#9654;</span>
+            </button>
+          ) : (
+            <div style={{ color: "#444", fontSize: 13, fontStyle: "italic", padding: "10px 0" }}>
+              Search a few artists to unlock your top genre
+            </div>
+          )}
+        </div>
+
+        {/* Divider */}
+        <div style={{ height: 1, background: "rgba(255,255,255,0.05)", marginBottom: 16 }} />
+
+        {/* 3. CONTINUE WRITING */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
+            \u270D\uFE0F CONTINUE WRITING
+          </div>
+          {lastLyric ? (
+            <button
+              onClick={function() { onEditLyric(lastLyric, savedLyrics.length - 1); }}
+              style={{
+                width: "100%", background: "rgba(192,38,211,0.08)",
+                border: "1.5px solid rgba(192,38,211,0.25)", borderRadius: 12,
+                padding: "12px 14px", cursor: "pointer", textAlign: "left",
+                display: "flex", alignItems: "center", gap: 12,
+                boxSizing: "border-box",
+              }}>
+              <div style={{
+                width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+                background: "linear-gradient(135deg,#6B21A8,#C026D3)",
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
+              }}>
+                \u270D\uFE0F
+              </div>
+              <div style={{ flex: 1, overflow: "hidden" }}>
+                <div style={{ color: "white", fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {lastLyric.title || "Untitled"}
+                </div>
+                <div style={{ color: "#C026D3", fontSize: 11, marginTop: 2 }}>
+                  {lastLyric.text ? (lastLyric.text.split(" ").length + " words") : "Empty"} — tap to continue
+                </div>
+              </div>
+              <span style={{ color: "#555", fontSize: 18 }}>&#62;</span>
+            </button>
+          ) : (
+            <button
+              onClick={function() { onGoMembers(); }}
+              style={{
+                width: "100%", background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12,
+                padding: "12px 14px", cursor: "pointer", textAlign: "center",
+                color: "#555", fontSize: 13, boxSizing: "border-box",
+              }}>
+              No lyrics yet — play a beat and tap Write Lyrics
+            </button>
+          )}
+        </div>
+
+        {/* Divider */}
+        <div style={{ height: 1, background: "rgba(255,255,255,0.05)", marginBottom: 16 }} />
+
+        {/* 4. BEAT OF THE DAY */}
+        <div style={{ marginBottom: isProducer ? 16 : 0 }}>
+          <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
+            \uD83C\uDFB5 BEAT OF THE DAY
+          </div>
+          {botdLoading ? (
+            <div style={{ color: "#444", fontSize: 13, padding: "10px 0" }}>Finding your beat...</div>
+          ) : beatOfDay ? (
+            <div
+              onClick={function() { onPlay(beatOfDay); }}
+              style={{
+                display: "flex", alignItems: "center", gap: 12, cursor: "pointer",
+                background: "linear-gradient(135deg,rgba(245,158,11,0.08),rgba(239,68,68,0.08))",
+                border: "1.5px solid rgba(245,158,11,0.25)", borderRadius: 12, padding: "10px 12px",
+              }}>
+              <div style={{ position: "relative", flexShrink: 0 }}>
+                <img
+                  src={beatOfDay.thumbnail || "https://img.youtube.com/vi/" + beatOfDay.videoId + "/hqdefault.jpg"}
+                  alt={beatOfDay.title}
+                  style={{ width: 52, height: 52, borderRadius: 10, objectFit: "cover", display: "block" }}
+                />
+                <div style={{
+                  position: "absolute", inset: 0, borderRadius: 10,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  background: "rgba(0,0,0,0.4)",
+                }}>
+                  <span style={{ color: "white", fontSize: 16 }}>&#9654;</span>
+                </div>
+              </div>
+              <div style={{ flex: 1, overflow: "hidden" }}>
+                <div style={{ color: "white", fontWeight: 700, fontSize: 13, lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                  {beatOfDay.title}
+                </div>
+                <div style={{ color: "#F59E0B", fontSize: 11, marginTop: 3, fontWeight: 600 }}>
+                  Picked for you today
+                </div>
+              </div>
+              <button
+                className="bf-save"
+                onClick={function(e) { e.stopPropagation(); onSave(beatOfDay); }}
+                style={{
+                  flexShrink: 0, width: 30, height: 30, borderRadius: "50%", border: "none",
+                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14,
+                  background: savedIds && savedIds.has(beatOfDay.videoId) ? "rgba(192,38,211,0.9)" : "rgba(255,255,255,0.08)",
+                  color: savedIds && savedIds.has(beatOfDay.videoId) ? "white" : "rgba(255,255,255,0.5)",
+                }}>
+                \uD83D\uDD16
+              </button>
+            </div>
+          ) : (
+            <div style={{ color: "#444", fontSize: 13, fontStyle: "italic" }}>Could not load today's beat</div>
+          )}
+        </div>
+
+        {/* PRODUCER ONLY SECTIONS */}
+        {isProducer && (
+          <div>
+            {/* Divider */}
+            <div style={{ height: 1, background: "rgba(255,255,255,0.05)", marginBottom: 16 }} />
+
+            {/* 5. PRODUCER EARNINGS SNAPSHOT */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
+                \uD83D\uDCB0 PRODUCER EARNINGS SNAPSHOT
+              </div>
+              {producerStats ? (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {[
+                    { label: "Beats Uploaded",  value: producerStats.totalBeats,     color: "#C026D3", icon: "\uD83C\uDFB5" },
+                    { label: "Total Downloads",  value: producerStats.totalDownloads, color: "#3B82F6", icon: "\u2B07\uFE0F" },
+                    { label: "Total Revenue",    value: "\u00A3" + producerStats.totalRevenue, color: "#22C55E", icon: "\uD83D\uDCB8" },
+                    { label: "Leases Sold",      value: producerStats.recentSales,   color: "#F59E0B", icon: "\uD83D\uDCDD" },
+                  ].map(function(stat) {
+                    return (
+                      <div key={stat.label} style={{
+                        background: "rgba(255,255,255,0.03)",
+                        border: "1px solid rgba(255,255,255,0.07)",
+                        borderRadius: 12, padding: "12px 10px", textAlign: "center",
+                      }}>
+                        <div style={{ fontSize: 18, marginBottom: 4 }}>{stat.icon}</div>
+                        <div style={{ color: stat.color, fontWeight: 800, fontSize: 18, lineHeight: 1 }}>
+                          {stat.value}
+                        </div>
+                        <div style={{ color: "#555", fontSize: 10, fontWeight: 600, marginTop: 4, letterSpacing: 0.5 }}>
+                          {stat.label.toUpperCase()}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ color: "#444", fontSize: 13, padding: "10px 0" }}>Loading your stats...</div>
+              )}
+            </div>
+
+            {/* Divider */}
+            <div style={{ height: 1, background: "rgba(255,255,255,0.05)", marginBottom: 16 }} />
+
+            {/* 6. BEATFINDER RANK */}
+            <div>
+              <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
+                \uD83C\uDFC6 YOUR BEATFINDER RANK
+              </div>
+              <div style={{
+                background: "linear-gradient(135deg,rgba(192,38,211,0.12),rgba(245,158,11,0.12))",
+                border: "1.5px solid rgba(192,38,211,0.2)",
+                borderRadius: 14, padding: "14px 16px",
+                display: "flex", alignItems: "center", gap: 14,
+              }}>
+                <div style={{
+                  width: 48, height: 48, borderRadius: 12, flexShrink: 0,
+                  background: "linear-gradient(135deg,#C026D3,#F59E0B)",
+                  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22,
+                }}>
+                  {rankEmoji}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ color: "white", fontWeight: 800, fontSize: 16 }}>{rank}</div>
+                  <div style={{ color: "#888", fontSize: 12, marginTop: 2 }}>
+                    {streak} activity points this week
+                  </div>
+                </div>
+                <div style={{
+                  background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+                  borderRadius: 20, padding: "5px 14px",
+                  color: "white", fontWeight: 800, fontSize: 12, flexShrink: 0,
+                }}>
+                  PRO
+                </div>
+              </div>
+              <div style={{ color: "#444", fontSize: 11, marginTop: 8, textAlign: "center" }}>
+                Save more beats and write more lyrics to climb the ranks
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric }) {
   const [heroIndex, setHeroIndex] = useState(0);
 
   const HERO_SLIDES = [
@@ -1288,38 +1666,16 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
 
       {/* Pro personalised workspace */}
       {user?.isArtistPro && (
-        <div style={{ padding: "0 16px", marginBottom: 28 }}>
-          <div style={{
-            background: "linear-gradient(135deg,#0a001a,#18003a)",
-            border: "1px solid rgba(192,38,211,0.2)",
-            borderRadius: 18, padding: "18px 16px",
-          }}>
-            <div style={{ color: "#C026D3", fontSize: 10, fontWeight: 800,
-              letterSpacing: 2, marginBottom: 6 }}>YOUR WORKSPACE</div>
-            <div style={{ color: "white", fontWeight: 800, fontSize: 17, marginBottom: 4 }}>
-              {"Welcome back" + (user.name ? ", " + user.name.split(" ")[0] : "") + " 👋"}
-            </div>
-            <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>
-              Continue writing or discover something new.
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              {[
-                { icon: "✍️", label: "Lyrics" },
-                { icon: "🔖", label: "Saved" },
-                { icon: "🎵", label: "Members" },
-              ].map(item => (
-                <div key={item.label} style={{
-                  flex: 1, background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.07)",
-                  borderRadius: 12, padding: "12px 8px", textAlign: "center",
-                }}>
-                  <div style={{ fontSize: 22, marginBottom: 5 }}>{item.icon}</div>
-                  <div style={{ color: "#888", fontSize: 11, fontWeight: 600 }}>{item.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        <WorkspaceSection
+          user={user}
+          savedLyrics={savedLyrics || []}
+          onEditLyric={onEditLyric}
+          onPlay={onPlay}
+          savedIds={savedIds}
+          onSave={onSave}
+          onGenreSearch={onGenreSearch}
+          onGoMembers={onGoMembers}
+        />
       )}
     </div>
   );
@@ -3801,7 +4157,7 @@ export default function BeatFinder() {
       )}
 
       <div key={tab} className="bf-tab-in" style={{ overflowY: "auto", height: "calc(100vh - 72px)" }}>
-        <div style={{ display: tab === "home"      ? "block" : "none" }}><HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => setTab("exclusive")} onGoProfile={() => setTab("profile")} onGenreSearch={q => { setSearchQuery(q); setTab("search"); }} /></div>
+        <div style={{ display: tab === "home"      ? "block" : "none" }}><HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => setTab("exclusive")} onGoProfile={() => setTab("profile")} onGenreSearch={q => { setSearchQuery(q); setTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} /></div>
         <div style={{ display: tab === "artists"   ? "block" : "none" }}><ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>
         <div style={{ display: tab === "trending"  ? "block" : "none" }}><TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>
         <div style={{ display: tab === "search"    ? "block" : "none" }}><SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} /></div>
