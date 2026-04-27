@@ -138,6 +138,8 @@ const VOCAL_SIGNALS = [
   "feat.", "ft.", "featuring", "prod by", "prod.", "(clean)", "(explicit)",
   "official audio", "sing along", "karaoke", "cover", "remix ft",
   "out now", "new song", "new single", "official single",
+  "oficial video", "video oficial", "official clip", "clip officiel",
+  "(mv)", "m/v", "music vid", "musicvideo", "vid oficial",
 ];
 
 // Words that are GOOD signals (real type beats)
@@ -151,16 +153,17 @@ const BEAT_SIGNALS = [
 function isLikelyInstrumental(title) {
   if (!title) return true;
   const t = title.toLowerCase();
-  // If it has a strong beat signal, trust it
+  // If it has a strong beat signal, always keep it
   if (BEAT_SIGNALS.some(s => t.includes(s))) return true;
-  // If it has vocal signals, reject it
+  // If it has any vocal/video signal, reject it
   if (VOCAL_SIGNALS.some(s => t.includes(s))) return false;
-  // Reject if it looks like "Artist Name - Song Name" with no beat keywords
-  // Pattern: has a dash but no beat-related words
+  // Reject "Artist - Song" pattern with no beat keywords
   if (t.includes(" - ") && !t.includes("beat") && !t.includes("instrumental") && !t.includes("free")) {
-    // Extra check: if it also has common song title patterns
-    if (t.includes("official") || t.includes("audio") || t.includes("video")) return false;
+    if (t.includes("official") || t.includes("audio") || t.includes("video") || t.includes("vevo")) return false;
   }
+  // Reject if title has no beat-related word at all AND is very short (likely a song title)
+  const hasBeatWord = ["beat", "instrumental", "free", "prod", "type", "drill", "trap", "rnb", "afro"].some(w => t.includes(w));
+  if (!hasBeatWord && t.length < 30) return false;
   return true;
 }
 
