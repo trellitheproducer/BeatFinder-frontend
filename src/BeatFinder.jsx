@@ -3679,6 +3679,17 @@ export default function BeatFinder() {
         {tab === "profile" && <ProfileScreen key={user ? user.id : "guest"} user={user} setUser={setUser} onLogout={() => { AuthAPI.logout(); setUser(null); }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} />}
       </div>
 
+      {playing && (
+        <Player
+          beat={playing}
+          onClose={() => setPlaying(null)}
+          savedIds={savedIds}
+          onSave={toggleSave}
+          isArtistPro={user?.isPro || user?.isArtistPro}
+          onGoMembers={() => goTab("exclusive")}
+        />
+      )}
+
       <div style={{
           position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
           width: "100%", maxWidth: 430,
