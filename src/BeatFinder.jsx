@@ -4048,7 +4048,7 @@ function SplashScreen({ onDone }) {
       pointerEvents: fading ? "none" : "all",
     }}>
       <img
-        src="https://i.ibb.co/RM7Kkhb/CBDCCD14-D10-A-4-E04-A3-BA-FBC84-EF774-FB.png"
+        src="/splash.png"
         alt="BeatFinder"
         style={{
           width: "100%", height: "100%",
