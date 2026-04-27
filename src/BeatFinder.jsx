@@ -4033,8 +4033,8 @@ function SplashScreen({ onDone }) {
   const [fading, setFading] = useState(false);
 
   useEffect(function() {
-    var fadeTimer = setTimeout(function() { setFading(true); }, 2000);
-    var doneTimer = setTimeout(function() { onDone(); }, 2600);
+    var fadeTimer = setTimeout(function() { setFading(true); }, 1200);
+    var doneTimer = setTimeout(function() { onDone(); }, 1600);
     return function() { clearTimeout(fadeTimer); clearTimeout(doneTimer); };
   }, []);
 
@@ -4043,7 +4043,7 @@ function SplashScreen({ onDone }) {
       position: "fixed", inset: 0, zIndex: 99999,
       background: "#0a0a0a",
       display: "flex", alignItems: "center", justifyContent: "center",
-      transition: "opacity 0.6s ease",
+      transition: "opacity 0.4s ease",
       opacity: fading ? 0 : 1,
       pointerEvents: fading ? "none" : "all",
     }}>
