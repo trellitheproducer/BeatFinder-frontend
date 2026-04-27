@@ -19,6 +19,8 @@ const LOADER_STYLE = `
   .bf-nav-btn:active { transform: scale(0.85); }
   .bf-play    { animation: bf-play-pulse 2s ease infinite; }
   .bf-carousel { scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
+  * { scrollbar-width: none; -ms-overflow-style: none; }
+  *::-webkit-scrollbar { display: none; }
   .bf-save    { transition: transform 0.18s cubic-bezier(0.34,1.56,0.64,1), color 0.15s ease; }
   .bf-save:active { transform: scale(1.3); }
   .bf-spinner {
@@ -745,7 +747,6 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
           resize: "none", fontFamily: "'DM Sans',sans-serif",
           WebkitUserSelect: "text", userSelect: "text",
         }}
-        autoFocus
       />
 
       <div style={{
