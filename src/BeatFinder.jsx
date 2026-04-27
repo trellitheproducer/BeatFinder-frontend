@@ -188,7 +188,7 @@ function isLikelyInstrumental(title) {
   return true;
 }
 
-async function fetchBeats(artistName, page, filterTitle, maxResults) {
+async function fetchBeats(artistName, page, filterTitle, maxResults, extraQueries) {
   const pageNum     = page || 1;
   const maxNum      = maxResults || 10;
   const doFilter    = filterTitle !== false;
@@ -197,10 +197,12 @@ async function fetchBeats(artistName, page, filterTitle, maxResults) {
     return { beats: cache[query].data, error: null };
   }
 
-  const filterParam = doFilter ? "true" : "false";
-  const url = "/api/youtube/search?artist=" + encodeURIComponent(artistName) +
+  let url = "/api/youtube/search?artist=" + encodeURIComponent(artistName) +
               "&max=" + maxNum + "&page=" + pageNum +
-              "&filter_title=" + filterParam;
+              "&filter_title=" + (doFilter ? "true" : "false");
+  if (extraQueries) {
+    url += "&extra_queries=" + encodeURIComponent(extraQueries);
+  }
 
   // Try up to 2 times - first page of an artist builds the master cache
   // which can take a few seconds on Render free tier
@@ -354,7 +356,8 @@ const ARTISTS_USA = [
   {id:"kashdoll",     name:"Kash Doll",        cat:"Detroit",       flag:"🇺🇸", img:"https://i.ibb.co/k6KfLyc1/IMG-8877.jpg"},
   {id:"skillababy",   name:"Skilla Baby",      cat:"Detroit",       flag:"🇺🇸", img:"https://i.ibb.co/4n9Hd8tx/IMG-8878.webp"},
   {id:"jiprince",     name:"J.I The Prince Of N.Y", cat:"Melodic Trap", flag:"🇺🇸", img:"https://i.ibb.co/tww7qV0F/IMG-9133.jpg",
-   searchOverride:"J.I type beat"},
+   searchOverride:"J.I type beat", filterTitle: false,
+   extraQueries:"J.I type beat,J.I Type Beats,J.I Instrumental,J.I TYPE BEATS!"},
   {id:"liltjay",      name:"Lil TJay",         cat:"Melodic Trap",  flag:"🇺🇸", img:"https://i.ibb.co/N23pQpRT/IMG-9134.jpg"},
   {id:"aboogie",      name:"A Boogie Wit Da Hoodie", cat:"Melodic Trap", flag:"🇺🇸", img:"https://i.ibb.co/chpLfGPc/IMG-9136.jpg"},
   {id:"sleepyhallow",  name:"Sleepy Hallow",   cat:"Melodic Trap",  flag:"🇺🇸", img:"https://i.ibb.co/zHmXPCgp/IMG-9137.webp"},
@@ -1002,7 +1005,7 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
 // =============================================================================
 // BEAT FEED
 // =============================================================================
-function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, showPagination, filterTitle, instrumentalOnly, max }) {
+function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, showPagination, filterTitle, instrumentalOnly, max, extraQueries }) {
   const [beats,   setBeats]   = useState([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
@@ -1016,7 +1019,7 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
     setBeats([]);
     window.scrollTo(0, 0);
 
-    fetchBeats(artistName, page, filterTitle, max || 20).then(({ beats: b, error: e }) => {
+    fetchBeats(artistName, page, filterTitle, max || 20, extraQueries).then(({ beats: b, error: e }) => {
       if (!alive) return;
       // Filter to instrumentals only if flag is set (e.g. Dot Rotten)
       const INSTRUMENTAL_KEYWORDS = ["instrumental", "riddim", "beat", "free beat", "backing track"];
@@ -2044,7 +2047,7 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
         </div>
       </div>
       <div style={{ padding: "0 16px" }}>
-        <BeatFeed artistName={searchName} savedIds={savedIds} onSave={onSave} onPlay={onPlay} showPagination filterTitle={artist.filterTitle !== false} instrumentalOnly={!!artist.instrumentalOnly} max={10} />
+        <BeatFeed artistName={searchName} savedIds={savedIds} onSave={onSave} onPlay={onPlay} showPagination filterTitle={artist.filterTitle !== false} instrumentalOnly={!!artist.instrumentalOnly} max={10} extraQueries={artist.extraQueries || null} />
       </div>
     </div>
   );
