@@ -1898,7 +1898,15 @@ function ArtistsScreen({ onPlay, savedIds, onSave }) {
           <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 32, letterSpacing: 2 }}>BEATFINDER</div>
           <div style={{ color: "#888", fontSize: 13 }}>Type beats, organized.</div>
         </div>
-
+        <img
+          src="https://i.ibb.co/v4wcZVJW/IMG-9119.jpg"
+          alt="BeatFinder Logo"
+          style={{
+            width: 72, height: 72, borderRadius: 16,
+            objectFit: "cover", flexShrink: 0,
+            boxShadow: "0 4px 20px rgba(192,38,211,0.25)",
+          }}
+        />
       </div>
       <div style={{ background: "#1a1a1a", borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, marginBottom: 12, border: "1px solid #222" }}>
         <span style={{ color: "#555" }}>🔍</span>
