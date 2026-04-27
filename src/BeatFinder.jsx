@@ -1614,179 +1614,193 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
 function TrendingScreen({ savedIds, onSave, onPlay }) {
   const [trending,  setTrending]  = useState([]);
   const [rising,    setRising]    = useState([]);
+  const [fresh,     setFresh]     = useState([]);
   const [tLoading,  setTLoading]  = useState(true);
   const [rLoading,  setRLoading]  = useState(true);
-  const [tError,    setTError]    = useState(null);
-  const [rError,    setRError]    = useState(null);
-  const [activeSection, setActiveSection] = useState("trending");
-  const [fresh,    setFresh]    = useState([]);
-  const [fLoading, setFLoading] = useState(true);
+  const [fLoading,  setFLoading]  = useState(true);
 
   useEffect(() => {
-    // Fetch trending (1M+ views)
     apiFetch("/api/youtube/trending")
       .then(d => { setTrending(d.beats || []); setTLoading(false); })
-      .catch(e => { setTError(e.message); setTLoading(false); });
+      .catch(() => setTLoading(false));
 
-    // Fresh uploads: sort by date, prioritise recency
-    apiFetch("/api/youtube/search?artist=type+beat&page=1&filter_title=false&max=10")
-      .then(d => { setFresh(d.beats || []); setFLoading(false); })
-      .catch(() => setFLoading(false));
-
-    // Rising producers: search recent uploads from smaller producers
-    // Use the producer beats from the DB - they are newer/smaller
     apiFetch("/api/producer/beats")
       .then(d => { setRising(d || []); setRLoading(false); })
       .catch(() => {
-        // Fallback: search YouTube for recent beats
-        apiFetch("/api/youtube/search?artist=type+beat+2025&page=1&filter_title=false&max=10")
-          .then(d => {
-            setRising((d.beats || []).map(b => ({
-              ...b, producer: b.channel, isYoutube: true,
-            })));
-            setRLoading(false);
-          })
+        apiFetch("/api/youtube/search?artist=type+beat+new&page=2&filter_title=false&max=10")
+          .then(d => { setRising(d.beats || []); setRLoading(false); })
           .catch(() => setRLoading(false));
       });
+
+    apiFetch("/api/youtube/search?artist=type+beat+2025&page=1&filter_title=false&max=10")
+      .then(d => { setFresh(d.beats || []); setFLoading(false); })
+      .catch(() => setFLoading(false));
   }, []);
 
-  const SectionHeader = ({ emoji, title, subtitle, color }) => (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-        <span style={{ fontSize: 22 }}>{emoji}</span>
-        <div style={{ color: color || "#C026D3", fontWeight: 800, fontSize: 17, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>{title}</div>
+  // Horizontal carousel card - compact version for side-scroll
+  const CarouselCard = ({ beat }) => (
+    <div
+      onClick={() => onPlay(beat)}
+      style={{
+        flexShrink: 0, width: 160, cursor: "pointer",
+        background: "#111", borderRadius: 14,
+        border: "1px solid #1e1e1e", overflow: "hidden",
+      }}
+    >
+      <div style={{ position: "relative" }}>
+        <img
+          src={beat.thumbnail || ("https://img.youtube.com/vi/" + beat.videoId + "/hqdefault.jpg")}
+          alt={beat.title}
+          style={{ width: "100%", height: 100, objectFit: "cover", display: "block" }}
+        />
+        <div style={{
+          position: "absolute", inset: 0, display: "flex",
+          alignItems: "center", justifyContent: "center",
+          background: "rgba(0,0,0,0.3)",
+        }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: "50%",
+            background: "rgba(192,38,211,0.9)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 14,
+          }}>
+            &#9654;
+          </div>
+        </div>
+        <button
+          onClick={e => { e.stopPropagation(); onSave(beat); }}
+          style={{
+            position: "absolute", top: 6, right: 6,
+            background: "rgba(0,0,0,0.7)", border: "none",
+            borderRadius: "50%", width: 28, height: 28,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer", fontSize: 13,
+            color: savedIds.has(beat.videoId) ? "#C026D3" : "#aaa",
+          }}
+        >
+          &#128338;
+        </button>
       </div>
-      {subtitle && <div style={{ color: "#666", fontSize: 12, marginLeft: 32 }}>{subtitle}</div>}
-      <div style={{ height: 2, background: "linear-gradient(90deg," + (color || "#C026D3") + ",transparent)", borderRadius: 2, marginTop: 8 }} />
+      <div style={{ padding: "10px 10px 12px" }}>
+        <div style={{
+          color: "white", fontSize: 12, fontWeight: 700,
+          lineHeight: 1.4, marginBottom: 4,
+          overflow: "hidden", display: "-webkit-box",
+          WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+        }}>
+          {beat.title}
+        </div>
+        <div style={{ color: "#666", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {beat.channel}
+        </div>
+      </div>
+    </div>
+  );
+
+  // Producer carousel card (no videoId)
+  const ProducerCard = ({ beat }) => (
+    <div style={{
+      flexShrink: 0, width: 160,
+      background: "#111", borderRadius: 14,
+      border: "1px solid rgba(34,197,94,0.2)", overflow: "hidden",
+    }}>
+      <div style={{
+        height: 100, background: "linear-gradient(135deg,#052e16,#166534)",
+        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36,
+      }}>
+        🎛
+      </div>
+      <div style={{ padding: "10px 10px 12px" }}>
+        <div style={{ color: "white", fontSize: 12, fontWeight: 700, lineHeight: 1.4, marginBottom: 4, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+          {beat.title}
+        </div>
+        <div style={{ color: "#22C55E", fontSize: 11 }}>{beat.producer}</div>
+        <div style={{ marginTop: 8 }}>
+          {beat.url && (
+            <audio
+              src={beat.url + "#t=60,90"}
+              controls
+              controlsList="nodownload"
+              style={{ width: "100%", height: 28, borderRadius: 6 }}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const SectionHeader = ({ emoji, title, subtitle, color }) => (
+    <div style={{ marginBottom: 14, paddingLeft: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+        <span style={{ fontSize: 20 }}>{emoji}</span>
+        <div style={{ color: color || "#C026D3", fontWeight: 800, fontSize: 16, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>{title}</div>
+      </div>
+      {subtitle && <div style={{ color: "#555", fontSize: 12, marginLeft: 28 }}>{subtitle}</div>}
+    </div>
+  );
+
+  const LoadingRow = () => (
+    <div style={{ paddingLeft: 16, display: "flex", gap: 12, marginBottom: 32 }}>
+      {[1,2,3].map(i => (
+        <div key={i} style={{ flexShrink: 0, width: 160, height: 180, background: "#111", borderRadius: 14, border: "1px solid #1e1e1e" }} />
+      ))}
     </div>
   );
 
   return (
-    <div style={{ padding: "0 16px 100px" }}>
-      <div style={{ padding: "20px 0 0" }}>
-        <div style={{ background: "linear-gradient(135deg,#1a1a2e,#6B21A8)", borderRadius: 16, padding: "20px", marginBottom: 16 }}>
+    <div style={{ paddingTop: 20, paddingBottom: 100 }}>
+      
+      <div style={{ padding: "0 16px", marginBottom: 28 }}>
+        <div style={{ background: "linear-gradient(135deg,#1a1a2e,#6B21A8)", borderRadius: 16, padding: "20px" }}>
           <div style={{ color: "#F59E0B", fontSize: 13, fontWeight: 800, marginBottom: 4 }}>DISCOVER</div>
           <div style={{ color: "white", fontSize: 26, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>Trending & Rising</div>
           <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>Viral beats + emerging producers</div>
         </div>
-
-        <div style={{
-          display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4, marginBottom: 20,
-          scrollbarWidth: "none", WebkitOverflowScrolling: "touch",
-        }}>
-          {[
-            { id: "trending", emoji: "🔥", label: "YouTube Trending", color: "#F59E0B" },
-            { id: "rising",   emoji: "🚀", label: "Rising Producers", color: "#22C55E" },
-            { id: "fresh",    emoji: "🎯", label: "Fresh Uploads",    color: "#06B6D4" },
-          ].map(function(chip) {
-            var active = activeSection === chip.id;
-            return (
-              <button
-                key={chip.id}
-                onClick={function(){ setActiveSection(chip.id); document.getElementById("section-" + chip.id).scrollIntoView({ behavior: "smooth", block: "start" }); }}
-                style={{
-                  flexShrink: 0, display: "flex", alignItems: "center", gap: 6,
-                  padding: "8px 16px", borderRadius: 24, cursor: "pointer", fontWeight: 700, fontSize: 13,
-                  border: active ? "2px solid " + chip.color : "1.5px solid #2a2a2a",
-                  background: active ? (chip.color === "#F59E0B" ? "rgba(245,158,11,0.15)" : chip.color === "#22C55E" ? "rgba(34,197,94,0.15)" : "rgba(6,182,212,0.15)") : "#111",
-                  color: active ? chip.color : "#666",
-                  transition: "all 0.15s",
-                }}
-              >
-                <span>{chip.emoji}</span>
-                <span>{chip.label}</span>
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       
-      <div id="section-trending" style={{ scrollMarginTop: 16 }}>
-        <SectionHeader emoji="🔥" title="TRENDING ON YOUTUBE" subtitle="1M+ views - sorted by most viewed" color="#F59E0B" />
-      </div>
-
-      {tLoading && (
-        <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>
-          <div style={{ fontSize: 30, marginBottom: 8 }}>🔥</div>
-          <div style={{ fontSize: 13 }}>Loading viral beats...</div>
-        </div>
-      )}
-      {tError && !trending.length && (
-        <div style={{ background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 12, padding: 16, textAlign: "center", marginBottom: 16 }}>
-          <div style={{ color: "#F87171", fontSize: 13 }}>Could not load trending - {tError}</div>
-        </div>
-      )}
-      {!tLoading && trending.map(beat => (
-        <BeatCard key={beat.videoId} beat={beat} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
-      ))}
-      {!tLoading && !trending.length && !tError && (
-        <div style={{ textAlign: "center", padding: "30px 0", color: "#444", fontSize: 13 }}>No trending beats found.</div>
-      )}
-
-      
-      <div id="section-rising" style={{ scrollMarginTop: 16, marginTop: 32 }}>
-        <SectionHeader emoji="🚀" title="RISING PRODUCERS" subtitle="New uploads from producers on BeatFinder" color="#22C55E" />
-      </div>
-
-      {rLoading && (
-        <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>
-          <div style={{ fontSize: 30, marginBottom: 8 }}>🚀</div>
-          <div style={{ fontSize: 13 }}>Loading rising producers...</div>
-        </div>
-      )}
-      {!rLoading && rising.length === 0 && (
-        <div style={{ background: "#111", borderRadius: 14, padding: 20, textAlign: "center", border: "1px solid #1e1e1e" }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>🎛</div>
-          <div style={{ color: "#aaa", fontSize: 14, fontWeight: 600, marginBottom: 4 }}>No producer uploads yet</div>
-          <div style={{ color: "#555", fontSize: 12 }}>Be the first to upload your beats as a Producer Pro</div>
-        </div>
-      )}
-      {!rLoading && rising.map((beat, i) => {
-        // Producer DB beats have different shape than YouTube beats
-        if (beat.isYoutube || beat.videoId) {
-          return <BeatCard key={beat.videoId || i} beat={beat} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />;
-        }
-        // Producer upload card
-        return (
-          <div key={beat.id || i} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 14, border: "1px solid rgba(34,197,94,0.2)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 4, lineHeight: 1.3 }}>{beat.title}</div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <div style={{ background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#22C55E", fontWeight: 700 }}>{beat.genre}</div>
-                  <div style={{ background: beat.price === "free" ? "rgba(34,197,94,0.1)" : "rgba(192,38,211,0.1)", border: "1px solid " + (beat.price === "free" ? "rgba(34,197,94,0.3)" : "rgba(192,38,211,0.3)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: beat.price === "free" ? "#22C55E" : "#C026D3", fontWeight: 700 }}>{beat.price === "free" ? "FREE" : beat.price}</div>
-                </div>
-              </div>
-              <div style={{ background: "rgba(34,197,94,0.15)", borderRadius: 20, padding: "4px 10px", fontSize: 11, color: "#22C55E", fontWeight: 700, flexShrink: 0 }}>🚀 RISING</div>
-            </div>
-            <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>
-              By <span style={{ color: "#22C55E", fontWeight: 700 }}>{beat.producer}</span> · {beat.downloads} downloads
-            </div>
-            {beat.url && (
-              <audio controls controlsList="nodownload" src={beat.url + "#t=60,90"} style={{ width: "100%", height: 36, borderRadius: 8 }} />
-            )}
+      <SectionHeader emoji="🔥" title="TRENDING ON YOUTUBE" subtitle="1M+ views, sorted by most viewed" color="#F59E0B" />
+      {tLoading ? <LoadingRow /> : (
+        <div style={{ overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch", paddingLeft: 16, paddingBottom: 4, marginBottom: 32 }}>
+          <div style={{ display: "flex", gap: 12, paddingRight: 16 }}>
+            {trending.length === 0
+              ? <div style={{ color: "#444", fontSize: 13, padding: "20px 0" }}>No trending beats found.</div>
+              : trending.map(beat => <CarouselCard key={beat.videoId} beat={beat} />)
+            }
           </div>
-        );
-      })}
-
-      <div id="section-fresh" style={{ scrollMarginTop: 16, marginTop: 32 }}>
-        <SectionHeader emoji="🎯" title="FRESH UPLOADS" subtitle="Newest beats uploaded recently" color="#06B6D4" />
-      </div>
-
-      {fLoading && (
-        <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>
-          <div style={{ fontSize: 30, marginBottom: 8 }}>🎯</div>
-          <div style={{ fontSize: 13 }}>Loading fresh beats...</div>
         </div>
       )}
-      {!fLoading && fresh.length === 0 && (
-        <div style={{ textAlign: "center", padding: "30px 0", color: "#444", fontSize: 13 }}>No fresh beats found.</div>
-      )}
-      {!fLoading && fresh.map(beat => (
-        <BeatCard key={beat.videoId} beat={beat} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
-      ))}
 
+      
+      <SectionHeader emoji="🚀" title="RISING PRODUCERS" subtitle="New uploads from producers" color="#22C55E" />
+      {rLoading ? <LoadingRow /> : (
+        <div style={{ overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch", paddingLeft: 16, paddingBottom: 4, marginBottom: 32 }}>
+          <div style={{ display: "flex", gap: 12, paddingRight: 16 }}>
+            {rising.length === 0 ? (
+              <div style={{ background: "#111", borderRadius: 14, padding: "20px 24px", border: "1px solid #1e1e1e", color: "#555", fontSize: 13 }}>
+                No producer uploads yet
+              </div>
+            ) : rising.map((beat, i) => (
+              beat.videoId
+                ? <CarouselCard key={beat.videoId} beat={beat} />
+                : <ProducerCard key={beat.id || i} beat={beat} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      
+      <SectionHeader emoji="🎯" title="FRESH UPLOADS" subtitle="Newest beats uploaded recently" color="#06B6D4" />
+      {fLoading ? <LoadingRow /> : (
+        <div style={{ overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch", paddingLeft: 16, paddingBottom: 4, marginBottom: 32 }}>
+          <div style={{ display: "flex", gap: 12, paddingRight: 16 }}>
+            {fresh.length === 0
+              ? <div style={{ color: "#444", fontSize: 13, padding: "20px 0" }}>No fresh beats found.</div>
+              : fresh.map(beat => <CarouselCard key={beat.videoId} beat={beat} />)
+            }
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1875,7 +1889,7 @@ function SearchScreen({ savedIds, onSave, onPlay }) {
           </button>
         </div>
 
-        {/* Quick genre chips */}
+        
         <div style={{ overflowX: "auto", scrollbarWidth: "none", marginBottom: 20 }}>
           <div style={{ display: "flex", gap: 8, paddingBottom: 4 }}>
             {GENRES.map(g => (
@@ -1893,7 +1907,7 @@ function SearchScreen({ savedIds, onSave, onPlay }) {
 
       {!active ? (
         <div>
-          {/* Recent searches */}
+          
           {recents.length > 0 && (
             <div style={{ marginBottom: 28 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -1916,7 +1930,7 @@ function SearchScreen({ savedIds, onSave, onPlay }) {
             </div>
           )}
 
-          {/* Popular searches */}
+          
           <div style={{ marginBottom: 28 }}>
             <div style={{ color: "#aaa", fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Popular Searches</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -1933,7 +1947,7 @@ function SearchScreen({ savedIds, onSave, onPlay }) {
             </div>
           </div>
 
-          {/* Empty state guidance */}
+          
           <div style={{ textAlign: "center", paddingTop: 20, color: "#444" }}>
             <div style={{ fontSize: 44, marginBottom: 12 }}>🎵</div>
             <div style={{ fontSize: 14, color: "#555", lineHeight: 1.8 }}>
@@ -2039,7 +2053,7 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) 
         </div>
         <div style={{ color: "#666", fontSize: 13, marginBottom: 16 }}>Your personal beat collection</div>
 
-        {/* Sort options */}
+        
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           {[{ id: "recent", label: "Recently Saved" }, { id: "alpha", label: "A - Z" }].map(s => (
             <button key={s.id} onClick={() => setSort(s.id)} style={{
@@ -2053,7 +2067,7 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) 
           ))}
         </div>
 
-        {/* Folder chips */}
+        
         {(allFolderNames.length > 0 || list.length > 0) && (
           <div style={{ overflowX: "auto", scrollbarWidth: "none", marginBottom: 4 }}>
             <div style={{ display: "flex", gap: 8, paddingBottom: 4 }}>
@@ -2080,7 +2094,7 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) 
         )}
       </div>
 
-      {/* Empty state */}
+      
       {list.length === 0 ? (
         <div style={{ textAlign: "center", paddingTop: 60 }}>
           <div style={{ fontSize: 56, marginBottom: 16 }}>🔖</div>
@@ -2105,7 +2119,7 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) 
           <div key={beat.videoId} style={{ position: "relative" }}>
             <BeatCard beat={beat} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
 
-            {/* Add to collection button */}
+            
             <div style={{ marginTop: -8, marginBottom: 14, display: "flex", gap: 6, flexWrap: "wrap", paddingLeft: 4 }}>
               {addingTo === beat.videoId ? (
                 <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 12, padding: "10px 12px", width: "100%", boxSizing: "border-box" }}>
@@ -2170,91 +2184,124 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
   const isPro = user?.isPro || user?.isArtistPro;
   const [tab, setTab] = useState("beats");
 
+  // Non-member locked screen
   if (!isPro) return (
-    <div style={{
-      display: "flex", flexDirection: "column", alignItems: "center",
-      justifyContent: "center", height: "calc(100vh - 80px)",
-      padding: "0 20px", textAlign: "center", overflow: "hidden",
-    }}>
-      <div style={{ fontSize: 40, marginBottom: 8 }}>🔒</div>
-      <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 28, letterSpacing: 2, color: "#F59E0B", marginBottom: 4 }}>MEMBERS ONLY</div>
-      <div style={{ color: "#888", fontSize: 13, lineHeight: 1.5, marginBottom: 14 }}>
-        Unlock exclusive beats, MP3s and more.
+    <div style={{ paddingBottom: 100, overflowY: "auto" }}>
+      
+      <div style={{ background: "linear-gradient(160deg,#1a0a00,#2d1500,#1C1917)", padding: "32px 20px 24px", textAlign: "center", borderBottom: "1px solid rgba(245,158,11,0.15)" }}>
+        <div style={{ fontSize: 44, marginBottom: 10 }}>🔒</div>
+        <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 34, letterSpacing: 3, color: "#F59E0B", marginBottom: 6 }}>MEMBERS ONLY</div>
+        <div style={{ color: "#aaa", fontSize: 14, lineHeight: 1.6, maxWidth: 300, margin: "0 auto" }}>
+          Join the BeatFinder community and unlock the full producer ecosystem
+        </div>
       </div>
 
-      <div style={{ display: "flex", gap: 10, width: "100%", marginBottom: 14 }}>
-        {[
-          {
-            label: "🎤 Artist Pro",
-            price: "£4.99/mo",
-            color: "#F59E0B",
-            perks: [
-              "Write lyrics to beats",
-              "Save & edit lyrics",
-              "Exclusive member beats",
-              "Download MP3s",
-              "Purchase leases",
-              "Bookmark unlimited beats",
-            ],
-          },
-          {
-            label: "🎛 Producer Pro",
-            price: "£8.99/mo",
-            color: "#C026D3",
-            perks: [
-              "Everything in Artist Pro",
-              "Upload & sell beats",
-              "Sell MP3 leases",
-              "Download stats",
-              "Verified badge",
-              "Featured in rotation",
-            ],
-          },
-        ].map(p => (
-          <div key={p.label} style={{ flex: 1, background: "#111", border: "1.5px solid " + p.color, borderRadius: 14, padding: "12px", textAlign: "left" }}>
-            <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>{p.label}</div>
-            <div style={{ color: p.color, fontWeight: 800, fontSize: 13, marginBottom: 10 }}>{p.price}</div>
-            {p.perks.map(perk => (
-              <div key={perk} style={{ color: "#bbb", fontSize: 11, marginBottom: 5, lineHeight: 1.3, display: "flex", alignItems: "flex-start", gap: 5 }}>
-                <span style={{ color: p.color, fontWeight: 900, flexShrink: 0 }}>•</span>
-                <span>{perk}</span>
+      
+      <div style={{ padding: "20px 20px 0" }}>
+        <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, letterSpacing: 1, marginBottom: 14, textAlign: "center" }}>WHAT YOU UNLOCK</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+          {[
+            { icon: "🎵", title: "Exclusive Beats", desc: "Access member-only beats unavailable anywhere else" },
+            { icon: "⬇️", title: "MP3 Downloads", desc: "Download and buy leases directly from producers" },
+            { icon: "✍️", title: "Lyric Studio", desc: "Write lyrics while beats play with AI assistance" },
+            { icon: "🎛", title: "Producer Tools", desc: "Upload beats, sell leases and get paid instantly" },
+          ].map(v => (
+            <div key={v.title} style={{ background: "#111", borderRadius: 14, padding: 14, border: "1px solid rgba(245,158,11,0.15)" }}>
+              <div style={{ fontSize: 24, marginBottom: 8 }}>{v.icon}</div>
+              <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 4 }}>{v.title}</div>
+              <div style={{ color: "#555", fontSize: 11, lineHeight: 1.5 }}>{v.desc}</div>
+            </div>
+          ))}
+        </div>
+
+        
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ color: "#888", fontWeight: 700, fontSize: 12, letterSpacing: 1, marginBottom: 12, textAlign: "center" }}>CHOOSE YOUR PLAN</div>
+          <div style={{ display: "flex", gap: 10 }}>
+            {[
+              { label: "🎤 Artist Pro", price: "£4.99/mo", color: "#F59E0B", perks: ["Write lyrics to beats", "Save & edit lyrics", "Exclusive member beats", "Download MP3s", "Purchase leases", "Bookmark unlimited beats"] },
+              { label: "🎛 Producer Pro", price: "£8.99/mo", color: "#C026D3", perks: ["Everything in Artist Pro", "Upload & sell beats", "Sell MP3 leases", "Download stats", "Verified badge", "Featured in rotation"] },
+            ].map(p => (
+              <div key={p.label} style={{ flex: 1, background: "#111", border: "1.5px solid " + p.color, borderRadius: 14, padding: "14px 12px", textAlign: "left" }}>
+                <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>{p.label}</div>
+                <div style={{ color: p.color, fontWeight: 800, fontSize: 16, marginBottom: 12 }}>{p.price}</div>
+                {p.perks.map(perk => (
+                  <div key={perk} style={{ color: "#bbb", fontSize: 11, marginBottom: 6, lineHeight: 1.3, display: "flex", alignItems: "flex-start", gap: 5 }}>
+                    <span style={{ color: p.color, flexShrink: 0, fontWeight: 900 }}>+</span>
+                    <span>{perk}</span>
+                  </div>
+                ))}
               </div>
             ))}
           </div>
-        ))}
-      </div>
+        </div>
 
-      <button onClick={onGoProfile}
-        style={{ background: "linear-gradient(135deg,#F59E0B,#C026D3)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: "14px 40px", fontSize: 16, cursor: "pointer", width: "100%" }}>
-        Unlock Access
-      </button>
+        
+        <button onClick={onGoProfile} style={{ width: "100%", background: "linear-gradient(135deg,#F59E0B,#C026D3)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: "16px", fontSize: 16, cursor: "pointer", marginBottom: 20 }}>
+          Unlock Access
+        </button>
+
+        
+        <div style={{ background: "#111", borderRadius: 14, padding: "14px 16px", border: "1px solid #1e1e1e", marginBottom: 20 }}>
+          <div style={{ color: "#555", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>WHY PRODUCERS LOVE IT</div>
+          {[
+            { icon: "💳", text: "Get paid instantly via Stripe" },
+            { icon: "🎵", text: "Your beats reach real artists daily" },
+            { icon: "📊", text: "Track downloads and sales" },
+          ].map(r => (
+            <div key={r.text} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, color: "#888", fontSize: 13 }}>
+              <span>{r.icon}</span>
+              <span>{r.text}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 
+  // Logged-in pro member view
   return (
     <div style={{ padding: "0 16px 100px" }}>
+      
       <div style={{ padding: "20px 0 14px" }}>
         <div style={{ background: "linear-gradient(135deg,#1C1917,rgba(245,158,11,0.12))", borderRadius: 16, padding: "20px", marginBottom: 18, border: "1.5px solid rgba(245,158,11,0.3)" }}>
-          <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 13, marginBottom: 4 }}>🔒 MEMBERS ONLY</div>
-          <div style={{ color: "white", fontSize: 24, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>Members Area</div>
-          <div style={{ color: "#aaa", fontSize: 13, marginTop: 4 }}>Exclusive beats and downloadable MP3s</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>🔒 MEMBERS ONLY</div>
+              <div style={{ color: "white", fontSize: 24, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>Members Area</div>
+              <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>Exclusive beats and downloadable MP3s</div>
+            </div>
+            <div style={{ background: user?.isPro ? "rgba(192,38,211,0.2)" : "rgba(245,158,11,0.2)", border: "1px solid " + (user?.isPro ? "#C026D3" : "#F59E0B"), borderRadius: 20, padding: "6px 12px", fontSize: 11, color: user?.isPro ? "#C026D3" : "#F59E0B", fontWeight: 800 }}>
+              {user?.isPro ? "PRODUCER PRO" : "ARTIST PRO"}
+            </div>
+          </div>
         </div>
 
+        
         <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-          <button onClick={() => setTab("beats")}
-            style={{ flex: 1, padding: "12px", borderRadius: 12, fontWeight: 800, fontSize: 14, cursor: "pointer", border: tab === "beats" ? "2px solid #F59E0B" : "1.5px solid #333", background: tab === "beats" ? "rgba(245,158,11,0.15)" : "transparent", color: tab === "beats" ? "#F59E0B" : "#666" }}>
+          <button onClick={() => setTab("beats")} style={{ flex: 1, padding: "12px", borderRadius: 12, fontWeight: 800, fontSize: 14, cursor: "pointer", border: tab === "beats" ? "2px solid #F59E0B" : "1.5px solid #333", background: tab === "beats" ? "rgba(245,158,11,0.15)" : "transparent", color: tab === "beats" ? "#F59E0B" : "#666" }}>
             🔥 Exclusive Beats
           </button>
-          <button onClick={() => setTab("mp3s")}
-            style={{ flex: 1, padding: "12px", borderRadius: 12, fontWeight: 800, fontSize: 14, cursor: "pointer", border: tab === "mp3s" ? "2px solid #C026D3" : "1.5px solid #333", background: tab === "mp3s" ? "rgba(192,38,211,0.15)" : "transparent", color: tab === "mp3s" ? "#C026D3" : "#666" }}>
+          <button onClick={() => setTab("mp3s")} style={{ flex: 1, padding: "12px", borderRadius: 12, fontWeight: 800, fontSize: 14, cursor: "pointer", border: tab === "mp3s" ? "2px solid #C026D3" : "1.5px solid #333", background: tab === "mp3s" ? "rgba(192,38,211,0.15)" : "transparent", color: tab === "mp3s" ? "#C026D3" : "#666" }}>
             ⬇️ MP3 Downloads
           </button>
         </div>
       </div>
 
       {tab === "beats" && (
-        <BeatFeed artistName="exclusive premium" exclusive savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} />
+        <div>
+          
+          <div style={{ background: "linear-gradient(135deg,#1a0040,#2d0060)", borderRadius: 16, padding: "16px", marginBottom: 20, border: "1px solid rgba(192,38,211,0.3)" }}>
+            <div style={{ color: "#C026D3", fontSize: 11, fontWeight: 800, letterSpacing: 1, marginBottom: 6 }}>FEATURED PRODUCER</div>
+            <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Top producers upload here daily</div>
+            <div style={{ color: "#888", fontSize: 12 }}>Exclusive content only available to members</div>
+          </div>
+
+          <div style={{ color: "#F59E0B", fontWeight: 700, fontSize: 12, letterSpacing: 1, marginBottom: 12 }}>EXCLUSIVE DROPS</div>
+          <BeatFeed artistName="exclusive premium" savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} />
+        </div>
       )}
+
       {tab === "mp3s" && (
         <ProducerBeatsScreen onPlay={onPlay} savedIds={savedIds} onSave={onSave} user={user} />
       )}
@@ -3033,6 +3080,84 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         )}
       </div>
 
+      
+      {user.isArtistPro && (
+        <div style={{ background: "linear-gradient(135deg,#1a0a00,#1a1000)", borderRadius: 16, padding: 16, marginBottom: 20, border: "1px solid rgba(245,158,11,0.25)" }}>
+          <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, letterSpacing: 1, marginBottom: 12 }}>🎤 ARTIST WORKSPACE</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {[
+              { icon: "✍️", label: "Lyrics", desc: savedLyrics.length + " saved", color: "#C026D3" },
+              { icon: "🔖", label: "Saved Beats", desc: "Your library", color: "#F59E0B" },
+              { icon: "🎵", label: "Members Area", desc: "Exclusive beats", color: "#22C55E" },
+              { icon: "✨", label: "AI Assistant", desc: "Writer's block?", color: "#818CF8" },
+            ].map(function(item) {
+              return (
+                <div key={item.label} style={{ background: "#111", borderRadius: 12, padding: "12px 10px", border: "1px solid #1e1e1e" }}>
+                  <div style={{ fontSize: 20, marginBottom: 6 }}>{item.icon}</div>
+                  <div style={{ color: "white", fontWeight: 700, fontSize: 13 }}>{item.label}</div>
+                  <div style={{ color: item.color, fontSize: 11, marginTop: 2 }}>{item.desc}</div>
+                </div>
+              );
+            })}
+          </div>
+          {savedLyrics.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>RECENT LYRICS</div>
+              {savedLyrics.slice(0, 2).map(function(lyric, i) {
+                return (
+                  <div key={i} onClick={function(){ onEditLyric(lyric, i); }}
+                    style={{ background: "#1a1a1a", borderRadius: 10, padding: "10px 12px", marginBottom: 6, border: "1px solid #222", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ color: "white", fontWeight: 600, fontSize: 13 }}>{lyric.title || "Untitled"}</div>
+                      <div style={{ color: "#555", fontSize: 11, marginTop: 2 }}>{lyric.beatTitle}</div>
+                    </div>
+                    <div style={{ color: "#C026D3", fontSize: 13 }}>&#9654;</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      
+      {user.isPro && (
+        <div style={{ background: "linear-gradient(135deg,#0a001a,#150030)", borderRadius: 16, padding: 16, marginBottom: 20, border: "1px solid rgba(192,38,211,0.25)" }}>
+          <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 12, letterSpacing: 1, marginBottom: 12 }}>🎹 PRODUCER DASHBOARD</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+            {[
+              { icon: "⬆️", label: "Upload", desc: "Add beats" },
+              { icon: "🎛", label: "My Beats", desc: "Manage uploads" },
+              { icon: "💳", label: "Payouts", desc: "Stripe" },
+            ].map(function(item) {
+              return (
+                <div key={item.label} style={{ background: "#111", borderRadius: 12, padding: "12px 8px", border: "1px solid #1e1e1e", textAlign: "center" }}>
+                  <div style={{ fontSize: 20, marginBottom: 4 }}>{item.icon}</div>
+                  <div style={{ color: "white", fontWeight: 700, fontSize: 12 }}>{item.label}</div>
+                  <div style={{ color: "#C026D3", fontSize: 10, marginTop: 2 }}>{item.desc}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ background: "#111", borderRadius: 12, padding: "12px 14px", border: "1px solid #1e1e1e" }}>
+            <div style={{ color: "#555", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>QUICK STATS</div>
+            <div style={{ display: "flex", gap: 0 }}>
+              {[
+                { label: "Beats", value: uploads.length },
+                { label: "Downloads", value: uploads.reduce(function(s, b){ return s + (b.downloads || 0); }, 0) },
+                { label: "Revenue", value: "View" },
+              ].map(function(stat, i) {
+                return (
+                  <div key={stat.label} style={{ flex: 1, textAlign: "center", borderRight: i < 2 ? "1px solid #1e1e1e" : "none" }}>
+                    <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>{stat.value}</div>
+                    <div style={{ color: "#555", fontSize: 11 }}>{stat.label}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
             {user.isPro && (
         <div style={{ marginBottom: 24 }}>
