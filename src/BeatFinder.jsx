@@ -1,4 +1,79 @@
 import React, { useState, useEffect, useCallback } from "react";
+// =============================================================================
+// PREMIUM LOADER COMPONENT
+// =============================================================================
+const LOADER_STYLE = `
+  @keyframes bf-spin  { to { transform: rotate(360deg); } }
+  @keyframes bf-pulse { 0%,100% { opacity:0.4; transform:scaleY(0.5); } 50% { opacity:1; transform:scaleY(1); } }
+  @keyframes bf-fade  { from { opacity:0; } to { opacity:1; } }
+  @keyframes bf-fadein-up { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes bf-scale-in  { from { opacity:0; transform:scale(0.96); } to { opacity:1; transform:scale(1); } }
+  @keyframes bf-play-pulse { 0%,100% { box-shadow:0 0 0 0 rgba(192,38,211,0.4); } 70% { box-shadow:0 0 0 10px rgba(192,38,211,0); } }
+  @keyframes bf-tab-in     { from { opacity:0; transform:translateX(8px); } to { opacity:1; transform:translateX(0); } }
+  .bf-page    { animation: bf-fadein-up 0.28s cubic-bezier(0.22,1,0.36,1) both; }
+  .bf-card    { animation: bf-scale-in  0.22s cubic-bezier(0.22,1,0.36,1) both; }
+  .bf-tab-in  { animation: bf-tab-in   0.22s cubic-bezier(0.22,1,0.36,1) both; }
+  .bf-btn     { transition: transform 0.12s ease, opacity 0.12s ease; }
+  .bf-btn:active { transform: scale(0.93); opacity: 0.8; }
+  .bf-nav-btn { transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1), color 0.15s ease; }
+  .bf-nav-btn:active { transform: scale(0.85); }
+  .bf-play    { animation: bf-play-pulse 2s ease infinite; }
+  .bf-carousel { scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
+  .bf-save    { transition: transform 0.18s cubic-bezier(0.34,1.56,0.64,1), color 0.15s ease; }
+  .bf-save:active { transform: scale(1.3); }
+  .bf-spinner {
+    width: 44px; height: 44px; border-radius: 50%;
+    border: 3px solid rgba(192,38,211,0.15);
+    border-top-color: #C026D3;
+    animation: bf-spin 0.8s linear infinite;
+    filter: drop-shadow(0 0 8px rgba(192,38,211,0.5));
+  }
+  .bf-bars { display:flex; align-items:flex-end; gap:4px; height:28px; }
+  .bf-bar {
+    width: 5px; border-radius: 3px;
+    background: linear-gradient(180deg,#C026D3,#7C3AED);
+    animation: bf-pulse 1s ease-in-out infinite;
+    filter: drop-shadow(0 0 4px rgba(192,38,211,0.6));
+  }
+  .bf-bar:nth-child(1) { height:14px; animation-delay:0s; }
+  .bf-bar:nth-child(2) { height:22px; animation-delay:0.15s; }
+  .bf-bar:nth-child(3) { height:28px; animation-delay:0.3s; }
+  .bf-bar:nth-child(4) { height:22px; animation-delay:0.45s; }
+  .bf-bar:nth-child(5) { height:14px; animation-delay:0.6s; }
+  .bf-loader { animation: bf-fade 0.2s ease; }
+`;
+
+function BFLoader({ text, type }) {
+  return (
+    <div className="bf-loader" style={{
+      display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", padding: "60px 20px", gap: 20,
+    }}>
+      <style>{LOADER_STYLE}</style>
+      {type === "bars" ? (
+        <div className="bf-bars">
+          <div className="bf-bar" />
+          <div className="bf-bar" />
+          <div className="bf-bar" />
+          <div className="bf-bar" />
+          <div className="bf-bar" />
+        </div>
+      ) : (
+        <div className="bf-spinner" />
+      )}
+      {text && (
+        <div style={{
+          color: "#6b6b6b", fontSize: 11, fontWeight: 600,
+          letterSpacing: 2, opacity: 0.8,
+        }}>
+          {text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 
 // =============================================================================
 // CONFIG
@@ -657,12 +732,7 @@ function AiLyricAssistant({ text, beat, onSuggest }) {
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-            {loading && (
-              <div style={{ textAlign: "center", padding: "60px 0" }}>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>&#10024;</div>
-                <div style={{ color: "#888", fontSize: 14 }}>Searching rhyme database...</div>
-              </div>
-            )}
+            {loading && <BFLoader type="bars" text="Searching rhyme database..." />}
 
             {error && !loading && (
               <div style={{ color: "#F87171", fontSize: 14, textAlign: "center", padding: "20px 0" }}>{error}</div>
@@ -970,84 +1040,89 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
 // =============================================================================
 function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
   const [imgErr, setImgErr] = useState(false);
-  const accent  = exclusive ? "#F59E0B" : featured ? "#C026D3" : "#9333EA";
-  const isSaved = savedIds.has(beat.videoId);
+  const isSaved  = savedIds.has(beat.videoId);
+  const accentClr = exclusive ? "#F59E0B" : featured ? "#C026D3" : "#7C3AED";
+  const borderClr = exclusive ? "rgba(245,158,11,0.25)" : featured ? "rgba(192,38,211,0.25)" : "rgba(255,255,255,0.06)";
+  const glowClr   = exclusive ? "rgba(245,158,11,0.35)" : "rgba(192,38,211,0.35)";
 
   return (
-    <div style={{
-      background: "#111", borderRadius: 14, overflow: "hidden", marginBottom: 16,
-      border: `1px solid ${exclusive ? "#F59E0B33" : featured ? "#C026D333" : "rgba(255,255,255,0.07)"}`,
+    <div className="bf-card" style={{
+      background: "linear-gradient(180deg,#161616 0%,#111 100%)",
+      borderRadius: 18, overflow: "hidden", marginBottom: 16,
+      border: "1px solid " + borderClr,
+      boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
     }}>
-      <div
-        style={{
-          position: "relative", height: 200,
-          background: `linear-gradient(135deg,#1a1a2e,${accent}44)`, cursor: "pointer",
-        }}
-        onClick={() => onPlay(beat)}
-      >
-        {beat.thumbnail && !imgErr && (
-          <img
-            src={beat.thumbnail} alt={beat.title}
-            onError={() => setImgErr(true)}
-            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-          />
+      {/* Thumbnail */}
+      <div style={{ position: "relative", height: 190, cursor: "pointer", overflow: "hidden" }}
+           onClick={() => onPlay(beat)}>
+        {beat.thumbnail && !imgErr ? (
+          <img src={beat.thumbnail} alt={beat.title} onError={() => setImgErr(true)}
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transform: "scale(1.02)" }} />
+        ) : (
+          <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg,#1a1a2e," + accentClr + "44)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: 40, opacity: 0.3 }}>🎵</span>
+          </div>
         )}
-        <div style={{
-          position: "absolute", inset: 0,
-          background: "linear-gradient(to top,rgba(0,0,0,0.65) 0%,rgba(0,0,0,0.05) 60%,transparent 100%)",
-        }} />
+        {/* Gradient overlay */}
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top,rgba(0,0,0,0.75) 0%,rgba(0,0,0,0.15) 50%,rgba(0,0,0,0.05) 100%)" }} />
+        {/* Premium play button */}
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{
-            width: 60, height: 60, borderRadius: "50%", background: accent,
+          <div className="bf-play" style={{
+            width: 56, height: 56, borderRadius: "50%",
+            background: "linear-gradient(135deg," + accentClr + ",rgba(124,58,237,0.9))",
             display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: `0 4px 24px ${accent}99`, border: "3px solid rgba(255,255,255,0.3)",
+            boxShadow: "0 0 0 3px rgba(255,255,255,0.12), 0 8px 32px " + glowClr,
+            backdropFilter: "blur(4px)",
           }}>
-            <span style={{ fontSize: 22, marginLeft: 5, color: "white" }}>▶</span>
+            <span style={{ fontSize: 20, marginLeft: 4, color: "white" }}>▶</span>
           </div>
         </div>
-        {featured && (
-          <div style={{ position: "absolute", top: 10, left: 12, background: "#C026D3", borderRadius: 8, padding: "3px 10px", fontSize: 11, color: "white", fontWeight: 800 }}>
-            ⭐ FEATURED
+        {/* Badges */}
+        {(featured || exclusive) && (
+          <div style={{ position: "absolute", top: 10, left: 12 }}>
+            <div style={{ background: featured ? "linear-gradient(135deg,#C026D3,#7C3AED)" : "linear-gradient(135deg,#F59E0B,#EF4444)", borderRadius: 20, padding: "4px 12px", fontSize: 10, color: "white", fontWeight: 800, letterSpacing: 0.5 }}>
+              {featured ? "⭐ FEATURED" : "🔒 EXCLUSIVE"}
+            </div>
           </div>
         )}
-        {exclusive && (
-          <div style={{ position: "absolute", top: 10, left: 12, background: "#F59E0B", borderRadius: 8, padding: "3px 10px", fontSize: 11, color: "black", fontWeight: 800 }}>
-            🔒 EXCLUSIVE
-          </div>
-        )}
-        <div
-          onClick={e => { e.stopPropagation(); onSave(beat); }}
-          style={{ position: "absolute", top: 10, right: 12, fontSize: 22, color: isSaved ? "#C026D3" : "rgba(255,255,255,0.55)", cursor: "pointer" }}
-        >
+        {/* Save button */}
+        <button className="bf-save" onClick={e => { e.stopPropagation(); onSave(beat); }}
+          style={{ position: "absolute", top: 10, right: 10, width: 34, height: 34, borderRadius: "50%", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
+            background: isSaved ? "rgba(192,38,211,0.9)" : "rgba(0,0,0,0.55)",
+            backdropFilter: "blur(8px)",
+            boxShadow: isSaved ? "0 0 12px rgba(192,38,211,0.5)" : "none",
+            color: isSaved ? "white" : "rgba(255,255,255,0.7)",
+          }}>
           🔖
-        </div>
-      </div>
-      <div style={{ padding: "12px 14px" }}>
-        <div
-          onClick={() => onPlay(beat)}
-          style={{ color: "white", fontWeight: 700, fontSize: 13, lineHeight: 1.4, marginBottom: 4, cursor: "pointer" }}>
-          {beat.title}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <div style={{ color: "#888", fontSize: 12 }}>{beat.channel}</div>
-          {beat.viewsLabel && (
-            <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "2px 8px", fontSize: 11, color: "#C026D3", fontWeight: 700 }}>
+        </button>
+        {/* View count at bottom of image */}
+        {beat.viewsLabel && (
+          <div style={{ position: "absolute", bottom: 10, left: 12 }}>
+            <div style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)", border: "1px solid rgba(192,38,211,0.4)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#C026D3", fontWeight: 700 }}>
               {beat.viewsLabel}
             </div>
-          )}
+          </div>
+        )}
+      </div>
+      {/* Info */}
+      <div style={{ padding: "14px 16px 12px" }}>
+        <div onClick={() => onPlay(beat)} style={{ color: "white", fontWeight: 700, fontSize: 14, lineHeight: 1.45, marginBottom: 6, cursor: "pointer",
+          overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+          {beat.title}
         </div>
-        <a
-          href={watchUrl(beat.videoId)}
-          target="_blank" rel="noopener noreferrer"
-          onClick={e => e.stopPropagation()}
-          style={{ color: "#FF0000", fontSize: 11, fontWeight: 700, textDecoration: "none" }}
-        >
-          ▶ Open in YouTube ↗
-        </a>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ color: "#666", fontSize: 12, fontWeight: 500 }}>{beat.channel}</div>
+          <a href={watchUrl(beat.videoId)} target="_blank" rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{ display: "flex", alignItems: "center", gap: 4, background: "rgba(255,0,0,0.1)", border: "1px solid rgba(255,0,0,0.25)", borderRadius: 20, padding: "3px 10px", color: "#FF4444", fontSize: 10, fontWeight: 700, textDecoration: "none" }}>
+            ▶ YouTube
+          </a>
+        </div>
       </div>
     </div>
   );
 }
+
 
 // =============================================================================
 // BEAT FEED
@@ -1116,13 +1191,7 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
     );
   };
 
-  if (loading) return (
-    <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
-      <div style={{ fontSize: 36, marginBottom: 10 }}>🎵</div>
-      <div style={{ fontSize: 13 }}>Finding {artistName} type beats...</div>
-      {page === 1 && <div style={{ fontSize: 11, color: "#444", marginTop: 6 }}>First load builds the full beat library - may take a few seconds</div>}
-    </div>
-  );
+  if (loading) return <BFLoader type="bars" text="LOADING BEATS..." />;
 
   if (error && !beats.length) return (
     <div style={{ padding: "20px 0" }}>
@@ -1191,56 +1260,374 @@ function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, s
 // HOME SCREEN
 // =============================================================================
 function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers }) {
+  const [heroIndex, setHeroIndex] = useState(0);
+
+  const HERO_SLIDES = [
+    {
+      title: "Find Your Sound",
+      sub: "Millions of type beats - one tap away",
+      emoji: "🎵",
+      grad: "linear-gradient(135deg,#12002a 0%,#3b0070 60%,#C026D3 100%)",
+      cta: "Explore Beats",
+    },
+    {
+      title: "Write Better Lyrics",
+      sub: "AI lyric assistant for every bar you write",
+      emoji: "✍️",
+      grad: "linear-gradient(135deg,#001230 0%,#002a70 60%,#3B82F6 100%)",
+      cta: "Upgrade to Pro",
+    },
+    {
+      title: "Sell Your Beats",
+      sub: "Upload, price, and earn on every lease",
+      emoji: "🎛",
+      grad: "linear-gradient(135deg,#180800 0%,#3a1500 60%,#F59E0B 100%)",
+      cta: "Go Producer Pro",
+    },
+  ];
+
+  const GENRES = [
+    { label: "Trap",       q: "trap type beat",       color: "#C026D3", emoji: "🔥" },
+    { label: "UK Drill",   q: "uk drill type beat",   color: "#3B82F6", emoji: "🎯" },
+    { label: "R&B",        q: "rnb type beat",        color: "#F59E0B", emoji: "🎵" },
+    { label: "Afrobeat",   q: "afrobeat type beat",   color: "#22C55E", emoji: "🌍" },
+    { label: "Melodic",    q: "melodic type beat",    color: "#818CF8", emoji: "🌊" },
+    { label: "Dancehall",  q: "dancehall riddim",     color: "#EC4899", emoji: "🎪" },
+  ];
+
+  useEffect(() => {
+    const t = setInterval(() => setHeroIndex(i => (i + 1) % HERO_SLIDES.length), 4200);
+    return () => clearInterval(t);
+  }, []);
+
+  const slide = HERO_SLIDES[heroIndex];
+
+  const SectionHead = ({ emoji, title, sub }) => (
+    <div style={{ paddingLeft: 16, marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+        <span style={{ fontSize: 18, lineHeight: 1 }}>{emoji}</span>
+        <span style={{ color: "white", fontWeight: 800, fontSize: 16,
+          fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>{title}</span>
+      </div>
+      {sub && <div style={{ color: "#555", fontSize: 12, marginLeft: 26 }}>{sub}</div>}
+    </div>
+  );
+
   return (
-    <div style={{ padding: "0 16px 100px" }}>
-      <div style={{ textAlign: "center", padding: "24px 0 20px" }}>
+    <div className="bf-page" style={{ paddingBottom: 100, overflowX: "hidden" }}>
+
+      {/* Logo */}
+      <div style={{ padding: "18px 16px 0" }}>
         <img
           src="https://i.ibb.co/9myqbFB7/2-BB02064-13-F6-476-C-89-FF-B1-EDDAE0-C709.png"
           alt="BeatFinder"
-          style={{ width: "100%", maxWidth: 380, display: "block", margin: "0 auto" }}
+          style={{ width: "100%", maxWidth: 320, display: "block", margin: "0 auto" }}
         />
       </div>
-      {(!user || (!user.isPro && !user.isArtistPro)) && (
+
+      {/* Hero Banner */}
+      <div style={{ padding: "14px 16px 0" }}>
         <div style={{
-          background: "linear-gradient(135deg,#1a0a2e,#2d1060)",
-          border: "1.5px solid rgba(192,38,211,0.4)",
-          borderRadius: 16, padding: "18px 20px", marginBottom: 20,
+          background: slide.grad, borderRadius: 22, padding: "22px 20px 18px",
+          marginBottom: 20, position: "relative", overflow: "hidden",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+          minHeight: 140,
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-            <div style={{ fontSize: 22 }}>🔒</div>
-            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>PRO FEATURES AVAILABLE</div>
-          </div>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 10, lineHeight: 1.4 }}>
-            Take your music further with a Pro plan
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
-            {["✍️  Write lyrics while beats play", "💾  Save & edit your lyrics anytime", "🎵  Access exclusive member beats", "⬇️  Download & buy MP3 leases", "✨  AI Lyric Assistant for writer's block", "🎛️  Upload & sell your own beats"].map(f => (
-              <div key={f} style={{ color: "#bbb", fontSize: 12 }}>{f}</div>
+          {/* Large bg emoji */}
+          <div style={{
+            position: "absolute", right: -8, top: -12,
+            fontSize: 90, opacity: 0.1, lineHeight: 1, userSelect: "none",
+          }}>{slide.emoji}</div>
+
+          <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: 800,
+            letterSpacing: 2.5, marginBottom: 8 }}>BEATFINDER</div>
+          <div style={{ color: "white", fontSize: 24, fontWeight: 900,
+            lineHeight: 1.1, marginBottom: 6, fontFamily: "'Bebas Neue',sans-serif",
+            letterSpacing: 1 }}>{slide.title}</div>
+          <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 13,
+            marginBottom: 18, lineHeight: 1.5 }}>{slide.sub}</div>
+          <button onClick={onGoMembers} style={{
+            background: "rgba(255,255,255,0.15)", backdropFilter: "blur(10px)",
+            border: "1px solid rgba(255,255,255,0.25)", borderRadius: 22,
+            color: "white", fontWeight: 800, fontSize: 13,
+            padding: "9px 20px", cursor: "pointer",
+          }}>{slide.cta} →</button>
+
+          {/* Dot indicators */}
+          <div style={{ position: "absolute", bottom: 14, right: 16,
+            display: "flex", gap: 5, alignItems: "center" }}>
+            {HERO_SLIDES.map((_, i) => (
+              <div key={i} onClick={() => setHeroIndex(i)} style={{
+                width: i === heroIndex ? 18 : 5, height: 5, borderRadius: 3,
+                background: i === heroIndex ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.25)",
+                cursor: "pointer", transition: "all 0.35s cubic-bezier(0.22,1,0.36,1)",
+              }} />
             ))}
           </div>
-          <button onClick={onGoMembers} style={{
-            width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)",
-            border: "none", borderRadius: 12, color: "white",
-            fontWeight: 800, fontSize: 15, padding: "13px", cursor: "pointer",
+        </div>
+      </div>
+
+      {/* Pro upsell strip for free users */}
+      {(!user || (!user.isPro && !user.isArtistPro)) && (
+        <div style={{ padding: "0 16px", marginBottom: 22 }}>
+          <div style={{
+            background: "linear-gradient(135deg,#0d0020,#1a0040)",
+            border: "1px solid rgba(192,38,211,0.25)",
+            borderRadius: 16, padding: "13px 16px",
+            display: "flex", alignItems: "center", gap: 14,
           }}>
-            View Plans - From £4.99/mo
-          </button>
+            <div style={{ fontSize: 28 }}>🔒</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: "white", fontWeight: 800, fontSize: 14, marginBottom: 2 }}>
+                Unlock Pro
+              </div>
+              <div style={{ color: "#666", fontSize: 12 }}>Lyrics, MP3s, exclusive beats</div>
+            </div>
+            <button onClick={onGoMembers} className="bf-btn" style={{
+              background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+              border: "none", borderRadius: 20, color: "white",
+              fontWeight: 800, fontSize: 12, padding: "8px 16px",
+              cursor: "pointer", flexShrink: 0,
+            }}>From £4.99</button>
+          </div>
         </div>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>⭐ Featured Beats</div>
-        <div style={{ color: "#888", fontSize: 12 }}>Live from YouTube</div>
+      {/* Featured Beats Carousel */}
+      <div style={{ marginBottom: 28 }}>
+        <SectionHead emoji="⭐" title="FEATURED BEATS" sub="Hand-picked from YouTube" />
+        <FeaturedCarousel savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
       </div>
-      <div style={{ background: "#111", borderRadius: 12, padding: "10px 14px", marginBottom: 20, border: "1px solid #1e1e1e" }}>
-        <div style={{ color: "#666", fontSize: 12, lineHeight: 1.6 }}>
-          🎵 Featured beats from producers worldwide - tap any video to play beats instantly.
+
+      {/* Genre chips */}
+      <div style={{ marginBottom: 28 }}>
+        <SectionHead emoji="🎯" title="BROWSE BY GENRE" />
+        <div className="bf-carousel" style={{ overflowX: "auto", scrollbarWidth: "none",
+          WebkitOverflowScrolling: "touch", paddingLeft: 16 }}>
+          <div style={{ display: "flex", gap: 10, paddingRight: 16 }}>
+            {GENRES.map(g => (
+              <div key={g.label} style={{
+                flexShrink: 0, display: "flex", alignItems: "center", gap: 7,
+                background: g.color + "18",
+                border: "1.5px solid " + g.color + "44",
+                borderRadius: 50, padding: "9px 18px", cursor: "pointer",
+              }}>
+                <span style={{ fontSize: 15 }}>{g.emoji}</span>
+                <span style={{ color: "white", fontWeight: 700, fontSize: 13,
+                  whiteSpace: "nowrap" }}>{g.label}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
-      <BeatFeed artistName="best free beats" featured savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} max={10} />
+
+      {/* Trending Strip */}
+      <div style={{ marginBottom: 28 }}>
+        <SectionHead emoji="🔥" title="TRENDING NOW" sub="1M+ views · updated daily" />
+        <TrendingStrip savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
+      </div>
+
+      {/* Pro personalised workspace */}
+      {user?.isArtistPro && (
+        <div style={{ padding: "0 16px", marginBottom: 28 }}>
+          <div style={{
+            background: "linear-gradient(135deg,#0a001a,#18003a)",
+            border: "1px solid rgba(192,38,211,0.2)",
+            borderRadius: 18, padding: "18px 16px",
+          }}>
+            <div style={{ color: "#C026D3", fontSize: 10, fontWeight: 800,
+              letterSpacing: 2, marginBottom: 6 }}>YOUR WORKSPACE</div>
+            <div style={{ color: "white", fontWeight: 800, fontSize: 17, marginBottom: 4 }}>
+              {"Welcome back" + (user.name ? ", " + user.name.split(" ")[0] : "") + " 👋"}
+            </div>
+            <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>
+              Continue writing or discover something new.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[
+                { icon: "✍️", label: "Lyrics" },
+                { icon: "🔖", label: "Saved" },
+                { icon: "🎵", label: "Members" },
+              ].map(item => (
+                <div key={item.label} style={{
+                  flex: 1, background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.07)",
+                  borderRadius: 12, padding: "12px 8px", textAlign: "center",
+                }}>
+                  <div style={{ fontSize: 22, marginBottom: 5 }}>{item.icon}</div>
+                  <div style={{ color: "#888", fontSize: 11, fontWeight: 600 }}>{item.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+function FeaturedCarousel({ savedIds, onSave, onPlay }) {
+  const [beats, setBeats] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch("/api/youtube/search?artist=best+free+beats&page=1&filter_title=false&max=8")
+      .then(d => { setBeats(d.beats || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return (
+    <div style={{ paddingLeft: 16 }}>
+      <BFLoader type="bars" text="LOADING BEATS..." />
+    </div>
+  );
+
+  return (
+    <div className="bf-carousel" style={{
+      overflowX: "auto", scrollbarWidth: "none",
+      WebkitOverflowScrolling: "touch", paddingLeft: 16,
+    }}>
+      <div style={{ display: "flex", gap: 12, paddingRight: 16 }}>
+        {beats.map(beat => {
+          const isSaved = savedIds.has(beat.videoId);
+          return (
+            <div key={beat.videoId} className="bf-card" onClick={() => onPlay(beat)} style={{
+              flexShrink: 0, width: 178, cursor: "pointer",
+              background: "linear-gradient(180deg,#1a1a1a,#111)",
+              borderRadius: 16, overflow: "hidden",
+              border: "1px solid rgba(255,255,255,0.07)",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+            }}>
+              <div style={{ position: "relative", height: 112, overflow: "hidden" }}>
+                <img
+                  src={beat.thumbnail || "https://img.youtube.com/vi/" + beat.videoId + "/hqdefault.jpg"}
+                  alt={beat.title}
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                />
+                <div style={{ position: "absolute", inset: 0,
+                  background: "linear-gradient(to top,rgba(0,0,0,0.7),transparent 55%)" }} />
+                <div style={{ position: "absolute", inset: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div className="bf-play" style={{
+                    width: 42, height: 42, borderRadius: "50%",
+                    background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    boxShadow: "0 0 0 3px rgba(255,255,255,0.12),0 6px 20px rgba(192,38,211,0.5)",
+                  }}>
+                    <span style={{ fontSize: 16, marginLeft: 3, color: "white" }}>▶</span>
+                  </div>
+                </div>
+                <button className="bf-save" onClick={e => { e.stopPropagation(); onSave(beat); }} style={{
+                  position: "absolute", top: 7, right: 7,
+                  width: 30, height: 30, borderRadius: "50%", border: "none",
+                  cursor: "pointer", display: "flex", alignItems: "center",
+                  justifyContent: "center", fontSize: 14,
+                  background: isSaved ? "rgba(192,38,211,0.9)" : "rgba(0,0,0,0.65)",
+                  color: isSaved ? "white" : "rgba(255,255,255,0.6)",
+                  boxShadow: isSaved ? "0 0 10px rgba(192,38,211,0.5)" : "none",
+                }}>🔖</button>
+              </div>
+              <div style={{ padding: "10px 12px 12px" }}>
+                <div style={{
+                  color: "white", fontSize: 12, fontWeight: 700, lineHeight: 1.4,
+                  overflow: "hidden", display: "-webkit-box",
+                  WebkitLineClamp: 2, WebkitBoxOrient: "vertical", marginBottom: 4,
+                }}>{beat.title}</div>
+                <div style={{ color: "#555", fontSize: 10, fontWeight: 500 }}>{beat.channel}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TrendingStrip({ savedIds, onSave, onPlay }) {
+  const [beats, setBeats] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch("/api/youtube/trending")
+      .then(d => { setBeats((d.beats || []).slice(0, 6)); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return (
+    <div style={{ paddingLeft: 16 }}>
+      <BFLoader type="bars" text="LOADING BEATS..." />
+    </div>
+  );
+
+  if (!beats.length) return null;
+
+  return (
+    <div className="bf-carousel" style={{
+      overflowX: "auto", scrollbarWidth: "none",
+      WebkitOverflowScrolling: "touch", paddingLeft: 16,
+    }}>
+      <div style={{ display: "flex", gap: 12, paddingRight: 16 }}>
+        {beats.map((beat, i) => {
+          const isSaved = savedIds.has(beat.videoId);
+          return (
+            <div key={beat.videoId} className="bf-card" onClick={() => onPlay(beat)} style={{
+              flexShrink: 0, width: 152, cursor: "pointer",
+              background: "linear-gradient(180deg,#161616,#0f0f0f)",
+              borderRadius: 14, overflow: "hidden",
+              border: "1px solid rgba(245,158,11,0.12)",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+            }}>
+              <div style={{ position: "relative", height: 96, overflow: "hidden" }}>
+                <img
+                  src={beat.thumbnail || "https://img.youtube.com/vi/" + beat.videoId + "/hqdefault.jpg"}
+                  alt={beat.title}
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                />
+                <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.3)" }} />
+                {/* Rank badge */}
+                <div style={{
+                  position: "absolute", top: 7, left: 8,
+                  background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)",
+                  border: "1px solid rgba(245,158,11,0.4)",
+                  borderRadius: 20, padding: "2px 9px",
+                  fontSize: 10, color: "#F59E0B", fontWeight: 900,
+                }}>#{i + 1}</div>
+                <div style={{ position: "absolute", inset: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: "50%",
+                    background: "linear-gradient(135deg,#F59E0B,#EF4444)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    boxShadow: "0 0 16px rgba(245,158,11,0.5)",
+                  }}>
+                    <span style={{ fontSize: 14, marginLeft: 3, color: "white" }}>▶</span>
+                  </div>
+                </div>
+                <button className="bf-save" onClick={e => { e.stopPropagation(); onSave(beat); }} style={{
+                  position: "absolute", top: 5, right: 6,
+                  width: 26, height: 26, borderRadius: "50%", border: "none",
+                  cursor: "pointer", display: "flex", alignItems: "center",
+                  justifyContent: "center", fontSize: 12,
+                  background: isSaved ? "rgba(192,38,211,0.9)" : "rgba(0,0,0,0.65)",
+                  color: isSaved ? "white" : "rgba(255,255,255,0.5)",
+                }}>🔖</button>
+              </div>
+              <div style={{ padding: "8px 10px 10px" }}>
+                <div style={{
+                  color: "white", fontSize: 11, fontWeight: 700, lineHeight: 1.35,
+                  overflow: "hidden", display: "-webkit-box",
+                  WebkitLineClamp: 2, WebkitBoxOrient: "vertical", marginBottom: 3,
+                }}>{beat.title}</div>
+                <div style={{ color: "#555", fontSize: 10 }}>{beat.channel}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 
 // =============================================================================
 // ARTISTS SCREEN
@@ -1550,12 +1937,7 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
         </div>
       </div>
 
-      {loading && (
-        <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>
-          <div style={{ fontSize: 36, marginBottom: 10 }}>🎵</div>
-          <div style={{ fontSize: 13 }}>Loading producer beats...</div>
-        </div>
-      )}
+    if (loading) return <BFLoader type="spinner" text="LOADING BEATS..." />;
 
       {error && (
         <div style={{ background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 14, padding: 20, textAlign: "center" }}>
@@ -1638,64 +2020,55 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
   }, []);
 
   // Horizontal carousel card - compact version for side-scroll
-  const CarouselCard = ({ beat }) => (
-    <div
-      onClick={() => onPlay(beat)}
-      style={{
-        flexShrink: 0, width: 160, cursor: "pointer",
-        background: "#111", borderRadius: 14,
-        border: "1px solid #1e1e1e", overflow: "hidden",
-      }}
-    >
-      <div style={{ position: "relative" }}>
-        <img
-          src={beat.thumbnail || ("https://img.youtube.com/vi/" + beat.videoId + "/hqdefault.jpg")}
-          alt={beat.title}
-          style={{ width: "100%", height: 100, objectFit: "cover", display: "block" }}
-        />
-        <div style={{
-          position: "absolute", inset: 0, display: "flex",
-          alignItems: "center", justifyContent: "center",
-          background: "rgba(0,0,0,0.3)",
-        }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: "50%",
-            background: "rgba(192,38,211,0.9)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 14,
+  const CarouselCard = ({ beat }) => {
+    const isSaved = savedIds.has(beat.videoId);
+    return (
+      <div onClick={() => onPlay(beat)} className="bf-card" style={{
+        flexShrink: 0, width: 168, cursor: "pointer",
+        background: "linear-gradient(180deg,#161616,#111)",
+        borderRadius: 16, border: "1px solid rgba(255,255,255,0.07)",
+        overflow: "hidden", boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+      }}>
+        <div style={{ position: "relative", height: 108, overflow: "hidden" }}>
+          <img
+            src={beat.thumbnail || ("https://img.youtube.com/vi/" + beat.videoId + "/hqdefault.jpg")}
+            alt={beat.title}
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          />
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top,rgba(0,0,0,0.6),transparent 60%)" }} />
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div className="bf-play" style={{
+              width: 38, height: 38, borderRadius: "50%",
+              background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              boxShadow: "0 0 0 2px rgba(255,255,255,0.15), 0 4px 16px rgba(192,38,211,0.4)",
+            }}>
+              <span style={{ fontSize: 14, marginLeft: 3, color: "white" }}>&#9654;</span>
+            </div>
+          </div>
+          <button className="bf-save" onClick={e => { e.stopPropagation(); onSave(beat); }} style={{
+            position: "absolute", top: 6, right: 6, width: 28, height: 28,
+            borderRadius: "50%", border: "none", cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13,
+            background: isSaved ? "rgba(192,38,211,0.9)" : "rgba(0,0,0,0.6)",
+            color: isSaved ? "white" : "rgba(255,255,255,0.6)",
+            boxShadow: isSaved ? "0 0 8px rgba(192,38,211,0.5)" : "none",
           }}>
-            &#9654;
+            🔖
+          </button>
+        </div>
+        <div style={{ padding: "10px 12px 12px" }}>
+          <div style={{ color: "white", fontSize: 12, fontWeight: 700, lineHeight: 1.4, marginBottom: 4,
+            overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+            {beat.title}
+          </div>
+          <div style={{ color: "#555", fontSize: 10, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {beat.channel}
           </div>
         </div>
-        <button
-          onClick={e => { e.stopPropagation(); onSave(beat); }}
-          style={{
-            position: "absolute", top: 6, right: 6,
-            background: "rgba(0,0,0,0.7)", border: "none",
-            borderRadius: "50%", width: 28, height: 28,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "pointer", fontSize: 13,
-            color: savedIds.has(beat.videoId) ? "#C026D3" : "#aaa",
-          }}
-        >
-          &#128338;
-        </button>
       </div>
-      <div style={{ padding: "10px 10px 12px" }}>
-        <div style={{
-          color: "white", fontSize: 12, fontWeight: 700,
-          lineHeight: 1.4, marginBottom: 4,
-          overflow: "hidden", display: "-webkit-box",
-          WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-        }}>
-          {beat.title}
-        </div>
-        <div style={{ color: "#666", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {beat.channel}
-        </div>
-      </div>
-    </div>
-  );
+    );
+  };
 
   // Producer carousel card (no videoId)
   const ProducerCard = ({ beat }) => (
@@ -1740,10 +2113,8 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
   );
 
   const LoadingRow = () => (
-    <div style={{ paddingLeft: 16, display: "flex", gap: 12, marginBottom: 32 }}>
-      {[1,2,3].map(i => (
-        <div key={i} style={{ flexShrink: 0, width: 160, height: 180, background: "#111", borderRadius: 14, border: "1px solid #1e1e1e" }} />
-      ))}
+    <div style={{ paddingLeft: 16, marginBottom: 32 }}>
+      <BFLoader type="bars" text="Loading..." />
     </div>
   );
 
@@ -1761,7 +2132,7 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
       
       <SectionHeader emoji="🔥" title="TRENDING ON YOUTUBE" subtitle="1M+ views, sorted by most viewed" color="#F59E0B" />
       {tLoading ? <LoadingRow /> : (
-        <div style={{ overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch", paddingLeft: 16, paddingBottom: 4, marginBottom: 32 }}>
+        <div className="bf-carousel" style={{ overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch", paddingLeft: 16, paddingBottom: 4, marginBottom: 32 }}>
           <div style={{ display: "flex", gap: 12, paddingRight: 16 }}>
             {trending.length === 0
               ? <div style={{ color: "#444", fontSize: 13, padding: "20px 0" }}>No trending beats found.</div>
@@ -1976,7 +2347,7 @@ function SearchScreen({ savedIds, onSave, onPlay }) {
 // SAVED SCREEN
 // =============================================================================
 function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) {
-  const list = Object.values(savedMap);
+  const list = user ? Object.values(savedMap) : [];
 
   const [sort,         setSort]         = useState("recent");
   const [activeFolder, setActiveFolder] = useState("all");
@@ -2027,19 +2398,16 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) 
 
   if (!user) return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "60vh", padding: 24, textAlign: "center" }}>
-      <div style={{ fontSize: 64, marginBottom: 20, opacity: 0.3 }}>🔖</div>
-      <div style={{ color: "white", fontSize: 22, fontWeight: 800, marginBottom: 10 }}>Your Beat Library</div>
-      <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 24 }}>Log in to save beats, create collections and sync across devices.</div>
-      {list.length > 0 && (
-        <div style={{ width: "100%", marginBottom: 24 }}>
-          <div style={{ color: "#888", fontSize: 13, marginBottom: 12 }}>{list.length} beat{list.length !== 1 ? "s" : ""} saved locally</div>
-          {list.slice(0, 3).map(beat => (
-            <BeatCard key={beat.videoId} beat={beat} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
-          ))}
-        </div>
-      )}
-      <button onClick={onGoProfile} style={{ background: "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: "16px 48px", fontSize: 16, cursor: "pointer", width: "100%", maxWidth: 300 }}>
-        Log In / Sign Up
+      <div style={{ fontSize: 64, marginBottom: 20 }}>🔖</div>
+      <div style={{ color: "white", fontSize: 22, fontWeight: 800, marginBottom: 8 }}>Your Beat Library</div>
+      <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 28 }}>
+        Create an account to save beats,<br />build collections and sync across devices.
+      </div>
+      <button onClick={onGoProfile} style={{ width: "100%", maxWidth: 300, background: "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: "pointer", marginBottom: 14 }}>
+        Create Account
+      </button>
+      <button onClick={onGoProfile} style={{ background: "none", border: "none", color: "#06B6D4", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+        Log In
       </button>
     </div>
   );
@@ -2586,7 +2954,7 @@ function MyUploadsSection({ user }) {
     }
   };
 
-  if (loading) return <div style={{ color: "#555", fontSize: 13, padding: "20px 0" }}>Loading your beats...</div>;
+  if (loading) return <BFLoader type="spinner" text="Loading your beats..." />;
 
   return (
     <div>
@@ -2693,7 +3061,7 @@ function RootAuthScreen({ onLogin }) {
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", padding: 32, textAlign: "center" }}>
       <img src="https://i.ibb.co/9myqbFB7/2-BB02064-13-F6-476-C-89-FF-B1-EDDAE0-C709.png" alt="BeatFinder" style={{ width: "100%", maxWidth: 300, marginBottom: 32 }} />
       <div style={{ color: "#aaa", fontSize: 14, marginBottom: 36, lineHeight: 1.7 }}>
-        Create a free account to save beats,<br />or subscribe as an artist or producer.
+        Create an account to save beats,<br />or subscribe as an artist or producer.
       </div>
       <button onClick={() => setMode("signup")}
         style={{ width: "100%", background: "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: "pointer", marginBottom: 16 }}>
@@ -3325,7 +3693,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
           <SectionBack onBack={() => setActiveSection(null)} label="Back to Dashboard" />
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 16 }}>Analytics</div>
           {!producerStats ? (
-            <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>Loading stats...</div>
+            <BFLoader type="spinner" text="Loading your stats..." />
           ) : (
             <div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
@@ -3427,6 +3795,13 @@ export default function BeatFinder() {
   // Handle reset token from URL
   const resetToken = new URLSearchParams(window.location.search).get("reset_token");
 
+  // Clear local saves if not logged in - guests shouldn't have saved state
+  useEffect(() => {
+    if (!user) {
+      setSavedMap({});
+    }
+  }, [user]);
+
   // Restore session from stored JWT on app load
   useEffect(() => {
     const token = getToken();
@@ -3455,15 +3830,21 @@ export default function BeatFinder() {
       .catch(e => console.warn("[BeatFinder] Could not fetch saved beats:", e));
   }, [user]);
 
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
+
   const toggleSave = useCallback(beat => {
+    if (!user) {
+      setShowAuthPrompt(true);
+      return;
+    }
     setSavedMap(prev => {
       const next = { ...prev };
       if (next[beat.videoId]) {
         delete next[beat.videoId];
-        if (user) BeatsAPI.remove(beat.videoId).catch(console.warn);
+        BeatsAPI.remove(beat.videoId).catch(console.warn);
       } else {
         next[beat.videoId] = beat;
-        if (user) BeatsAPI.save(beat).catch(console.warn);
+        BeatsAPI.save(beat).catch(console.warn);
       }
       persistSaved(next);
       return next;
@@ -3532,6 +3913,37 @@ export default function BeatFinder() {
     <div key="app-root" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
+      {showAuthPrompt && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 20000,
+          background: "rgba(0,0,0,0.85)", display: "flex",
+          alignItems: "center", justifyContent: "center",
+          padding: 24, fontFamily: "'DM Sans',sans-serif",
+        }} onClick={() => setShowAuthPrompt(false)}>
+          <div style={{
+            background: "#111", border: "1.5px solid #C026D3",
+            borderRadius: 20, padding: 28, width: "100%", maxWidth: 340,
+            textAlign: "center",
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 44, marginBottom: 14 }}>🔖</div>
+            <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 8 }}>
+              Save Your Beats
+            </div>
+            <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 24 }}>
+              Create a free account to save beats and sync your library across devices.
+            </div>
+            <button onClick={() => { setShowAuthPrompt(false); setTab("profile"); }}
+              style={{ width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, fontSize: 16, padding: "14px", cursor: "pointer", marginBottom: 12 }}>
+              Create Account
+            </button>
+            <button onClick={() => setShowAuthPrompt(false)}
+              style={{ background: "none", border: "none", color: "#555", fontSize: 14, cursor: "pointer" }}>
+              Maybe later
+            </button>
+          </div>
+        </div>
+      )}
+
       {playing && <Player beat={playing} onClose={() => setPlaying(null)} savedIds={savedIds} onSave={toggleSave} isArtistPro={isArtistPro} onOpenLyrics={handleOpenLyrics} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoMembers={() => { setPlaying(null); setTab("exclusive"); }} />}
       {lyricsOpen && <LyricsNotepad beat={lyricsBeat} onClose={() => { setLyricsOpen(false); setEditingLyric(null); setEditingIndex(null); }} onSaveLyric={handleSaveLyric} initialLyric={editingLyric} lyricIndex={editingIndex} />}
       {publicProfile && (
@@ -3540,7 +3952,7 @@ export default function BeatFinder() {
         </div>
       )}
 
-      <div style={{ overflowY: "auto", height: "calc(100vh - 72px)" }}>
+      <div key={tab} className="bf-tab-in" style={{ overflowY: "auto", height: "calc(100vh - 72px)" }}>
         <div style={{ display: tab === "home"      ? "block" : "none" }}><HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => setTab("exclusive")} /></div>
         <div style={{ display: tab === "artists"   ? "block" : "none" }}><ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>
         <div style={{ display: tab === "trending"  ? "block" : "none" }}><TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>
@@ -3550,24 +3962,73 @@ export default function BeatFinder() {
         {tab === "profile" && <ProfileScreen key={user ? user.id : "guest"} user={user} setUser={setUser} onLogout={() => { AuthAPI.logout(); setUser(null); }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} />}
       </div>
 
-      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "rgba(10,10,10,0.97)", borderTop: "1px solid #1a1a1a", display: "flex", height: "calc(72px + env(safe-area-inset-bottom))", zIndex: 100, backdropFilter: "blur(20px)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+      <div style={{
+          position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
+          width: "100%", maxWidth: 430,
+          background: "rgba(8,8,8,0.92)",
+          borderTop: "1px solid rgba(255,255,255,0.07)",
+          display: "flex", height: "calc(68px + env(safe-area-inset-bottom))",
+          zIndex: 100, backdropFilter: "blur(24px)",
+          paddingBottom: "env(safe-area-inset-bottom)",
+          boxShadow: "0 -8px 32px rgba(0,0,0,0.6)",
+        }}>
         {NAV.map(n => {
           const isPro    = user?.isPro || user?.isArtistPro;
           const locked   = n.id === "exclusive" && (!user || !isPro);
           const isActive = tab === n.id;
+          const activeColor = n.id === "exclusive" ? "#F59E0B" : "#C026D3";
           return (
-            <button key={n.id} onClick={() => goTab(n.id)}
+            <button key={n.id} onClick={() => goTab(n.id)} className="bf-nav-btn"
               style={{
                 flex: 1, background: "none", border: "none", cursor: "pointer",
-                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3,
-                color: isActive ? (n.id === "exclusive" ? "#F59E0B" : "#C026D3") : locked ? "#F59E0B55" : "#555",
-                position: "relative",
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
+                color: isActive ? activeColor : locked ? "#F59E0B44" : "#444",
+                position: "relative", paddingTop: 8,
+                transition: "color 0.2s ease",
               }}>
-              <span style={{ fontSize: 15 }}>{n.icon}</span>
-              <span style={{ fontSize: 9, fontWeight: 700 }}>{n.label}</span>
-              {locked && <div style={{ position: "absolute", top: 8, right: "calc(50% - 12px)", width: 7, height: 7, borderRadius: "50%", background: "#F59E0B" }} />}
+              {/* Active indicator dot */}
+              {isActive && (
+                <div style={{
+                  position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
+                  width: 20, height: 2, borderRadius: 1,
+                  background: activeColor,
+                  boxShadow: "0 0 8px " + activeColor,
+                }} />
+              )}
+              {/* Active glow bg */}
+              {isActive && (
+                <div style={{
+                  position: "absolute", inset: 0,
+                  background: "radial-gradient(ellipse at 50% 80%, " + activeColor + "18 0%, transparent 70%)",
+                  borderRadius: 12,
+                  pointerEvents: "none",
+                }} />
+              )}
+              <span style={{
+                fontSize: 17,
+                filter: isActive ? "drop-shadow(0 0 6px " + activeColor + ")" : "none",
+                transition: "filter 0.2s ease",
+                lineHeight: 1,
+              }}>{n.icon}</span>
+              <span style={{
+                fontSize: 9, fontWeight: isActive ? 800 : 600,
+                letterSpacing: isActive ? 0.3 : 0,
+                transition: "all 0.2s ease",
+              }}>{n.label}</span>
+              {locked && <div style={{
+                position: "absolute", top: 6, right: "calc(50% - 14px)",
+                background: "#F59E0B", borderRadius: "50%",
+                width: 7, height: 7,
+              }} />}
               {n.id === "saved" && savedIds.size > 0 && (
-                <div style={{ position: "absolute", top: 6, right: "calc(50% - 14px)", background: "#C026D3", borderRadius: 10, fontSize: 9, fontWeight: 800, color: "white", padding: "1px 5px", minWidth: 16, textAlign: "center" }}>
+                <div style={{
+                  position: "absolute", top: 5, right: "calc(50% - 16px)",
+                  background: "#C026D3", borderRadius: "50%",
+                  fontSize: 8, fontWeight: 800, color: "white",
+                  padding: "1px 4px", minWidth: 14, textAlign: "center",
+                  lineHeight: "14px", height: 14,
+                  boxShadow: "0 0 6px rgba(192,38,211,0.6)",
+                }}>
                   {savedIds.size}
                 </div>
               )}
