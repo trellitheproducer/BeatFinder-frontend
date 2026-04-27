@@ -4026,7 +4026,42 @@ const NAV = [
 // =============================================================================
 // ROOT APP
 // =============================================================================
+// =============================================================================
+// SPLASH SCREEN
+// =============================================================================
+function SplashScreen({ onDone }) {
+  const [fading, setFading] = useState(false);
+
+  useEffect(function() {
+    var fadeTimer = setTimeout(function() { setFading(true); }, 2000);
+    var doneTimer = setTimeout(function() { onDone(); }, 2600);
+    return function() { clearTimeout(fadeTimer); clearTimeout(doneTimer); };
+  }, []);
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 99999,
+      background: "#0a0a0a",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      transition: "opacity 0.6s ease",
+      opacity: fading ? 0 : 1,
+      pointerEvents: fading ? "none" : "all",
+    }}>
+      <img
+        src="https://i.ibb.co/RM7Kkhb/CBDCCD14-D10-A-4-E04-A3-BA-FBC84-EF774-FB.png"
+        alt="BeatFinder"
+        style={{
+          width: "100%", height: "100%",
+          objectFit: "cover", objectPosition: "center",
+          display: "block",
+        }}
+      />
+    </div>
+  );
+}
+
 export default function BeatFinder() {
+  const [splashDone, setSplashDone] = useState(false);
   const [tab,     setTab]     = useState("home");
   const [searchQuery, setSearchQuery] = useState("");
   const [artist,  setArtist]  = useState(null); // kept for compatibility
@@ -4155,6 +4190,8 @@ export default function BeatFinder() {
   return (
     <div key="app-root" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
+
+      {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
 
       {showAuthPrompt && (
         <div style={{
