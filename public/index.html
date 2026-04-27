@@ -24,11 +24,34 @@
 
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
+
+      /* Hide scrollbar on every element, every browser */
+      *,
+      *::before,
+      *::after {
+        scrollbar-width: none;        /* Firefox */
+        -ms-overflow-style: none;     /* IE / Edge */
+      }
+      *::-webkit-scrollbar {
+        display: none;                /* Chrome / Safari / WebKit */
+        width: 0;
+        height: 0;
+      }
+
       html, body, #root {
         width: 100%;
         min-height: 100%;
         background: #0a0a0a;
         overflow-x: hidden;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+      html::-webkit-scrollbar,
+      body::-webkit-scrollbar,
+      #root::-webkit-scrollbar {
+        display: none;
+        width: 0;
+        height: 0;
       }
     </style>
   </head>
