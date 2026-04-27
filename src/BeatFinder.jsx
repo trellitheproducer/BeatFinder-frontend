@@ -646,6 +646,122 @@ function barQuality(bar) {
 }
 
 
+function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex }) {
+  const [text,  setText]  = useState(initialLyric ? initialLyric.text  : "");
+  const [title, setTitle] = useState(initialLyric ? initialLyric.title : "");
+  const [saved, setSaved] = useState(false);
+  const scrollRef = useCallback(node => {
+    if (node) node.scrollTop = 0;
+  }, []);
+  const isEditing = initialLyric !== undefined && initialLyric !== null;
+
+  const handleSave = () => {
+    if (!text.trim()) return;
+    const lyric = {
+      id:        isEditing ? initialLyric.id : Date.now(),
+      title:     title.trim() || (beat ? beat.title : "Untitled"),
+      text:      text.trim(),
+      beatTitle: beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
+      beatId:    beat ? beat.videoId : (initialLyric ? initialLyric.beatId : ""),
+      beat:      beat || (initialLyric ? initialLyric.beat : null),
+      savedAt:   isEditing ? initialLyric.savedAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    onSaveLyric(lyric, isEditing ? lyricIndex : null);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  return (
+    <div ref={scrollRef} style={{
+      position: "fixed", inset: 0, zIndex: 10001,
+      background: "#0a0a0a", display: "flex",
+      flexDirection: "column", fontFamily: "'DM Sans',sans-serif",
+      paddingTop: "env(safe-area-inset-top)",
+    }}>
+      <div style={{ background: "#0a0a0a", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderBottom: "1px solid #1a1a1a" }}>
+          <button onClick={onClose} style={{
+            background: "#1a1a1a", border: "1px solid #333", borderRadius: "50%",
+            color: "white", width: 36, height: 36, fontSize: 20, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            ←
+          </button>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13 }}>✍️ Lyrics Notepad</div>
+          </div>
+          <button onClick={handleSave} style={{
+            background: saved ? "#22C55E" : "#C026D3",
+            border: "none", borderRadius: 20, color: "white",
+            fontWeight: 800, fontSize: 13, padding: "8px 16px", cursor: "pointer",
+          }}>
+            {saved ? "Saved!" : "Save"}
+          </button>
+        </div>
+
+        {beat && (
+          <div style={{ borderBottom: "1px solid #1a1a1a", background: "#000" }}>
+            <iframe
+              key={beat.videoId}
+              src={"https://www.youtube.com/embed/" + beat.videoId + "?autoplay=0&rel=0"}
+              width="100%"
+              height="160"
+              style={{ display: "block", border: "none" }}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              title={beat.title}
+            />
+            <div style={{ padding: "8px 16px", background: "#0d0d0d" }}>
+              <div style={{ color: "white", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {beat.title}
+              </div>
+              <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>{beat.channel}</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ padding: "12px 16px 8px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
+        <input
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          placeholder="Song title (optional)"
+          style={{
+            width: "100%", background: "#1a1a1a", border: "1px solid #333",
+            borderRadius: 10, padding: "10px 14px", color: "white",
+            fontSize: 14, outline: "none", boxSizing: "border-box",
+          }}
+        />
+      </div>
+
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder="Start writing your lyrics here... Writer's block? Tap the AI Lyric Assistant button below - it will analyse your rhyme scheme and suggest the perfect next line to keep you flowing."
+        style={{
+          flex: 1, background: "#0d0d0d", border: "none", outline: "none",
+          color: "white", fontSize: 15, lineHeight: 1.8, padding: "16px",
+          resize: "none", fontFamily: "'DM Sans',sans-serif",
+          WebkitUserSelect: "text", userSelect: "text",
+        }}
+        autoFocus
+      />
+
+      <div style={{
+        padding: "12px 16px", background: "#0a0a0a",
+        borderTop: "1px solid #1a1a1a",
+        paddingBottom: "calc(12px + env(safe-area-inset-bottom))",
+        display: "flex", flexDirection: "column", gap: 8,
+      }}>
+        <div style={{ color: "#444", fontSize: 11, textAlign: "center" }}>
+          {text.length} characters • {text.split(" ").filter(function(w){return w.length > 0;}).length} words
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // =============================================================================
 // FULL-SCREEN PLAYER
 // =============================================================================
@@ -730,6 +846,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
             return (
               <>
                 <button
+                  onClick={() => onOpenLyrics(beat)}
                   style={{
                     marginTop: 10, width: "100%", borderRadius: 14, padding: "15px",
                     fontWeight: 800, fontSize: 16, cursor: "pointer",
@@ -738,6 +855,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
                   }}
                 >
+                  &#9997;&#65039; Write Lyrics to This Beat
                 </button>
                 {existingLyric && (
                   <button
@@ -3570,6 +3688,35 @@ export default function BeatFinder() {
     });
   }, [user]);
 
+
+  const handleSaveLyric = useCallback((lyric, editIndex) => {
+    setSavedLyrics(prev => {
+      let next;
+      if (editIndex !== null && editIndex !== undefined) {
+        next = prev.map((l, i) => i === editIndex ? lyric : l);
+      } else {
+        next = [lyric, ...prev];
+      }
+      try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const handleOpenLyrics = useCallback(beat => {
+    setPlaying(null);
+    setLyricsBeat(beat);
+    setEditingLyric(null);
+    setEditingIndex(null);
+    setLyricsOpen(true);
+  }, []);
+
+  const handleEditLyric = useCallback((lyric, index) => {
+    setLyricsBeat(lyric.beat || null);
+    setEditingLyric(lyric);
+    setEditingIndex(index);
+    setLyricsOpen(true);
+  }, []);
+
   const handlePlay = useCallback(beat => setPlaying(beat), []);
   const goTab = id => {
     setPlaying(null);
@@ -3588,37 +3735,6 @@ export default function BeatFinder() {
 
   const isArtistPro = user?.isPro || user?.isArtistPro || user?.plan === "artist" || user?.plan === "producer";
 
-  const handleOpenLyrics = useCallback(beat => {
-    setPlaying(null);   // stop the YouTube player
-    setLyricsBeat(beat);
-    setEditingLyric(null);
-    setEditingIndex(null);
-    setLyricsOpen(true);
-  }, []);
-
-  const handleEditLyric = useCallback((lyric, index) => {
-    setEditingLyric(lyric);
-    setEditingIndex(index);
-    setLyricsBeat(lyric.beat || null);
-    // Play beat first, then open notepad on top
-    if (lyric.beat) {
-      setPlaying(lyric.beat);
-    }
-    setLyricsOpen(true);
-  }, []);
-
-  const handleSaveLyric = useCallback((lyric, editIndex) => {
-    setSavedLyrics(prev => {
-      let next;
-      if (editIndex !== null && editIndex !== undefined) {
-        next = prev.map((l, i) => i === editIndex ? lyric : l);
-      } else {
-        next = [lyric, ...prev];
-      }
-      try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch {}
-      return next;
-    });
-  }, []);
 
   if (resetToken) {
     return (
@@ -3679,6 +3795,7 @@ export default function BeatFinder() {
         {tab === "profile" && <ProfileScreen key={user ? user.id : "guest"} user={user} setUser={setUser} onLogout={() => { AuthAPI.logout(); setUser(null); }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} />}
       </div>
 
+      {lyricsOpen && <LyricsNotepad beat={lyricsBeat} onClose={() => { setLyricsOpen(false); setEditingLyric(null); setEditingIndex(null); }} onSaveLyric={handleSaveLyric} initialLyric={editingLyric} lyricIndex={editingIndex} />}
       {playing && (
         <Player
           beat={playing}
@@ -3687,6 +3804,9 @@ export default function BeatFinder() {
           onSave={toggleSave}
           isArtistPro={user?.isPro || user?.isArtistPro}
           onGoMembers={() => goTab("exclusive")}
+          onOpenLyrics={handleOpenLyrics}
+          savedLyrics={savedLyrics}
+          onEditLyric={handleEditLyric}
         />
       )}
 
