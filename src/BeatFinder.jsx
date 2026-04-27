@@ -1904,7 +1904,7 @@ function ArtistsScreen({ onPlay, savedIds, onSave }) {
           style={{
             width: 72, height: 72, borderRadius: 16,
             objectFit: "cover", flexShrink: 0,
-            boxShadow: "0 4px 20px rgba(192,38,211,0.25)",
+
           }}
         />
       </div>
