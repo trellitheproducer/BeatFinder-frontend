@@ -736,13 +736,23 @@ function RhymeFinder({ onClose, onInsert }) {
         fetch("https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(w) + "&max=100").then(function(r){ return r.json(); }),
         fetch("https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(w) + "&max=50").then(function(r){ return r.json(); }),
       ]).then(function(data) {
-        var perfect = (data[0] || []).filter(function(r){ return r.word.indexOf(" ") === -1; });
-        var near    = (data[1] || []).filter(function(r){ return r.word.indexOf(" ") === -1; });
-        var ending  = w.slice(-2);
-        var tightNear = near.filter(function(r) {
-          return r.word.slice(-2) === ending || r.score > 800;
+        var allRhymes = (data[0] || []).filter(function(r){ return r.word.indexOf(" ") === -1; });
+        var allNear   = (data[1] || []).filter(function(r){ return r.word.indexOf(" ") === -1; });
+
+        // Perfect rhymes: only words with score above 300 (Datamuse scores true rhymes highest)
+        var perfect = allRhymes.filter(function(r){ return (r.score || 0) >= 300; });
+        // If too few, lower threshold
+        if (perfect.length < 5) perfect = allRhymes.filter(function(r){ return (r.score || 0) >= 100; });
+        if (perfect.length === 0) perfect = allRhymes.slice(0, 20);
+
+        // Near rhymes: only from rel_nry, not already in perfect, tightly filtered by ending
+        var perfectWords = new Set(perfect.map(function(r){ return r.word; }));
+        var ending3 = w.slice(-3);
+        var near = allNear.filter(function(r){
+          return !perfectWords.has(r.word) && (r.score || 0) > 800;
         });
-        setResults({ perfect, near: tightNear, multiSyllable: null, isMultiWord: false });
+
+        setResults({ perfect, near, multiSyllable: null, isMultiWord: false });
         setLoading(false);
       }).catch(function() {
         setResults({ perfect: [], near: [], multiSyllable: null, isMultiWord: false });
