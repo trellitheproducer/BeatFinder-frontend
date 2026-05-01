@@ -736,8 +736,8 @@ function RhymeFinder({ onClose, onInsert }) {
         fetch("https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(w) + "&max=100").then(function(r){ return r.json(); }),
         fetch("https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(w) + "&max=50").then(function(r){ return r.json(); }),
       ]).then(function(data) {
-        var perfect = data[0] || [];
-        var near    = data[1] || [];
+        var perfect = (data[0] || []).filter(function(r){ return r.word.indexOf(" ") === -1; });
+        var near    = (data[1] || []).filter(function(r){ return r.word.indexOf(" ") === -1; });
         var ending  = w.slice(-2);
         var tightNear = near.filter(function(r) {
           return r.word.slice(-2) === ending || r.score > 800;
