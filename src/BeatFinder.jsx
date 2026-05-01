@@ -663,11 +663,147 @@ function barQuality(bar) {
 }
 
 
+// =============================================================================
+// RHYME FINDER
+// =============================================================================
+function RhymeFinder({ onClose, onInsert }) {
+  const [word,     setWord]     = useState("");
+  const [results,  setResults]  = useState(null);
+  const [loading,  setLoading]  = useState(false);
+  const [searched, setSearched] = useState("");
+
+  const findRhymes = function() {
+    var w = word.trim().toLowerCase();
+    if (!w) return;
+    setLoading(true);
+    setResults(null);
+    setSearched(w);
+
+    Promise.all([
+      fetch("https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(w) + "&max=100").then(function(r){ return r.json(); }),
+      fetch("https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(w) + "&max=100").then(function(r){ return r.json(); }),
+      fetch("https://api.datamuse.com/words?sl=" + encodeURIComponent(w) + "&max=50").then(function(r){ return r.json(); }),
+    ]).then(function(data) {
+      var perfect   = data[0] || [];
+      var near      = data[1] || [];
+      var soundsLike = data[2] || [];
+
+      // Score multi-syllable rhymes (words with more syllables score higher)
+      var countSyllables = function(w) {
+        return (w.match(/[aeiou]/gi) || []).length;
+      };
+
+      var multiSyllable = perfect.filter(function(r) {
+        return countSyllables(r.word) >= 2;
+      }).sort(function(a, b) {
+        return countSyllables(b.word) - countSyllables(a.word);
+      });
+
+      setResults({ perfect, near, soundsLike, multiSyllable });
+      setLoading(false);
+    }).catch(function() {
+      setResults({ perfect: [], near: [], soundsLike: [], multiSyllable: [] });
+      setLoading(false);
+    });
+  };
+
+  var RhymeChip = function(props) {
+    return (
+      <button
+        onClick={function() { onInsert(props.word); }}
+        style={{
+          background: "rgba(255,255,255,0.05)", border: "1px solid #2a2a2a",
+          borderRadius: 20, padding: "5px 12px", color: "white",
+          fontSize: 13, fontWeight: 500, cursor: "pointer", flexShrink: 0,
+          fontFamily: "'DM Sans',sans-serif",
+        }}>
+        {props.word}
+      </button>
+    );
+  };
+
+  var Section = function(props) {
+    if (!props.words || props.words.length === 0) return null;
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ color: props.color || "#888", fontSize: 10, fontWeight: 800, letterSpacing: 1.5, marginBottom: 8 }}>
+          {props.title} ({props.words.length})
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {props.words.map(function(r) {
+            return <RhymeChip key={r.word} word={r.word} />;
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{
+      background: "#0a0f1a", borderTop: "1px solid rgba(6,182,212,0.3)",
+      paddingBottom: "calc(0px + env(safe-area-inset-bottom))",
+      maxHeight: 320, display: "flex", flexDirection: "column",
+    }}>
+      <div style={{ padding: "12px 16px 10px", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ color: "#06B6D4", fontWeight: 800, fontSize: 13 }}>🎯 Rhyme Finder</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer" }}>✕</button>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={word}
+            onChange={function(e) { setWord(e.target.value); }}
+            onKeyDown={function(e) { if (e.key === "Enter") findRhymes(); }}
+            placeholder="Type a word e.g. love, night, fire..."
+            style={{
+              flex: 1, background: "#1a1a2a", border: "1px solid #2a2a3a",
+              borderRadius: 10, padding: "10px 12px", color: "white",
+              fontSize: 13, outline: "none",
+            }}
+          />
+          <button onClick={findRhymes} disabled={loading || !word.trim()} style={{
+            background: loading || !word.trim() ? "#1a1a2a" : "linear-gradient(135deg,#06B6D4,#0891B2)",
+            border: "none", borderRadius: 10, color: "white",
+            fontWeight: 800, fontSize: 13, padding: "10px 16px",
+            cursor: loading || !word.trim() ? "not-allowed" : "pointer",
+            opacity: loading || !word.trim() ? 0.5 : 1, flexShrink: 0,
+          }}>
+            {loading ? "..." : "Find"}
+          </button>
+        </div>
+      </div>
+
+      {results && (
+        <div style={{ overflowY: "auto", padding: "0 16px 16px", flex: 1 }}>
+          {results.perfect.length === 0 && results.near.length === 0 ? (
+            <div style={{ color: "#444", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
+              No rhymes found for "{searched}"
+            </div>
+          ) : (
+            <div>
+              <Section title="MULTI-SYLLABLE RHYMES" words={results.multiSyllable} color="#C026D3" />
+              <Section title="PERFECT RHYMES" words={results.perfect} color="#06B6D4" />
+              <Section title="NEAR RHYMES" words={results.near} color="#F59E0B" />
+              <Section title="SOUNDS LIKE" words={results.soundsLike} color="#22C55E" />
+            </div>
+          )}
+        </div>
+      )}
+
+      {!results && !loading && (
+        <div style={{ color: "#333", fontSize: 12, textAlign: "center", padding: "12px 0" }}>
+          Tap a rhyme to insert it into your lyrics
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex }) {
   const [text,       setText]       = useState(initialLyric ? initialLyric.text  : "");
   const [title,      setTitle]      = useState(initialLyric ? initialLyric.title : "");
   const [saved,      setSaved]      = useState(false);
-  const [aiOpen,     setAiOpen]     = useState(false);
+  const [aiOpen,     setAiOpen]     = useState(null);
   const [aiPrompt,   setAiPrompt]   = useState("");
   const [aiReply,    setAiReply]    = useState("");
   const [aiLoading,  setAiLoading]  = useState(false);
@@ -797,30 +933,16 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
       />
 
       {/* AI Assistant Panel */}
-      {aiOpen && (
+      {aiOpen === "ai" && (
         <div style={{
           background: "#0f0f1a", borderTop: "1px solid rgba(192,38,211,0.3)",
           padding: "14px 16px",
           paddingBottom: "calc(14px + env(safe-area-inset-bottom))",
         }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13 }}>✨ AI Lyric Assistant</div>
-            <button onClick={() => { setAiOpen(false); setAiReply(""); setAiPrompt(""); }}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13 }}>✨ AI — Suggest Next Line</div>
+            <button onClick={() => { setAiOpen(null); setAiReply(""); setAiPrompt(""); }}
               style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer" }}>✕</button>
-          </div>
-
-          {/* Quick prompt chips */}
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-            {["Write me a hook", "Suggest the next line", "Write a verse", "Give me a bridge", "Make it rhyme"].map(function(chip) {
-              return (
-                <button key={chip} onClick={() => setAiPrompt(chip)} style={{
-                  background: aiPrompt === chip ? "rgba(192,38,211,0.2)" : "rgba(255,255,255,0.05)",
-                  border: "1px solid " + (aiPrompt === chip ? "#C026D3" : "#333"),
-                  borderRadius: 16, padding: "5px 11px", color: aiPrompt === chip ? "#C026D3" : "#888",
-                  fontSize: 11, fontWeight: 600, cursor: "pointer",
-                }}>{chip}</button>
-              );
-            })}
           </div>
 
           <div style={{ display: "flex", gap: 8, marginBottom: aiReply ? 10 : 0 }}>
@@ -828,20 +950,26 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
               value={aiPrompt}
               onChange={e => setAiPrompt(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") handleAiSuggest(); }}
-              placeholder="Ask AI anything about your lyrics..."
+              placeholder="e.g. keep the street energy, make it rhyme..."
               style={{
                 flex: 1, background: "#1a1a1a", border: "1px solid #333",
                 borderRadius: 10, padding: "10px 12px", color: "white",
                 fontSize: 13, outline: "none",
               }}
             />
-            <button onClick={handleAiSuggest} disabled={aiLoading || !aiPrompt.trim()} style={{
-              background: "linear-gradient(135deg,#C026D3,#7C3AED)",
-              border: "none", borderRadius: 10, color: "white",
-              fontWeight: 800, fontSize: 13, padding: "10px 16px",
-              cursor: aiLoading || !aiPrompt.trim() ? "not-allowed" : "pointer",
-              opacity: aiLoading || !aiPrompt.trim() ? 0.6 : 1, flexShrink: 0,
-            }}>
+            <button
+              onClick={function() {
+                if (!aiPrompt.trim()) setAiPrompt("Suggest the next line");
+                handleAiSuggest();
+              }}
+              disabled={aiLoading}
+              style={{
+                background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+                border: "none", borderRadius: 10, color: "white",
+                fontWeight: 800, fontSize: 13, padding: "10px 16px",
+                cursor: aiLoading ? "not-allowed" : "pointer",
+                opacity: aiLoading ? 0.6 : 1, flexShrink: 0,
+              }}>
               {aiLoading ? "..." : "Go"}
             </button>
           </div>
@@ -849,7 +977,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
           {aiReply ? (
             <div style={{
               background: "rgba(192,38,211,0.08)", border: "1px solid rgba(192,38,211,0.2)",
-              borderRadius: 12, padding: "12px 14px",
+              borderRadius: 12, padding: "12px 14px", marginTop: 10,
             }}>
               <div style={{ color: "white", fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap", marginBottom: 10 }}>
                 {aiReply}
@@ -866,25 +994,41 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
         </div>
       )}
 
+      {/* Rhyme Finder Panel */}
+      {aiOpen === "rhymes" && (
+        <RhymeFinder onClose={() => setAiOpen(null)} onInsert={word => {
+          setText(prev => prev ? prev + " " + word : word);
+        }} />
+      )}
+
       <div style={{
         padding: "10px 16px",
         background: "#0a0a0a",
         borderTop: aiOpen ? "none" : "1px solid #1a1a1a",
         paddingBottom: aiOpen ? 0 : "calc(10px + env(safe-area-inset-bottom))",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
       }}>
-        <div style={{ color: "#444", fontSize: 11 }}>
+        <div style={{ color: "#444", fontSize: 11, flexShrink: 0 }}>
           {text.length} chars • {text.split(" ").filter(function(w){return w.length > 0;}).length} words
         </div>
-        <button onClick={() => setAiOpen(o => !o)} style={{
-          background: aiOpen ? "rgba(192,38,211,0.2)" : "linear-gradient(135deg,#C026D3,#7C3AED)",
-          border: aiOpen ? "1px solid #C026D3" : "none",
-          borderRadius: 20, color: "white", fontWeight: 800,
-          fontSize: 12, padding: "8px 16px", cursor: "pointer",
-          display: "flex", alignItems: "center", gap: 6,
-        }}>
-          ✨ AI Assist
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => setAiOpen(aiOpen === "rhymes" ? null : "rhymes")} style={{
+            background: aiOpen === "rhymes" ? "rgba(6,182,212,0.2)" : "rgba(6,182,212,0.15)",
+            border: "1px solid " + (aiOpen === "rhymes" ? "#06B6D4" : "rgba(6,182,212,0.4)"),
+            borderRadius: 20, color: "#06B6D4", fontWeight: 800,
+            fontSize: 12, padding: "8px 14px", cursor: "pointer",
+          }}>
+            🎯 Rhyme Finder
+          </button>
+          <button onClick={() => setAiOpen(aiOpen === "ai" ? null : "ai")} style={{
+            background: aiOpen === "ai" ? "rgba(192,38,211,0.2)" : "linear-gradient(135deg,#C026D3,#7C3AED)",
+            border: aiOpen === "ai" ? "1px solid #C026D3" : "none",
+            borderRadius: 20, color: "white", fontWeight: 800,
+            fontSize: 12, padding: "8px 14px", cursor: "pointer",
+          }}>
+            ✨ AI Lyric Helper
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1643,9 +1787,17 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
       cta: "Explore Beats",
     },
     {
+      title: "Rhyme Finder & AI Lyric Helper",
+      sub: "Find perfect rhymes & get AI suggestions while you write",
+      emoji: "✍️",
+      grad: "linear-gradient(135deg,#001a1a 0%,#003333 40%,#065f5f 75%,#06B6D4 100%)",
+      cta: "Try It Now",
+      lyricsSlide: true,
+    },
+    {
       title: "Discover Rising Producers",
       sub: "Tap in with producers worldwide",
-      emoji: "✍️",
+      emoji: "🎯",
       grad: "linear-gradient(135deg,#001230 0%,#002a70 60%,#3B82F6 100%)",
       cta: "Upgrade to Pro",
     },
