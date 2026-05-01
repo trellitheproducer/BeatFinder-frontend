@@ -664,9 +664,13 @@ function barQuality(bar) {
 
 
 function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex }) {
-  const [text,  setText]  = useState(initialLyric ? initialLyric.text  : "");
-  const [title, setTitle] = useState(initialLyric ? initialLyric.title : "");
-  const [saved, setSaved] = useState(false);
+  const [text,       setText]       = useState(initialLyric ? initialLyric.text  : "");
+  const [title,      setTitle]      = useState(initialLyric ? initialLyric.title : "");
+  const [saved,      setSaved]      = useState(false);
+  const [aiOpen,     setAiOpen]     = useState(false);
+  const [aiPrompt,   setAiPrompt]   = useState("");
+  const [aiReply,    setAiReply]    = useState("");
+  const [aiLoading,  setAiLoading]  = useState(false);
   const scrollRef = useCallback(node => {
     if (node) node.scrollTop = 0;
   }, []);
@@ -687,6 +691,34 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
     onSaveLyric(lyric, isEditing ? lyricIndex : null);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleAiSuggest = () => {
+    if (!aiPrompt.trim()) return;
+    setAiLoading(true);
+    setAiReply("");
+    apiFetch("/api/ai/suggest", {
+      method: "POST",
+      body: JSON.stringify({
+        prompt:    aiPrompt.trim(),
+        lyrics:    text.trim(),
+        beatTitle: beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
+      }),
+    }).then(function(d) {
+      setAiReply(d.suggestion || "");
+      setAiLoading(false);
+    }).catch(function() {
+      setAiReply("Something went wrong. Please try again.");
+      setAiLoading(false);
+    });
+  };
+
+  const handleInsert = () => {
+    if (!aiReply) return;
+    setText(prev => prev ? prev + "\n\n" + aiReply : aiReply);
+    setAiReply("");
+    setAiPrompt("");
+    setAiOpen(false);
   };
 
   return (
@@ -755,7 +787,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
       <textarea
         value={text}
         onChange={e => setText(e.target.value)}
-        placeholder="Start writing your lyrics here... Writer's block? Tap the AI Lyric Assistant button below - it will analyse your rhyme scheme and suggest the perfect next line to keep you flowing."
+        placeholder="Start writing your lyrics here... Writer's block? Tap the AI Lyric Assistant button below!"
         style={{
           flex: 1, background: "#0d0d0d", border: "none", outline: "none",
           color: "white", fontSize: 15, lineHeight: 1.8, padding: "16px",
@@ -764,15 +796,95 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
         }}
       />
 
-      <div style={{
-        padding: "12px 16px", background: "#0a0a0a",
-        borderTop: "1px solid #1a1a1a",
-        paddingBottom: "calc(12px + env(safe-area-inset-bottom))",
-        display: "flex", flexDirection: "column", gap: 8,
-      }}>
-        <div style={{ color: "#444", fontSize: 11, textAlign: "center" }}>
-          {text.length} characters • {text.split(" ").filter(function(w){return w.length > 0;}).length} words
+      {/* AI Assistant Panel */}
+      {aiOpen && (
+        <div style={{
+          background: "#0f0f1a", borderTop: "1px solid rgba(192,38,211,0.3)",
+          padding: "14px 16px",
+          paddingBottom: "calc(14px + env(safe-area-inset-bottom))",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13 }}>✨ AI Lyric Assistant</div>
+            <button onClick={() => { setAiOpen(false); setAiReply(""); setAiPrompt(""); }}
+              style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer" }}>✕</button>
+          </div>
+
+          {/* Quick prompt chips */}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+            {["Write me a hook", "Suggest the next line", "Write a verse", "Give me a bridge", "Make it rhyme"].map(function(chip) {
+              return (
+                <button key={chip} onClick={() => setAiPrompt(chip)} style={{
+                  background: aiPrompt === chip ? "rgba(192,38,211,0.2)" : "rgba(255,255,255,0.05)",
+                  border: "1px solid " + (aiPrompt === chip ? "#C026D3" : "#333"),
+                  borderRadius: 16, padding: "5px 11px", color: aiPrompt === chip ? "#C026D3" : "#888",
+                  fontSize: 11, fontWeight: 600, cursor: "pointer",
+                }}>{chip}</button>
+              );
+            })}
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginBottom: aiReply ? 10 : 0 }}>
+            <input
+              value={aiPrompt}
+              onChange={e => setAiPrompt(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") handleAiSuggest(); }}
+              placeholder="Ask AI anything about your lyrics..."
+              style={{
+                flex: 1, background: "#1a1a1a", border: "1px solid #333",
+                borderRadius: 10, padding: "10px 12px", color: "white",
+                fontSize: 13, outline: "none",
+              }}
+            />
+            <button onClick={handleAiSuggest} disabled={aiLoading || !aiPrompt.trim()} style={{
+              background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+              border: "none", borderRadius: 10, color: "white",
+              fontWeight: 800, fontSize: 13, padding: "10px 16px",
+              cursor: aiLoading || !aiPrompt.trim() ? "not-allowed" : "pointer",
+              opacity: aiLoading || !aiPrompt.trim() ? 0.6 : 1, flexShrink: 0,
+            }}>
+              {aiLoading ? "..." : "Go"}
+            </button>
+          </div>
+
+          {aiReply ? (
+            <div style={{
+              background: "rgba(192,38,211,0.08)", border: "1px solid rgba(192,38,211,0.2)",
+              borderRadius: 12, padding: "12px 14px",
+            }}>
+              <div style={{ color: "white", fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap", marginBottom: 10 }}>
+                {aiReply}
+              </div>
+              <button onClick={handleInsert} style={{
+                width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+                border: "none", borderRadius: 10, color: "white",
+                fontWeight: 800, fontSize: 13, padding: "10px", cursor: "pointer",
+              }}>
+                ✍️ Insert into lyrics
+              </button>
+            </div>
+          ) : null}
         </div>
+      )}
+
+      <div style={{
+        padding: "10px 16px",
+        background: "#0a0a0a",
+        borderTop: aiOpen ? "none" : "1px solid #1a1a1a",
+        paddingBottom: aiOpen ? 0 : "calc(10px + env(safe-area-inset-bottom))",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+      }}>
+        <div style={{ color: "#444", fontSize: 11 }}>
+          {text.length} chars • {text.split(" ").filter(function(w){return w.length > 0;}).length} words
+        </div>
+        <button onClick={() => setAiOpen(o => !o)} style={{
+          background: aiOpen ? "rgba(192,38,211,0.2)" : "linear-gradient(135deg,#C026D3,#7C3AED)",
+          border: aiOpen ? "1px solid #C026D3" : "none",
+          borderRadius: 20, color: "white", fontWeight: 800,
+          fontSize: 12, padding: "8px 16px", cursor: "pointer",
+          display: "flex", alignItems: "center", gap: 6,
+        }}>
+          ✨ AI Assist
+        </button>
       </div>
     </div>
   );
