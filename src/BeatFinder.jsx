@@ -679,32 +679,76 @@ function RhymeFinder({ onClose, onInsert }) {
     setResults(null);
     setSearched(w);
 
-    Promise.all([
-      fetch("https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(w) + "&max=100").then(function(r){ return r.json(); }),
-      fetch("https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(w) + "&max=100").then(function(r){ return r.json(); }),
-      fetch("https://api.datamuse.com/words?sl=" + encodeURIComponent(w) + "&max=50").then(function(r){ return r.json(); }),
-    ]).then(function(data) {
-      var perfect   = data[0] || [];
-      var near      = data[1] || [];
-      var soundsLike = data[2] || [];
+    var words = w.trim().split(/\s+/);
+    var isMultiWord = words.length > 1;
 
-      // Score multi-syllable rhymes (words with more syllables score higher)
-      var countSyllables = function(w) {
-        return (w.match(/[aeiou]/gi) || []).length;
-      };
-
-      var multiSyllable = perfect.filter(function(r) {
-        return countSyllables(r.word) >= 2;
-      }).sort(function(a, b) {
-        return countSyllables(b.word) - countSyllables(a.word);
+    if (isMultiWord) {
+      // Fetch rhymes for each word independently then combine
+      var fetches = words.map(function(word) {
+        return fetch("https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(word) + "&max=80")
+          .then(function(r){ return r.json(); });
       });
 
-      setResults({ perfect, near, soundsLike, multiSyllable });
-      setLoading(false);
-    }).catch(function() {
-      setResults({ perfect: [], near: [], soundsLike: [], multiSyllable: [] });
-      setLoading(false);
-    });
+      Promise.all(fetches).then(function(results) {
+        // results[0] = rhymes for first word, results[1] = rhymes for second word etc
+        // Build combinations: pick one from each and combine
+        var rhymeSets = results.map(function(set) {
+          return (set || []).map(function(r){ return r.word; });
+        });
+
+        // Generate multi-syllable combos — pair rhymes from each word position
+        var combos = [];
+        var max = 30;
+        var setA = rhymeSets[0] || [];
+        var setB = rhymeSets[rhymeSets.length - 1] || [];
+        var len = Math.min(setA.length, setB.length, max);
+        for (var i = 0; i < len; i++) {
+          var combo = words.map(function(_, idx) {
+            var set = rhymeSets[idx] || [];
+            return set[i % set.length] || words[idx];
+          }).join(" ");
+          combos.push({ word: combo });
+        }
+
+        // Also fetch regular rhymes for the last word
+        fetch("https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(words[words.length - 1]) + "&max=100")
+          .then(function(r){ return r.json(); })
+          .then(function(perfect) {
+            fetch("https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(words[words.length - 1]) + "&max=50")
+              .then(function(r){ return r.json(); })
+              .then(function(near) {
+                var ending = words[words.length - 1].slice(-2);
+                var tightNear = (near || []).filter(function(r) {
+                  return r.word.slice(-2) === ending || r.score > 800;
+                });
+                setResults({ perfect: perfect || [], near: tightNear, multiSyllable: combos, isMultiWord: true });
+                setLoading(false);
+              });
+          });
+      }).catch(function() {
+        setResults({ perfect: [], near: [], multiSyllable: [], isMultiWord: true });
+        setLoading(false);
+      });
+
+    } else {
+      // Single word — perfect + near rhymes only
+      Promise.all([
+        fetch("https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(w) + "&max=100").then(function(r){ return r.json(); }),
+        fetch("https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(w) + "&max=50").then(function(r){ return r.json(); }),
+      ]).then(function(data) {
+        var perfect = data[0] || [];
+        var near    = data[1] || [];
+        var ending  = w.slice(-2);
+        var tightNear = near.filter(function(r) {
+          return r.word.slice(-2) === ending || r.score > 800;
+        });
+        setResults({ perfect, near: tightNear, multiSyllable: null, isMultiWord: false });
+        setLoading(false);
+      }).catch(function() {
+        setResults({ perfect: [], near: [], multiSyllable: null, isMultiWord: false });
+        setLoading(false);
+      });
+    }
   };
 
   var RhymeChip = function(props) {
@@ -781,10 +825,11 @@ function RhymeFinder({ onClose, onInsert }) {
             </div>
           ) : (
             <div>
-              <Section title="MULTI-SYLLABLE RHYMES" words={results.multiSyllable} color="#C026D3" />
+              {results.isMultiWord && results.multiSyllable && results.multiSyllable.length > 0 && (
+                <Section title="MULTI-SYLLABLE RHYMES" words={results.multiSyllable} color="#C026D3" />
+              )}
               <Section title="PERFECT RHYMES" words={results.perfect} color="#06B6D4" />
               <Section title="NEAR RHYMES" words={results.near} color="#F59E0B" />
-              <Section title="SOUNDS LIKE" words={results.soundsLike} color="#22C55E" />
             </div>
           )}
         </div>
