@@ -1000,34 +1000,21 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
               style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer" }}>✕</button>
           </div>
 
-          <div style={{ display: "flex", gap: 8, marginBottom: aiReply ? 10 : 0 }}>
-            <input
-              value={aiPrompt}
-              onChange={e => setAiPrompt(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") handleAiSuggest(); }}
-              placeholder="e.g. keep the street energy, make it rhyme..."
-              style={{
-                flex: 1, background: "#1a1a1a", border: "1px solid #333",
-                borderRadius: 10, padding: "10px 12px", color: "white",
-                fontSize: 13, outline: "none",
-              }}
-            />
-            <button
-              onClick={function() {
-                if (!aiPrompt.trim()) setAiPrompt("Suggest the next line");
-                handleAiSuggest();
-              }}
-              disabled={aiLoading}
-              style={{
-                background: "linear-gradient(135deg,#C026D3,#7C3AED)",
-                border: "none", borderRadius: 10, color: "white",
-                fontWeight: 800, fontSize: 13, padding: "10px 16px",
-                cursor: aiLoading ? "not-allowed" : "pointer",
-                opacity: aiLoading ? 0.6 : 1, flexShrink: 0,
-              }}>
-              {aiLoading ? "..." : "Go"}
-            </button>
-          </div>
+          <button
+            onClick={function() {
+              setAiPrompt("Suggest the next line");
+              handleAiSuggest();
+            }}
+            disabled={aiLoading}
+            style={{
+              width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+              border: "none", borderRadius: 10, color: "white",
+              fontWeight: 800, fontSize: 14, padding: "12px",
+              cursor: aiLoading ? "not-allowed" : "pointer",
+              opacity: aiLoading ? 0.6 : 1, marginBottom: aiReply ? 10 : 0,
+            }}>
+            {aiLoading ? "Analysing your lyrics..." : "✨ Suggest Next Line"}
+          </button>
 
           {aiReply ? (
             <div style={{
