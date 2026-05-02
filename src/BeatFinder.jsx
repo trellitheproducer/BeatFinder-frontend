@@ -3401,21 +3401,6 @@ function StripeConnectSection({ user }) {
           </button>
         </>
       )}
-      {status?.connected && (
-        <button
-          onClick={async () => {
-            try {
-              const r = await apiFetch("/api/producer/sync-stripe", { method: "POST" });
-              alert("Synced! " + r.updated + " beat(s) updated.");
-            } catch (e) {
-              alert("Error: " + e.message);
-            }
-          }}
-          style={{ marginTop: 10, width: "100%", background: "transparent", border: "1px solid #333", borderRadius: 12, color: "#888", fontWeight: 600, fontSize: 13, padding: "10px", cursor: "pointer" }}
-        >
-          Sync Stripe to My Beats
-        </button>
-      )}
     </div>
   );
 }
