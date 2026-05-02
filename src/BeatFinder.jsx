@@ -859,9 +859,6 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
   const [title,      setTitle]      = useState(initialLyric ? initialLyric.title : "");
   const [saved,      setSaved]      = useState(false);
   const [aiOpen,     setAiOpen]     = useState(null);
-  const [aiPrompt,   setAiPrompt]   = useState("");
-  const [aiReply,    setAiReply]    = useState("");
-  const [aiLoading,  setAiLoading]  = useState(false);
   const scrollRef = useCallback(node => {
     if (node) node.scrollTop = 0;
   }, []);
@@ -882,34 +879,6 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
     onSaveLyric(lyric, isEditing ? lyricIndex : null);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
-  };
-
-  const handleAiSuggest = () => {
-    if (!aiPrompt.trim()) return;
-    setAiLoading(true);
-    setAiReply("");
-    apiFetch("/api/ai/suggest", {
-      method: "POST",
-      body: JSON.stringify({
-        prompt:    aiPrompt.trim(),
-        lyrics:    text.trim(),
-        beatTitle: beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
-      }),
-    }).then(function(d) {
-      setAiReply(d.suggestion || "");
-      setAiLoading(false);
-    }).catch(function() {
-      setAiReply("Something went wrong. Please try again.");
-      setAiLoading(false);
-    });
-  };
-
-  const handleInsert = () => {
-    if (!aiReply) return;
-    setText(prev => prev ? prev + "\n\n" + aiReply : aiReply);
-    setAiReply("");
-    setAiPrompt("");
-    setAiOpen(false);
   };
 
   return (
@@ -987,55 +956,6 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
         }}
       />
 
-      {/* AI Assistant Panel */}
-      {aiOpen === "ai" && (
-        <div style={{
-          background: "#0f0f1a", borderTop: "1px solid rgba(192,38,211,0.3)",
-          padding: "14px 16px",
-          paddingBottom: "calc(14px + env(safe-area-inset-bottom))",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13 }}>✨ AI — Suggest Next Line</div>
-            <button onClick={() => { setAiOpen(null); setAiReply(""); setAiPrompt(""); }}
-              style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer" }}>✕</button>
-          </div>
-
-          <button
-            onClick={function() {
-              setAiPrompt("Suggest the next line");
-              handleAiSuggest();
-            }}
-            disabled={aiLoading}
-            style={{
-              width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)",
-              border: "none", borderRadius: 10, color: "white",
-              fontWeight: 800, fontSize: 14, padding: "12px",
-              cursor: aiLoading ? "not-allowed" : "pointer",
-              opacity: aiLoading ? 0.6 : 1, marginBottom: aiReply ? 10 : 0,
-            }}>
-            {aiLoading ? "Analysing your lyrics..." : "✨ Suggest Next Line"}
-          </button>
-
-          {aiReply ? (
-            <div style={{
-              background: "rgba(192,38,211,0.08)", border: "1px solid rgba(192,38,211,0.2)",
-              borderRadius: 12, padding: "12px 14px", marginTop: 10,
-            }}>
-              <div style={{ color: "white", fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap", marginBottom: 10 }}>
-                {aiReply}
-              </div>
-              <button onClick={handleInsert} style={{
-                width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)",
-                border: "none", borderRadius: 10, color: "white",
-                fontWeight: 800, fontSize: 13, padding: "10px", cursor: "pointer",
-              }}>
-                ✍️ Insert into lyrics
-              </button>
-            </div>
-          ) : null}
-        </div>
-      )}
-
       {/* Rhyme Finder Panel */}
       {aiOpen === "rhymes" && (
         <RhymeFinder onClose={() => setAiOpen(null)} onInsert={word => {
@@ -1053,24 +973,14 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
         <div style={{ color: "#444", fontSize: 11, flexShrink: 0 }}>
           {text.length} chars • {text.split(" ").filter(function(w){return w.length > 0;}).length} words
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setAiOpen(aiOpen === "rhymes" ? null : "rhymes")} style={{
-            background: aiOpen === "rhymes" ? "rgba(6,182,212,0.2)" : "rgba(6,182,212,0.15)",
-            border: "1px solid " + (aiOpen === "rhymes" ? "#06B6D4" : "rgba(6,182,212,0.4)"),
-            borderRadius: 20, color: "#06B6D4", fontWeight: 800,
-            fontSize: 12, padding: "8px 14px", cursor: "pointer",
-          }}>
-            🎯 Rhyme Finder
-          </button>
-          <button onClick={() => setAiOpen(aiOpen === "ai" ? null : "ai")} style={{
-            background: aiOpen === "ai" ? "rgba(192,38,211,0.2)" : "linear-gradient(135deg,#C026D3,#7C3AED)",
-            border: aiOpen === "ai" ? "1px solid #C026D3" : "none",
-            borderRadius: 20, color: "white", fontWeight: 800,
-            fontSize: 12, padding: "8px 14px", cursor: "pointer",
-          }}>
-            ✨ AI Lyric Helper
-          </button>
-        </div>
+        <button onClick={() => setAiOpen(aiOpen === "rhymes" ? null : "rhymes")} style={{
+          background: aiOpen === "rhymes" ? "rgba(6,182,212,0.2)" : "rgba(6,182,212,0.15)",
+          border: "1px solid " + (aiOpen === "rhymes" ? "#06B6D4" : "rgba(6,182,212,0.4)"),
+          borderRadius: 20, color: "#06B6D4", fontWeight: 800,
+          fontSize: 12, padding: "8px 14px", cursor: "pointer",
+        }}>
+          🎯 Rhyme Finder
+        </button>
       </div>
     </div>
   );
@@ -1829,8 +1739,8 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
       cta: "Explore Beats",
     },
     {
-      title: "Rhyme Finder & AI Lyric Helper",
-      sub: "Find perfect rhymes & get AI suggestions while you write",
+      title: "Rhyme Finder",
+      sub: "Find perfect rhymes & multi-syllable rhymes while you write",
       emoji: "✍️",
       grad: "linear-gradient(135deg,#001a1a 0%,#003333 40%,#065f5f 75%,#06B6D4 100%)",
       cta: "Try It Now",
