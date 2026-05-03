@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 // =============================================================================
 // PREMIUM LOADER COMPONENT
 // =============================================================================
@@ -1727,7 +1727,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
   );
 }
 
-function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric }) {
+function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric, onGoTrending }) {
   const [heroIndex, setHeroIndex] = useState(0);
 
   const HERO_SLIDES = [
@@ -1765,9 +1765,10 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
       sub: "Tap in with producers worldwide",
       emoji: "🎯",
       grad: "linear-gradient(135deg,#001230 0%,#002a70 60%,#3B82F6 100%)",
-      cta: "Upgrade to Pro",
+      cta: "Find Producers",
       btnColor: "rgba(59,130,246,0.5)",
       btnBorder: "rgba(59,130,246,0.7)",
+      trendingSlide: true,
     },
     {
       title: "Sell Your Beats",
@@ -1789,12 +1790,35 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
     { label: "Dancehall",  q: "dancehall riddim",     color: "#EC4899", emoji: "🎪" },
   ];
 
+  const [heroPaused, setHeroPaused] = useState(false);
+  const heroTouchX = useRef(null);
+
   useEffect(() => {
+    if (heroPaused) return;
     const t = setInterval(() => setHeroIndex(i => (i + 1) % HERO_SLIDES.length), 4200);
     return () => clearInterval(t);
-  }, []);
+  }, [heroPaused]);
 
   const slide = HERO_SLIDES[heroIndex];
+
+  const handleHeroTouchStart = (e) => {
+    heroTouchX.current = e.touches[0].clientX;
+    setHeroPaused(true);
+  };
+
+  const handleHeroTouchEnd = (e) => {
+    if (heroTouchX.current === null) return;
+    const diff = heroTouchX.current - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 40) {
+      if (diff > 0) {
+        setHeroIndex(i => (i + 1) % HERO_SLIDES.length);
+      } else {
+        setHeroIndex(i => (i - 1 + HERO_SLIDES.length) % HERO_SLIDES.length);
+      }
+    }
+    heroTouchX.current = null;
+    setTimeout(() => setHeroPaused(false), 3000);
+  };
 
   const SectionHead = ({ emoji, title, sub }) => (
     <div style={{ paddingLeft: 16, marginBottom: 14 }}>
@@ -1821,11 +1845,16 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
 
       {/* Hero Banner */}
       <div style={{ padding: "14px 16px 0" }}>
-        <div style={{
+        <div
+          onTouchStart={handleHeroTouchStart}
+          onTouchEnd={handleHeroTouchEnd}
+          style={{
           background: slide.grad, borderRadius: 22, padding: "22px 20px 18px",
           marginBottom: 20, position: "relative", overflow: "hidden",
           boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
           minHeight: 140,
+          transition: "background 0.4s ease",
+          userSelect: "none",
         }}>
           {/* Large bg emoji */}
           <div style={{
@@ -1840,7 +1869,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
             letterSpacing: 1 }}>{slide.title}</div>
           <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 13,
             marginBottom: 18, lineHeight: 1.5 }}>{slide.sub}</div>
-          <button onClick={onGoProfile} style={{
+          <button onClick={slide.trendingSlide ? onGoTrending : onGoProfile} style={{
             background: slide.btnColor || "rgba(255,255,255,0.15)",
             backdropFilter: "blur(10px)",
             border: "1px solid " + (slide.btnBorder || "rgba(255,255,255,0.25)"),
@@ -4526,7 +4555,7 @@ export default function BeatFinder() {
       )}
 
       <div key={tab} className="bf-tab-in" style={{ overflowY: "auto", height: "calc(100vh - 72px)" }}>
-        <div style={{ display: tab === "home"      ? "block" : "none" }}><HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => setTab("exclusive")} onGoProfile={() => setTab("profile")} onGenreSearch={q => { setSearchQuery(q); setTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} /></div>
+        <div style={{ display: tab === "home"      ? "block" : "none" }}><HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => setTab("exclusive")} onGoProfile={() => setTab("profile")} onGenreSearch={q => { setSearchQuery(q); setTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => setTab("trending")} /></div>
         <div style={{ display: tab === "artists"   ? "block" : "none" }}><ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} /></div>
         <div style={{ display: tab === "trending"  ? "block" : "none" }}><TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} /></div>
         <div style={{ display: tab === "search"    ? "block" : "none" }}><SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} /></div>
