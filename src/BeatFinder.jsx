@@ -4293,7 +4293,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 // =============================================================================
 // STUDIO SCREEN
 // =============================================================================
-function StudioScreen({ user }) {
+function StudioScreen({ user, onExit }) {
   const [beatUrl,          setBeatUrl]         = useState(null);
   const [beatName,         setBeatName]        = useState("");
   const [isPlaying,        setIsPlaying]       = useState(false);
@@ -4882,7 +4882,7 @@ function StudioScreen({ user }) {
   ) : null;
 
   return (
-    <div style={{ background:"#080808", height:"calc(100vh - calc(68px + env(safe-area-inset-bottom)))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", position:"relative", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
+    <div style={{ background:"#080808", height:"calc(100vh - env(safe-area-inset-bottom))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", position:"relative", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
       onClick={function(){ setContextMenu(null); setShowProjects(false); setShowSettings(false); setShowAddMenu(false); setSelectedTake(null); }}
       onMouseMove={draggingTake ? function(e){ var dx=e.clientX-draggingTake.startX; moveTake(draggingTake.trackId,draggingTake.takeId,draggingTake.startOffset+dx/_pps); } : null}
       onMouseUp={draggingTake ? function(){ setDraggingTake(null); } : null}
@@ -5131,6 +5131,10 @@ function StudioScreen({ user }) {
 
       {/* TOP BAR */}
       <div style={{ display:"flex", alignItems:"center", padding:"10px 12px", borderBottom:"1px solid #141414", background:"#0a0a0a", flexShrink:0, gap:8 }}>
+        {/* Home / Exit button */}
+        <button onClick={onExit} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:14, width:32, height:32, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", flexShrink:0 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#888"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+        </button>
         {renamingProject ? (
           <input autoFocus defaultValue={projectName}
             onBlur={function(e){ setProjectName(e.target.value||projectName); setRenamingProject(false); }}
@@ -5621,8 +5625,10 @@ export default function BeatFinder() {
         {["home","artists","trending","search","saved","studio","exclusive"].map(t => (
           <div key={t} style={{
             display: tab === t ? "block" : "none",
-            overflowY: "auto",
-            height: "calc(100vh - calc(72px + env(safe-area-inset-bottom)))",
+            overflowY: t === "studio" ? "hidden" : "auto",
+            height: t === "studio"
+              ? "calc(100vh - env(safe-area-inset-bottom))"
+              : "calc(100vh - calc(72px + env(safe-area-inset-bottom)))",
             WebkitOverflowScrolling: "touch",
           }}>
             {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} />}
@@ -5630,7 +5636,7 @@ export default function BeatFinder() {
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} />}
-            {t === "studio"    && <StudioScreen user={user} />}
+            {t === "studio"    && <StudioScreen user={user} onExit={() => goTab("home")} />}
             {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
           </div>
         ))}
@@ -5660,7 +5666,8 @@ export default function BeatFinder() {
           width: "100%", maxWidth: 430,
           background: "rgba(8,8,8,0.92)",
           borderTop: "1px solid rgba(255,255,255,0.07)",
-          display: "flex", height: "calc(68px + env(safe-area-inset-bottom))",
+          display: tab === "studio" ? "none" : "flex",
+          height: "calc(68px + env(safe-area-inset-bottom))",
           zIndex: 100, backdropFilter: "blur(24px)",
           paddingBottom: "env(safe-area-inset-bottom)",
           boxShadow: "0 -8px 32px rgba(0,0,0,0.6)",
