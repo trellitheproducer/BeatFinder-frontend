@@ -4302,12 +4302,450 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 // =============================================================================
 // BOTTOM NAV
 // =============================================================================
+// =============================================================================
+// STUDIO SCREEN
+// =============================================================================
+function StudioScreen({ user }) {
+  const [beatFile,     setBeatFile]     = useState(null);
+  const [beatUrl,      setBeatUrl]      = useState(null);
+  const [beatName,     setBeatName]     = useState("");
+  const [isPlaying,    setIsPlaying]    = useState(false);
+  const [isRecording,  setIsRecording]  = useState(false);
+  const [takes,        setTakes]        = useState([]);
+  const [playingTake,  setPlayingTake]  = useState(null);
+  const [recTime,      setRecTime]      = useState(0);
+  const [beatTime,     setBeatTime]     = useState(0);
+  const [beatDuration, setBeatDuration] = useState(0);
+  const [error,        setError]        = useState("");
+  const [analyserData, setAnalyserData] = useState(new Uint8Array(64).fill(10));
+  const [recBars,      setRecBars]      = useState(new Uint8Array(32).fill(5));
+
+  const audioRef     = useRef(null);
+  const mediaRecRef  = useRef(null);
+  const chunksRef    = useRef([]);
+  const recTimerRef  = useRef(null);
+  const animFrameRef = useRef(null);
+  const analyserRef  = useRef(null);
+  const takeAudioRef = useRef(null);
+  const audioCtxRef  = useRef(null);
+
+  // Animate beat waveform bars when playing
+  useEffect(function() {
+    if (!isPlaying || !analyserRef.current) return;
+    var animate = function() {
+      var data = new Uint8Array(analyserRef.current.frequencyBinCount);
+      analyserRef.current.getByteFrequencyData(data);
+      setAnalyserData(new Uint8Array(data.slice(0, 64)));
+      animFrameRef.current = requestAnimationFrame(animate);
+    };
+    animFrameRef.current = requestAnimationFrame(animate);
+    return function() { cancelAnimationFrame(animFrameRef.current); };
+  }, [isPlaying]);
+
+  // Animate recording bars
+  useEffect(function() {
+    if (!isRecording) return;
+    var id = setInterval(function() {
+      setRecBars(function() {
+        var arr = new Uint8Array(32);
+        for (var i = 0; i < 32; i++) arr[i] = Math.floor(Math.random() * 80 + 10);
+        return arr;
+      });
+    }, 80);
+    return function() { clearInterval(id); };
+  }, [isRecording]);
+
+  var fmt = function(s) {
+    s = Math.floor(s || 0);
+    var m = Math.floor(s / 60);
+    var sec = s % 60;
+    return (m < 10 ? "0" : "") + m + ":" + (sec < 10 ? "0" : "") + sec;
+  };
+
+  var setupAudioContext = function(url) {
+    if (audioCtxRef.current) { audioCtxRef.current.close(); }
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    var analyser = ctx.createAnalyser();
+    analyser.fftSize = 128;
+    var source = ctx.createMediaElementSource(audioRef.current);
+    source.connect(analyser);
+    analyser.connect(ctx.destination);
+    audioCtxRef.current = ctx;
+    analyserRef.current = analyser;
+  };
+
+  var handleBeatUpload = function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith("audio/")) { setError("Please upload an MP3 or WAV file"); return; }
+    setError("");
+    var url = URL.createObjectURL(file);
+    setBeatFile(file);
+    setBeatUrl(url);
+    setBeatName(file.name.replace(/\.[^.]+$/, ""));
+    setIsPlaying(false);
+    setTakes([]);
+    setTimeout(function() {
+      if (audioRef.current) {
+        audioRef.current.src = url;
+        audioRef.current.load();
+        try { setupAudioContext(url); } catch(e) {}
+      }
+    }, 100);
+  };
+
+  var togglePlay = function() {
+    if (!audioRef.current || !beatUrl) return;
+    if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
+      audioCtxRef.current.resume();
+    }
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play();
+      setIsPlaying(true);
+    }
+  };
+
+  var rewind = function() {
+    if (audioRef.current) { audioRef.current.currentTime = 0; }
+  };
+
+  var startRecording = async function() {
+    setError("");
+    try {
+      var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      chunksRef.current = [];
+      var mr = new MediaRecorder(stream);
+      mr.ondataavailable = function(e) { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = function() {
+        var blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        var url  = URL.createObjectURL(blob);
+        var offset = audioRef.current ? Math.max(0, audioRef.current.currentTime - recTimerRef._elapsed) : 0;
+        setTakes(function(prev) {
+          return [{
+            id:         Date.now(),
+            url:        url,
+            blob:       blob,
+            duration:   recTimerRef._elapsed || 0,
+            beatOffset: offset,
+            label:      "Take " + (prev.length + 1),
+            date:       new Date().toLocaleTimeString(),
+          }, ...prev];
+        });
+        stream.getTracks().forEach(function(t){ t.stop(); });
+        clearInterval(recTimerRef.current);
+        recTimerRef._elapsed = 0;
+        setRecTime(0);
+        setIsRecording(false);
+      };
+      mediaRecRef.current = mr;
+      var startSec = 0;
+      recTimerRef._elapsed = 0;
+      recTimerRef.current = setInterval(function() {
+        startSec++;
+        recTimerRef._elapsed = startSec;
+        setRecTime(startSec);
+      }, 1000);
+      mr.start();
+      setIsRecording(true);
+      if (audioRef.current && !isPlaying) {
+        if (audioCtxRef.current && audioCtxRef.current.state === "suspended") audioCtxRef.current.resume();
+        audioRef.current.play();
+        setIsPlaying(true);
+      }
+    } catch(e) {
+      setError("Microphone access denied. Allow mic in your browser settings.");
+    }
+  };
+
+  var stopRecording = function() {
+    if (mediaRecRef.current && isRecording) mediaRecRef.current.stop();
+  };
+
+  var playTake = function(take) {
+    if (takeAudioRef.current) { takeAudioRef.current.pause(); takeAudioRef.current = null; }
+    if (playingTake === take.id) {
+      setPlayingTake(null);
+      if (audioRef.current) { audioRef.current.pause(); setIsPlaying(false); }
+      return;
+    }
+    if (audioRef.current) {
+      audioRef.current.currentTime = take.beatOffset;
+      if (audioCtxRef.current && audioCtxRef.current.state === "suspended") audioCtxRef.current.resume();
+      audioRef.current.play();
+      setIsPlaying(true);
+    }
+    var ta = new Audio(take.url);
+    ta.play();
+    takeAudioRef.current = ta;
+    setPlayingTake(take.id);
+    ta.onended = function() {
+      setPlayingTake(null);
+      if (audioRef.current) { audioRef.current.pause(); setIsPlaying(false); }
+    };
+  };
+
+  var deleteTake = function(id) {
+    if (playingTake === id) {
+      if (takeAudioRef.current) { takeAudioRef.current.pause(); takeAudioRef.current = null; }
+      setPlayingTake(null);
+      if (audioRef.current) { audioRef.current.pause(); setIsPlaying(false); }
+    }
+    setTakes(function(prev){ return prev.filter(function(t){ return t.id !== id; }); });
+  };
+
+  var downloadTake = function(take) {
+    var a = document.createElement("a");
+    a.href = take.url;
+    a.download = (beatName || "beat") + " - " + take.label + ".webm";
+    a.click();
+  };
+
+  var progress = beatDuration > 0 ? (beatTime / beatDuration) * 100 : 0;
+
+  // Waveform bars from analyser or static
+  var bars = Array.from(analyserData);
+
+  return (
+    <div style={{
+      background: "#080808", minHeight: "100%",
+      fontFamily: "'DM Sans', sans-serif", display: "flex", flexDirection: "column",
+    }}>
+
+      {/* Top toolbar */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "12px 16px 10px", borderBottom: "1px solid #141414",
+        background: "#0a0a0a",
+      }}>
+        <div style={{ color: "#C026D3", fontWeight: 900, fontSize: 13, letterSpacing: 3 }}>STUDIO</div>
+        <div style={{ color: "#888", fontSize: 11, fontFamily: "monospace" }}>{fmt(beatTime)} / {fmt(beatDuration)}</div>
+        <div style={{ color: beatUrl ? "#22C55E" : "#333", fontSize: 11, fontWeight: 700 }}>
+          {beatUrl ? "● BEAT LOADED" : "○ NO BEAT"}
+        </div>
+      </div>
+
+      {/* Timeline ruler */}
+      {beatUrl && (
+        <div style={{ background: "#0d0d0d", borderBottom: "1px solid #141414", padding: "0 16px", height: 24, display: "flex", alignItems: "center", position: "relative", overflow: "hidden" }}>
+          {Array.from({length: 9}, function(_, i) {
+            return (
+              <div key={i} style={{ position: "absolute", left: ((i+1)/10 * 100) + "%", top: 0, bottom: 0, width: 1, background: "#1a1a1a" }}>
+                <span style={{ position: "absolute", top: 6, left: 3, color: "#333", fontSize: 8, fontFamily: "monospace" }}>
+                  {fmt(beatDuration * (i+1) / 10)}
+                </span>
+              </div>
+            );
+          })}
+          {/* Playhead */}
+          <div style={{ position: "absolute", left: progress + "%", top: 0, bottom: 0, width: 2, background: "#C026D3", zIndex: 10, transition: "left 0.1s linear" }} />
+        </div>
+      )}
+
+      {/* Tracks area */}
+      <div style={{ flex: 1, overflow: "hidden" }}>
+
+        {!beatUrl ? (
+          /* Empty state — upload prompt */
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 32px", gap: 20 }}>
+            <div style={{ width: 80, height: 80, borderRadius: 20, background: "linear-gradient(135deg,#1a0030,#3d0060)", border: "1.5px solid rgba(192,38,211,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36 }}>🎵</div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>No Beat Loaded</div>
+              <div style={{ color: "#444", fontSize: 13 }}>Upload an MP3 or WAV to start recording</div>
+            </div>
+            <label style={{ cursor: "pointer" }}>
+              <div style={{ background: "linear-gradient(135deg,#C026D3,#7C3AED)", borderRadius: 14, padding: "14px 32px", color: "white", fontWeight: 800, fontSize: 15 }}>
+                + Upload Beat
+              </div>
+              <input type="file" accept="audio/*" onChange={handleBeatUpload} style={{ display: "none" }} />
+            </label>
+          </div>
+        ) : (
+          <div style={{ padding: "0 0 120px" }}>
+
+            {/* BEAT TRACK */}
+            <div style={{ borderBottom: "1px solid #111" }}>
+              <div style={{ display: "flex", alignItems: "stretch", minHeight: 64 }}>
+                {/* Track label */}
+                <div style={{ width: 100, flexShrink: 0, background: "#0f0f0f", borderRight: "1px solid #141414", padding: "10px 12px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#C026D3" }} />
+                    <span style={{ color: "white", fontSize: 11, fontWeight: 700 }}>BEAT</span>
+                  </div>
+                  <div style={{ color: "#444", fontSize: 9, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{beatName}</div>
+                </div>
+                {/* Waveform */}
+                <div style={{ flex: 1, background: "linear-gradient(180deg,rgba(192,38,211,0.12),rgba(192,38,211,0.04))", display: "flex", alignItems: "center", padding: "8px 6px", gap: 1, overflow: "hidden", position: "relative" }}>
+                  {bars.map(function(v, i) {
+                    var h = isPlaying ? Math.max(4, (v / 255) * 44) : 20 + Math.sin(i * 0.4) * 12;
+                    return (
+                      <div key={i} style={{ flex: 1, background: i < (progress / 100 * bars.length) ? "#C026D3" : "rgba(192,38,211,0.35)", borderRadius: 1, height: h, transition: isPlaying ? "none" : "height 0.3s" }} />
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* VOCAL TRACKS */}
+            {takes.length === 0 ? (
+              <div style={{ borderBottom: "1px solid #111" }}>
+                <div style={{ display: "flex", alignItems: "stretch", minHeight: 64 }}>
+                  <div style={{ width: 100, flexShrink: 0, background: "#0f0f0f", borderRight: "1px solid #141414", padding: "10px 12px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#22C55E" }} />
+                      <span style={{ color: "white", fontSize: 11, fontWeight: 700 }}>VOCALS</span>
+                    </div>
+                    <div style={{ color: "#333", fontSize: 9 }}>No takes yet</div>
+                  </div>
+                  <div style={{ flex: 1, background: "rgba(34,197,94,0.03)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <span style={{ color: "#222", fontSize: 12 }}>Record to add takes</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              takes.map(function(take, idx) {
+                var isActive = playingTake === take.id;
+                var bars2 = Array.from({length: 48}, function(_, i){ return 15 + Math.sin(i * 0.5 + idx) * 12 + Math.cos(i * 0.3) * 8; });
+                return (
+                  <div key={take.id} style={{ borderBottom: "1px solid #111" }}>
+                    <div style={{ display: "flex", alignItems: "stretch", minHeight: 64 }}>
+                      {/* Label */}
+                      <div style={{ width: 100, flexShrink: 0, background: "#0f0f0f", borderRight: "1px solid #141414", padding: "8px 10px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: isActive ? "#22C55E" : "#166534" }} />
+                          <span style={{ color: "white", fontSize: 10, fontWeight: 700 }}>{take.label.toUpperCase()}</span>
+                        </div>
+                        <div style={{ color: "#444", fontSize: 9 }}>{fmt(take.duration)}</div>
+                        <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                          <button onClick={function(){ playTake(take); }} style={{ background: isActive ? "#22C55E" : "#1a1a1a", border: "none", borderRadius: 4, color: "white", fontSize: 9, padding: "2px 6px", cursor: "pointer" }}>
+                            {isActive ? "■" : "▶"}
+                          </button>
+                          <button onClick={function(){ downloadTake(take); }} style={{ background: "#1a1a1a", border: "none", borderRadius: 4, color: "#888", fontSize: 9, padding: "2px 6px", cursor: "pointer" }}>⬇</button>
+                          <button onClick={function(){ deleteTake(take.id); }} style={{ background: "#1a1a1a", border: "none", borderRadius: 4, color: "#555", fontSize: 9, padding: "2px 5px", cursor: "pointer" }}>✕</button>
+                        </div>
+                      </div>
+                      {/* Waveform */}
+                      <div style={{ flex: 1, background: isActive ? "linear-gradient(180deg,rgba(34,197,94,0.18),rgba(34,197,94,0.06))" : "linear-gradient(180deg,rgba(34,197,94,0.08),rgba(34,197,94,0.02))", display: "flex", alignItems: "center", padding: "8px 6px", gap: 1, overflow: "hidden" }}>
+                        {bars2.map(function(v, i) {
+                          return <div key={i} style={{ flex: 1, background: isActive ? "#22C55E" : "rgba(34,197,94,0.35)", borderRadius: 1, height: Math.max(3, v) }} />;
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+
+            {/* Recording live track */}
+            {isRecording && (
+              <div style={{ borderBottom: "1px solid #111" }}>
+                <div style={{ display: "flex", alignItems: "stretch", minHeight: 64 }}>
+                  <div style={{ width: 100, flexShrink: 0, background: "#0f0f0f", borderRight: "1px solid #141414", padding: "10px 12px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#EF4444" }} />
+                      <span style={{ color: "#EF4444", fontSize: 11, fontWeight: 700 }}>● REC</span>
+                    </div>
+                    <div style={{ color: "#EF4444", fontSize: 9, fontFamily: "monospace" }}>{fmt(recTime)}</div>
+                  </div>
+                  <div style={{ flex: 1, background: "linear-gradient(180deg,rgba(239,68,68,0.12),rgba(239,68,68,0.04))", display: "flex", alignItems: "center", padding: "8px 6px", gap: 1 }}>
+                    {Array.from(recBars).map(function(v, i) {
+                      return <div key={i} style={{ flex: 1, background: "#EF4444", borderRadius: 1, height: Math.max(3, (v / 90) * 44) }} />;
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {error && <div style={{ background: "rgba(239,68,68,0.1)", borderTop: "1px solid rgba(239,68,68,0.2)", color: "#F87171", fontSize: 12, padding: "8px 16px", textAlign: "center" }}>{error}</div>}
+
+      {/* Transport bar — fixed at bottom */}
+      <div style={{
+        position: "fixed", bottom: "calc(68px + env(safe-area-inset-bottom))", left: "50%", transform: "translateX(-50%)",
+        width: "100%", maxWidth: 430, background: "#0a0a0a",
+        borderTop: "1px solid #141414", padding: "10px 24px",
+        display: "flex", flexDirection: "column", gap: 8, zIndex: 50,
+      }}>
+        {/* Seek bar */}
+        {beatUrl && (
+          <input type="range" min={0} max={beatDuration || 100} step={0.1} value={beatTime}
+            onChange={function(e){ if (audioRef.current) audioRef.current.currentTime = parseFloat(e.target.value); }}
+            style={{ width: "100%", accentColor: "#C026D3", height: 3, cursor: "pointer" }}
+          />
+        )}
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {/* Upload */}
+          <label style={{ cursor: "pointer" }}>
+            <div style={{ width: 36, height: 36, borderRadius: 8, background: "#141414", border: "1px solid #222", display: "flex", alignItems: "center", justifyContent: "center", color: "#888", fontSize: 16 }}>+</div>
+            <input type="file" accept="audio/*" onChange={handleBeatUpload} style={{ display: "none" }} />
+          </label>
+
+          {/* Rewind */}
+          <button onClick={rewind} style={{ width: 36, height: 36, borderRadius: 8, background: "#141414", border: "1px solid #222", color: "white", fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+              <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/>
+            </svg>
+          </button>
+
+          {/* Record */}
+          <button onClick={isRecording ? stopRecording : startRecording}
+            disabled={!beatUrl}
+            style={{
+              width: 52, height: 52, borderRadius: "50%",
+              background: isRecording ? "#EF4444" : "linear-gradient(135deg,#EF4444,#DC2626)",
+              border: isRecording ? "3px solid rgba(239,68,68,0.5)" : "3px solid rgba(239,68,68,0.2)",
+              cursor: beatUrl ? "pointer" : "not-allowed", opacity: beatUrl ? 1 : 0.4,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              boxShadow: isRecording ? "0 0 20px rgba(239,68,68,0.5)" : "none",
+            }}>
+            {isRecording
+              ? <div style={{ width: 16, height: 16, background: "white", borderRadius: 3 }} />
+              : <div style={{ width: 20, height: 20, background: "white", borderRadius: "50%" }} />
+            }
+          </button>
+
+          {/* Play/Pause */}
+          <button onClick={togglePlay}
+            disabled={!beatUrl}
+            style={{ width: 40, height: 40, borderRadius: "50%", background: beatUrl ? "linear-gradient(135deg,#C026D3,#7C3AED)" : "#141414", border: "none", color: "white", cursor: beatUrl ? "pointer" : "not-allowed", opacity: beatUrl ? 1 : 0.4, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {isPlaying
+              ? <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              : <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+            }
+          </button>
+
+          {/* Takes count */}
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: "#141414", border: "1px solid #222", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ color: takes.length > 0 ? "#22C55E" : "#444", fontSize: 14, fontWeight: 800, lineHeight: 1 }}>{takes.length}</span>
+            <span style={{ color: "#333", fontSize: 7, letterSpacing: 0.5 }}>TAKES</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Hidden audio element */}
+      <audio ref={audioRef}
+        onTimeUpdate={function(e){ setBeatTime(e.target.currentTime); }}
+        onDurationChange={function(e){ setBeatDuration(e.target.duration); }}
+        onEnded={function(){ setIsPlaying(false); }}
+        style={{ display: "none" }}
+      />
+    </div>
+  );
+}
+
+
 const NAV = [
   { id: "home",      label: "Home",    icon: "🏠" },
   { id: "artists",   label: "Artists", icon: "▦"  },
   { id: "trending",  label: "Trending",icon: "🔥" },
   { id: "search",    label: "Search",  icon: "🔍" },
   { id: "saved",     label: "Saved",   icon: "🔖" },
+  { id: "studio",    label: "Studio",  icon: "🎙" },
   { id: "exclusive", label: "Members", icon: "🔒" },
   { id: "profile",   label: "Profile", icon: "👤" },
 ];
@@ -4456,6 +4894,7 @@ export default function BeatFinder() {
 
   const handlePlay = useCallback(beat => setPlaying(beat), []);
   const goTab = id => {
+    setPlaying(null);
     setTab(id);
   };
 
@@ -4554,7 +4993,7 @@ export default function BeatFinder() {
       )}
 
       <div style={{ position: "relative" }}>
-        {["home","artists","trending","search","saved","exclusive"].map(t => (
+        {["home","artists","trending","search","saved","studio","exclusive"].map(t => (
           <div key={t} style={{
             display: tab === t ? "block" : "none",
             overflowY: "auto",
@@ -4566,6 +5005,7 @@ export default function BeatFinder() {
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} />}
+            {t === "studio"    && <StudioScreen user={user} />}
             {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
           </div>
         ))}
