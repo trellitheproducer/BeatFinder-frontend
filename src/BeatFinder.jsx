@@ -1715,7 +1715,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
   );
 }
 
-function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric, onGoTrending }) {
+function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric, onGoTrending, onGoStudio }) {
   const [heroIndex, setHeroIndex] = useState(0);
 
   const HERO_SLIDES = [
@@ -1766,6 +1766,17 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
       cta: "Go Producer Pro",
       btnColor: "rgba(245,158,11,0.5)",
       btnBorder: "rgba(245,158,11,0.7)",
+    },
+    {
+      title: "Record in the Studio",
+      sub: "Create projects, record vocals over any beat & export your mix",
+      emoji: "🎙",
+      grad: "linear-gradient(135deg,#0a001a 0%,#1a0033 40%,#4c0080 75%,#7C3AED 100%)",
+      cta: "Open Studio",
+      studioSlide: true,
+      btnColor: "rgba(124,58,237,0.5)",
+      btnBorder: "rgba(124,58,237,0.8)",
+      badge: "PRO",
     },
   ];
 
@@ -1857,14 +1868,19 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
             letterSpacing: 1 }}>{slide.title}</div>
           <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 13,
             marginBottom: 18, lineHeight: 1.5 }}>{slide.sub}</div>
-          <button onClick={slide.trendingSlide ? onGoTrending : onGoProfile} style={{
-            background: slide.btnColor || "rgba(255,255,255,0.15)",
-            backdropFilter: "blur(10px)",
-            border: "1px solid " + (slide.btnBorder || "rgba(255,255,255,0.25)"),
-            borderRadius: 22,
-            color: "white", fontWeight: 800, fontSize: 13,
-            padding: "9px 20px", cursor: "pointer",
-          }}>{slide.cta} →</button>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <button onClick={slide.studioSlide ? onGoStudio : slide.trendingSlide ? onGoTrending : onGoProfile} style={{
+              background: slide.btnColor || "rgba(255,255,255,0.15)",
+              backdropFilter: "blur(10px)",
+              border: "1px solid " + (slide.btnBorder || "rgba(255,255,255,0.25)"),
+              borderRadius: 22,
+              color: "white", fontWeight: 800, fontSize: 13,
+              padding: "9px 20px", cursor: "pointer",
+            }}>{slide.cta} →</button>
+            {slide.badge && (
+              <span style={{ background:"rgba(124,58,237,0.4)", border:"1px solid rgba(124,58,237,0.7)", borderRadius:12, color:"#a78bfa", fontSize:10, fontWeight:800, padding:"4px 8px", letterSpacing:1 }}>{slide.badge}</span>
+            )}
+          </div>
 
           {/* Dot indicators */}
           <div style={{ position: "absolute", bottom: 14, right: 16,
@@ -4293,6 +4309,80 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 // =============================================================================
 // STUDIO SCREEN
 // =============================================================================
+// iOS-style wheel picker
+function WheelPicker({ items, value, onChange, onClose, title, inline, label }) {
+  var itemH = 44;
+  var visCount = 5;
+  var containerH = itemH * visCount;
+  var scrollRef = useRef(null);
+  var scrollTimeout = useRef(null);
+
+  var idx = Math.max(0, items.indexOf(value));
+
+  useEffect(function() {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = idx * itemH;
+    }
+  }, []);
+
+  var handleScroll = function(e) {
+    clearTimeout(scrollTimeout.current);
+    var el = e.target;
+    scrollTimeout.current = setTimeout(function() {
+      var nearest = Math.round(el.scrollTop / itemH);
+      nearest = Math.max(0, Math.min(nearest, items.length - 1));
+      // Snap scroll
+      el.scrollTo({ top: nearest * itemH, behavior: "smooth" });
+      onChange(items[nearest]);
+    }, 80);
+  };
+
+  var wheel = (
+    <div style={{ position:"relative", height:containerH, flex:1 }}>
+      {label && <div style={{ position:"absolute", top:0, left:0, right:0, textAlign:"center", color:"#555", fontSize:10, paddingTop:4, zIndex:3 }}>{label}</div>}
+      <div style={{ position:"absolute", top:"50%", left:4, right:4, height:itemH, transform:"translateY(-50%)", background:"rgba(192,38,211,0.10)", borderTop:"1px solid rgba(192,38,211,0.3)", borderBottom:"1px solid rgba(192,38,211,0.3)", borderRadius:8, pointerEvents:"none", zIndex:1 }} />
+      <div style={{ position:"absolute", top:0, left:0, right:0, height:itemH*1.8, background:"linear-gradient(to bottom,#1c1c1c 30%,transparent)", pointerEvents:"none", zIndex:2 }} />
+      <div style={{ position:"absolute", bottom:0, left:0, right:0, height:itemH*1.8, background:"linear-gradient(to top,#1c1c1c 30%,transparent)", pointerEvents:"none", zIndex:2 }} />
+      <div ref={scrollRef} onScroll={handleScroll}
+        style={{ height:"100%", overflowY:"auto", scrollSnapType:"y mandatory", WebkitOverflowScrolling:"touch",
+          scrollbarWidth:"none", msOverflowStyle:"none" }}>
+        <style>{".wheel-hide-scroll::-webkit-scrollbar{display:none}"}</style>
+        <div className="wheel-hide-scroll" />
+        <div style={{ height:itemH * Math.floor(visCount / 2) }} />
+        {items.map(function(item) {
+          var isSelected = item === value;
+          return (
+            <div key={item} style={{ height:itemH, display:"flex", alignItems:"center", justifyContent:"center", scrollSnapAlign:"center", cursor:"pointer" }}
+              onClick={function(){ onChange(item); if(!inline) onClose(); }}>
+              <span style={{ color:isSelected?"white":"#555", fontSize:isSelected?18:15, fontWeight:isSelected?700:400, transition:"all 0.1s", userSelect:"none" }}>
+                {item}
+              </span>
+            </div>
+          );
+        })}
+        <div style={{ height:itemH * Math.floor(visCount / 2) }} />
+      </div>
+    </div>
+  );
+
+  if (inline) return wheel;
+
+  return (
+    <div style={{ position:"absolute", inset:0, zIndex:9999, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"flex-end" }}
+      onClick={onClose}>
+      <div style={{ width:"100%", background:"#1c1c1c", borderRadius:"20px 20px 0 0", paddingBottom:"calc(20px + env(safe-area-inset-bottom))" }}
+        onClick={function(e){ e.stopPropagation(); }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px 12px", borderBottom:"1px solid #2a2a2a" }}>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:"#888", fontSize:14, cursor:"pointer" }}>Cancel</button>
+          <div style={{ color:"white", fontWeight:700, fontSize:15 }}>{title}</div>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:"#C026D3", fontSize:14, fontWeight:700, cursor:"pointer" }}>Done</button>
+        </div>
+        {wheel}
+      </div>
+    </div>
+  );
+}
+
 function StudioScreen({ user, onExit }) {
   const [beatUrl,          setBeatUrl]         = useState(null);
   const [beatName,         setBeatName]        = useState("");
@@ -4325,14 +4415,22 @@ function StudioScreen({ user, onExit }) {
   const [timeSigNum,       setTimeSigNum]      = useState(4);
   const [timeSigDen,       setTimeSigDen]      = useState(4);
   const [projectKey,       setProjectKey]      = useState("C major");
+  const [showTimeSigPicker,setShowTimeSigPicker] = useState(false);
+  const [showKeyPicker,    setShowKeyPicker]   = useState(false);
   const [inputDevice,      setInputDevice]     = useState("default");
   const [audioDevices,     setAudioDevices]    = useState([]);
   const [tapTimes,         setTapTimes]        = useState([]);
   const lastTapRef         = useRef(0);
-  const [selectedTake,     setSelectedTake]    = useState(null); // {trackId, takeId}
+  const [selectedTake,     setSelectedTake]    = useState(null);
   const [snapToGrid,       setSnapToGrid]      = useState(true);
-  const [draggingTake,     setDraggingTake]    = useState(null); // {trackId, takeId, startX, startOffset}
+  const [draggingTake,     setDraggingTake]    = useState(null);
   const [renamingProject,  setRenamingProject] = useState(false);
+  const [showProjectMenu,  setShowProjectMenu] = useState(false);
+  const [unsavedPrompt,    setUnsavedPrompt]   = useState(false);
+  const [isSaved_proj,     setIsSaved_proj]    = useState(false);
+  const [exporting,        setExporting]       = useState(false);
+  const [exportProgress,   setExportProgress]  = useState("");
+  const [isSaved,          setIsSaved]         = useState(false);
 
   const audioRef      = useRef(null);
   const mediaRecRef   = useRef(null);
@@ -4357,8 +4455,11 @@ function StudioScreen({ user, onExit }) {
   useEffect(function() {
     if (!loopEnabled || !audioRef.current) return;
     var check = setInterval(function() {
-      if (audioRef.current && audioRef.current.currentTime >= loopOut && loopOut > loopIn)
+      if (audioRef.current && audioRef.current.currentTime >= loopOut && loopOut > loopIn) {
         audioRef.current.currentTime = loopIn;
+        stopAllTakes();
+        startAllTakes(loopIn);
+      }
     }, 100);
     loopCheckRef.current = check;
     return function() { clearInterval(check); };
@@ -4429,10 +4530,11 @@ function StudioScreen({ user, onExit }) {
 
   const [bpmDetecting,   setBpmDetecting]  = useState(false);
   const [detectedBpm,    setDetectedBpm]   = useState(null);
-  const [zoom,           setZoom]          = useState(1);    // 1 = default, 2 = 2x zoom etc
+  const [zoom,           setZoom]          = useState(1);
   const [timelineScroll, setTimelineScroll]= useState(0);
   const timelineRulerRef = useRef(null);
   const tracksScrollRef  = useRef(null);
+  const pinchStartRef    = useRef(null); // {dist, zoom}
 
   var detectBpm = async function() {
     if (!beatUrl) return;
@@ -4441,56 +4543,77 @@ function StudioScreen({ user, onExit }) {
     try {
       var response = await fetch(beatUrl);
       var arrayBuffer = await response.arrayBuffer();
-      var offlineCtx = new OfflineAudioContext(1, 44100 * 30, 44100);
+      var sampleRate = 44100;
+      var maxDur     = 60; // analyse up to 60s
+      var offlineCtx = new OfflineAudioContext(1, sampleRate * maxDur, sampleRate);
       var audioBuffer = await offlineCtx.decodeAudioData(arrayBuffer);
+      var raw = audioBuffer.getChannelData(0);
 
-      // Analyse first 30 seconds for BPM using peak detection
-      var data = audioBuffer.getChannelData(0);
-      var sampleRate = audioBuffer.sampleRate;
-
-      // Low-pass filter simulation — take every 512th sample
-      var step = 512;
-      var filtered = [];
-      for (var i = 0; i < data.length; i += step) {
+      // ── Step 1: build onset strength envelope ──────────────────
+      // Downsample to ~172 fps (hop = 256 samples at 44100)
+      var hop = 256;
+      var envLen = Math.floor(raw.length / hop);
+      var env = new Float32Array(envLen);
+      for (var i = 0; i < envLen; i++) {
         var sum = 0;
-        for (var j = i; j < Math.min(i + step, data.length); j++) {
-          sum += Math.abs(data[j]);
+        var base = i * hop;
+        for (var j = 0; j < hop && base + j < raw.length; j++) {
+          sum += raw[base + j] * raw[base + j];
         }
-        filtered.push(sum / step);
+        env[i] = Math.sqrt(sum / hop); // RMS
       }
 
-      // Find peaks
-      var threshold = 0;
-      for (var k = 0; k < filtered.length; k++) threshold += filtered[k];
-      threshold = (threshold / filtered.length) * 1.5;
+      // Half-wave rectified first-order difference (onset strength)
+      var onset = new Float32Array(envLen);
+      for (var i = 1; i < envLen; i++) {
+        var diff = env[i] - env[i - 1];
+        onset[i] = diff > 0 ? diff : 0;
+      }
 
-      var peaks = [];
-      var minDist = Math.floor(sampleRate * 0.3 / step); // min 0.3s between peaks
-      var lastPeak = -minDist;
-      for (var p = 0; p < filtered.length; p++) {
-        if (filtered[p] > threshold && p - lastPeak > minDist) {
-          peaks.push(p);
-          lastPeak = p;
+      // ── Step 2: autocorrelation of onset envelope ─────────────
+      // Search BPM range 60–200 (lags in frames)
+      var fps = sampleRate / hop;  // ~172
+      var minLag = Math.round(fps * 60 / 200); // lag for 200 BPM
+      var maxLag = Math.round(fps * 60 / 60);  // lag for 60 BPM
+      var acLen = Math.min(onset.length, Math.round(fps * 30)); // use 30s
+
+      var bestLag = minLag;
+      var bestScore = -1;
+
+      for (var lag = minLag; lag <= maxLag; lag++) {
+        var score = 0;
+        for (var t = 0; t < acLen - lag; t++) {
+          score += onset[t] * onset[t + lag];
         }
+        score /= (acLen - lag);
+        if (score > bestScore) { bestScore = score; bestLag = lag; }
       }
 
-      if (peaks.length < 4) { setBpmDetecting(false); setDetectedBpm(-1); return; }
+      // ── Step 3: convert lag to BPM ────────────────────────────
+      var rawBpm = (fps * 60) / bestLag;
 
-      // Calculate intervals between peaks
-      var intervals = [];
-      for (var n = 1; n < Math.min(peaks.length, 20); n++) {
-        intervals.push((peaks[n] - peaks[n-1]) * step / sampleRate);
-      }
-      var avgInterval = intervals.reduce(function(a,b){ return a+b; }, 0) / intervals.length;
-      var rawBpm = Math.round(60 / avgInterval);
+      // ── Step 4: half/double tempo correction with confidence ──
+      // Check harmonics: does 2x or 0.5x score higher?
+      var candidates = [rawBpm, rawBpm * 2, rawBpm / 2, rawBpm * 1.5, rawBpm / 1.5];
+      var scores = candidates.map(function(cBpm) {
+        if (cBpm < 60 || cBpm > 200) return { bpm: cBpm, score: -1 };
+        var cLag = (fps * 60) / cBpm;
+        var s = 0;
+        for (var t = 0; t < acLen - Math.round(cLag); t++) {
+          s += onset[t] * onset[t + Math.round(cLag)];
+        }
+        return { bpm: Math.round(cBpm), score: s / (acLen - Math.round(cLag)) };
+      });
 
-      // Normalise to 60-200 range
-      while (rawBpm < 60)  rawBpm *= 2;
-      while (rawBpm > 200) rawBpm /= 2;
-      rawBpm = Math.round(rawBpm);
+      scores.sort(function(a, b) { return b.score - a.score; });
+      var finalBpm = scores[0].score > 0 ? scores[0].bpm : Math.round(rawBpm);
 
-      setDetectedBpm(rawBpm);
-      setBpm(rawBpm);
+      // Clamp to valid range
+      while (finalBpm < 60)  finalBpm *= 2;
+      while (finalBpm > 200) finalBpm = Math.round(finalBpm / 2);
+
+      setDetectedBpm(finalBpm);
+      setBpm(finalBpm);
       setBpmDetecting(false);
     } catch(e) {
       console.warn("BPM detection failed:", e);
@@ -4571,6 +4694,118 @@ function StudioScreen({ user, onExit }) {
     }).catch(function(){});
   };
 
+  // ── Export mix ───────────────────────────────────────────────
+  var exportMix = async function() {
+    setExporting(true);
+    setExportProgress("Preparing audio...");
+    try {
+      var SR = 44100;
+
+      // Determine total project duration
+      var totalDur = beatDuration || 0;
+      tracks.forEach(function(t) {
+        t.takes.forEach(function(tk) {
+          var end = (tk.beatOffset || 0) + ((tk.trimEnd || tk.duration) - (tk.trimStart || 0));
+          if (end > totalDur) totalDur = end;
+        });
+      });
+      if (totalDur < 0.5) { setExportProgress("Nothing to export"); setTimeout(function(){ setExporting(false); setExportProgress(""); }, 2000); return; }
+
+      var numSamples = Math.ceil(totalDur * SR);
+      var offCtx = new OfflineAudioContext(2, numSamples, SR);
+
+      var decodeUrl = async function(url) {
+        var resp = await fetch(url);
+        var buf  = await resp.arrayBuffer();
+        return offCtx.decodeAudioData(buf);
+      };
+
+      // Mix beat
+      if (beatUrl) {
+        setExportProgress("Loading beat...");
+        try {
+          var beatBuf = await decodeUrl(beatUrl);
+          var beatSrc = offCtx.createBufferSource();
+          beatSrc.buffer = beatBuf;
+          beatSrc.connect(offCtx.destination);
+          beatSrc.start(0);
+        } catch(e) { console.warn("Beat load failed:", e); }
+      }
+
+      // Mix each vocal take
+      var trackCount = 0;
+      for (var ti = 0; ti < tracks.length; ti++) {
+        var track = tracks[ti];
+        if (track.muted) continue;
+        for (var ki = 0; ki < track.takes.length; ki++) {
+          var take = track.takes[ki];
+          if (!take.url) continue;
+          setExportProgress("Loading " + take.label + "...");
+          try {
+            var takeBuf = await decodeUrl(take.url);
+            var gainNode = offCtx.createGain();
+            gainNode.gain.value = track.volume || 1;
+            var takeSrc = offCtx.createBufferSource();
+            takeSrc.buffer = takeBuf;
+            takeSrc.connect(gainNode);
+            gainNode.connect(offCtx.destination);
+            var startAt  = take.beatOffset || 0;
+            var trimStart = take.trimStart || 0;
+            takeSrc.start(startAt, trimStart, (take.trimEnd || take.duration) - trimStart);
+            trackCount++;
+          } catch(e) { console.warn("Take load failed:", e); }
+        }
+      }
+
+      setExportProgress("Rendering mix...");
+      var rendered = await offCtx.startRendering();
+
+      // Convert AudioBuffer to WAV blob
+      setExportProgress("Encoding WAV...");
+      var wavBlob = audioBufferToWav(rendered);
+
+      // Trigger download
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(wavBlob);
+      a.download = (projectName || "project") + " - mix.wav";
+      a.click();
+
+      setExportProgress("Export complete!");
+      setTimeout(function(){ setExporting(false); setExportProgress(""); }, 2500);
+    } catch(e) {
+      console.error("Export failed:", e);
+      setExportProgress("Export failed. Try again.");
+      setTimeout(function(){ setExporting(false); setExportProgress(""); }, 3000);
+    }
+  };
+
+  // WAV encoder — converts AudioBuffer to .wav Blob
+  var audioBufferToWav = function(buffer) {
+    var numCh  = buffer.numberOfChannels;
+    var sr     = buffer.sampleRate;
+    var len    = buffer.length;
+    var byteLen = len * numCh * 2; // 16-bit
+    var ab     = new ArrayBuffer(44 + byteLen);
+    var view   = new DataView(ab);
+    var writeStr = function(o, s){ for (var i=0;i<s.length;i++) view.setUint8(o+i, s.charCodeAt(i)); };
+    writeStr(0,"RIFF"); view.setUint32(4, 36+byteLen, true);
+    writeStr(8,"WAVE"); writeStr(12,"fmt ");
+    view.setUint32(16,16,true); view.setUint16(20,1,true);
+    view.setUint16(22,numCh,true); view.setUint32(24,sr,true);
+    view.setUint32(28,sr*numCh*2,true); view.setUint16(32,numCh*2,true);
+    view.setUint16(34,16,true); writeStr(36,"data");
+    view.setUint32(40,byteLen,true);
+    var offset = 44;
+    for (var i=0; i<len; i++) {
+      for (var c=0; c<numCh; c++) {
+        var s = Math.max(-1, Math.min(1, buffer.getChannelData(c)[i]));
+        view.setInt16(offset, s < 0 ? s*0x8000 : s*0x7FFF, true);
+        offset += 2;
+      }
+    }
+    return new Blob([ab], { type:"audio/wav" });
+  };
+
   var saveProject = function() {
     try {
       var project = { id: Date.now(), name: projectName, beatName, savedAt: new Date().toISOString(),
@@ -4582,7 +4817,7 @@ function StudioScreen({ user, onExit }) {
       list = list.slice(0, 10);
       localStorage.setItem("bf_studio_projects", JSON.stringify(list));
       setSavedProjects(list);
-      setSaveStatus("Saved!"); setTimeout(function(){ setSaveStatus(""); }, 2000);
+      setSaveStatus("Saved!"); setIsSaved_proj(true); setTimeout(function(){ setSaveStatus(""); }, 2000);
     } catch(e) {}
   };
 
@@ -4604,6 +4839,7 @@ function StudioScreen({ user, onExit }) {
     var ext = file.name.split(".").pop().toLowerCase();
     if (!file.type.startsWith("audio/") && ["mp3","wav","m4a","aac","ogg"].indexOf(ext) < 0) { setError("Please upload an audio file"); return; }
     setError("");
+    setIsSaved_proj(false);
     var url = URL.createObjectURL(file);
     setBeatUrl(url);
     var name = file.name.replace(/\.[^.]+$/, "");
@@ -4623,24 +4859,74 @@ function StudioScreen({ user, onExit }) {
 
   var resumeCtx = function() { if (audioCtxRef.current && audioCtxRef.current.state==="suspended") audioCtxRef.current.resume(); };
 
+  var startAllTakes = function(startTime) {
+    // Play every take that has audio, offset from startTime
+    tracks.forEach(function(track) {
+      if (track.muted) return;
+      track.takes.forEach(function(take) {
+        if (!take.url) return;
+        var takeStart = take.beatOffset || 0;
+        var trimStart = take.trimStart || 0;
+        var trimEnd   = take.trimEnd   || take.duration;
+
+        // If startTime is past the end of this take, skip
+        if (startTime >= takeStart + (trimEnd - trimStart)) return;
+
+        var audioEl = new Audio(take.url);
+        audioEl.volume = track.volume || 1;
+
+        if (startTime >= takeStart) {
+          // We're starting inside this take
+          audioEl.currentTime = trimStart + (startTime - takeStart);
+          audioEl.play().catch(function(){});
+        } else {
+          // We're before this take — schedule it to start later
+          var delay = (takeStart - startTime) * 1000;
+          var timer = setTimeout(function() {
+            audioEl.currentTime = trimStart;
+            audioEl.play().catch(function(){});
+          }, delay);
+          audioEl._startTimer = timer;
+        }
+
+        takeAudiosRef.current[take.id] = audioEl;
+        audioEl.onended = function() { delete takeAudiosRef.current[take.id]; };
+      });
+    });
+  };
+
+  var stopAllTakes = function() {
+    Object.values(takeAudiosRef.current).forEach(function(a) {
+      if (a._startTimer) clearTimeout(a._startTimer);
+      a.pause();
+    });
+    takeAudiosRef.current = {};
+  };
+
   var togglePlay = function() {
     resumeCtx();
     if (isPlaying) {
       if (audioRef.current) audioRef.current.pause();
-      Object.values(takeAudiosRef.current).forEach(function(a){ a.pause(); });
+      stopAllTakes();
       setIsPlaying(false);
     } else {
+      var startTime = audioRef.current ? audioRef.current.currentTime : 0;
+      if (loopEnabled && loopOut > loopIn) startTime = loopIn;
+
       if (beatUrl && audioRef.current) {
-        if (loopEnabled && loopOut > loopIn) audioRef.current.currentTime = loopIn;
+        audioRef.current.currentTime = startTime;
         audioRef.current.play();
       }
+      startAllTakes(startTime);
       setIsPlaying(true);
     }
   };
 
   var rewind = function() {
-    if (audioRef.current) audioRef.current.currentTime = loopEnabled ? loopIn : 0;
-    Object.values(takeAudiosRef.current).forEach(function(a){ a.pause(); a.currentTime=0; });
+    var seekTo = loopEnabled ? loopIn : 0;
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = seekTo; }
+    stopAllTakes();
+    setBeatTime(seekTo);
     setIsPlaying(false);
   };
 
@@ -4681,16 +4967,50 @@ function StudioScreen({ user, onExit }) {
         var url  = URL.createObjectURL(blob);
         var elapsed = recTimerRef._elapsed || 0;
         var beatOffset = audioRef.current ? Math.max(0, audioRef.current.currentTime - elapsed) : 0;
+        var newTakeId = Date.now();
         setTracks(function(prev) {
           return prev.map(function(t) {
             if (t.id !== trackId) return t;
-            return { ...t, takes: [{ id: Date.now(), url, blob, mimeType, duration: elapsed,
+            return { ...t, takes: [{ id: newTakeId, url, blob, mimeType, duration: elapsed,
               beatOffset, trimStart: 0, trimEnd: elapsed,
               label: "Take " + (t.takes.length+1), date: new Date().toLocaleTimeString(),
               bars: Array.from({length:48},function(_,i){return 15+Math.sin(i*0.5)*12+Math.cos(i*0.3)*8;})
             }, ...t.takes] };
           });
         });
+
+        // Async: decode blob and compute real waveform bars
+        (async function(tId, b) {
+          try {
+            var ab = await b.arrayBuffer();
+            var actx = new OfflineAudioContext(1, 44100 * 60, 44100);
+            var decoded = await actx.decodeAudioData(ab);
+            var ch = decoded.getChannelData(0);
+            var numBars = 48;
+            var segLen = Math.floor(ch.length / numBars);
+            var realBars = [];
+            for (var bi = 0; bi < numBars; bi++) {
+              var rms = 0;
+              var start = bi * segLen;
+              for (var si = start; si < start + segLen && si < ch.length; si++) {
+                rms += ch[si] * ch[si];
+              }
+              rms = Math.sqrt(rms / segLen);
+              realBars.push(Math.round(rms * 200));
+            }
+            var maxBar = Math.max.apply(null, realBars) || 1;
+            realBars = realBars.map(function(v){ return Math.max(5, Math.round((v / maxBar) * 40)); });
+            setTracks(function(prev) {
+              return prev.map(function(t) {
+                return { ...t, takes: t.takes.map(function(tk) {
+                  if (tk.id !== tId) return tk;
+                  return { ...tk, bars: realBars };
+                }) };
+              });
+            });
+          } catch(e) {}
+        })(newTakeId, blob);
+
         stream.getTracks().forEach(function(t){ t.stop(); });
         clearInterval(recTimerRef.current); recTimerRef._elapsed = 0;
         setIsRecording(false); setRecordingTrackId(null);
@@ -4760,6 +5080,49 @@ function StudioScreen({ user, onExit }) {
   var addTrack    = function(){ setTracks(function(p){ return [...p, makeTrack(p.length+1)]; }); };
 
   // Snap offset to nearest beat
+  // Pinch-to-zoom on timeline/tracks area
+  var handlePinchStart = function(e) {
+    if (e.touches.length !== 2) return;
+    var dx = e.touches[0].clientX - e.touches[1].clientX;
+    var dy = e.touches[0].clientY - e.touches[1].clientY;
+    pinchStartRef.current = { dist: Math.sqrt(dx*dx + dy*dy), zoom: zoom };
+  };
+
+  var handlePinchMove = function(e) {
+    if (e.touches.length !== 2 || !pinchStartRef.current) return;
+    // Only prevent default when pinching — not single-finger scroll
+    e.preventDefault();
+    var dx = e.touches[0].clientX - e.touches[1].clientX;
+    var dy = e.touches[0].clientY - e.touches[1].clientY;
+    var dist = Math.sqrt(dx*dx + dy*dy);
+    var scale = dist / pinchStartRef.current.dist;
+    var newZoom = Math.min(4, Math.max(0.5, +(pinchStartRef.current.zoom * scale).toFixed(2)));
+    setZoom(newZoom);
+  };
+
+  var handlePinchEnd = function() {
+    pinchStartRef.current = null;
+  };
+
+  // Attach pinch ONLY to the waveform tracks area via native listeners
+  // (must be non-passive to call preventDefault, which stops page zoom)
+  useEffect(function() {
+    var el = tracksScrollRef.current;
+    if (!el) return;
+    var onStart = function(e) { handlePinchStart(e); };
+    var onMove  = function(e) { handlePinchMove(e); };
+    var onEnd   = function()  { handlePinchEnd(); };
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove",  onMove,  { passive: false });
+    el.addEventListener("touchend",   onEnd,   { passive: true });
+    return function() {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove",  onMove);
+      el.removeEventListener("touchend",   onEnd);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom]);
+
   var snapOffset = function(offset) {
     var clamped = Math.max(0, offset);
     if (!snapToGrid) return clamped;
@@ -4797,7 +5160,30 @@ function StudioScreen({ user, onExit }) {
   var _liPx  = loopIn  * _pps;
   var _loPx  = loopOut * _pps;
   var _onRS  = function(e) { setTimelineScroll(e.target.scrollLeft); if (tracksScrollRef.current) tracksScrollRef.current.scrollLeft = e.target.scrollLeft; };
-  var _onRC  = function(e) { if (settingLoop) return; var rect=e.currentTarget.getBoundingClientRect(); var x=e.clientX-rect.left+e.currentTarget.scrollLeft; if (audioRef.current && beatDuration>0) audioRef.current.currentTime=Math.min(x/_pps,beatDuration); };
+
+  var _seekTo = function(x, rulerEl) {
+    var scrollLeft = rulerEl ? rulerEl.scrollLeft : 0;
+    var t = Math.max(0, Math.min((x + scrollLeft) / _pps, beatDuration || 999));
+    if (audioRef.current) audioRef.current.currentTime = t;
+    setBeatTime(t);
+    if (isPlaying) {
+      stopAllTakes();
+      startAllTakes(t);
+    }
+  };
+
+  var _onRC  = function(e) {
+    if (settingLoop) return;
+    var rect = e.currentTarget.getBoundingClientRect();
+    _seekTo(e.clientX - rect.left, e.currentTarget);
+  };
+
+  var _onRTouch = function(e) {
+    if (settingLoop) return;
+    var rect = e.currentTarget.getBoundingClientRect();
+    _seekTo(e.touches[0].clientX - rect.left, e.currentTarget);
+  };
+
   var _onLD  = function(side) { return function(e) { e.stopPropagation(); var sx=e.clientX; var sv=side==='in'?loopIn:loopOut; var onM=function(me){ var dt=(me.clientX-sx)/_pps; var nT=Math.max(0,Math.min(sv+dt,beatDuration)); if(side==='in') setLoopIn(Math.min(nT,loopOut-0.5)); if(side==='out') setLoopOut(Math.max(nT,loopIn+0.5)); }; var onU=function(){ document.removeEventListener('mousemove',onM); document.removeEventListener('mouseup',onU); }; document.addEventListener('mousemove',onM); document.addEventListener('mouseup',onU); }; };
   var _labelW = 90; // must match track label column width
   var timelineRuler = (
@@ -4815,6 +5201,8 @@ function StudioScreen({ user, onExit }) {
         <div style={{ width:_labelW, flexShrink:0, background:"#0a0a0a", borderRight:"1px solid #141414", borderBottom:"1px solid #141414" }} />
         {/* Scrollable ruler area */}
         <div ref={timelineRulerRef} onScroll={_onRS} onClick={_onRC}
+          onTouchStart={_onRTouch} onTouchMove={function(e){e.stopPropagation();_onRTouch(e);}}
+          onMouseDown={function(e){ if(settingLoop) return; var el=e.currentTarget; var onM=function(me){ var rect=el.getBoundingClientRect(); _seekTo(me.clientX-rect.left,el); }; var onU=function(){ document.removeEventListener("mousemove",onM); document.removeEventListener("mouseup",onU); }; document.addEventListener("mousemove",onM); document.addEventListener("mouseup",onU); }}
           style={{ flex:1, overflowX: "auto", overflowY: "hidden", height:38, background: "#0c0c0c", borderBottom: "1px solid #141414", position: "relative", cursor: "pointer" }}>
           <div style={{ position: "relative", width:_rw, height: "100%", flexShrink:0 }}>
             {loopEnabled && _loPx > _liPx && (
@@ -4883,11 +5271,24 @@ function StudioScreen({ user, onExit }) {
 
   return (
     <div style={{ background:"#080808", height:"calc(100vh - env(safe-area-inset-bottom))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", position:"relative", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
-      onClick={function(){ setContextMenu(null); setShowProjects(false); setShowSettings(false); setShowAddMenu(false); setSelectedTake(null); }}
+      onClick={function(){ setContextMenu(null); setShowProjects(false); setShowSettings(false); setShowAddMenu(false); setSelectedTake(null); setShowProjectMenu(false); }}
       onMouseMove={draggingTake ? function(e){ var dx=e.clientX-draggingTake.startX; moveTake(draggingTake.trackId,draggingTake.takeId,draggingTake.startOffset+dx/_pps); } : null}
       onMouseUp={draggingTake ? function(){ setDraggingTake(null); } : null}
       onTouchMove={draggingTake ? function(e){ var dx=e.touches[0].clientX-draggingTake.startX; moveTake(draggingTake.trackId,draggingTake.takeId,draggingTake.startOffset+dx/_pps); } : null}
       onTouchEnd={draggingTake ? function(){ setDraggingTake(null); } : null}>
+
+      {/* Export overlay */}
+      {exporting && (
+        <div style={{ position:"absolute", inset:0, zIndex:9000, background:"rgba(0,0,0,0.88)", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:20 }}>
+          <div style={{ width:56, height:56, borderRadius:"50%", border:"3px solid rgba(192,38,211,0.3)", borderTop:"3px solid #C026D3", animation:"spin 1s linear infinite" }} />
+          <div style={{ color:"white", fontWeight:700, fontSize:16 }}>Exporting Mix</div>
+          <div style={{ color:"#888", fontSize:13 }}>{exportProgress}</div>
+          <div style={{ color:"#555", fontSize:11, textAlign:"center", maxWidth:240 }}>
+            Mixing beat + vocals into a single WAV file
+          </div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
 
       {/* Count-in */}
       {countIn > 0 && (
@@ -4904,18 +5305,17 @@ function StudioScreen({ user, onExit }) {
 
       {/* Context menu */}
       {contextMenu && (
-        <div style={{ position:"fixed", top:Math.min(contextMenu.y+4,window.innerHeight-230), left:Math.max(8,Math.min(contextMenu.x,window.innerWidth-185)), zIndex:5000, background:"#1c1c1c", border:"1px solid #2a2a2a", borderRadius:14, overflow:"hidden", minWidth:175, boxShadow:"0 8px 32px rgba(0,0,0,0.8)" }}
+        <div style={{ position:"fixed", top:Math.min(contextMenu.y+4,window.innerHeight-180), left:Math.max(8,Math.min(contextMenu.x,window.innerWidth-185)), zIndex:5000, background:"#1c1c1c", border:"1px solid #2a2a2a", borderRadius:14, overflow:"hidden", minWidth:175, boxShadow:"0 8px 32px rgba(0,0,0,0.8)" }}
           onClick={function(e){ e.stopPropagation(); }}>
           <div style={{ padding:"10px 16px 8px", color:"#555", fontSize:11, borderBottom:"1px solid #222" }}>{contextMenu.take.label}</div>
-          {[
-            {icon:"▶", label:"Play",      fn:function(){ playTake(contextMenu.take,tracks.find(function(t){return t.id===contextMenu.trackId;})); setContextMenu(null); }},
-            {icon:"✂", label:"Trim",      fn:function(){ setTrimming({trackId:contextMenu.trackId,takeId:contextMenu.take.id}); setContextMenu(null); }},
-            {icon:"⧉", label:"Duplicate", fn:function(){ duplicateTake(contextMenu.trackId,contextMenu.take); }},
-            {icon:"⬇", label:"Download",  fn:function(){ downloadTake(contextMenu.take,tracks.find(function(t){return t.id===contextMenu.trackId;})?.name||""); }},
-            {icon:"✕", label:"Delete",    fn:function(){ deleteTake(contextMenu.trackId,contextMenu.take.id); }, danger:true},
-          ].map(function(item){
-            return <button key={item.label} onClick={item.fn} style={{ display:"block", width:"100%", textAlign:"left", padding:"12px 16px", background:"none", border:"none", borderBottom:"1px solid #1a1a1a", color:item.danger?"#EF4444":"white", fontSize:14, cursor:"pointer" }}>{item.icon}  {item.label}</button>;
-          })}
+          <button onClick={function(){ duplicateTake(contextMenu.trackId,contextMenu.take); }}
+            style={{ display:"block", width:"100%", textAlign:"left", padding:"14px 16px", background:"none", border:"none", borderBottom:"1px solid #1a1a1a", color:"white", fontSize:14, cursor:"pointer" }}>
+            ⧉  Duplicate
+          </button>
+          <button onClick={function(){ deleteTake(contextMenu.trackId,contextMenu.take.id); }}
+            style={{ display:"block", width:"100%", textAlign:"left", padding:"14px 16px", background:"none", border:"none", color:"#EF4444", fontSize:14, cursor:"pointer" }}>
+            ✕  Delete
+          </button>
         </div>
       )}
 
@@ -4972,56 +5372,26 @@ function StudioScreen({ user, onExit }) {
 
             {/* ── TIME SIGNATURE ── */}
             <div style={{ margin:"0 16px 16px", background:"#1a1a1a", borderRadius:14, overflow:"hidden" }}>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px", borderBottom:"1px solid #222" }}>
-                <div style={{ color:"white", fontWeight:700, fontSize:13 }}>Time Signature</div>
-                <div style={{ color:"#888", fontSize:13 }}>{timeSigNum}/{timeSigDen}</div>
-              </div>
-              <div style={{ display:"flex", gap:16, padding:"14px 16px" }}>
-                {/* Numerator */}
-                <div style={{ flex:1 }}>
-                  <div style={{ color:"#555", fontSize:10, marginBottom:8, textAlign:"center" }}>Beats per bar</div>
-                  <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
-                    {[2,3,4,5,6,7].map(function(n){
-                      return (
-                        <button key={n} onClick={function(){ setTimeSigNum(n); }}
-                          style={{ background:timeSigNum===n?"rgba(192,38,211,0.2)":"#141414", border:"1px solid "+(timeSigNum===n?"#C026D3":"#222"), borderRadius:8, color:timeSigNum===n?"#C026D3":"#666", fontSize:14, fontWeight:timeSigNum===n?800:400, padding:"8px", cursor:"pointer" }}>
-                          {n}
-                        </button>
-                      );
-                    })}
-                  </div>
+              <button onClick={function(){ setShowTimeSigPicker(true); }}
+                style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 16px", background:"none", border:"none", cursor:"pointer" }}>
+                <span style={{ color:"white", fontWeight:700, fontSize:14 }}>Time Signature</span>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ color:"#C026D3", fontSize:16, fontWeight:700 }}>{timeSigNum}/{timeSigDen}</span>
+                  <span style={{ color:"#444", fontSize:12 }}>›</span>
                 </div>
-                {/* Denominator */}
-                <div style={{ flex:1 }}>
-                  <div style={{ color:"#555", fontSize:10, marginBottom:8, textAlign:"center" }}>Note value</div>
-                  <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
-                    {[2,4,8,16].map(function(n){
-                      return (
-                        <button key={n} onClick={function(){ setTimeSigDen(n); }}
-                          style={{ background:timeSigDen===n?"rgba(192,38,211,0.2)":"#141414", border:"1px solid "+(timeSigDen===n?"#C026D3":"#222"), borderRadius:8, color:timeSigDen===n?"#C026D3":"#666", fontSize:14, fontWeight:timeSigDen===n?800:400, padding:"8px", cursor:"pointer" }}>
-                          {n}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
+              </button>
             </div>
 
             {/* ── PROJECT KEY ── */}
             <div style={{ margin:"0 16px 16px", background:"#1a1a1a", borderRadius:14, overflow:"hidden" }}>
-              <div style={{ padding:"14px 16px", borderBottom:"1px solid #222", color:"white", fontWeight:700, fontSize:13 }}>Project Key</div>
-              <div style={{ display:"flex", flexWrap:"wrap", gap:6, padding:"12px 16px" }}>
-                {["C major","C# major","D major","D# major","E major","F major","F# major","G major","G# major","A major","A# major","B major",
-                  "C minor","C# minor","D minor","D# minor","E minor","F minor","F# minor","G minor","G# minor","A minor","A# minor","B minor"].map(function(k){
-                  return (
-                    <button key={k} onClick={function(){ setProjectKey(k); }}
-                      style={{ background:projectKey===k?"rgba(192,38,211,0.2)":"#141414", border:"1px solid "+(projectKey===k?"#C026D3":"#222"), borderRadius:20, color:projectKey===k?"#C026D3":"#666", fontSize:11, fontWeight:projectKey===k?700:400, padding:"5px 10px", cursor:"pointer" }}>
-                      {k}
-                    </button>
-                  );
-                })}
-              </div>
+              <button onClick={function(){ setShowKeyPicker(true); }}
+                style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 16px", background:"none", border:"none", cursor:"pointer" }}>
+                <span style={{ color:"white", fontWeight:700, fontSize:14 }}>Project Key</span>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ color:"#C026D3", fontSize:14, fontWeight:700 }}>{projectKey}</span>
+                  <span style={{ color:"#444", fontSize:12 }}>›</span>
+                </div>
+              </button>
             </div>
 
             {/* ── INPUT DEVICE ── */}
@@ -5108,6 +5478,65 @@ function StudioScreen({ user, onExit }) {
         </div>
       )}
 
+      {/* Time Signature Picker */}
+      {showTimeSigPicker && (
+        <div style={{ position:"absolute", inset:0, zIndex:9999, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"flex-end" }}
+          onClick={function(){ setShowTimeSigPicker(false); }}>
+          <div style={{ width:"100%", background:"#1c1c1c", borderRadius:"20px 20px 0 0", paddingBottom:"calc(20px + env(safe-area-inset-bottom))" }}
+            onClick={function(e){ e.stopPropagation(); }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px 12px", borderBottom:"1px solid #2a2a2a" }}>
+              <button onClick={function(){ setShowTimeSigPicker(false); }} style={{ background:"none", border:"none", color:"#888", fontSize:14, cursor:"pointer" }}>Cancel</button>
+              <div style={{ color:"white", fontWeight:700, fontSize:15 }}>Time Signature</div>
+              <button onClick={function(){ setShowTimeSigPicker(false); }} style={{ background:"none", border:"none", color:"#C026D3", fontSize:14, fontWeight:700, cursor:"pointer" }}>Done</button>
+            </div>
+            <div style={{ display:"flex", gap:0 }}>
+              {/* Numerator wheel */}
+              <WheelPicker
+                items={[2,3,4,5,6,7].map(String)}
+                value={String(timeSigNum)}
+                onChange={function(v){ setTimeSigNum(parseInt(v)); }}
+                onClose={function(){}}
+                label="Beats"
+                inline={true}
+              />
+              <div style={{ display:"flex", alignItems:"center", color:"white", fontSize:28, fontWeight:700, padding:"0 4px", userSelect:"none" }}>/</div>
+              {/* Denominator wheel */}
+              <WheelPicker
+                items={[2,4,8,16].map(String)}
+                value={String(timeSigDen)}
+                onChange={function(v){ setTimeSigDen(parseInt(v)); }}
+                onClose={function(){}}
+                label="Note"
+                inline={true}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Project Key Picker */}
+      {showKeyPicker && (
+        <div style={{ position:"absolute", inset:0, zIndex:9999, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"flex-end" }}
+          onClick={function(){ setShowKeyPicker(false); }}>
+          <div style={{ width:"100%", background:"#1c1c1c", borderRadius:"20px 20px 0 0", paddingBottom:"calc(20px + env(safe-area-inset-bottom))" }}
+            onClick={function(e){ e.stopPropagation(); }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px 12px", borderBottom:"1px solid #2a2a2a" }}>
+              <button onClick={function(){ setShowKeyPicker(false); }} style={{ background:"none", border:"none", color:"#888", fontSize:14, cursor:"pointer" }}>Cancel</button>
+              <div style={{ color:"white", fontWeight:700, fontSize:15 }}>Project Key</div>
+              <button onClick={function(){ setShowKeyPicker(false); }} style={{ background:"none", border:"none", color:"#C026D3", fontSize:14, fontWeight:700, cursor:"pointer" }}>Done</button>
+            </div>
+            <WheelPicker
+              items={["C major","C# major","D major","D# major","E major","F major","F# major","G major","G# major","A major","A# major","B major",
+                      "C minor","C# minor","D minor","D# minor","E minor","F minor","F# minor","G minor","G# minor","A minor","A# minor","B minor"]}
+              value={projectKey}
+              onChange={function(v){ setProjectKey(v); }}
+              onClose={function(){ setShowKeyPicker(false); }}
+              inline={true}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Projects */}
       {showProjects && (
         <div style={{ position:"absolute", inset:0, zIndex:900, background:"rgba(0,0,0,0.7)" }} onClick={function(){ setShowProjects(false); }}>
@@ -5132,29 +5561,116 @@ function StudioScreen({ user, onExit }) {
       {/* TOP BAR */}
       <div style={{ display:"flex", alignItems:"center", padding:"10px 12px", borderBottom:"1px solid #141414", background:"#0a0a0a", flexShrink:0, gap:8 }}>
         {/* Home / Exit button */}
-        <button onClick={onExit} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:14, width:32, height:32, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", flexShrink:0 }}>
+        <button onClick={function(){
+          if (!isSaved_proj && hasContent) { setUnsavedPrompt(true); }
+          else { onExit(); }
+        }} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:14, width:32, height:32, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", flexShrink:0 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="#888"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
         </button>
+
+        {/* Project name */}
         {renamingProject ? (
           <input autoFocus defaultValue={projectName}
-            onBlur={function(e){ setProjectName(e.target.value||projectName); setRenamingProject(false); }}
-            onKeyDown={function(e){ if(e.key==="Enter"){ setProjectName(e.target.value||projectName); setRenamingProject(false); } }}
+            onBlur={function(e){ setProjectName(e.target.value||projectName); setRenamingProject(false); setIsSaved_proj(false); }}
+            onKeyDown={function(e){ if(e.key==="Enter"){ setProjectName(e.target.value||projectName); setRenamingProject(false); setIsSaved_proj(false); } }}
             style={{ background:"none", border:"none", borderBottom:"1px solid #C026D3", color:"white", fontSize:14, fontWeight:700, outline:"none", flex:1, padding:"0 0 2px" }} />
         ) : (
-          <div style={{ flex:1, display:"flex", alignItems:"center", gap:8, overflow:"hidden" }}>
-            <span onClick={function(){ setRenamingProject(true); }} style={{ color:"white", fontWeight:700, fontSize:13, cursor:"text", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{projectName}</span>
-            <button onClick={function(){ setRenamingProject(true); }} style={{ background:"none", border:"none", color:"#444", fontSize:11, cursor:"pointer", flexShrink:0, padding:0 }}>✏️</button>
-          </div>
+          <span style={{ color:"white", fontWeight:700, fontSize:13, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{projectName}</span>
         )}
-        <div style={{ display:"flex", gap:5, flexShrink:0, alignItems:"center" }}>
-          <button onClick={function(e){ e.stopPropagation(); setShowProjects(function(v){return !v;}); }} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:9, fontWeight:700, padding:"5px 7px", cursor:"pointer" }}>PROJECTS</button>
-          {hasContent && (
-            <button onClick={saveProject} style={{ background:saveStatus?"rgba(34,197,94,0.2)":"rgba(192,38,211,0.15)", border:"1px solid "+(saveStatus?"#22C55E":"rgba(192,38,211,0.3)"), borderRadius:8, color:saveStatus?"#22C55E":"#C026D3", fontSize:9, fontWeight:700, padding:"5px 7px", cursor:"pointer" }}>{saveStatus||"SAVE"}</button>
-          )}
-          <button onClick={function(e){ e.stopPropagation(); setShowSettings(function(v){return !v;}); }} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:12, padding:"5px 8px", cursor:"pointer" }}>⚙</button>
-        </div>
+
+        {/* ... project menu button */}
+        <button onClick={function(e){ e.stopPropagation(); setShowProjectMenu(function(v){ return !v; }); setShowSettings(false); }}
+          style={{ background:showProjectMenu?"rgba(192,38,211,0.15)":"#1a1a1a", border:"1px solid "+(showProjectMenu?"rgba(192,38,211,0.4)":"#2a2a2a"), borderRadius:8, color:"#aaa", fontSize:13, fontWeight:700, padding:"5px 10px", cursor:"pointer", flexShrink:0, letterSpacing:2 }}>
+          ···
+        </button>
+
+        <button onClick={function(e){ e.stopPropagation(); setShowProjectMenu(false); setShowSettings(function(v){return !v;}); }} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:12, padding:"5px 8px", cursor:"pointer", flexShrink:0 }}>⚙</button>
         <div style={{ color: isRecording ? "#EF4444" : "#aaa", fontSize: 12, fontFamily: "monospace", fontWeight: 700, flexShrink: 0, background: "#141414", border: "1px solid #222", borderRadius: 6, padding: "4px 8px" }}>{fmt(beatTime)} / {fmt(beatDuration)}</div>
       </div>
+
+      {/* Project menu — full-screen backdrop closes on outside tap */}
+      {showProjectMenu && (
+        <div style={{ position:"absolute", inset:0, zIndex:5999 }}
+          onClick={function(){ setShowProjectMenu(false); }}>
+          <div style={{ position:"absolute", top:58, right:12, zIndex:6000, background:"#1c1c1c", border:"1px solid #2a2a2a", borderRadius:14, overflow:"hidden", minWidth:200, boxShadow:"0 8px 40px rgba(0,0,0,0.9)" }}
+            onClick={function(e){ e.stopPropagation(); }}>
+            {[
+              { label:"💾  Save",        fn: function(){ setShowProjectMenu(false); saveProject(); } },
+              { label:"📋  Save As…",    fn: function(){
+                setShowProjectMenu(false);
+                setTimeout(function(){
+                  var name = window.prompt("Save as:", projectName + " (copy)");
+                  if (name) { setProjectName(name); setIsSaved_proj(false); setTimeout(saveProject, 50); }
+                }, 50);
+              }},
+              { label:"✏️  Rename",      fn: function(){ setShowProjectMenu(false); setRenamingProject(true); } },
+              { label:"📂  All Projects",fn: function(){ setShowProjectMenu(false); setTimeout(function(){ setShowProjects(true); }, 50); } },
+              { label:"⬇️  Export Mix",  fn: function(){ setShowProjectMenu(false); setTimeout(exportMix, 50); }, highlight: true },
+              { label:"🆕  New Project", fn: function(){
+                setShowProjectMenu(false);
+                setTimeout(function(){
+                  if (!isSaved_proj && hasContent) {
+                    setUnsavedPrompt("new");
+                  } else {
+                    setBeatUrl(null); setBeatName("");
+                    setTracks([]); setProjectName("New Project");
+                    setIsSaved_proj(false); setBeatTime(0); setBeatDuration(0);
+                    setIsPlaying(false); setIsRecording(false);
+                  }
+                }, 50);
+              }, separator: true },
+            ].map(function(item){
+              return (
+                <button key={item.label} onClick={item.fn}
+                  style={{ display:"block", width:"100%", textAlign:"left", padding:"13px 16px", background:item.highlight?"rgba(192,38,211,0.08)":"none", border:"none", borderBottom:"1px solid #1a1a1a", color:item.label.includes("New")?"#C026D3":item.highlight?"#C026D3":"white", fontSize:14, cursor:"pointer", borderTop:item.separator?"1px solid #2a2a2a":"none" }}>
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Unsaved project prompt */}
+      {unsavedPrompt && (
+        <div style={{ position:"absolute", inset:0, zIndex:8000, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", padding:"32px" }}>
+          <div style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:20, padding:"28px 24px", width:"100%", maxWidth:320, textAlign:"center" }}>
+            <div style={{ color:"white", fontWeight:800, fontSize:18, marginBottom:10 }}>Unsaved Project</div>
+            <div style={{ color:"#888", fontSize:14, marginBottom:28, lineHeight:1.6 }}>
+              Do you want to save <span style={{ color:"white", fontWeight:700 }}>{projectName}</span> before {unsavedPrompt === "new" ? "starting a new project" : "leaving"}?
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              <button onClick={function(){
+                saveProject();
+                setUnsavedPrompt(false);
+                if (unsavedPrompt === "new") {
+                  setBeatUrl(null); setBeatFile(null); setBeatName("");
+                  setTracks([]); setProjectName("New Project");
+                  setIsSaved_proj(false); setBeatTime(0); setBeatDuration(0);
+                  setIsPlaying(false);
+                } else { onExit(); }
+              }} style={{ background:"linear-gradient(135deg,#C026D3,#7C3AED)", border:"none", borderRadius:12, color:"white", fontWeight:800, fontSize:15, padding:"14px", cursor:"pointer" }}>
+                Save {unsavedPrompt === "new" ? "& New" : "& Exit"}
+              </button>
+              <button onClick={function(){
+                setUnsavedPrompt(false);
+                if (unsavedPrompt === "new") {
+                  setBeatUrl(null); setBeatFile(null); setBeatName("");
+                  setTracks([]); setProjectName("New Project");
+                  setIsSaved_proj(false); setBeatTime(0); setBeatDuration(0);
+                  setIsPlaying(false);
+                } else { onExit(); }
+              }} style={{ background:"rgba(239,68,68,0.15)", border:"1px solid rgba(239,68,68,0.3)", borderRadius:12, color:"#EF4444", fontWeight:700, fontSize:15, padding:"14px", cursor:"pointer" }}>
+                Don't Save
+              </button>
+              <button onClick={function(){ setUnsavedPrompt(false); }}
+                style={{ background:"none", border:"1px solid #2a2a2a", borderRadius:12, color:"#666", fontWeight:600, fontSize:14, padding:"12px", cursor:"pointer" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Metronome indicator */}
       {metronomeOn && (
@@ -5169,9 +5685,8 @@ function StudioScreen({ user, onExit }) {
 
       {/* TRACKS AREA — always visible */}
       <div ref={tracksScrollRef}
-        style={{ flex:1, overflowY:"auto", overflowX:"hidden", minHeight:0 }}
+        style={{ flex:1, overflowY:"auto", overflowX:"auto", minHeight:0 }}
         onScroll={function(e){
-          setTimelineScroll(e.target.scrollLeft);
           if (timelineRulerRef.current) timelineRulerRef.current.scrollLeft = e.target.scrollLeft;
         }}>
 
@@ -5245,6 +5760,7 @@ function StudioScreen({ user, onExit }) {
                             onDoubleClick={function(){ take.url&&playTake(take,track); }}
                             onMouseDown={function(e){ e.stopPropagation(); setDraggingTake({trackId:track.id,takeId:take.id,startX:e.clientX,startOffset:take.beatOffset||0}); setSelectedTake({trackId:track.id,takeId:take.id}); }}
                             onTouchStart={function(e){
+                              if (e.touches.length === 2) return; // let pinch bubble to waveform zone
                               var startX=e.touches[0].clientX;
                               var timer=setTimeout(function(){ handleTakeLongPress(e,track.id,take); },600);
                               e.currentTarget._lp=timer;
@@ -5252,6 +5768,7 @@ function StudioScreen({ user, onExit }) {
                               setSelectedTake({trackId:track.id,takeId:take.id});
                             }}
                             onTouchMove={function(e){
+                              if (e.touches.length === 2) { clearTimeout(e.currentTarget._lp); return; }
                               clearTimeout(e.currentTarget._lp);
                               var dd=e.currentTarget._dd;
                               if(dd){ var dx=e.touches[0].clientX-dd.startX; if(Math.abs(dx)>4){ setDraggingTake(dd); moveTake(dd.trackId,dd.takeId,dd.startOffset+dx/_pps); } }
@@ -5269,19 +5786,6 @@ function StudioScreen({ user, onExit }) {
                     </div>
                   )}
                 </div>
-              </div>
-              {/* Per-track record button */}
-              <div style={{ background:"#080808", padding:"4px 8px 4px 96px", borderTop:"1px solid #0f0f0f" }}>
-                {isRecordingThis ? (
-                  <button onClick={stopRecording} style={{ background:"#EF444422", border:"1px solid #EF4444", borderRadius:6, color:"#EF4444", fontSize:11, fontWeight:700, padding:"4px 14px", cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
-                    <div style={{ width:8, height:8, background:"#EF4444", borderRadius:2 }} /> Stop
-                  </button>
-                ) : (
-                  <button onClick={function(){ if(!isRecording&&!countIn) startCountIn(track.id); }} disabled={isRecording||countIn>0}
-                    style={{ background:"#141414", border:"1px solid #2a2a2a", borderRadius:6, color:(isRecording||countIn>0)?"#333":"#EF4444", fontSize:11, fontWeight:700, padding:"4px 14px", cursor:(isRecording||countIn>0)?"not-allowed":"pointer", display:"flex", alignItems:"center", gap:6 }}>
-                    <div style={{ width:8, height:8, background:(isRecording||countIn>0)?"#333":"#EF4444", borderRadius:"50%" }} /> Record
-                  </button>
-                )}
               </div>
             </div>
           );
@@ -5325,8 +5829,17 @@ function StudioScreen({ user, onExit }) {
         </div>
       )}
 
-      {/* TRANSPORT */}
-      <div style={{ background:"#0a0a0a", borderTop:"1px solid #141414", padding:"8px 16px", flexShrink:0, zIndex:50 }}>
+      {/* TRANSPORT — fixed above iPhone home indicator */}
+      <div style={{
+        background:"#0a0a0a",
+        borderTop:"1px solid #141414",
+        padding:"8px 16px",
+        paddingBottom:"calc(8px + env(safe-area-inset-bottom))",
+        flexShrink:0,
+        zIndex:50,
+        position:"sticky",
+        bottom:0,
+      }}>
         {beatUrl && (
           <div style={{ position:"relative", marginBottom:8 }}>
             <input type="range" min={0} max={beatDuration||100} step={0.1} value={beatTime}
@@ -5631,7 +6144,7 @@ export default function BeatFinder() {
               : "calc(100vh - calc(72px + env(safe-area-inset-bottom)))",
             WebkitOverflowScrolling: "touch",
           }}>
-            {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} />}
+            {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} />}
