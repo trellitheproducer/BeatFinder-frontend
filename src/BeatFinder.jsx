@@ -4534,7 +4534,9 @@ function StudioScreen({ user, onExit }) {
   const [timelineScroll, setTimelineScroll]= useState(0);
   const timelineRulerRef = useRef(null);
   const tracksScrollRef  = useRef(null);
-  const pinchStartRef    = useRef(null); // {dist, zoom}
+  const pinchStartRef    = useRef(null);
+  const zoomRef          = useRef(zoom); // keep ref in sync so pinch handler always has current zoom
+  useEffect(function(){ zoomRef.current = zoom; }, [zoom]);
 
   var detectBpm = async function() {
     if (!beatUrl) return;
@@ -5085,12 +5087,11 @@ function StudioScreen({ user, onExit }) {
     if (e.touches.length !== 2) return;
     var dx = e.touches[0].clientX - e.touches[1].clientX;
     var dy = e.touches[0].clientY - e.touches[1].clientY;
-    pinchStartRef.current = { dist: Math.sqrt(dx*dx + dy*dy), zoom: zoom };
+    pinchStartRef.current = { dist: Math.sqrt(dx*dx + dy*dy), zoom: zoomRef.current };
   };
 
   var handlePinchMove = function(e) {
     if (e.touches.length !== 2 || !pinchStartRef.current) return;
-    // Only prevent default when pinching — not single-finger scroll
     e.preventDefault();
     var dx = e.touches[0].clientX - e.touches[1].clientX;
     var dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -5105,7 +5106,6 @@ function StudioScreen({ user, onExit }) {
   };
 
   // Attach pinch ONLY to the waveform tracks area via native listeners
-  // (must be non-passive to call preventDefault, which stops page zoom)
   useEffect(function() {
     var el = tracksScrollRef.current;
     if (!el) return;
@@ -5120,8 +5120,7 @@ function StudioScreen({ user, onExit }) {
       el.removeEventListener("touchmove",  onMove);
       el.removeEventListener("touchend",   onEnd);
     };
-  // zoom dependency intentionally omitted - pinch handler captures it via ref
-  }, [zoom]);
+  }, []);
 
   var snapOffset = function(offset) {
     var clamped = Math.max(0, offset);
@@ -5271,7 +5270,10 @@ function StudioScreen({ user, onExit }) {
 
   return (
     <div style={{ background:"#080808", height:"calc(100vh - env(safe-area-inset-bottom))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", position:"relative", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
-      onClick={function(){ setContextMenu(null); setShowProjects(false); setShowSettings(false); setShowAddMenu(false); setSelectedTake(null); setShowProjectMenu(false); }}
+      onClick={function(e){ 
+        if(e.target===e.currentTarget){ setContextMenu(null); setShowProjects(false); setShowSettings(false); setShowAddMenu(false); setSelectedTake(null); setShowProjectMenu(false); }
+        else { setContextMenu(null); setShowProjects(false); setShowSettings(false); setShowAddMenu(false); setShowProjectMenu(false); }
+      }}
       onMouseMove={draggingTake ? function(e){ var dx=e.clientX-draggingTake.startX; moveTake(draggingTake.trackId,draggingTake.takeId,draggingTake.startOffset+dx/_pps); } : null}
       onMouseUp={draggingTake ? function(){ setDraggingTake(null); } : null}
       onTouchMove={draggingTake ? function(e){ var dx=e.touches[0].clientX-draggingTake.startX; moveTake(draggingTake.trackId,draggingTake.takeId,draggingTake.startOffset+dx/_pps); } : null}
@@ -5305,16 +5307,16 @@ function StudioScreen({ user, onExit }) {
 
       {/* Context menu */}
       {contextMenu && (
-        <div style={{ position:"fixed", top:Math.min(contextMenu.y+4,window.innerHeight-180), left:Math.max(8,Math.min(contextMenu.x,window.innerWidth-185)), zIndex:5000, background:"#1c1c1c", border:"1px solid #2a2a2a", borderRadius:14, overflow:"hidden", minWidth:175, boxShadow:"0 8px 32px rgba(0,0,0,0.8)" }}
+        <div style={{ position:"fixed", top:Math.min(contextMenu.y+4,window.innerHeight-140), left:Math.max(8,Math.min(contextMenu.x,window.innerWidth-200)), zIndex:5000, background:"#1c1c1c", border:"1px solid #2a2a2a", borderRadius:14, overflow:"hidden", minWidth:190, boxShadow:"0 8px 32px rgba(0,0,0,0.9)" }}
           onClick={function(e){ e.stopPropagation(); }}>
-          <div style={{ padding:"10px 16px 8px", color:"#555", fontSize:11, borderBottom:"1px solid #222" }}>{contextMenu.take.label}</div>
-          <button onClick={function(){ duplicateTake(contextMenu.trackId,contextMenu.take); }}
-            style={{ display:"block", width:"100%", textAlign:"left", padding:"14px 16px", background:"none", border:"none", borderBottom:"1px solid #1a1a1a", color:"white", fontSize:14, cursor:"pointer" }}>
+          <div style={{ padding:"10px 16px 8px", color:"#555", fontSize:11, fontWeight:600, borderBottom:"1px solid #222" }}>{contextMenu.take.label}</div>
+          <button onClick={function(){ duplicateTake(contextMenu.trackId,contextMenu.take); setContextMenu(null); }}
+            style={{ display:"block", width:"100%", textAlign:"left", padding:"13px 16px", background:"none", border:"none", borderBottom:"1px solid #1a1a1a", color:"white", fontSize:14, cursor:"pointer" }}>
             ⧉  Duplicate
           </button>
-          <button onClick={function(){ deleteTake(contextMenu.trackId,contextMenu.take.id); }}
-            style={{ display:"block", width:"100%", textAlign:"left", padding:"14px 16px", background:"none", border:"none", color:"#EF4444", fontSize:14, cursor:"pointer" }}>
-            ✕  Delete
+          <button onClick={function(){ deleteTake(contextMenu.trackId,contextMenu.take.id); setContextMenu(null); }}
+            style={{ display:"block", width:"100%", textAlign:"left", padding:"13px 16px", background:"none", border:"none", color:"#EF4444", fontSize:14, cursor:"pointer" }}>
+            🗑  Delete
           </button>
         </div>
       )}
@@ -5753,28 +5755,72 @@ function StudioScreen({ user, onExit }) {
                               border:"2px solid "+(isSelected?track.color:track.color+"66"),
                               boxShadow:isSelected?"0 0 0 2px "+track.color+"44":"none",
                               overflow:"hidden", cursor:isDragging?"grabbing":"grab",
-                              opacity:take.url?1:0.5, userSelect:"none",
+                              opacity:take.url?1:0.5, userSelect:"none", WebkitUserSelect:"none",
                               transition:isDragging?"none":"box-shadow 0.15s",
+                              touchAction:"none",
                             }}
-                            onClick={function(e){ e.stopPropagation(); setSelectedTake({trackId:track.id,takeId:take.id}); }}
-                            onDoubleClick={function(){ take.url&&playTake(take,track); }}
-                            onMouseDown={function(e){ e.stopPropagation(); setDraggingTake({trackId:track.id,takeId:take.id,startX:e.clientX,startOffset:take.beatOffset||0}); setSelectedTake({trackId:track.id,takeId:take.id}); }}
+                            onClick={function(e){
+                              e.stopPropagation();
+                              setSelectedTake({trackId:track.id,takeId:take.id});
+                            }}
+                            onMouseDown={function(e){
+                              e.stopPropagation();
+                              setSelectedTake({trackId:track.id,takeId:take.id});
+                              var startX=e.clientX;
+                              var startOffset=take.beatOffset||0;
+                              var moved=false;
+                              var onMove=function(me){
+                                var dx=me.clientX-startX;
+                                if(!moved && Math.abs(dx)<4) return;
+                                moved=true;
+                                setDraggingTake({trackId:track.id,takeId:take.id,startX,startOffset});
+                                moveTake(track.id,take.id,startOffset+dx/_pps);
+                              };
+                              var onUp=function(){
+                                document.removeEventListener("mousemove",onMove);
+                                document.removeEventListener("mouseup",onUp);
+                                setDraggingTake(null);
+                              };
+                              document.addEventListener("mousemove",onMove);
+                              document.addEventListener("mouseup",onUp);
+                            }}
                             onTouchStart={function(e){
-                              if (e.touches.length === 2) return; // let pinch bubble to waveform zone
+                              if(e.touches.length===2) return;
+                              e.stopPropagation();
                               var startX=e.touches[0].clientX;
-                              var timer=setTimeout(function(){ handleTakeLongPress(e,track.id,take); },600);
-                              e.currentTarget._lp=timer;
-                              e.currentTarget._dd={trackId:track.id,takeId:take.id,startX,startOffset:take.beatOffset||0};
+                              var startOffset=take.beatOffset||0;
+                              var moved=false;
+                              var lp=setTimeout(function(){
+                                if(!moved){
+                                  var rect=e.currentTarget.getBoundingClientRect();
+                                  setContextMenu({trackId:track.id,take,x:rect.left,y:rect.bottom});
+                                }
+                              },600);
+                              e.currentTarget._lp=lp;
+                              e.currentTarget._ts={startX,startOffset};
                               setSelectedTake({trackId:track.id,takeId:take.id});
                             }}
                             onTouchMove={function(e){
-                              if (e.touches.length === 2) { clearTimeout(e.currentTarget._lp); return; }
+                              if(e.touches.length===2) return;
+                              e.stopPropagation();
                               clearTimeout(e.currentTarget._lp);
-                              var dd=e.currentTarget._dd;
-                              if(dd){ var dx=e.touches[0].clientX-dd.startX; if(Math.abs(dx)>4){ setDraggingTake(dd); moveTake(dd.trackId,dd.takeId,dd.startOffset+dx/_pps); } }
+                              var ts=e.currentTarget._ts;
+                              if(!ts) return;
+                              var dx=e.touches[0].clientX-ts.startX;
+                              if(Math.abs(dx)>5){
+                                setDraggingTake({trackId:track.id,takeId:take.id,startX:ts.startX,startOffset:ts.startOffset});
+                                moveTake(track.id,take.id,ts.startOffset+dx/_pps);
+                              }
                             }}
-                            onTouchEnd={function(e){ clearTimeout(e.currentTarget._lp); setDraggingTake(null); }}
-                            onContextMenu={function(e){ handleTakeLongPress(e,track.id,take); }}>
+                            onTouchEnd={function(e){
+                              clearTimeout(e.currentTarget._lp);
+                              setDraggingTake(null);
+                            }}
+                            onContextMenu={function(e){
+                              e.preventDefault();
+                              var rect=e.currentTarget.getBoundingClientRect();
+                              setContextMenu({trackId:track.id,take,x:rect.left,y:rect.bottom});
+                            }}>
                             <div style={{ display:"flex", alignItems:"center", padding:"3px 3px", gap:0.5, height:"100%", pointerEvents:"none" }}>
                               {take.bars.map(function(v,i){ return <div key={i} style={{ flex:1, background:track.color, borderRadius:0.5, height:Math.max(2,(v/40)*28), opacity:0.85 }} />; })}
                             </div>
