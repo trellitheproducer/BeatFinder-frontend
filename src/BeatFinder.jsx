@@ -43,6 +43,7 @@ const LOADER_STYLE = `
   .bf-bar:nth-child(4) { height:22px; animation-delay:0.45s; }
   .bf-bar:nth-child(5) { height:14px; animation-delay:0.6s; }
   .bf-loader { animation: bf-fade 0.2s ease; }
+
 `;
 
 function BFLoader({ text, type }) {
@@ -4346,8 +4347,6 @@ function WheelPicker({ items, value, onChange, onClose, title, inline, label }) 
       <div ref={scrollRef} onScroll={handleScroll}
         style={{ height:"100%", overflowY:"auto", scrollSnapType:"y mandatory", WebkitOverflowScrolling:"touch",
           scrollbarWidth:"none", msOverflowStyle:"none" }}>
-        <style>{".wheel-hide-scroll::-webkit-scrollbar{display:none}"}</style>
-        <div className="wheel-hide-scroll" />
         <div style={{ height:itemH * Math.floor(visCount / 2) }} />
         {items.map(function(item) {
           var isSelected = item === value;
@@ -5280,13 +5279,13 @@ function StudioScreen({ user, onExit }) {
       {/* Export overlay */}
       {exporting && (
         <div style={{ position:"absolute", inset:0, zIndex:9000, background:"rgba(0,0,0,0.88)", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:20 }}>
-          <div style={{ width:56, height:56, borderRadius:"50%", border:"3px solid rgba(192,38,211,0.3)", borderTop:"3px solid #C026D3", animation:"spin 1s linear infinite" }} />
+          <div style={{ width:56, height:56, borderRadius:"50%", border:"3px solid rgba(192,38,211,0.3)", borderTop:"3px solid #C026D3", animation:"bf-spin 0.8s linear infinite" }} />
           <div style={{ color:"white", fontWeight:700, fontSize:16 }}>Exporting Mix</div>
           <div style={{ color:"#888", fontSize:13 }}>{exportProgress}</div>
           <div style={{ color:"#555", fontSize:11, textAlign:"center", maxWidth:240 }}>
             Mixing beat + vocals into a single WAV file
           </div>
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+  
         </div>
       )}
 
@@ -5644,7 +5643,7 @@ function StudioScreen({ user, onExit }) {
                 saveProject();
                 setUnsavedPrompt(false);
                 if (unsavedPrompt === "new") {
-                  setBeatUrl(null); setBeatFile(null); setBeatName("");
+                  setBeatUrl(null); setBeatName("");
                   setTracks([]); setProjectName("New Project");
                   setIsSaved_proj(false); setBeatTime(0); setBeatDuration(0);
                   setIsPlaying(false);
@@ -5655,7 +5654,7 @@ function StudioScreen({ user, onExit }) {
               <button onClick={function(){
                 setUnsavedPrompt(false);
                 if (unsavedPrompt === "new") {
-                  setBeatUrl(null); setBeatFile(null); setBeatName("");
+                  setBeatUrl(null); setBeatName("");
                   setTracks([]); setProjectName("New Project");
                   setIsSaved_proj(false); setBeatTime(0); setBeatDuration(0);
                   setIsPlaying(false);
@@ -6251,4 +6250,4 @@ export default function BeatFinder() {
       </div>
     </div>
   );
-  }
+}
