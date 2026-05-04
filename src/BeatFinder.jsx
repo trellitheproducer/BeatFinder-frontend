@@ -4516,6 +4516,30 @@ function StudioScreen({ user }) {
     }
   }, [beatTime, isPlaying]);
 
+  // Fallback: poll audio time on iOS where onTimeUpdate can be unreliable
+  useEffect(function() {
+    if (!isPlaying || !audioRef.current) return;
+    var id = setInterval(function() {
+      if (audioRef.current) {
+        setBeatTime(audioRef.current.currentTime);
+        if (audioRef.current.duration && !beatDuration) {
+          setBeatDuration(audioRef.current.duration);
+        }
+      }
+    }, 250);
+    return function() { clearInterval(id); };
+  }, [isPlaying]);
+
+  // Keep beatTime updating during recording when no beat file loaded
+  useEffect(function() {
+    if (!isRecording || beatUrl) return;
+    var start = Date.now();
+    var id = setInterval(function() {
+      setBeatTime(Math.floor((Date.now() - start) / 1000));
+    }, 250);
+    return function() { clearInterval(id); };
+  }, [isRecording, beatUrl]);
+
   // Tap tempo
   var handleTapTempo = function() {
     var now = Date.now();
@@ -4858,7 +4882,7 @@ function StudioScreen({ user }) {
   ) : null;
 
   return (
-    <div style={{ background:"#080808", height:"calc(100vh - calc(68px + env(safe-area-inset-bottom)))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", position:"relative" }}
+    <div style={{ background:"#080808", height:"calc(100vh - calc(68px + env(safe-area-inset-bottom)))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", position:"relative", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
       onClick={function(){ setContextMenu(null); setShowProjects(false); setShowSettings(false); setShowAddMenu(false); setSelectedTake(null); }}
       onMouseMove={draggingTake ? function(e){ var dx=e.clientX-draggingTake.startX; moveTake(draggingTake.trackId,draggingTake.takeId,draggingTake.startOffset+dx/_pps); } : null}
       onMouseUp={draggingTake ? function(){ setDraggingTake(null); } : null}
@@ -5298,7 +5322,7 @@ function StudioScreen({ user }) {
       )}
 
       {/* TRANSPORT */}
-      <div style={{ background:"#0a0a0a", borderTop:"1px solid #141414", padding:"8px 16px", flexShrink:0 }}>
+      <div style={{ background:"#0a0a0a", borderTop:"1px solid #141414", padding:"8px 16px", flexShrink:0, zIndex:50 }}>
         {beatUrl && (
           <div style={{ position:"relative", marginBottom:8 }}>
             <input type="range" min={0} max={beatDuration||100} step={0.1} value={beatTime}
