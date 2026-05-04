@@ -4329,6 +4329,10 @@ function StudioScreen({ user }) {
   const [audioDevices,     setAudioDevices]    = useState([]);
   const [tapTimes,         setTapTimes]        = useState([]);
   const lastTapRef         = useRef(0);
+  const [selectedTake,     setSelectedTake]    = useState(null); // {trackId, takeId}
+  const [snapToGrid,       setSnapToGrid]      = useState(true);
+  const [draggingTake,     setDraggingTake]    = useState(null); // {trackId, takeId, startX, startOffset}
+  const [renamingProject,  setRenamingProject] = useState(false);
 
   const audioRef      = useRef(null);
   const mediaRecRef   = useRef(null);
@@ -4596,15 +4600,17 @@ function StudioScreen({ user }) {
   var resumeCtx = function() { if (audioCtxRef.current && audioCtxRef.current.state==="suspended") audioCtxRef.current.resume(); };
 
   var togglePlay = function() {
-    if (!audioRef.current || !beatUrl) return;
     resumeCtx();
     if (isPlaying) {
-      audioRef.current.pause();
+      if (audioRef.current) audioRef.current.pause();
       Object.values(takeAudiosRef.current).forEach(function(a){ a.pause(); });
       setIsPlaying(false);
     } else {
-      if (loopEnabled && loopOut > loopIn) audioRef.current.currentTime = loopIn;
-      audioRef.current.play(); setIsPlaying(true);
+      if (beatUrl && audioRef.current) {
+        if (loopEnabled && loopOut > loopIn) audioRef.current.currentTime = loopIn;
+        audioRef.current.play();
+      }
+      setIsPlaying(true);
     }
   };
 
@@ -4727,6 +4733,29 @@ function StudioScreen({ user }) {
   var setVolume   = function(id,v){ setTracks(function(p){ return p.map(function(t){ return t.id===id?{...t,volume:v}:t; }); }); };
   var renameTrack = function(id,n){ setTracks(function(p){ return p.map(function(t){ return t.id===id?{...t,name:n}:t; }); }); setEditingTrack(null); };
   var deleteTrack = function(id){ setTracks(function(p){ return p.filter(function(t){ return t.id!==id; }); }); };
+  var addTrack    = function(){ setTracks(function(p){ return [...p, makeTrack(p.length+1)]; }); };
+
+  // Snap offset to nearest beat
+  var snapOffset = function(offset) {
+    var clamped = Math.max(0, offset);
+    if (!snapToGrid) return clamped;
+    var spb = 60 / bpm;
+    return Math.round(clamped / spb) * spb;
+  };
+
+  // Move take to new beat offset
+  var moveTake = function(trackId, takeId, newOffset) {
+    var snapped = snapOffset(newOffset);
+    setTracks(function(prev) {
+      return prev.map(function(t) {
+        if (t.id !== trackId) return t;
+        return { ...t, takes: t.takes.map(function(tk) {
+          if (tk.id !== takeId) return tk;
+          return { ...tk, beatOffset: snapped };
+        }) };
+      });
+    });
+  };
 
   var progress   = beatDuration > 0 ? (beatTime/beatDuration)*100 : 0;
   var bars       = Array.from(analyserData);
@@ -4746,6 +4775,7 @@ function StudioScreen({ user }) {
   var _onRS  = function(e) { setTimelineScroll(e.target.scrollLeft); if (tracksScrollRef.current) tracksScrollRef.current.scrollLeft = e.target.scrollLeft; };
   var _onRC  = function(e) { if (settingLoop) return; var rect=e.currentTarget.getBoundingClientRect(); var x=e.clientX-rect.left+e.currentTarget.scrollLeft; if (audioRef.current && beatDuration>0) audioRef.current.currentTime=Math.min(x/_pps,beatDuration); };
   var _onLD  = function(side) { return function(e) { e.stopPropagation(); var sx=e.clientX; var sv=side==='in'?loopIn:loopOut; var onM=function(me){ var dt=(me.clientX-sx)/_pps; var nT=Math.max(0,Math.min(sv+dt,beatDuration)); if(side==='in') setLoopIn(Math.min(nT,loopOut-0.5)); if(side==='out') setLoopOut(Math.max(nT,loopIn+0.5)); }; var onU=function(){ document.removeEventListener('mousemove',onM); document.removeEventListener('mouseup',onU); }; document.addEventListener('mousemove',onM); document.addEventListener('mouseup',onU); }; };
+  var _labelW = 90; // must match track label column width
   var timelineRuler = (
     <div style={{ flexShrink:0 }}>
       <div style={{ display: "flex", alignItems: "center", gap:6, padding: "4px 12px", background: "#090909", borderBottom: "1px solid #0f0f0f" }}>
@@ -4756,31 +4786,37 @@ function StudioScreen({ user }) {
         <button onClick={function(){ setLoopEnabled(function(v){return !v;}); }} style={{ background:loopEnabled?"rgba(59,130,246,0.2)":"#141414", border:"1px solid "+(loopEnabled?"#3B82F6":"#222"), borderRadius:6, color:loopEnabled?"#3B82F6":"#555", fontSize:10, fontWeight:700, padding:"3px 8px", cursor:"pointer" }}>LOOP</button>
         {loopEnabled && <span style={{ color: "#3B82F6", fontSize:10, fontFamily: "monospace" }}>{fmt(loopIn)} - {fmt(loopOut)}</span>}
       </div>
-      <div ref={timelineRulerRef} onScroll={_onRS} onClick={_onRC}
-        style={{ overflowX: "auto", overflowY: "hidden", height:38, background: "#0c0c0c", borderBottom: "1px solid #141414", position: "relative", cursor: "pointer" }}>
-        <div style={{ position: "relative", width:_rw, height: "100%", flexShrink:0 }}>
-          {loopEnabled && _loPx > _liPx && (
-            <div style={{ position: "absolute", left:_liPx, width:_loPx-_liPx, top:0, bottom:0, background: "rgba(59,130,246,0.12)", zIndex:1 }}>
-              <div onMouseDown={_onLD('in')} style={{ position: "absolute", left:-2, top:0, bottom:0, width:6, background: "#3B82F6", cursor: "ew-resize", zIndex:3, borderRadius: "2px 0 0 2px" }} />
-              <div onMouseDown={_onLD('out')} style={{ position: "absolute", right:-2, top:0, bottom:0, width:6, background: "#3B82F6", cursor: "ew-resize", zIndex:3, borderRadius: "0 2px 2px 0" }} />
-              <span style={{ position: "absolute", top:2, left:8, color: "#3B82F6", fontSize:9, fontWeight:700, pointerEvents: "none" }}>LOOP</span>
-            </div>
-          )}
-          {Array.from({length:_tbars+1}, function(_,bi){
-            var bx = bi * _sbar * _pps;
-            return (
-              <div key={bi} style={{ position: "absolute", left:bx, top:0, bottom:0 }}>
-                <div style={{ position: "absolute", left:0, top:0, bottom:0, width:1, background:bi===0?'#333': "#1e1e1e" }} />
-                {bi < _tbars && <span style={{ position: "absolute", top:3, left:4, color: "#555", fontSize:9, fontFamily: "monospace", fontWeight:700, userSelect: "none" }}>{bi+1}</span>}
-                {Array.from({length:_bpb}, function(_,di){
-                  if (di===0) return null;
-                  return <div key={di} style={{ position: "absolute", left:di*_spb*_pps, top:16, bottom:0, width:1, background: "#181818" }}><span style={{ position: "absolute", top:2, left:2, color: "#252525", fontSize:7, fontFamily: "monospace", userSelect: "none" }}>{di+1}</span></div>;
-                })}
+      <div style={{ display:"flex" }}>
+        {/* Label column spacer — matches track label width */}
+        <div style={{ width:_labelW, flexShrink:0, background:"#0a0a0a", borderRight:"1px solid #141414", borderBottom:"1px solid #141414" }} />
+        {/* Scrollable ruler area */}
+        <div ref={timelineRulerRef} onScroll={_onRS} onClick={_onRC}
+          style={{ flex:1, overflowX: "auto", overflowY: "hidden", height:38, background: "#0c0c0c", borderBottom: "1px solid #141414", position: "relative", cursor: "pointer" }}>
+          <div style={{ position: "relative", width:_rw, height: "100%", flexShrink:0 }}>
+            {loopEnabled && _loPx > _liPx && (
+              <div style={{ position: "absolute", left:_liPx, width:_loPx-_liPx, top:0, bottom:0, background: "rgba(59,130,246,0.12)", zIndex:1 }}>
+                <div onMouseDown={_onLD('in')} style={{ position: "absolute", left:-2, top:0, bottom:0, width:6, background: "#3B82F6", cursor: "ew-resize", zIndex:3, borderRadius: "2px 0 0 2px" }} />
+                <div onMouseDown={_onLD('out')} style={{ position: "absolute", right:-2, top:0, bottom:0, width:6, background: "#3B82F6", cursor: "ew-resize", zIndex:3, borderRadius: "0 2px 2px 0" }} />
+                <span style={{ position: "absolute", top:2, left:8, color: "#3B82F6", fontSize:9, fontWeight:700, pointerEvents: "none" }}>LOOP</span>
               </div>
-            );
-          })}
-          <div style={{ position: "absolute", left:_phPx, top:0, bottom:0, width:2, background: "#C026D3", zIndex:10, pointerEvents: "none" }}>
-            <div style={{ position: "absolute", top:0, left:-5, width:0, height:0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "8px solid #C026D3" }} />
+            )}
+            {Array.from({length:_tbars+1}, function(_,bi){
+              var bx = bi * _sbar * _pps;
+              return (
+                <div key={bi} style={{ position: "absolute", left:bx, top:0, bottom:0 }}>
+                  <div style={{ position: "absolute", left:0, top:0, bottom:0, width:1, background:bi===0?"#444":"#1e1e1e" }} />
+                  {bi < _tbars && <span style={{ position: "absolute", top:3, left:4, color: "#666", fontSize:9, fontFamily: "monospace", fontWeight:700, userSelect: "none" }}>{bi+1}</span>}
+                  {Array.from({length:_bpb}, function(_,di){
+                    if (di===0) return null;
+                    return <div key={di} style={{ position: "absolute", left:di*_spb*_pps, top:16, bottom:0, width:1, background: "#181818" }}><span style={{ position: "absolute", top:2, left:2, color: "#252525", fontSize:7, fontFamily: "monospace", userSelect: "none" }}>{di+1}</span></div>;
+                  })}
+                </div>
+              );
+            })}
+            {/* Playhead */}
+            <div style={{ position: "absolute", left:_phPx, top:0, bottom:0, width:2, background: "#C026D3", zIndex:10, pointerEvents: "none" }}>
+              <div style={{ position: "absolute", top:0, left:-5, width:0, height:0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "8px solid #C026D3" }} />
+            </div>
           </div>
         </div>
       </div>
@@ -4823,7 +4859,11 @@ function StudioScreen({ user }) {
 
   return (
     <div style={{ background:"#080808", height:"calc(100vh - calc(68px + env(safe-area-inset-bottom)))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", position:"relative" }}
-      onClick={function(){ setContextMenu(null); setShowProjects(false); setShowSettings(false); setShowAddMenu(false); }}>
+      onClick={function(){ setContextMenu(null); setShowProjects(false); setShowSettings(false); setShowAddMenu(false); setSelectedTake(null); }}
+      onMouseMove={draggingTake ? function(e){ var dx=e.clientX-draggingTake.startX; moveTake(draggingTake.trackId,draggingTake.takeId,draggingTake.startOffset+dx/_pps); } : null}
+      onMouseUp={draggingTake ? function(){ setDraggingTake(null); } : null}
+      onTouchMove={draggingTake ? function(e){ var dx=e.touches[0].clientX-draggingTake.startX; moveTake(draggingTake.trackId,draggingTake.takeId,draggingTake.startOffset+dx/_pps); } : null}
+      onTouchEnd={draggingTake ? function(){ setDraggingTake(null); } : null}>
 
       {/* Count-in */}
       {countIn > 0 && (
@@ -4844,11 +4884,11 @@ function StudioScreen({ user }) {
           onClick={function(e){ e.stopPropagation(); }}>
           <div style={{ padding:"10px 16px 8px", color:"#555", fontSize:11, borderBottom:"1px solid #222" }}>{contextMenu.take.label}</div>
           {[
-            {icon:"▶",label:"Play",      fn:function(){ playTake(contextMenu.take,tracks.find(function(t){return t.id===contextMenu.trackId;})); setContextMenu(null); }},
-            {icon:"✂",label:"Trim",      fn:function(){ setTrimming({trackId:contextMenu.trackId,takeId:contextMenu.take.id}); setContextMenu(null); }},
-            {icon:"⬇",label:"Download",  fn:function(){ downloadTake(contextMenu.take,tracks.find(function(t){return t.id===contextMenu.trackId;})?.name||""); }},
-            {icon:"⧉",label:"Duplicate", fn:function(){ duplicateTake(contextMenu.trackId,contextMenu.take); }},
-            {icon:"✕",label:"Delete",    fn:function(){ deleteTake(contextMenu.trackId,contextMenu.take.id); }, danger:true},
+            {icon:"▶", label:"Play",      fn:function(){ playTake(contextMenu.take,tracks.find(function(t){return t.id===contextMenu.trackId;})); setContextMenu(null); }},
+            {icon:"✂", label:"Trim",      fn:function(){ setTrimming({trackId:contextMenu.trackId,takeId:contextMenu.take.id}); setContextMenu(null); }},
+            {icon:"⧉", label:"Duplicate", fn:function(){ duplicateTake(contextMenu.trackId,contextMenu.take); }},
+            {icon:"⬇", label:"Download",  fn:function(){ downloadTake(contextMenu.take,tracks.find(function(t){return t.id===contextMenu.trackId;})?.name||""); }},
+            {icon:"✕", label:"Delete",    fn:function(){ deleteTake(contextMenu.trackId,contextMenu.take.id); }, danger:true},
           ].map(function(item){
             return <button key={item.label} onClick={item.fn} style={{ display:"block", width:"100%", textAlign:"left", padding:"12px 16px", background:"none", border:"none", borderBottom:"1px solid #1a1a1a", color:item.danger?"#EF4444":"white", fontSize:14, cursor:"pointer" }}>{item.icon}  {item.label}</button>;
           })}
@@ -5000,6 +5040,20 @@ function StudioScreen({ user }) {
               </div>
             </div>
 
+            {/* ── SNAP TO GRID ── */}
+            <div style={{ margin:"0 16px 16px", background:"#1a1a1a", borderRadius:14, overflow:"hidden" }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px" }}>
+                <div>
+                  <div style={{ color:"white", fontWeight:700, fontSize:13 }}>Snap to Grid</div>
+                  <div style={{ color:"#555", fontSize:11, marginTop:2 }}>Snap audio clips to nearest beat when moving</div>
+                </div>
+                <button onClick={function(){ setSnapToGrid(function(v){ return !v; }); }}
+                  style={{ background:snapToGrid?"rgba(192,38,211,0.2)":"#141414", border:"1px solid "+(snapToGrid?"#C026D3":"#2a2a2a"), borderRadius:20, color:snapToGrid?"#C026D3":"#555", fontWeight:700, fontSize:12, padding:"6px 16px", cursor:"pointer" }}>
+                  {snapToGrid?"ON":"OFF"}
+                </button>
+              </div>
+            </div>
+
             {/* ── METRONOME ── */}
             <div style={{ margin:"0 16px 16px", background:"#1a1a1a", borderRadius:14, overflow:"hidden" }}>
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px" }}>
@@ -5053,13 +5107,16 @@ function StudioScreen({ user }) {
 
       {/* TOP BAR */}
       <div style={{ display:"flex", alignItems:"center", padding:"10px 12px", borderBottom:"1px solid #141414", background:"#0a0a0a", flexShrink:0, gap:8 }}>
-        {editingProject ? (
+        {renamingProject ? (
           <input autoFocus defaultValue={projectName}
-            onBlur={function(e){ setProjectName(e.target.value||projectName); setEditingProject(false); }}
-            onKeyDown={function(e){ if(e.key==="Enter"){ setProjectName(e.target.value||projectName); setEditingProject(false); } }}
-            style={{ background:"none", border:"none", borderBottom:"1px solid #C026D3", color:"white", fontSize:13, fontWeight:700, outline:"none", flex:1, padding:0 }} />
+            onBlur={function(e){ setProjectName(e.target.value||projectName); setRenamingProject(false); }}
+            onKeyDown={function(e){ if(e.key==="Enter"){ setProjectName(e.target.value||projectName); setRenamingProject(false); } }}
+            style={{ background:"none", border:"none", borderBottom:"1px solid #C026D3", color:"white", fontSize:14, fontWeight:700, outline:"none", flex:1, padding:"0 0 2px" }} />
         ) : (
-          <div onClick={function(){ setEditingProject(true); }} style={{ color:"white", fontWeight:700, fontSize:13, cursor:"text", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{projectName}</div>
+          <div style={{ flex:1, display:"flex", alignItems:"center", gap:8, overflow:"hidden" }}>
+            <span onClick={function(){ setRenamingProject(true); }} style={{ color:"white", fontWeight:700, fontSize:13, cursor:"text", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{projectName}</span>
+            <button onClick={function(){ setRenamingProject(true); }} style={{ background:"none", border:"none", color:"#444", fontSize:11, cursor:"pointer", flexShrink:0, padding:0 }}>✏️</button>
+          </div>
         )}
         <div style={{ display:"flex", gap:5, flexShrink:0, alignItems:"center" }}>
           <button onClick={function(e){ e.stopPropagation(); setShowProjects(function(v){return !v;}); }} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:9, fontWeight:700, padding:"5px 7px", cursor:"pointer" }}>PROJECTS</button>
@@ -5084,7 +5141,7 @@ function StudioScreen({ user }) {
 
       {/* TRACKS AREA — always visible */}
       <div ref={tracksScrollRef}
-        style={{ flex:1, overflowY:"auto", overflowX:"hidden" }}
+        style={{ flex:1, overflowY:"auto", overflowX:"hidden", minHeight:0 }}
         onScroll={function(e){
           setTimelineScroll(e.target.scrollLeft);
           if (timelineRulerRef.current) timelineRulerRef.current.scrollLeft = e.target.scrollLeft;
@@ -5131,29 +5188,53 @@ function StudioScreen({ user }) {
                     <button onClick={function(){ deleteTrack(track.id); }} style={{ background:"none", border:"none", color:"#333", fontSize:10, cursor:"pointer", padding:"0 2px", marginLeft:"auto" }}>✕</button>
                   </div>
                 </div>
-                <div style={{ flex:1, overflowX:"auto", display:"flex", alignItems:"stretch", background:"#090909" }}>
+                <div style={{ flex:1, position:"relative", background:"#090909", overflow:"hidden", minHeight:58 }}>
                   {isRecordingThis ? (
-                    <div style={{ flex:1, minWidth:200, background:"linear-gradient(180deg,rgba(239,68,68,0.1),rgba(239,68,68,0.03))", display:"flex", alignItems:"center", padding:"6px 4px", gap:1 }}>
+                    <div style={{ position:"absolute", inset:0, background:"linear-gradient(180deg,rgba(239,68,68,0.1),rgba(239,68,68,0.03))", display:"flex", alignItems:"center", padding:"6px 4px", gap:1 }}>
                       {Array.from(recBars).map(function(v,i){ return <div key={i} style={{ flex:1, background:"#EF4444", borderRadius:1, height:Math.max(3,(v/90)*40) }} />; })}
                     </div>
                   ) : track.takes.length===0 ? (
-                    <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center" }}><span style={{ color:"#222", fontSize:11 }}>No takes yet</span></div>
+                    <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center" }}><span style={{ color:"#222", fontSize:11 }}>No takes yet</span></div>
                   ) : (
-                    <div style={{ display:"flex", gap:3, padding:"6px", alignItems:"center" }}>
+                    <div style={{ position:"relative", width:Math.max(300, _rw), height:"100%" }}>
                       {track.takes.map(function(take){
-                        var w = take.duration>0 ? Math.max(60,((take.trimEnd||take.duration)-(take.trimStart||0))/take.duration*110) : 110;
+                        var isSelected = selectedTake && selectedTake.trackId===track.id && selectedTake.takeId===take.id;
+                        var isDragging = draggingTake && draggingTake.trackId===track.id && draggingTake.takeId===take.id;
+                        var takeLen = (take.trimEnd||take.duration||4) - (take.trimStart||0);
+                        var takeW = Math.max(60, takeLen * _pps);
+                        var takeLeft = (take.beatOffset||0) * _pps;
                         return (
                           <div key={take.id}
-                            onContextMenu={function(e){ handleTakeLongPress(e,track.id,take); }}
-                            onTouchStart={function(e){ var t=setTimeout(function(){ handleTakeLongPress(e,track.id,take); },500); e.currentTarget._lp=t; }}
-                            onTouchEnd={function(e){ clearTimeout(e.currentTarget._lp); }}
-                            onClick={function(){ take.url&&playTake(take,track); }}
-                            style={{ flexShrink:0, width:w, height:46, borderRadius:6, background:"linear-gradient(180deg,"+track.color+"22,"+track.color+"08)", border:"1px solid "+track.color+"44", overflow:"hidden", cursor:take.url?"pointer":"default", position:"relative", opacity:take.url?1:0.5 }}>
-                            <div style={{ display:"flex", alignItems:"center", padding:"4px 3px", gap:0.5, height:"100%" }}>
-                              {take.bars.map(function(v,i){ return <div key={i} style={{ flex:1, background:track.color, borderRadius:0.5, height:Math.max(2,(v/40)*30), opacity:0.7 }} />; })}
+                            style={{ position:"absolute", left:takeLeft, top:4, width:takeW, height:"calc(100% - 8px)",
+                              borderRadius:6, background:"linear-gradient(180deg,"+track.color+"33,"+track.color+"10)",
+                              border:"2px solid "+(isSelected?track.color:track.color+"66"),
+                              boxShadow:isSelected?"0 0 0 2px "+track.color+"44":"none",
+                              overflow:"hidden", cursor:isDragging?"grabbing":"grab",
+                              opacity:take.url?1:0.5, userSelect:"none",
+                              transition:isDragging?"none":"box-shadow 0.15s",
+                            }}
+                            onClick={function(e){ e.stopPropagation(); setSelectedTake({trackId:track.id,takeId:take.id}); }}
+                            onDoubleClick={function(){ take.url&&playTake(take,track); }}
+                            onMouseDown={function(e){ e.stopPropagation(); setDraggingTake({trackId:track.id,takeId:take.id,startX:e.clientX,startOffset:take.beatOffset||0}); setSelectedTake({trackId:track.id,takeId:take.id}); }}
+                            onTouchStart={function(e){
+                              var startX=e.touches[0].clientX;
+                              var timer=setTimeout(function(){ handleTakeLongPress(e,track.id,take); },600);
+                              e.currentTarget._lp=timer;
+                              e.currentTarget._dd={trackId:track.id,takeId:take.id,startX,startOffset:take.beatOffset||0};
+                              setSelectedTake({trackId:track.id,takeId:take.id});
+                            }}
+                            onTouchMove={function(e){
+                              clearTimeout(e.currentTarget._lp);
+                              var dd=e.currentTarget._dd;
+                              if(dd){ var dx=e.touches[0].clientX-dd.startX; if(Math.abs(dx)>4){ setDraggingTake(dd); moveTake(dd.trackId,dd.takeId,dd.startOffset+dx/_pps); } }
+                            }}
+                            onTouchEnd={function(e){ clearTimeout(e.currentTarget._lp); setDraggingTake(null); }}
+                            onContextMenu={function(e){ handleTakeLongPress(e,track.id,take); }}>
+                            <div style={{ display:"flex", alignItems:"center", padding:"3px 3px", gap:0.5, height:"100%", pointerEvents:"none" }}>
+                              {take.bars.map(function(v,i){ return <div key={i} style={{ flex:1, background:track.color, borderRadius:0.5, height:Math.max(2,(v/40)*28), opacity:0.85 }} />; })}
                             </div>
-                            <div style={{ position:"absolute", bottom:2, left:4, color:"rgba(255,255,255,0.5)", fontSize:8 }}>{take.label}</div>
-                            {(take.trimStart>0||(take.trimEnd<take.duration&&take.trimEnd>0)) && <div style={{ position:"absolute", top:2, right:4, color:"rgba(255,255,255,0.4)", fontSize:8 }}>✂</div>}
+                            <div style={{ position:"absolute", bottom:2, left:5, color:"rgba(255,255,255,0.6)", fontSize:8, fontWeight:600, pointerEvents:"none" }}>{take.label}</div>
+                            {isSelected && <div style={{ position:"absolute", top:3, right:6, fontSize:8, color:track.color }}>●</div>}
                           </div>
                         );
                       })}
@@ -5239,7 +5320,7 @@ function StudioScreen({ user }) {
             {isRecording?<div style={{ width:16, height:16, background:"white", borderRadius:3 }} />:<div style={{ width:20, height:20, background:"white", borderRadius:"50%" }} />}
           </button>
 
-          <button onClick={togglePlay} disabled={!beatUrl} style={{ width:40, height:40, borderRadius:"50%", background:beatUrl?"linear-gradient(135deg,#C026D3,#7C3AED)":"#141414", border:"none", cursor:beatUrl?"pointer":"not-allowed", opacity:beatUrl?1:0.4, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <button onClick={togglePlay} disabled={!beatUrl && tracks.every(function(t){return t.takes.length===0;})} style={{ width:40, height:40, borderRadius:"50%", background:"linear-gradient(135deg,#C026D3,#7C3AED)", border:"none", cursor:"pointer", opacity:(beatUrl || tracks.some(function(t){return t.takes.length>0;}))?1:0.4, display:"flex", alignItems:"center", justifyContent:"center" }}>
             {isPlaying?<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>}
           </button>
 
