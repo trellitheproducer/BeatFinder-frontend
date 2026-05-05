@@ -6083,55 +6083,288 @@ function StudioScreen({ user, onExit }) {
         const t = tracks.find(function(tr){ return tr.id===fxTrackId; });
         if (!t) return null;
         const fx = t.effects || {};
-        const upd = function(section, patch){ updateTrack(t.id, { effects:{ ...t.effects, [section]:{ ...t.effects[section], ...patch } } }); };
-        return (
-          <div style={{ background:"#0f0f0f",borderTop:"1px solid #1e1e1e",padding:"10px 14px",flexShrink:0 }} onClick={function(e){ e.stopPropagation(); }}>
-            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8 }}>
-              <span style={{ color:"#8B5CF6",fontWeight:700,fontSize:12 }}>FX — {t.name}</span>
-              <button onClick={function(){ setFxTrackId(null); }} style={{ background:"none",border:"none",color:"#555",fontSize:16,cursor:"pointer" }}>✕</button>
+        const upd = function(section, patch){ updateTrack(t.id, { effects:{ ...t.effects, [section]:{ ...(t.effects[section]||{}), ...patch } } }); };
+
+        // ── Rotary Knob component ──
+        const Knob = function({ label, value, min, max, step, unit, onChange, color }) {
+          const knobRef = useRef(null);
+          const startRef = useRef(null);
+          color = color || "#8B5CF6";
+          const norm = (value - min) / (max - min);
+          const angle = -140 + norm * 280; // -140° to +140°
+          const r = 22, cx = 28, cy = 28;
+          const toXY = function(deg) {
+            const rad = (deg - 90) * Math.PI / 180;
+            return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+          };
+          const startA = toXY(-140), endA = toXY(angle);
+          const largeArc = norm > 0.5 ? 1 : 0;
+          const arcD = `M ${startA.x} ${startA.y} A ${r} ${r} 0 ${largeArc} 1 ${endA.x} ${endA.y}`;
+          const dotA = toXY(angle);
+
+          const onPointerDown = function(e) {
+            e.preventDefault();
+            startRef.current = { y: e.clientY, val: value };
+            const onMove = function(me) {
+              const dy = startRef.current.y - me.clientY;
+              const range = max - min;
+              const newVal = Math.min(max, Math.max(min, startRef.current.val + (dy / 100) * range));
+              const snapped = step ? Math.round(newVal / step) * step : newVal;
+              onChange(+snapped.toFixed(3));
+            };
+            const onUp = function() { document.removeEventListener("pointermove", onMove); document.removeEventListener("pointerup", onUp); };
+            document.addEventListener("pointermove", onMove);
+            document.addEventListener("pointerup", onUp);
+          };
+
+          return (
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, userSelect:"none" }}>
+              <svg ref={knobRef} width={56} height={56} style={{ cursor:"ns-resize", touchAction:"none" }} onPointerDown={onPointerDown}>
+                {/* Track */}
+                <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1a1a1a" strokeWidth={5} />
+                {/* Arc */}
+                <path d={arcD} fill="none" stroke={color} strokeWidth={4} strokeLinecap="round" />
+                {/* Dot */}
+                <circle cx={dotA.x} cy={dotA.y} r={3.5} fill={color} />
+                {/* Centre */}
+                <circle cx={cx} cy={cy} r={10} fill="#111" stroke="#2a2a2a" strokeWidth={1.5} />
+              </svg>
+              <div style={{ color:"white", fontSize:10, fontWeight:700 }}>{unit === "dB" ? (value >= 0 ? "+" : "") + value + "dB" : unit === "%" ? Math.round(value * 100) + "%" : value + (unit || "")}</div>
+              <div style={{ color:"#555", fontSize:8 }}>{label}</div>
             </div>
-            <div style={{ display:"flex",gap:8 }}>
-              {/* Compressor */}
-              <div style={{ flex:1,background:"#1a1a1a",borderRadius:10,padding:"8px" }}>
-                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6 }}>
-                  <span style={{ color:"#aaa",fontSize:10,fontWeight:700 }}>COMP</span>
-                  <button onClick={function(){ upd("compressor",{on:!fx.compressor?.on}); }} style={{ background:fx.compressor?.on?"rgba(139,92,246,0.3)":"#222",border:"none",borderRadius:4,color:fx.compressor?.on?"#8B5CF6":"#555",fontSize:8,padding:"2px 6px",cursor:"pointer",fontWeight:700 }}>{fx.compressor?.on?"ON":"OFF"}</button>
+          );
+        };
+
+        // ── EQ Graph ──
+        const EQGraph = function({ eq, onDrag }) {
+          const W = 280, H = 120;
+          const bands = [
+            { key:"low",  freq:200,  gain:eq.low||0,  color:"#3B82F6" },
+            { key:"mid",  freq:1000, gain:eq.mid||0,  color:"#22C55E" },
+            { key:"high", freq:4000, gain:eq.high||0, color:"#F59E0B" },
+          ];
+          const freqToX = function(f) { return W * Math.log10(f / 20) / Math.log10(20000 / 20); };
+          const gainToY = function(g) { return H / 2 - (g / 15) * (H / 2 - 10); };
+
+          // Draw frequency response curve by summing all band responses
+          const freqResp = function(f) {
+            return bands.reduce(function(sum, b) {
+              const ratio = f / b.freq;
+              const q = 1.0;
+              return sum + b.gain / (1 + q * q * (ratio - 1/ratio) * (ratio - 1/ratio));
+            }, 0);
+          };
+
+          const pts = [];
+          for (let i = 0; i <= 100; i++) {
+            const f = 20 * Math.pow(20000/20, i/100);
+            pts.push(`${freqToX(f)},${gainToY(freqResp(f))}`);
+          }
+          const curvePath = "M " + pts.join(" L ");
+
+          const dragging = useRef(null);
+          const svgRef = useRef(null);
+
+          const onMouseDown = function(e, key) {
+            e.preventDefault(); e.stopPropagation();
+            dragging.current = key;
+            const move = function(me) {
+              if (!dragging.current || !svgRef.current) return;
+              const rect = svgRef.current.getBoundingClientRect();
+              const y = me.clientY - rect.top;
+              const gain = Math.max(-15, Math.min(15, ((H/2 - y) / (H/2 - 10)) * 15));
+              onDrag(dragging.current, +gain.toFixed(1));
+            };
+            const up = function() { dragging.current = null; document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+            document.addEventListener("mousemove", move);
+            document.addEventListener("mouseup", up);
+          };
+
+          const onTouchStart = function(e, key) {
+            e.preventDefault(); e.stopPropagation();
+            dragging.current = key;
+          };
+          const onTouchMove = function(e) {
+            if (!dragging.current || !svgRef.current) return;
+            const rect = svgRef.current.getBoundingClientRect();
+            const y = e.touches[0].clientY - rect.top;
+            const gain = Math.max(-15, Math.min(15, ((H/2 - y) / (H/2 - 10)) * 15));
+            onDrag(dragging.current, +gain.toFixed(1));
+          };
+
+          return (
+            <svg ref={svgRef} width={W} height={H} style={{ display:"block", background:"#0a0a0a", borderRadius:8, touchAction:"none" }}
+              onTouchMove={onTouchMove} onTouchEnd={function(){ dragging.current = null; }}>
+              {/* Grid */}
+              {[20,50,100,200,500,1000,2000,5000,10000,20000].map(function(f){
+                const x = freqToX(f);
+                return <line key={f} x1={x} y1={0} x2={x} y2={H} stroke="#1a1a1a" strokeWidth={1} />;
+              })}
+              {[-12,-6,0,6,12].map(function(g){
+                const y = gainToY(g);
+                return <g key={g}><line x1={0} y1={y} x2={W} y2={y} stroke={g===0?"#2a2a2a":"#141414"} strokeWidth={g===0?1.5:1} /><text x={3} y={y-2} fill="#333" fontSize={7}>{g>0?"+":""}{g}</text></g>;
+              })}
+              {/* Frequency labels */}
+              {[100,1000,10000].map(function(f){ return <text key={f} x={freqToX(f)} y={H-3} fill="#333" fontSize={7} textAnchor="middle">{f>=1000?f/1000+"k":f}</text>; })}
+              {/* Curve */}
+              <path d={curvePath} fill="none" stroke="#8B5CF6" strokeWidth={2} strokeLinecap="round" />
+              {/* Fill under curve */}
+              <path d={curvePath + ` L ${W},${H/2} L 0,${H/2} Z`} fill="rgba(139,92,246,0.08)" />
+              {/* Draggable band handles */}
+              {bands.map(function(b){
+                return (
+                  <circle key={b.key} cx={freqToX(b.freq)} cy={gainToY(b.gain)} r={7} fill={b.color} stroke="#0a0a0a" strokeWidth={2}
+                    style={{ cursor:"ns-resize" }}
+                    onMouseDown={function(e){ onMouseDown(e, b.key); }}
+                    onTouchStart={function(e){ onTouchStart(e, b.key); }} />
+                );
+              })}
+            </svg>
+          );
+        };
+
+        // ── Compressor curve ──
+        const CompGraph = function({ threshold, ratio }) {
+          const W = 160, H = 120;
+          const dBtoP = function(db) { return (db + 60) / 60; }; // 0-1 for -60 to 0dB
+          const pts = [];
+          for (let i = 0; i <= 60; i++) {
+            const inDb = -60 + i;
+            const outDb = inDb < threshold ? inDb : threshold + (inDb - threshold) / ratio;
+            const x = W * dBtoP(inDb);
+            const y = H * (1 - dBtoP(outDb));
+            pts.push(`${x},${y}`);
+          }
+          const thX = W * dBtoP(threshold);
+          return (
+            <svg width={W} height={H} style={{ display:"block", background:"#0a0a0a", borderRadius:8 }}>
+              <line x1={0} y1={H} x2={W} y2={0} stroke="#1e1e1e" strokeWidth={1} strokeDasharray="4 3" />
+              <path d={"M " + pts.join(" L ")} fill="none" stroke="#8B5CF6" strokeWidth={2} strokeLinecap="round" />
+              <path d={"M " + pts.join(" L ") + ` L ${W} ${H} L 0 ${H} Z`} fill="rgba(139,92,246,0.1)" />
+              <line x1={thX} y1={0} x2={thX} y2={H} stroke="#EF4444" strokeWidth={1} strokeDasharray="3 2" />
+              <text x={thX+3} y={12} fill="#EF4444" fontSize={8}>{threshold}dB</text>
+              <text x={3} y={10} fill="#555" fontSize={7}>OUT</text>
+              <text x={W-20} y={H-3} fill="#555" fontSize={7}>IN</text>
+            </svg>
+          );
+        };
+
+        // ── Reverb visualiser ──
+        const ReverbViz = function({ wet, roomSize }) {
+          const W = 160, H = 80;
+          const decay = roomSize * 3;
+          const lines = [];
+          for (let i = 0; i < 24; i++) {
+            const x = (i / 23) * W;
+            const amp = Math.exp(-i / (decay * 4)) * (H/2 - 4) * wet;
+            const jitter = (Math.sin(i * 7.3) * 0.4 + 0.6) * amp;
+            lines.push(<line key={i} x1={x} y1={H/2 - jitter} x2={x} y2={H/2 + jitter} stroke={`rgba(139,92,246,${0.3 + 0.7 * Math.exp(-i/6)})`} strokeWidth={2} />);
+          }
+          return (
+            <svg width={W} height={H} style={{ display:"block", background:"#0a0a0a", borderRadius:8 }}>
+              <line x1={0} y1={H/2} x2={W} y2={H/2} stroke="#1a1a1a" strokeWidth={1} />
+              {lines}
+            </svg>
+          );
+        };
+
+        return (
+          <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.95)", display:"flex", flexDirection:"column" }} onClick={function(e){ e.stopPropagation(); }}>
+            {/* Header */}
+            <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0 }}>
+              <div style={{ width:8, height:8, borderRadius:"50%", background:t.color, marginRight:8 }} />
+              <span style={{ color:"white", fontWeight:800, fontSize:14, flex:1 }}>{t.name} — Effects</span>
+              <button onClick={function(){ setFxTrackId(null); }} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:13, padding:"5px 12px", cursor:"pointer" }}>Done</button>
+            </div>
+
+            <div style={{ flex:1, overflowY:"auto", padding:"16px", display:"flex", flexDirection:"column", gap:12 }}>
+
+              {/* ── EQ ── */}
+              <div style={{ background:"#111", borderRadius:14, overflow:"hidden", border:"1px solid "+(fx.eq?.on?"#3B82F6":"#1e1e1e") }}>
+                <div style={{ display:"flex", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #1e1e1e", gap:8 }}>
+                  <span style={{ color:"#3B82F6", fontWeight:800, fontSize:12, letterSpacing:2 }}>EQ</span>
+                  <span style={{ color:"#333", fontSize:10, flex:1 }}>Parametric 3-Band</span>
+                  <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                    <span style={{ color:"#555", fontSize:9 }}>Drag dots up/down</span>
+                    <button onClick={function(){ upd("eq",{on:!fx.eq?.on}); }}
+                      style={{ background:fx.eq?.on?"#3B82F6":"#222", border:"none", borderRadius:6, color:"white", fontSize:10, fontWeight:700, padding:"4px 10px", cursor:"pointer" }}>
+                      {fx.eq?.on ? "ON" : "OFF"}
+                    </button>
+                  </div>
                 </div>
-                <div style={{ opacity:fx.compressor?.on?1:0.3 }}>
-                  <div style={{ color:"#555",fontSize:8,marginBottom:2 }}>Threshold {fx.compressor?.threshold??-24}dB</div>
-                  <input type="range" min={-60} max={0} step={1} value={fx.compressor?.threshold??-24} onChange={function(e){ upd("compressor",{threshold:+e.target.value}); }} style={{ width:"100%",accentColor:"#8B5CF6",height:2 }} />
-                  <div style={{ color:"#555",fontSize:8,marginBottom:2,marginTop:4 }}>Ratio {fx.compressor?.ratio??4}:1</div>
-                  <input type="range" min={1} max={20} step={0.5} value={fx.compressor?.ratio??4} onChange={function(e){ upd("compressor",{ratio:+e.target.value}); }} style={{ width:"100%",accentColor:"#8B5CF6",height:2 }} />
+                <div style={{ padding:"12px 14px", opacity:fx.eq?.on?1:0.35 }}>
+                  <EQGraph eq={fx.eq||{low:0,mid:0,high:0}} onDrag={function(key, val){ upd("eq", {[key]: val}); }} />
+                  <div style={{ display:"flex", justifyContent:"space-around", marginTop:12 }}>
+                    {[
+                      { key:"low",  label:"LOW SHELF",  val:fx.eq?.low||0,  freq:"200Hz", color:"#3B82F6" },
+                      { key:"mid",  label:"MID PEAK",   val:fx.eq?.mid||0,  freq:"1kHz",  color:"#22C55E" },
+                      { key:"high", label:"HIGH SHELF", val:fx.eq?.high||0, freq:"4kHz",  color:"#F59E0B" },
+                    ].map(function(b){
+                      return (
+                        <div key={b.key} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+                          <Knob label={b.label} value={b.val} min={-15} max={15} step={0.5} unit="dB" color={b.color}
+                            onChange={function(v){ upd("eq", {[b.key]: v}); }} />
+                          <span style={{ color:"#333", fontSize:8 }}>{b.freq}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-              {/* EQ */}
-              <div style={{ flex:1,background:"#1a1a1a",borderRadius:10,padding:"8px" }}>
-                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6 }}>
-                  <span style={{ color:"#aaa",fontSize:10,fontWeight:700 }}>EQ</span>
-                  <button onClick={function(){ upd("eq",{on:!fx.eq?.on}); }} style={{ background:fx.eq?.on?"rgba(139,92,246,0.3)":"#222",border:"none",borderRadius:4,color:fx.eq?.on?"#8B5CF6":"#555",fontSize:8,padding:"2px 6px",cursor:"pointer",fontWeight:700 }}>{fx.eq?.on?"ON":"OFF"}</button>
+
+              {/* ── COMPRESSOR ── */}
+              <div style={{ background:"#111", borderRadius:14, overflow:"hidden", border:"1px solid "+(fx.compressor?.on?"#8B5CF6":"#1e1e1e") }}>
+                <div style={{ display:"flex", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #1e1e1e", gap:8 }}>
+                  <span style={{ color:"#8B5CF6", fontWeight:800, fontSize:12, letterSpacing:2 }}>COMP</span>
+                  <span style={{ color:"#333", fontSize:10, flex:1 }}>Dynamics Compressor</span>
+                  <button onClick={function(){ upd("compressor",{on:!fx.compressor?.on}); }}
+                    style={{ background:fx.compressor?.on?"#8B5CF6":"#222", border:"none", borderRadius:6, color:"white", fontSize:10, fontWeight:700, padding:"4px 10px", cursor:"pointer" }}>
+                    {fx.compressor?.on ? "ON" : "OFF"}
+                  </button>
                 </div>
-                <div style={{ opacity:fx.eq?.on?1:0.3 }}>
-                  {[["Lo",fx.eq?.low??0,"low"],["Mid",fx.eq?.mid??0,"mid"],["Hi",fx.eq?.high??0,"high"]].map(function(band){
-                    return (<div key={band[2]} style={{ marginBottom:4 }}>
-                      <div style={{ color:"#555",fontSize:8 }}>{band[0]} {band[1]>0?"+":""}{band[1]}dB</div>
-                      <input type="range" min={-15} max={15} step={0.5} value={band[1]} onChange={function(e){ upd("eq",{[band[2]]:+e.target.value}); }} style={{ width:"100%",accentColor:"#8B5CF6",height:2 }} />
-                    </div>);
-                  })}
+                <div style={{ padding:"12px 14px", opacity:fx.compressor?.on?1:0.35 }}>
+                  <div style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
+                    <CompGraph threshold={fx.compressor?.threshold??-24} ratio={fx.compressor?.ratio??4} />
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:10, justifyContent:"center", flex:1 }}>
+                      {[
+                        { key:"threshold", label:"THRESHOLD", val:fx.compressor?.threshold??-24, min:-60, max:0, step:1, unit:"dB" },
+                        { key:"ratio",     label:"RATIO",     val:fx.compressor?.ratio??4,       min:1,   max:20, step:0.5, unit:":1" },
+                        { key:"attack",    label:"ATTACK",    val:Math.round((fx.compressor?.attack??0.003)*1000), min:1, max:200, step:1, unit:"ms",
+                          onChange: function(v){ upd("compressor",{attack:v/1000}); } },
+                        { key:"release",   label:"RELEASE",   val:Math.round((fx.compressor?.release??0.25)*1000), min:10, max:2000, step:10, unit:"ms",
+                          onChange: function(v){ upd("compressor",{release:v/1000}); } },
+                      ].map(function(p){
+                        return <Knob key={p.key} label={p.label} value={p.val} min={p.min} max={p.max} step={p.step} unit={p.unit}
+                          onChange={p.onChange || function(v){ upd("compressor",{[p.key]:v}); }} />;
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
-              {/* Reverb */}
-              <div style={{ flex:1,background:"#1a1a1a",borderRadius:10,padding:"8px" }}>
-                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6 }}>
-                  <span style={{ color:"#aaa",fontSize:10,fontWeight:700 }}>REVERB</span>
-                  <button onClick={function(){ upd("reverb",{on:!fx.reverb?.on}); }} style={{ background:fx.reverb?.on?"rgba(139,92,246,0.3)":"#222",border:"none",borderRadius:4,color:fx.reverb?.on?"#8B5CF6":"#555",fontSize:8,padding:"2px 6px",cursor:"pointer",fontWeight:700 }}>{fx.reverb?.on?"ON":"OFF"}</button>
+
+              {/* ── REVERB ── */}
+              <div style={{ background:"#111", borderRadius:14, overflow:"hidden", border:"1px solid "+(fx.reverb?.on?"#C026D3":"#1e1e1e") }}>
+                <div style={{ display:"flex", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #1e1e1e", gap:8 }}>
+                  <span style={{ color:"#C026D3", fontWeight:800, fontSize:12, letterSpacing:2 }}>REVERB</span>
+                  <span style={{ color:"#333", fontSize:10, flex:1 }}>Convolution Room</span>
+                  <button onClick={function(){ upd("reverb",{on:!fx.reverb?.on}); }}
+                    style={{ background:fx.reverb?.on?"#C026D3":"#222", border:"none", borderRadius:6, color:"white", fontSize:10, fontWeight:700, padding:"4px 10px", cursor:"pointer" }}>
+                    {fx.reverb?.on ? "ON" : "OFF"}
+                  </button>
                 </div>
-                <div style={{ opacity:fx.reverb?.on?1:0.3 }}>
-                  <div style={{ color:"#555",fontSize:8,marginBottom:2 }}>Wet {Math.round((fx.reverb?.wet??0.25)*100)}%</div>
-                  <input type="range" min={0} max={1} step={0.05} value={fx.reverb?.wet??0.25} onChange={function(e){ upd("reverb",{wet:+e.target.value}); }} style={{ width:"100%",accentColor:"#8B5CF6",height:2 }} />
-                  <div style={{ color:"#555",fontSize:8,marginBottom:2,marginTop:4 }}>Room {Math.round((fx.reverb?.roomSize??0.8)*100)}%</div>
-                  <input type="range" min={0.1} max={1} step={0.05} value={fx.reverb?.roomSize??0.8} onChange={function(e){ upd("reverb",{roomSize:+e.target.value}); }} style={{ width:"100%",accentColor:"#8B5CF6",height:2 }} />
+                <div style={{ padding:"12px 14px", opacity:fx.reverb?.on?1:0.35 }}>
+                  <div style={{ display:"flex", gap:12, alignItems:"center" }}>
+                    <ReverbViz wet={fx.reverb?.wet??0.25} roomSize={fx.reverb?.roomSize??0.8} />
+                    <div style={{ display:"flex", gap:14, flex:1, justifyContent:"center" }}>
+                      <Knob label="WET" value={fx.reverb?.wet??0.25} min={0} max={1} step={0.01} unit="%" color="#C026D3"
+                        onChange={function(v){ upd("reverb",{wet:v}); }} />
+                      <Knob label="ROOM" value={fx.reverb?.roomSize??0.8} min={0.1} max={1} step={0.01} unit="%" color="#C026D3"
+                        onChange={function(v){ upd("reverb",{roomSize:v}); }} />
+                    </div>
+                  </div>
                 </div>
               </div>
+
             </div>
           </div>
         );
