@@ -4388,50 +4388,41 @@ function WheelPicker({ items, value, onChange, onClose, title, inline, label }) 
 // =============================================================================
 
 // =============================================================================
-// WAVEFORM CANVAS  –  real PCM peak rendering via Web Audio API
+
+// =============================================================================
+// WAVEFORM CANVAS — real PCM rendering
 // =============================================================================
 function WaveformCanvas({ audioBuffer, color, width, height, playedFraction }) {
-  const canvasRef = useRef(null);
-
+  const ref = useRef(null);
   useEffect(function () {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const cv = ref.current;
+    if (!cv) return;
     const W = Math.max(1, Math.round(width));
     const H = Math.max(1, Math.round(height));
-    canvas.width  = W;
-    canvas.height = H;
-    const ctx = canvas.getContext("2d");
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext("2d");
     ctx.clearRect(0, 0, W, H);
     const mid = H / 2;
-
     if (!audioBuffer) {
-      ctx.strokeStyle = color + "33";
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = color + "33"; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
       return;
     }
-
-    const raw          = audioBuffer.getChannelData(0);
-    const samplesPerPx = raw.length / W;
-
-    // Unplayed bars
+    const raw = audioBuffer.getChannelData(0);
+    const spp = raw.length / W;
     ctx.fillStyle = color + "55";
     for (let px = 0; px < W; px++) {
-      const s = Math.floor(px * samplesPerPx);
-      const e = Math.floor((px + 1) * samplesPerPx);
+      const s = Math.floor(px * spp), e = Math.floor((px + 1) * spp);
       let peak = 0;
       for (let i = s; i < e && i < raw.length; i++) { const v = Math.abs(raw[i]); if (v > peak) peak = v; }
       const h = Math.max(1, peak * mid * 0.95);
       ctx.fillRect(px, mid - h, 1, h * 2);
     }
-
-    // Played overlay – brighter
     if (playedFraction > 0) {
-      const playedPx = Math.floor(W * Math.min(1, playedFraction));
+      const pp = Math.floor(W * Math.min(1, playedFraction));
       ctx.fillStyle = color + "cc";
-      for (let px = 0; px < playedPx; px++) {
-        const s = Math.floor(px * samplesPerPx);
-        const e = Math.floor((px + 1) * samplesPerPx);
+      for (let px = 0; px < pp; px++) {
+        const s = Math.floor(px * spp), e = Math.floor((px + 1) * spp);
         let peak = 0;
         for (let i = s; i < e && i < raw.length; i++) { const v = Math.abs(raw[i]); if (v > peak) peak = v; }
         const h = Math.max(1, peak * mid * 0.95);
@@ -4439,27 +4430,43 @@ function WaveformCanvas({ audioBuffer, color, width, height, playedFraction }) {
       }
     }
   }, [audioBuffer, width, height, color, playedFraction]);
-
-  return (
-    <canvas ref={canvasRef}
-      style={{ display:"block", width:"100%", height:"100%", imageRendering:"pixelated" }} />
-  );
+  return <canvas ref={ref} style={{ display:"block", width:"100%", height:"100%", imageRendering:"pixelated" }} />;
 }
 
 // =============================================================================
-// STUDIO SCREEN  –  strict two-column DAW layout
+// STUDIO SCREEN — proper DAW physics
+// =============================================================================
+//
+//  Global coordinate system:
+//    xPosition = time * PPS
+//
+//  Fixed playhead at left: PLAYHEAD_X (from right-column left edge)
+//    currentTime = (scrollLeft + PLAYHEAD_X) / PPS
+//
+//  During playback:
+//    container.scrollLeft = currentTime * PPS - PLAYHEAD_X
+//
+//  Manual scroll:
+//    currentTime = (container.scrollLeft + PLAYHEAD_X) / PPS
+//
 // =============================================================================
 function StudioScreen({ user, onExit }) {
 
-  // ── Project ───────────────────────────────────────────────────
-  const [projectName,  setProjectName]  = useState("New Project");
+  // ── Constants ─────────────────────────────────────────────────
+  const PPS         = 100;       // PIXELS_PER_SECOND — single source of truth
+  const SIDEBAR_W   = 140;       // left column: track headers (locked horizontally)
+  const TRACK_H     = 68;        // each track row height
+  const RULER_H     = 32;        // timeline ruler height
+  const PLAYHEAD_X  = 80;        // playhead's fixed X from right-column left edge
+
+  // ── Track array: [{id, name, type, audioBuffer, url, isMuted, isSoloed, startTime, duration}]
   const [tracks,       setTracks]       = useState([]);
-  const [beatClip,     setBeatClip]     = useState(null);
   const [bpm,          setBpm]          = useState(120);
   const [timeSigNum,   setTimeSigNum]   = useState(4);
   const [zoom,         setZoom]         = useState(1);
   const [snapToGrid,   setSnapToGrid]   = useState(true);
   const [projectKey,   setProjectKey]   = useState("C major");
+  const [projectName,  setProjectName]  = useState("New Project");
 
   // ── Playback ──────────────────────────────────────────────────
   const [isPlaying,    setIsPlaying]    = useState(false);
@@ -4468,11 +4475,10 @@ function StudioScreen({ user, onExit }) {
   const [loopEnabled,  setLoopEnabled]  = useState(false);
   const [loopIn,       setLoopIn]       = useState(0);
   const [loopOut,      setLoopOut]      = useState(0);
+  const [followMode,   setFollowMode]   = useState(true);
 
   // ── UI ────────────────────────────────────────────────────────
-  const [selectedClip, setSelectedClip] = useState(null);
-  const [draggingClip, setDraggingClip] = useState(null);
-  const [contextMenu,  setContextMenu]  = useState(null);
+  const [contextMenu,  setContextMenu]  = useState(null); // {region, x, y}
   const [showSettings, setShowSettings] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showProjMenu, setShowProjMenu] = useState(false);
@@ -4494,41 +4500,38 @@ function StudioScreen({ user, onExit }) {
   const [recTrackId,   setRecTrackId]   = useState(null);
   const [showTSPicker, setShowTSPicker] = useState(false);
   const [showKeyPick,  setShowKeyPick]  = useState(false);
+  const [draggingReg,  setDraggingReg]  = useState(null);
 
   // ── Refs ──────────────────────────────────────────────────────
-  const actxRef        = useRef(null);
-  const masterStartRef = useRef(0);
-  const playheadAtRef  = useRef(0);
-  const animRef        = useRef(null);
-  const timelineColRef = useRef(null);  // RIGHT COLUMN – scrolls horizontally
-  const sidebarRef     = useRef(null);  // LEFT COLUMN – stays fixed width
-  const mediaRecRef    = useRef(null);
-  const chunksRef      = useRef([]);
-  const recIntRef      = useRef(null);
-  const recDurRef      = useRef(0);
-  const countTimerRef  = useRef(null);
-  const metroRef       = useRef(null);
-  const pinchRef       = useRef(null);
-  const zoomRef        = useRef(zoom);
-  const scheduledRef   = useRef([]);
+  const actxRef         = useRef(null);
+  const masterStartRef  = useRef(0);
+  const playheadAtRef   = useRef(0);
+  const animRef         = useRef(null);
+  const scrollRef       = useRef(null);  // THE single horizontal scroll container
+  const sidebarRef      = useRef(null);  // left column (locked horizontal)
+  const mediaRecRef     = useRef(null);
+  const chunksRef       = useRef([]);
+  const recIntRef       = useRef(null);
+  const recDurRef       = useRef(0);
+  const countTimerRef   = useRef(null);
+  const metroRef        = useRef(null);
+  const pinchRef        = useRef(null);
+  const zoomRef         = useRef(zoom);
+  const scheduledRef    = useRef([]);
+  const isPlayingRef    = useRef(false);  // for use inside event handlers
 
   useEffect(function () { zoomRef.current = zoom; }, [zoom]);
+  useEffect(function () { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
-  // ── Layout constants ──────────────────────────────────────────
-  const SIDEBAR_W = 140;   // wider track label column
-  const TRACK_H   = 68;    // each track row height (px)
-  const RULER_H   = 32;    // timeline ruler height (px)
-  const PPS_BASE  = 100;   // pixels per second at zoom = 1
-  const PPS       = PPS_BASE * zoom;
-  const COLORS    = ["#3B82F6","#22C55E","#F59E0B","#EC4899","#8B5CF6","#06B6D4","#EF4444","#F97316"];
-  const hasContent = beatClip || tracks.length > 0;
-
-  // ── Timeline geometry ─────────────────────────────────────────
-  const spb      = 60 / bpm;
-  const spBar    = spb * timeSigNum;
-  const totalDur = Math.max(beatClip ? beatClip.duration : 0, currentTime + 30, 60);
-  const totalW   = totalDur * PPS;   // width of scrollable content
-  const numBars  = Math.ceil(totalDur / spBar) + 2;
+  // ── Computed ──────────────────────────────────────────────────
+  const effectivePPS = PPS * zoom;
+  const spb          = 60 / bpm;
+  const spBar        = spb * timeSigNum;
+  const totalDur     = Math.max(60, currentTime + 30, ...tracks.map(function(t){ return (t.startTime||0)+(t.duration||0); }));
+  const totalW       = totalDur * effectivePPS + PLAYHEAD_X * 2;
+  const numBars      = Math.ceil(totalDur / spBar) + 2;
+  const COLORS       = ["#3B82F6","#22C55E","#F59E0B","#EC4899","#8B5CF6","#06B6D4","#EF4444","#F97316"];
+  const hasContent   = tracks.length > 0;
 
   // ── Load projects ─────────────────────────────────────────────
   useEffect(function () {
@@ -4544,19 +4547,19 @@ function StudioScreen({ user, onExit }) {
     return actxRef.current;
   };
 
-  const decodeUrl = async function (url) {
-    const resp = await fetch(url);
-    const ab   = await resp.arrayBuffer();
-    return getActx().decodeAudioData(ab);
+  // ── Scroll container helpers ──────────────────────────────────
+  // With paddingLeft=PLAYHEAD_X on inner div, Bar1 (x=0) sits exactly under the playhead.
+  // scrollLeft=0 → t=0 (Bar1 under playhead). scrollLeft=t*effectivePPS → t plays through.
+  const getTimeFromScroll = function () {
+    const el = scrollRef.current;
+    if (!el) return 0;
+    return Math.max(0, el.scrollLeft / effectivePPS);
   };
 
-  // Playhead is fixed at left:0 of the right column (flush with sidebar).
-  // Bar 1 is at x=0 in the scrollable content — no padding needed.
-  // scrollLeft = t * PPS → at t=0, scrollLeft=0, Bar1 is at left edge = under playhead. ✓
-  const scrollTimelineTo = function (t) {
-    const el = timelineColRef.current;
+  const scrollToTime = function (t) {
+    const el = scrollRef.current;
     if (!el) return;
-    el.scrollLeft = Math.max(0, t * PPS);
+    el.scrollLeft = Math.max(0, t * effectivePPS);
   };
 
   // ── RAF playback loop ─────────────────────────────────────────
@@ -4568,67 +4571,173 @@ function StudioScreen({ user, onExit }) {
       const elapsed = actx.currentTime - masterStartRef.current;
       const t       = playheadAtRef.current + elapsed;
       setCurrentTime(t);
-      scrollTimelineTo(t);
-      if (loopEnabled && loopOut > loopIn && t >= loopOut) { doSeek(loopIn, true); return; }
+      // Scroll so playhead stays fixed at PLAYHEAD_X
+      if (followMode) scrollToTime(t);
+      if (loopEnabled && loopOut > loopIn && t >= loopOut) {
+        stopAll(); doPlay(loopIn); setCurrentTime(loopIn); return;
+      }
       animRef.current = requestAnimationFrame(tick);
     };
     animRef.current = requestAnimationFrame(tick);
     return function () { cancelAnimationFrame(animRef.current); };
-  }, [isPlaying, PPS, loopEnabled, loopIn, loopOut]);
+  }, [isPlaying, effectivePPS, loopEnabled, loopIn, loopOut, followMode]);
 
-  // ── Stop all nodes ────────────────────────────────────────────
+  // ── Audio engine — gain nodes persist so mute/solo works in real-time ──
+  const gainNodesRef  = useRef({});   // trackId → GainNode
+  const masterGainRef = useRef(null); // single master output
+
+  const getOrCreateMaster = function () {
+    const actx = getActx();
+    if (!masterGainRef.current || masterGainRef.current.context !== actx) {
+      masterGainRef.current = actx.createGain();
+      masterGainRef.current.gain.value = 1;
+      masterGainRef.current.connect(actx.destination);
+    }
+    return masterGainRef.current;
+  };
+
+  // Apply mute/solo to all live gain nodes without restarting playback
+  const applyGains = function (updatedTracks) {
+    const tList = updatedTracks || tracks;
+    const hasSolo = tList.some(function(t){ return t.isSoloed; });
+    tList.forEach(function(t){
+      const g = gainNodesRef.current[t.id];
+      if (!g) return;
+      const shouldPlay = !t.isMuted && (!hasSolo || t.isSoloed);
+      g.gain.setTargetAtTime(shouldPlay ? 1 : 0, getActx().currentTime, 0.01);
+    });
+  };
+
+  // Wrap toggleMute/toggleSolo to also update gains live
+  const toggleMute = function (id) {
+    setTracks(function(prev){
+      const next = prev.map(function(t){ return t.id===id?{...t,isMuted:!t.isMuted}:t; });
+      applyGains(next);
+      return next;
+    });
+    setIsSaved(false);
+  };
+
+  const toggleSolo = function (id) {
+    setTracks(function(prev){
+      const next = prev.map(function(t){ return t.id===id?{...t,isSoloed:!t.isSoloed}:t; });
+      applyGains(next);
+      return next;
+    });
+    setIsSaved(false);
+  };
+
+  // ── Stop all audio nodes ──────────────────────────────────────
   const stopAll = function () {
     cancelAnimationFrame(animRef.current);
     scheduledRef.current.forEach(function (s) { try { s.stop(); s.disconnect(); } catch (e) {} });
     scheduledRef.current = [];
+    gainNodesRef.current = {};
   };
 
-  // ── Schedule and play ─────────────────────────────────────────
+  // ── Play from a given time — all tracks share master destination ──
   const doPlay = async function (fromTime) {
     stopAll();
-    const actx = getActx();
-    const now  = actx.currentTime + 0.02;
+    const actx   = getActx();
+    const master = getOrCreateMaster();
+    // Use a precise start time slightly in the future so all tracks align exactly
+    const now    = actx.currentTime + 0.05;
     masterStartRef.current = actx.currentTime;
     playheadAtRef.current  = fromTime;
 
-    const scheduleUrl = async function (url, clipOffset, duration, volume) {
+    const hasSolo = tracks.some(function(t){ return t.isSoloed; });
+
+    const scheduleTrack = async function (track) {
+      if (!track.url) return;
       try {
-        const buf = await decodeUrl(url);
-        const src = actx.createBufferSource();
+        const resp = await fetch(track.url);
+        const ab   = await resp.arrayBuffer();
+        const buf  = await actx.decodeAudioData(ab);
+        const src  = actx.createBufferSource();
         src.buffer = buf;
-        const g = actx.createGain(); g.gain.value = volume || 1;
-        src.connect(g); g.connect(actx.destination);
-        if ((clipOffset + (duration || buf.duration)) <= fromTime) return;
+
+        // Each track gets its own GainNode → master → destination
+        const gain = actx.createGain();
+        const shouldPlay = !track.isMuted && (!hasSolo || track.isSoloed);
+        gain.gain.value = shouldPlay ? 1 : 0;
+        src.connect(gain);
+        gain.connect(master);
+        gainNodesRef.current[track.id] = gain; // store for real-time updates
+
+        const clipStart = track.startTime || 0;
+        const clipEnd   = clipStart + buf.duration;
+        if (clipEnd <= fromTime) return;
+
         let when, bufOff;
-        if (fromTime <= clipOffset) { when = now + (clipOffset - fromTime); bufOff = 0; }
-        else                        { when = now; bufOff = fromTime - clipOffset; }
+        if (fromTime <= clipStart) {
+          when   = now + (clipStart - fromTime);
+          bufOff = 0;
+        } else {
+          when   = now;
+          bufOff = fromTime - clipStart;
+        }
         const remain = buf.duration - bufOff;
-        if (remain > 0) { src.start(when, bufOff, remain); scheduledRef.current.push(src); }
+        if (remain > 0) {
+          src.start(when, bufOff, remain);
+          scheduledRef.current.push(src);
+        }
       } catch (e) {}
     };
 
-    if (beatClip && beatClip.url) scheduleUrl(beatClip.url, 0, beatClip.duration, 1);
-    tracks.forEach(function (tr) {
-      if (tr.muted) return;
-      tr.clips.forEach(function (cl) { if (cl.url) scheduleUrl(cl.url, cl.offset || 0, cl.duration, tr.volume || 1); });
-    });
+    // Schedule ALL tracks simultaneously
+    await Promise.all(tracks.map(scheduleTrack));
   };
 
   const togglePlay = function () {
-    if (isPlaying) { stopAll(); setIsPlaying(false); }
-    else           { doPlay(currentTime); setIsPlaying(true); }
+    if (isPlaying) {
+      stopAll(); setIsPlaying(false);
+    } else {
+      doPlay(currentTime); setIsPlaying(true);
+    }
   };
 
-  const doSeek = function (t, keepPlaying) {
-    stopAll();
-    const clamped = Math.max(0, t);
-    setCurrentTime(clamped);
-    scrollTimelineTo(clamped);
-    if (keepPlaying || isPlaying) { doPlay(clamped); setIsPlaying(true); }
-    else setIsPlaying(false);
+  const rewind = function () {
+    stopAll(); setIsPlaying(false);
+    const t = loopEnabled ? loopIn : 0;
+    setCurrentTime(t);
+    scrollToTime(t);
   };
 
-  const rewind = function () { doSeek(loopEnabled ? loopIn : 0, false); setIsPlaying(false); };
+  // ── Seek: click ruler or drag ─────────────────────────────────
+  const seekToX = function (clientX) {
+    const el = scrollRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    // x in scroll-space = clientX - rect.left + scrollLeft
+    // time = (x) / effectivePPS  (ruler ticks are at t*effectivePPS)
+    // Click x in content space: subtract PLAYHEAD_X offset because content is padded
+    const x = clientX - rect.left + el.scrollLeft - PLAYHEAD_X;
+    const t = Math.max(0, x / effectivePPS);
+    setCurrentTime(t);
+    scrollToTime(t);
+    if (isPlayingRef.current) { stopAll(); doPlay(t); }
+  };
+
+  const handleRulerMouseDown = function (e) {
+    seekToX(e.clientX);
+    const onMove = function (me) { seekToX(me.clientX); };
+    const onUp   = function ()   { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup",   onUp);
+  };
+
+  const handleRulerTouch = function (e) {
+    seekToX(e.touches[0].clientX);
+  };
+
+  // ── Manual scroll → update currentTime (when not playing) ────
+  const handleScroll = function (e) {
+    if (!isPlayingRef.current) {
+      setCurrentTime(getTimeFromScroll());
+    }
+    // Sync sidebar vertical scroll
+    if (sidebarRef.current) sidebarRef.current.scrollTop = e.target.scrollTop;
+  };
 
   // ── Snap ──────────────────────────────────────────────────────
   const snapSecs = function (t) {
@@ -4636,80 +4745,72 @@ function StudioScreen({ user, onExit }) {
     return Math.max(0, Math.round(t / spb) * spb);
   };
 
-  // ── Track helpers ─────────────────────────────────────────────
-  const makeTrack = function (n) {
-    return { id: Date.now()+Math.random(), name:"Vocal "+n, muted:false, volume:1, clips:[], color:COLORS[(n-1)%COLORS.length] };
-  };
-  const addTrack    = function () { setTracks(function (p) { return [...p, makeTrack(p.length+1)]; }); setIsSaved(false); };
-  const deleteTrack = function (id) { setTracks(function (p) { return p.filter(function(t){ return t.id!==id; }); }); setIsSaved(false); };
-  const toggleMute  = function (id) { setTracks(function (p) { return p.map(function(t){ return t.id===id?{...t,muted:!t.muted}:t; }); }); };
-  const setVol      = function (id,v) { setTracks(function (p) { return p.map(function(t){ return t.id===id?{...t,volume:v}:t; }); }); };
-
-  const moveClip = function (trackId, clipId, newOffset) {
-    const snapped = snapSecs(newOffset);
-    setTracks(function (prev) {
-      return prev.map(function (t) {
-        if (t.id !== trackId) return t;
-        return { ...t, clips: t.clips.map(function(c){ return c.id!==clipId?c:{...c,offset:snapped}; }) };
-      });
-    });
+  // ── Track/region helpers ──────────────────────────────────────
+  const addTrackObj = function (obj) {
+    setTracks(function (prev) { return [...prev, obj]; });
     setIsSaved(false);
   };
 
-  const duplicateClip = function (trackId, clip) {
-    setTracks(function (prev) {
-      return prev.map(function (t) {
-        if (t.id !== trackId) return t;
-        return { ...t, clips:[...t.clips, {...clip, id:Date.now()+Math.random(), offset:(clip.offset||0)+(clip.duration||2)+0.25, label:clip.label+" (copy)"}] };
-      });
-    });
+  const updateTrack = function (id, patch) {
+    setTracks(function (prev) { return prev.map(function(t){ return t.id===id?{...t,...patch}:t; }); });
+    setIsSaved(false);
+  };
+
+  const removeTrack = function (id) {
+    setTracks(function (prev) { return prev.filter(function(t){ return t.id!==id; }); });
     setContextMenu(null); setIsSaved(false);
   };
 
-  const deleteClip = function (trackId, clipId) {
-    setTracks(function (prev) {
-      return prev.map(function (t) {
-        if (t.id !== trackId) return t;
-        return { ...t, clips: t.clips.filter(function(c){ return c.id!==clipId; }) };
-      });
-    });
-    setContextMenu(null); setIsSaved(false);
+  const cloneTrack = function (track) {
+    addTrackObj({ ...track, id: Date.now()+Math.random(), startTime: (track.startTime||0)+(track.duration||2)+0.25, name: track.name+" (copy)" });
+    setContextMenu(null);
   };
 
-  // ── Beat upload ───────────────────────────────────────────────
-  const handleBeatUpload = async function (e) {
-    const file = e.target.files[0];
-    if (!file) return;
+  const toggleMuteUnused = null; const toggleSoloUnused = null; // replaced above
+
+  // ── Upload beat / audio ───────────────────────────────────────
+  const handleFileUpload = async function (e, type) {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
     setError("");
-    const url  = URL.createObjectURL(file);
-    const name = file.name.replace(/\.[^.]+$/, "");
-    try {
-      const actx = getActx();
-      const ab   = await file.arrayBuffer();
-      const buf  = await actx.decodeAudioData(ab.slice(0));
-      setBeatClip({ url, buffer:buf, duration:buf.duration, name });
-      setProjectName(name); setLoopOut(buf.duration);
-    } catch (e2) { setError("Could not decode audio."); return; }
-    setIsSaved(false); setShowAddMenu(false);
-    if (tracks.length === 0) setTracks([makeTrack(1)]);
+    const actx = getActx();
+    for (const file of files) {
+      const url  = URL.createObjectURL(file);
+      const name = file.name.replace(/\.[^.]+$/, "");
+      try {
+        const ab  = await file.arrayBuffer();
+        const buf = await actx.decodeAudioData(ab.slice(0));
+        // Always push — never overwrite existing tracks
+        addTrackObj({
+          id: Date.now() + Math.random(),
+          name, type: type || "beat",
+          audioBuffer: buf, url,
+          isMuted: false, isSoloed: false,
+          startTime: 0,
+          duration: buf.duration,
+          color: type === "beat" ? "#C026D3" : COLORS[tracks.length % COLORS.length]
+        });
+        if (type === "beat") { setProjectName(name); setLoopOut(buf.duration); }
+      } catch (e2) { setError("Could not decode: " + file.name); }
+    }
+    setShowAddMenu(false);
+    // Reset input so the same file(s) can be re-selected
+    e.target.value = "";
   };
 
   // ── Recording ─────────────────────────────────────────────────
-  const startCountIn = function (trackId) {
+  const startCountIn = function () {
     setError(""); setCountIn(4); let n = 4;
     countTimerRef.current = setInterval(function () {
       n--; setCountIn(n);
-      if (n <= 0) { clearInterval(countTimerRef.current); setCountIn(0); doRecord(trackId); }
+      if (n <= 0) { clearInterval(countTimerRef.current); setCountIn(0); doRecord(); }
     }, 800);
   };
 
-  const doRecord = async function (trackId) {
+  const doRecord = async function () {
     try {
       const constraints = { audio:{ echoCancellation:true, noiseSuppression:true, sampleRate:44100 } };
-      if (inputDevice && inputDevice !== "default") constraints.audio.deviceId = { exact:inputDevice };
-      if (navigator.permissions) {
-        try { const p = await navigator.permissions.query({ name:"microphone" }); if (p.state==="denied") { setError("Mic blocked. Go to Settings → Safari → Microphone."); setCountIn(0); return; } } catch(e){}
-      }
+      if (inputDevice && inputDevice !== "default") constraints.audio.deviceId = { exact: inputDevice };
       const stream   = await navigator.mediaDevices.getUserMedia(constraints);
       const actx     = getActx();
       const srcNode  = actx.createMediaStreamSource(stream);
@@ -4718,26 +4819,30 @@ function StudioScreen({ user, onExit }) {
       setRecTrail([]);
       chunksRef.current = [];
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
-      const mr   = new MediaRecorder(stream, { mimeType:mime });
+      const mr   = new MediaRecorder(stream, { mimeType: mime });
       mr.ondataavailable = function (ev) { if (ev.data.size > 0) chunksRef.current.push(ev.data); };
       mr.onstop = async function () {
         stream.getTracks().forEach(function(t){ t.stop(); });
         clearInterval(recIntRef.current);
         analyser.disconnect(); srcNode.disconnect();
         const dur  = recDurRef.current;
-        const blob = new Blob(chunksRef.current, { type:mime });
+        const blob = new Blob(chunksRef.current, { type: mime });
         const url  = URL.createObjectURL(blob);
-        const clipOffset = Math.max(0, currentTime - dur);
-        const clipId     = Date.now();
-        let buffer = null;
-        try { const ab = await blob.arrayBuffer(); buffer = await getActx().decodeAudioData(ab.slice(0)); } catch(e){}
-        setTracks(function(prev){
-          return prev.map(function(t){
-            if (t.id!==trackId) return t;
-            return { ...t, clips:[...t.clips, { id:clipId, url, blob, mimeType:mime, buffer, duration:dur, offset:clipOffset, label:"Take "+(t.clips.length+1) }] };
-          });
+        const clipStart = Math.max(0, currentTime - dur);
+        let buf = null;
+        try { const ab = await blob.arrayBuffer(); buf = await getActx().decodeAudioData(ab.slice(0)); } catch(e) {}
+        const newTrackId = Date.now();
+        addTrackObj({
+          id: newTrackId,
+          name: "Vocal " + (tracks.filter(function(t){return t.type==="vocal";}).length + 1),
+          type: "vocal",
+          audioBuffer: buf, url, blob,
+          isMuted: false, isSoloed: false,
+          startTime: clipStart,
+          duration: dur,
+          color: COLORS[tracks.length % COLORS.length]
         });
-        setRecTrail([]); setIsRecording(false); setRecTrackId(null); setIsSaved(false);
+        setRecTrail([]); setIsRecording(false); setRecTrackId(null);
       };
       recDurRef.current = 0;
       const recStart = Date.now();
@@ -4746,14 +4851,15 @@ function StudioScreen({ user, onExit }) {
         const data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteTimeDomainData(data);
         let peak = 0;
-        for (let i=0; i<data.length; i++) { const v=Math.abs(data[i]-128)/128; if(v>peak)peak=v; }
-        setRecTrail(function(prev){ return [...prev.slice(-150), peak]; });
+        for (let i=0; i<data.length; i++) { const v=Math.abs(data[i]-128)/128; if(v>peak) peak=v; }
+        setRecTrail(function(prev){ return [...prev.slice(-200), peak]; });
       }, 50);
       mr.start(100); mediaRecRef.current = mr;
-      setIsRecording(true); setRecTrackId(trackId);
-      if (!isPlaying && beatClip) { doPlay(currentTime); setIsPlaying(true); }
-    } catch(e){
-      if (e.name==="NotAllowedError") setError("Mic access denied. Go to Settings → Safari → Microphone.");
+      setIsRecording(true); setRecTrackId(Date.now());
+      // Auto-play beat tracks when recording
+      if (!isPlaying) { doPlay(currentTime); setIsPlaying(true); }
+    } catch (e) {
+      if (e.name==="NotAllowedError") setError("Mic blocked. Go to Settings → Safari → Microphone.");
       else setError("Could not access microphone.");
       setCountIn(0);
     }
@@ -4761,34 +4867,70 @@ function StudioScreen({ user, onExit }) {
 
   const stopRecording = function () { if (mediaRecRef.current && isRecording) mediaRecRef.current.stop(); };
 
-  // ── Metronome ─────────────────────────────────────────────────
-  useEffect(function () {
-    if (!metronomeOn) { clearInterval(metroRef.current); return; }
-    const ctx = new (window.AudioContext||window.webkitAudioContext)();
-    let beat = 0;
-    const tick = function () {
-      const osc=ctx.createOscillator(), g=ctx.createGain();
-      osc.connect(g); g.connect(ctx.destination);
-      osc.frequency.value = beat%timeSigNum===0?1000:700;
-      g.gain.setValueAtTime(0.3,ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.05);
-      osc.start(ctx.currentTime); osc.stop(ctx.currentTime+0.1); beat++;
+  // ── Region drag ───────────────────────────────────────────────
+  const handleRegionMouseDown = function (e, track) {
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startT = track.startTime || 0;
+    let moved = false;
+    const onMove = function (me) {
+      const dx = me.clientX - startX;
+      if (!moved && Math.abs(dx) < 5) return;
+      moved = true;
+      setDraggingReg(track.id);
+      updateTrack(track.id, { startTime: snapSecs(startT + dx / effectivePPS) });
     };
-    tick(); metroRef.current = setInterval(tick, 60000/bpm);
-    return function () { clearInterval(metroRef.current); try{ctx.close();}catch(e){} };
-  }, [metronomeOn, bpm, timeSigNum]);
+    const onUp = function () {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup",   onUp);
+      setDraggingReg(null);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup",   onUp);
+  };
 
-  // ── Pinch-to-zoom on right column only ───────────────────────
+  const handleRegionTouchStart = function (e, track) {
+    if (e.touches.length === 2) return;
+    e.stopPropagation();
+    const startX = e.touches[0].clientX;
+    const startT = track.startTime || 0;
+    const lp = setTimeout(function () {
+      const r = e.currentTarget.getBoundingClientRect();
+      setContextMenu({ track, x: r.left, y: r.bottom });
+    }, 600);
+    e.currentTarget._lp = lp;
+    e.currentTarget._ts = { startX, startT };
+  };
+
+  const handleRegionTouchMove = function (e, track) {
+    if (e.touches.length === 2) return;
+    e.stopPropagation();
+    clearTimeout(e.currentTarget._lp);
+    const ts = e.currentTarget._ts;
+    if (!ts) return;
+    const dx = e.touches[0].clientX - ts.startX;
+    if (Math.abs(dx) > 6) {
+      setDraggingReg(track.id);
+      updateTrack(track.id, { startTime: snapSecs(ts.startT + dx / effectivePPS) });
+    }
+  };
+
+  const handleRegionTouchEnd = function (e) {
+    clearTimeout(e.currentTarget._lp);
+    setDraggingReg(null);
+  };
+
+  // ── Pinch zoom ────────────────────────────────────────────────
   useEffect(function () {
-    const el = timelineColRef.current;
+    const el = scrollRef.current;
     if (!el) return;
     const onStart = function (e) {
-      if (e.touches.length!==2) return;
+      if (e.touches.length !== 2) return;
       const dx=e.touches[0].clientX-e.touches[1].clientX, dy=e.touches[0].clientY-e.touches[1].clientY;
       pinchRef.current = { dist:Math.sqrt(dx*dx+dy*dy), zoom:zoomRef.current };
     };
     const onMove = function (e) {
-      if (e.touches.length!==2||!pinchRef.current) return;
+      if (e.touches.length !== 2 || !pinchRef.current) return;
       e.preventDefault();
       const dx=e.touches[0].clientX-e.touches[1].clientX, dy=e.touches[0].clientY-e.touches[1].clientY;
       const d=Math.sqrt(dx*dx+dy*dy);
@@ -4801,119 +4943,76 @@ function StudioScreen({ user, onExit }) {
     return function(){ el.removeEventListener("touchstart",onStart); el.removeEventListener("touchmove",onMove); el.removeEventListener("touchend",onEnd); };
   }, []);
 
-  // ── Ruler click → seek ────────────────────────────────────────
-  const handleRulerClick = function (e) {
-    const el = timelineColRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    // x in scrollable space = clientX - rect.left + scrollLeft
-
-    const x = e.clientX - rect.left + el.scrollLeft;
-    const t = x / PPS;
-    if (t < 0) return;
-    doSeek(t, false);
-  };
-
-  // ── Clip mouse drag ───────────────────────────────────────────
-  const handleClipMouseDown = function (e, trackId, clip) {
-    e.stopPropagation();
-    setSelectedClip({ trackId, clipId:clip.id });
-    const startX=e.clientX, startOff=clip.offset||0;
-    let moved = false;
-    const onMove = function (me) {
-      const dx = me.clientX-startX;
-      if (!moved && Math.abs(dx)<5) return;
-      moved = true;
-      setDraggingClip({ trackId, clipId:clip.id });
-      moveClip(trackId, clip.id, startOff+dx/PPS);
+  // ── Metronome ─────────────────────────────────────────────────
+  useEffect(function () {
+    if (!metronomeOn) { clearInterval(metroRef.current); return; }
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    let beat = 0;
+    const tick = function () {
+      const osc=ctx.createOscillator(), g=ctx.createGain();
+      osc.connect(g); g.connect(ctx.destination);
+      osc.frequency.value = beat%timeSigNum===0?1000:700;
+      g.gain.setValueAtTime(0.3,ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.05);
+      osc.start(ctx.currentTime); osc.stop(ctx.currentTime+0.1); beat++;
     };
-    const onUp = function () {
-      document.removeEventListener("mousemove",onMove);
-      document.removeEventListener("mouseup",onUp);
-      setDraggingClip(null);
-    };
-    document.addEventListener("mousemove",onMove);
-    document.addEventListener("mouseup",onUp);
-  };
+    tick(); metroRef.current = setInterval(tick, 60000/bpm);
+    return function () { clearInterval(metroRef.current); try{ctx.close();}catch(e){} };
+  }, [metronomeOn, bpm, timeSigNum]);
 
-  // ── Clip touch drag ───────────────────────────────────────────
-  const handleClipTouchStart = function (e, trackId, clip) {
-    if (e.touches.length===2) return;
-    e.stopPropagation();
-    setSelectedClip({ trackId, clipId:clip.id });
-    const startX=e.touches[0].clientX, startOff=clip.offset||0;
-    const lp = setTimeout(function(){
-      const r=e.currentTarget.getBoundingClientRect();
-      setContextMenu({ trackId, clip, x:r.left, y:r.bottom });
-    }, 600);
-    e.currentTarget._lp  = lp;
-    e.currentTarget._ts  = { startX, startOff };
-  };
-  const handleClipTouchMove = function (e, trackId, clip) {
-    if (e.touches.length===2) return;
-    e.stopPropagation();
-    clearTimeout(e.currentTarget._lp);
-    const ts = e.currentTarget._ts; if (!ts) return;
-    const dx = e.touches[0].clientX - ts.startX;
-    if (Math.abs(dx)>6) { setDraggingClip({ trackId, clipId:clip.id }); moveClip(trackId, clip.id, ts.startOff+dx/PPS); }
-  };
-  const handleClipTouchEnd = function (e) { clearTimeout(e.currentTarget._lp); setDraggingClip(null); };
-
-  // ── Save / Load ───────────────────────────────────────────────
+  // ── Save/Load ─────────────────────────────────────────────────
   const saveProject = function () {
     try {
       const proj = { id:Date.now(), name:projectName, bpm, timeSigNum, projectKey, savedAt:new Date().toISOString(),
-        beatName:beatClip?beatClip.name:"",
-        tracks:tracks.map(function(t){ return {...t, clips:t.clips.map(function(c){ return {...c,url:null,blob:null,buffer:null}; })}; }) };
+        tracks:tracks.map(function(t){ return {...t,audioBuffer:null,url:null,blob:null}; }) };
       let list = JSON.parse(localStorage.getItem("bf_studio_projects")||"[]");
       const idx = list.findIndex(function(p){ return p.name===projectName; });
       if (idx>=0) list[idx]=proj; else list.unshift(proj);
-      list = list.slice(0,10);
-      localStorage.setItem("bf_studio_projects", JSON.stringify(list));
+      list=list.slice(0,10);
+      localStorage.setItem("bf_studio_projects",JSON.stringify(list));
       setSavedProjects(list); setIsSaved(true);
-      setSaveStatus("Saved!"); setTimeout(function(){ setSaveStatus(""); }, 2000);
+      setSaveStatus("Saved!"); setTimeout(function(){ setSaveStatus(""); },2000);
     } catch(e){}
   };
 
   const loadProject = function (p) {
     setProjectName(p.name); setBpm(p.bpm||120);
-    setTracks(p.tracks.map(function(t){ return {...t, clips:t.clips.map(function(c){ return {...c,url:null,blob:null,buffer:null}; })}; }));
+    setTracks(p.tracks.map(function(t){ return {...t,audioBuffer:null,url:null,blob:null}; }));
     setShowProjects(false); setIsSaved(true);
-    setSaveStatus("Loaded — re-upload beat to restore audio"); setTimeout(function(){ setSaveStatus(""); }, 4000);
+    setSaveStatus("Loaded — re-upload audio to restore"); setTimeout(function(){ setSaveStatus(""); },4000);
   };
 
   const deleteProject = function (id) {
-    const u = savedProjects.filter(function(p){ return p.id!==id; });
-    setSavedProjects(u); localStorage.setItem("bf_studio_projects", JSON.stringify(u));
+    const u=savedProjects.filter(function(p){ return p.id!==id; });
+    setSavedProjects(u); localStorage.setItem("bf_studio_projects",JSON.stringify(u));
   };
 
   // ── BPM detect ────────────────────────────────────────────────
   const detectBpm = async function () {
-    if (!beatClip||!beatClip.buffer) return;
+    const beatTrack = tracks.find(function(t){ return t.type==="beat" && t.audioBuffer; });
+    if (!beatTrack) return;
     setBpmDetecting(true); setDetectedBpm(null);
     try {
-      const raw=beatClip.buffer.getChannelData(0), SR=beatClip.buffer.sampleRate, hop=256;
-      const envLen=Math.floor(raw.length/hop);
-      const env=new Float32Array(envLen);
-      for (let i=0;i<envLen;i++){ let s=0; for(let j=i*hop;j<(i+1)*hop&&j<raw.length;j++) s+=raw[j]*raw[j]; env[i]=Math.sqrt(s/hop); }
+      const raw=beatTrack.audioBuffer.getChannelData(0), SR=beatTrack.audioBuffer.sampleRate, hop=256;
+      const envLen=Math.floor(raw.length/hop); const env=new Float32Array(envLen);
+      for(let i=0;i<envLen;i++){let s=0;for(let j=i*hop;j<(i+1)*hop&&j<raw.length;j++)s+=raw[j]*raw[j];env[i]=Math.sqrt(s/hop);}
       const onset=new Float32Array(envLen);
-      for (let i=1;i<envLen;i++){ const d=env[i]-env[i-1]; onset[i]=d>0?d:0; }
-      const fps=SR/hop, minL=Math.round(fps*60/200), maxL=Math.round(fps*60/60), acLen=Math.min(envLen,Math.round(fps*30));
-      let bestL=minL, bestS=-1;
-      for (let lag=minL;lag<=maxL;lag++){ let sc=0; for(let t=0;t<acLen-lag;t++) sc+=onset[t]*onset[t+lag]; sc/=(acLen-lag); if(sc>bestS){bestS=sc;bestL=lag;} }
+      for(let i=1;i<envLen;i++){const d=env[i]-env[i-1];onset[i]=d>0?d:0;}
+      const fps=SR/hop,minL=Math.round(fps*60/200),maxL=Math.round(fps*60/60),acLen=Math.min(envLen,Math.round(fps*30));
+      let bestL=minL,bestS=-1;
+      for(let lag=minL;lag<=maxL;lag++){let sc=0;for(let t=0;t<acLen-lag;t++)sc+=onset[t]*onset[t+lag];sc/=(acLen-lag);if(sc>bestS){bestS=sc;bestL=lag;}}
       let raw2=fps*60/bestL;
       const cands=[raw2,raw2*2,raw2/2,raw2*1.5,raw2/1.5];
       const scored=cands.map(function(cb){
-        if(cb<60||cb>200) return{bpm:cb,sc:-1};
-        const cl=fps*60/cb; let sc2=0;
-        for(let t=0;t<acLen-Math.round(cl);t++) sc2+=onset[t]*onset[t+Math.round(cl)];
+        if(cb<60||cb>200)return{bpm:cb,sc:-1};
+        const cl=fps*60/cb;let sc2=0;
+        for(let t=0;t<acLen-Math.round(cl);t++)sc2+=onset[t]*onset[t+Math.round(cl)];
         return{bpm:Math.round(cb),sc:sc2/(acLen-Math.round(cl))};
       });
-      scored.sort(function(a,b){ return b.sc-a.sc; });
+      scored.sort(function(a,b){return b.sc-a.sc;});
       let final=scored[0].sc>0?scored[0].bpm:Math.round(raw2);
-      while(final<60) final*=2; while(final>200) final=Math.round(final/2);
-      setDetectedBpm(final); setBpm(final);
-    } catch(e){ setDetectedBpm(-1); }
+      while(final<60)final*=2;while(final>200)final=Math.round(final/2);
+      setDetectedBpm(final);setBpm(final);
+    }catch(e){setDetectedBpm(-1);}
     setBpmDetecting(false);
   };
 
@@ -4921,103 +5020,105 @@ function StudioScreen({ user, onExit }) {
   const audioBufferToWav = function (buf) {
     const nc=buf.numberOfChannels,sr=buf.sampleRate,len=buf.length,bl=len*nc*2;
     const ab=new ArrayBuffer(44+bl),dv=new DataView(ab);
-    const ws=function(o,s){ for(let i=0;i<s.length;i++) dv.setUint8(o+i,s.charCodeAt(i)); };
+    const ws=function(o,s){for(let i=0;i<s.length;i++)dv.setUint8(o+i,s.charCodeAt(i));};
     ws(0,"RIFF");dv.setUint32(4,36+bl,true);ws(8,"WAVE");ws(12,"fmt ");
     dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,nc,true);
     dv.setUint32(24,sr,true);dv.setUint32(28,sr*nc*2,true);dv.setUint16(32,nc*2,true);
     dv.setUint16(34,16,true);ws(36,"data");dv.setUint32(40,bl,true);
     let off=44;
-    for(let i=0;i<len;i++) for(let c=0;c<nc;c++){
+    for(let i=0;i<len;i++)for(let c=0;c<nc;c++){
       const s=Math.max(-1,Math.min(1,buf.getChannelData(c)[i]));
-      dv.setInt16(off,s<0?s*0x8000:s*0x7FFF,true); off+=2;
+      dv.setInt16(off,s<0?s*0x8000:s*0x7FFF,true);off+=2;
     }
     return new Blob([ab],{type:"audio/wav"});
   };
 
   const exportMix = async function () {
-    setExporting(true); setExportMsg("Preparing...");
+    setExporting(true);setExportMsg("Preparing...");
     try {
-      const SR=44100; let totalDur2=beatClip?beatClip.duration:0;
-      tracks.forEach(function(t){ t.clips.forEach(function(c){ const e=(c.offset||0)+(c.duration||0); if(e>totalDur2) totalDur2=e; }); });
-      if(totalDur2<0.5){ setExportMsg("Nothing to export"); setTimeout(function(){ setExporting(false); setExportMsg(""); },2000); return; }
+      const SR=44100;
+      let totalDur2=0;
+      tracks.forEach(function(t){const e=(t.startTime||0)+(t.duration||0);if(e>totalDur2)totalDur2=e;});
+      if(totalDur2<0.5){setExportMsg("Nothing to export");setTimeout(function(){setExporting(false);setExportMsg("");},2000);return;}
       const oc=new OfflineAudioContext(2,Math.ceil(totalDur2*SR),SR);
-      const dec=async function(url){ const r=await fetch(url); const ab=await r.arrayBuffer(); return oc.decodeAudioData(ab); };
-      if(beatClip&&beatClip.url){ setExportMsg("Loading beat..."); try{ const bb=await dec(beatClip.url); const bs=oc.createBufferSource(); bs.buffer=bb; bs.connect(oc.destination); bs.start(0); }catch(e){} }
-      for(const tr of tracks){ if(tr.muted) continue; for(const cl of tr.clips){ if(!cl.url) continue; setExportMsg("Loading "+cl.label+"..."); try{ const cb=await dec(cl.url); const g=oc.createGain(); g.gain.value=tr.volume||1; const cs=oc.createBufferSource(); cs.buffer=cb; cs.connect(g); g.connect(oc.destination); cs.start(cl.offset||0,0,cl.duration||cb.duration); }catch(e){} } }
+      const dec=async function(url){const r=await fetch(url);const ab=await r.arrayBuffer();return oc.decodeAudioData(ab);};
+      const hasSolo=tracks.some(function(t){return t.isSoloed;});
+      for(const tr of tracks){
+        if(tr.isMuted||!tr.url)continue;
+        if(hasSolo&&!tr.isSoloed)continue;
+        setExportMsg("Loading "+tr.name+"...");
+        try{const b=await dec(tr.url);const g=oc.createGain();g.gain.value=1;const s=oc.createBufferSource();s.buffer=b;s.connect(g);g.connect(oc.destination);s.start(tr.startTime||0,0,b.duration);}catch(e){}
+      }
       setExportMsg("Rendering...");
       const rendered=await oc.startRendering();
-      setExportMsg("Encoding WAV...");
       const wav=audioBufferToWav(rendered);
-      const a=document.createElement("a"); a.href=URL.createObjectURL(wav); a.download=(projectName||"project")+" - mix.wav"; a.click();
-      setExportMsg("Done!"); setTimeout(function(){ setExporting(false); setExportMsg(""); },2500);
-    } catch(e){ setExportMsg("Failed."); setTimeout(function(){ setExporting(false); setExportMsg(""); },3000); }
+      const a=document.createElement("a");a.href=URL.createObjectURL(wav);a.download=(projectName||"project")+" - mix.wav";a.click();
+      setExportMsg("Done!");setTimeout(function(){setExporting(false);setExportMsg("");},2500);
+    }catch(e){setExportMsg("Failed.");setTimeout(function(){setExporting(false);setExportMsg("");},3000);}
   };
 
   const fmt = function (s) {
     s=Math.max(0,s||0);
-    const m=Math.floor(s/60), sec=Math.floor(s%60), ms=Math.floor((s%1)*10);
+    const m=Math.floor(s/60),sec=Math.floor(s%60),ms=Math.floor((s%1)*10);
     return (m<10?"0":"")+m+":"+(sec<10?"0":"")+sec+"."+ms;
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // RENDER
-  // ─────────────────────────────────────────────────────────────
+  // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
       style={{ background:"#080808", height:"calc(100vh - env(safe-area-inset-bottom))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); }}
     >
-
       {/* ── Overlays ── */}
       {exporting && (
-        <div style={{ position:"absolute", inset:0, zIndex:9000, background:"rgba(0,0,0,0.9)", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:20 }}>
-          <div style={{ width:52, height:52, borderRadius:"50%", border:"3px solid rgba(192,38,211,0.3)", borderTop:"3px solid #C026D3", animation:"bf-spin 0.8s linear infinite" }} />
-          <div style={{ color:"white", fontWeight:700, fontSize:16 }}>Exporting Mix</div>
-          <div style={{ color:"#888", fontSize:13 }}>{exportMsg}</div>
+        <div style={{ position:"absolute",inset:0,zIndex:9000,background:"rgba(0,0,0,0.9)",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:20 }}>
+          <div style={{ width:52,height:52,borderRadius:"50%",border:"3px solid rgba(192,38,211,0.3)",borderTop:"3px solid #C026D3",animation:"bf-spin 0.8s linear infinite" }} />
+          <div style={{ color:"white",fontWeight:700,fontSize:16 }}>Exporting Mix</div>
+          <div style={{ color:"#888",fontSize:13 }}>{exportMsg}</div>
         </div>
       )}
 
       {countIn > 0 && (
-        <div style={{ position:"absolute", inset:0, zIndex:1000, background:"rgba(0,0,0,0.92)", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column" }}>
-          <div style={{ color:"#EF4444", fontSize:100, fontWeight:900, lineHeight:1 }}>{countIn}</div>
-          <div style={{ color:"#555", fontSize:14, marginTop:8 }}>Allow mic access when prompted</div>
+        <div style={{ position:"absolute",inset:0,zIndex:1000,background:"rgba(0,0,0,0.92)",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column" }}>
+          <div style={{ color:"#EF4444",fontSize:100,fontWeight:900,lineHeight:1 }}>{countIn}</div>
+          <div style={{ color:"#555",fontSize:14,marginTop:8 }}>Allow mic when prompted</div>
         </div>
       )}
 
       {contextMenu && (
-        <div style={{ position:"fixed", top:Math.min(contextMenu.y+4,window.innerHeight-130), left:Math.max(8,Math.min(contextMenu.x,window.innerWidth-200)), zIndex:5000, background:"#1c1c1c", border:"1px solid #2a2a2a", borderRadius:14, overflow:"hidden", minWidth:190, boxShadow:"0 8px 32px rgba(0,0,0,0.9)" }}
+        <div style={{ position:"fixed",top:Math.min(contextMenu.y+4,window.innerHeight-120),left:Math.max(8,Math.min(contextMenu.x,window.innerWidth-200)),zIndex:5000,background:"#1c1c1c",border:"1px solid #2a2a2a",borderRadius:14,overflow:"hidden",minWidth:180,boxShadow:"0 8px 32px rgba(0,0,0,0.9)" }}
           onClick={function(e){ e.stopPropagation(); }}>
-          <div style={{ padding:"10px 16px 8px", color:"#555", fontSize:11, fontWeight:600, borderBottom:"1px solid #222" }}>{contextMenu.clip.label}</div>
-          <button onClick={function(){ duplicateClip(contextMenu.trackId,contextMenu.clip); }} style={{ display:"block", width:"100%", textAlign:"left", padding:"13px 16px", background:"none", border:"none", borderBottom:"1px solid #1a1a1a", color:"white", fontSize:14, cursor:"pointer" }}>⧉  Duplicate</button>
-          <button onClick={function(){ deleteClip(contextMenu.trackId,contextMenu.clip.id); }} style={{ display:"block", width:"100%", textAlign:"left", padding:"13px 16px", background:"none", border:"none", color:"#EF4444", fontSize:14, cursor:"pointer" }}>🗑  Delete</button>
+          <div style={{ padding:"10px 16px 8px",color:"#555",fontSize:11,fontWeight:600,borderBottom:"1px solid #222" }}>{contextMenu.track.name}</div>
+          <button onClick={function(){ cloneTrack(contextMenu.track); }} style={{ display:"block",width:"100%",textAlign:"left",padding:"13px 16px",background:"none",border:"none",borderBottom:"1px solid #1a1a1a",color:"white",fontSize:14,cursor:"pointer" }}>⧉  Clone</button>
+          <button onClick={function(){ removeTrack(contextMenu.track.id); }} style={{ display:"block",width:"100%",textAlign:"left",padding:"13px 16px",background:"none",border:"none",color:"#EF4444",fontSize:14,cursor:"pointer" }}>🗑  Delete</button>
         </div>
       )}
 
       {unsavedAlert && (
-        <div style={{ position:"absolute", inset:0, zIndex:8000, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", padding:"32px" }}>
-          <div style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:20, padding:"28px 24px", width:"100%", maxWidth:320, textAlign:"center" }}>
-            <div style={{ color:"white", fontWeight:800, fontSize:18, marginBottom:10 }}>Unsaved Project</div>
-            <div style={{ color:"#888", fontSize:14, marginBottom:28, lineHeight:1.6 }}>Save <span style={{ color:"white", fontWeight:700 }}>{projectName}</span> before {unsavedAlert==="new"?"starting new?":"leaving?"}</div>
-            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-              <button onClick={function(){ saveProject(); setUnsavedAlert(false); if(unsavedAlert!=="new") onExit(); else{ setTracks([]); setBeatClip(null); setProjectName("New Project"); setIsSaved(false); setCurrentTime(0); } }} style={{ background:"linear-gradient(135deg,#C026D3,#7C3AED)", border:"none", borderRadius:12, color:"white", fontWeight:800, fontSize:15, padding:"14px", cursor:"pointer" }}>Save {unsavedAlert==="new"?"& New":"& Exit"}</button>
-              <button onClick={function(){ setUnsavedAlert(false); if(unsavedAlert!=="new") onExit(); else{ setTracks([]); setBeatClip(null); setProjectName("New Project"); setIsSaved(false); setCurrentTime(0); } }} style={{ background:"rgba(239,68,68,0.15)", border:"1px solid rgba(239,68,68,0.3)", borderRadius:12, color:"#EF4444", fontWeight:700, fontSize:15, padding:"14px", cursor:"pointer" }}>Don't Save</button>
-              <button onClick={function(){ setUnsavedAlert(false); }} style={{ background:"none", border:"1px solid #2a2a2a", borderRadius:12, color:"#666", fontSize:14, padding:"12px", cursor:"pointer" }}>Cancel</button>
+        <div style={{ position:"absolute",inset:0,zIndex:8000,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:"32px" }}>
+          <div style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:320,textAlign:"center" }}>
+            <div style={{ color:"white",fontWeight:800,fontSize:18,marginBottom:10 }}>Unsaved Project</div>
+            <div style={{ color:"#888",fontSize:14,marginBottom:28,lineHeight:1.6 }}>Save before {unsavedAlert==="new"?"new project?":"leaving?"}</div>
+            <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+              <button onClick={function(){ saveProject();setUnsavedAlert(false);if(unsavedAlert!=="new")onExit();else{setTracks([]);setProjectName("New Project");setIsSaved(false);setCurrentTime(0);} }} style={{ background:"linear-gradient(135deg,#C026D3,#7C3AED)",border:"none",borderRadius:12,color:"white",fontWeight:800,fontSize:15,padding:"14px",cursor:"pointer" }}>Save {unsavedAlert==="new"?"& New":"& Exit"}</button>
+              <button onClick={function(){ setUnsavedAlert(false);if(unsavedAlert!=="new")onExit();else{setTracks([]);setProjectName("New Project");setIsSaved(false);setCurrentTime(0);} }} style={{ background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:12,color:"#EF4444",fontWeight:700,fontSize:15,padding:"14px",cursor:"pointer" }}>Don't Save</button>
+              <button onClick={function(){ setUnsavedAlert(false); }} style={{ background:"none",border:"1px solid #2a2a2a",borderRadius:12,color:"#666",fontSize:14,padding:"12px",cursor:"pointer" }}>Cancel</button>
             </div>
           </div>
         </div>
       )}
 
       {showTSPicker && (
-        <div style={{ position:"absolute", inset:0, zIndex:9999, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"flex-end" }} onClick={function(){ setShowTSPicker(false); }}>
-          <div style={{ width:"100%", background:"#1c1c1c", borderRadius:"20px 20px 0 0", paddingBottom:"calc(20px + env(safe-area-inset-bottom))" }} onClick={function(e){ e.stopPropagation(); }}>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px 12px", borderBottom:"1px solid #2a2a2a" }}>
-              <button onClick={function(){ setShowTSPicker(false); }} style={{ background:"none", border:"none", color:"#888", fontSize:14, cursor:"pointer" }}>Cancel</button>
-              <span style={{ color:"white", fontWeight:700, fontSize:15 }}>Time Signature</span>
-              <button onClick={function(){ setShowTSPicker(false); }} style={{ background:"none", border:"none", color:"#C026D3", fontSize:14, fontWeight:700, cursor:"pointer" }}>Done</button>
+        <div style={{ position:"absolute",inset:0,zIndex:9999,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"flex-end" }} onClick={function(){ setShowTSPicker(false); }}>
+          <div style={{ width:"100%",background:"#1c1c1c",borderRadius:"20px 20px 0 0",paddingBottom:"calc(20px + env(safe-area-inset-bottom))" }} onClick={function(e){ e.stopPropagation(); }}>
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 20px 12px",borderBottom:"1px solid #2a2a2a" }}>
+              <button onClick={function(){ setShowTSPicker(false); }} style={{ background:"none",border:"none",color:"#888",fontSize:14,cursor:"pointer" }}>Cancel</button>
+              <span style={{ color:"white",fontWeight:700,fontSize:15 }}>Time Signature</span>
+              <button onClick={function(){ setShowTSPicker(false); }} style={{ background:"none",border:"none",color:"#C026D3",fontSize:14,fontWeight:700,cursor:"pointer" }}>Done</button>
             </div>
             <div style={{ display:"flex" }}>
               <WheelPicker items={["2","3","4","5","6","7"]} value={String(timeSigNum)} onChange={function(v){ setTimeSigNum(parseInt(v)); }} onClose={function(){}} inline={true} label="Beats" />
-              <div style={{ display:"flex", alignItems:"center", color:"white", fontSize:28, fontWeight:700, padding:"0 8px" }}>/</div>
+              <div style={{ display:"flex",alignItems:"center",color:"white",fontSize:28,fontWeight:700,padding:"0 8px" }}>/</div>
               <WheelPicker items={["4"]} value="4" onChange={function(){}} onClose={function(){}} inline={true} label="Note" />
             </div>
           </div>
@@ -5025,12 +5126,12 @@ function StudioScreen({ user, onExit }) {
       )}
 
       {showKeyPick && (
-        <div style={{ position:"absolute", inset:0, zIndex:9999, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"flex-end" }} onClick={function(){ setShowKeyPick(false); }}>
-          <div style={{ width:"100%", background:"#1c1c1c", borderRadius:"20px 20px 0 0", paddingBottom:"calc(20px + env(safe-area-inset-bottom))" }} onClick={function(e){ e.stopPropagation(); }}>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px 12px", borderBottom:"1px solid #2a2a2a" }}>
-              <button onClick={function(){ setShowKeyPick(false); }} style={{ background:"none", border:"none", color:"#888", fontSize:14, cursor:"pointer" }}>Cancel</button>
-              <span style={{ color:"white", fontWeight:700, fontSize:15 }}>Project Key</span>
-              <button onClick={function(){ setShowKeyPick(false); }} style={{ background:"none", border:"none", color:"#C026D3", fontSize:14, fontWeight:700, cursor:"pointer" }}>Done</button>
+        <div style={{ position:"absolute",inset:0,zIndex:9999,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"flex-end" }} onClick={function(){ setShowKeyPick(false); }}>
+          <div style={{ width:"100%",background:"#1c1c1c",borderRadius:"20px 20px 0 0",paddingBottom:"calc(20px + env(safe-area-inset-bottom))" }} onClick={function(e){ e.stopPropagation(); }}>
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 20px 12px",borderBottom:"1px solid #2a2a2a" }}>
+              <button onClick={function(){ setShowKeyPick(false); }} style={{ background:"none",border:"none",color:"#888",fontSize:14,cursor:"pointer" }}>Cancel</button>
+              <span style={{ color:"white",fontWeight:700,fontSize:15 }}>Project Key</span>
+              <button onClick={function(){ setShowKeyPick(false); }} style={{ background:"none",border:"none",color:"#C026D3",fontSize:14,fontWeight:700,cursor:"pointer" }}>Done</button>
             </div>
             <WheelPicker items={["C major","C# major","D major","D# major","E major","F major","F# major","G major","G# major","A major","A# major","B major","C minor","C# minor","D minor","D# minor","E minor","F minor","F# minor","G minor","G# minor","A minor","A# minor","B minor"]} value={projectKey} onChange={function(v){ setProjectKey(v); }} onClose={function(){ setShowKeyPick(false); }} inline={true} />
           </div>
@@ -5038,88 +5139,80 @@ function StudioScreen({ user, onExit }) {
       )}
 
       {showSettings && (
-        <div style={{ position:"absolute", inset:0, zIndex:700, background:"rgba(0,0,0,0.85)" }} onClick={function(){ setShowSettings(false); }}>
-          <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"#111", borderRadius:"20px 20px 0 0", maxHeight:"88vh", overflowY:"auto" }} onClick={function(e){ e.stopPropagation(); }}>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 20px 12px" }}>
-              <span style={{ color:"white", fontWeight:800, fontSize:16 }}>Project Settings</span>
-              <button onClick={function(){ setShowSettings(false); }} style={{ background:"none", border:"none", color:"#555", fontSize:20, cursor:"pointer" }}>✕</button>
+        <div style={{ position:"absolute",inset:0,zIndex:700,background:"rgba(0,0,0,0.85)" }} onClick={function(){ setShowSettings(false); }}>
+          <div style={{ position:"absolute",bottom:0,left:0,right:0,background:"#111",borderRadius:"20px 20px 0 0",maxHeight:"88vh",overflowY:"auto" }} onClick={function(e){ e.stopPropagation(); }}>
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"18px 20px 12px" }}>
+              <span style={{ color:"white",fontWeight:800,fontSize:16 }}>Project Settings</span>
+              <button onClick={function(){ setShowSettings(false); }} style={{ background:"none",border:"none",color:"#555",fontSize:20,cursor:"pointer" }}>✕</button>
             </div>
-            {/* Tempo */}
-            <div style={{ margin:"0 16px 16px", background:"#1a1a1a", borderRadius:14, overflow:"hidden" }}>
-              <div style={{ padding:"14px 16px 6px", color:"white", fontWeight:700, fontSize:13 }}>Tempo</div>
-              <div style={{ display:"flex", alignItems:"stretch", borderTop:"1px solid #222" }}>
-                <button onClick={function(){ setBpm(function(b){ return Math.max(40,b-1); }); }} style={{ flex:1, background:"none", border:"none", borderRight:"1px solid #222", color:"white", fontSize:28, cursor:"pointer", padding:"14px 0" }}>−</button>
+            <div style={{ margin:"0 16px 16px",background:"#1a1a1a",borderRadius:14,overflow:"hidden" }}>
+              <div style={{ padding:"14px 16px 6px",color:"white",fontWeight:700,fontSize:13 }}>Tempo</div>
+              <div style={{ display:"flex",alignItems:"stretch",borderTop:"1px solid #222" }}>
+                <button onClick={function(){ setBpm(function(b){ return Math.max(40,b-1); }); }} style={{ flex:1,background:"none",border:"none",borderRight:"1px solid #222",color:"white",fontSize:28,cursor:"pointer",padding:"14px 0" }}>−</button>
                 <div onClick={function(){
-                  const taps=(window._bfTaps=window._bfTaps||[]), now=Date.now();
-                  if(now-(taps[taps.length-1]||0)>3000) taps.length=0;
+                  const taps=(window._bfTaps=window._bfTaps||[]),now=Date.now();
+                  if(now-(taps[taps.length-1]||0)>3000)taps.length=0;
                   taps.push(now);
-                  if(taps.length>=2){ const intervals=[]; for(let i=1;i<taps.length;i++) intervals.push(taps[i]-taps[i-1]); const avg=intervals.reduce(function(a,b){return a+b;},0)/intervals.length; const d=Math.round(60000/avg); if(d>=40&&d<=220) setBpm(d); }
-                }} style={{ flex:2, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"12px 0", cursor:"pointer" }}>
-                  <div style={{ color:"white", fontWeight:900, fontSize:40, lineHeight:1 }}>{bpm}</div>
-                  <div style={{ color:"#555", fontSize:11, marginTop:4 }}>Tap Tempo</div>
+                  if(taps.length>=2){const intervals=[];for(let i=1;i<taps.length;i++)intervals.push(taps[i]-taps[i-1]);const avg=intervals.reduce(function(a,b){return a+b;},0)/intervals.length;const d=Math.round(60000/avg);if(d>=40&&d<=220)setBpm(d);}
+                }} style={{ flex:2,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"12px 0",cursor:"pointer" }}>
+                  <div style={{ color:"white",fontWeight:900,fontSize:40,lineHeight:1 }}>{bpm}</div>
+                  <div style={{ color:"#555",fontSize:11,marginTop:4 }}>Tap Tempo</div>
                 </div>
-                <button onClick={function(){ setBpm(function(b){ return Math.min(220,b+1); }); }} style={{ flex:1, background:"none", border:"none", borderLeft:"1px solid #222", color:"white", fontSize:28, cursor:"pointer", padding:"14px 0" }}>+</button>
+                <button onClick={function(){ setBpm(function(b){ return Math.min(220,b+1); }); }} style={{ flex:1,background:"none",border:"none",borderLeft:"1px solid #222",color:"white",fontSize:28,cursor:"pointer",padding:"14px 0" }}>+</button>
               </div>
               <div style={{ padding:"8px 16px 12px" }}>
-                <input type="range" min={40} max={220} step={1} value={bpm} onChange={function(e){ setBpm(parseInt(e.target.value)); }} style={{ width:"100%", accentColor:"#C026D3" }} />
+                <input type="range" min={40} max={220} step={1} value={bpm} onChange={function(e){ setBpm(parseInt(e.target.value)); }} style={{ width:"100%",accentColor:"#C026D3" }} />
               </div>
-              {beatClip && (
-                <div style={{ padding:"0 16px 14px", display:"flex", alignItems:"center", gap:10 }}>
-                  <button onClick={detectBpm} disabled={bpmDetecting} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid rgba(192,38,211,0.3)", borderRadius:8, color:"#C026D3", fontSize:12, fontWeight:700, padding:"7px 14px", cursor:bpmDetecting?"not-allowed":"pointer", opacity:bpmDetecting?0.6:1 }}>{bpmDetecting?"Detecting...":"Auto-detect BPM"}</button>
-                  {detectedBpm>0 && <span style={{ color:"#22C55E", fontSize:12, fontWeight:700 }}>→ {detectedBpm} BPM</span>}
-                  {detectedBpm===-1 && <span style={{ color:"#F87171", fontSize:12 }}>Could not detect</span>}
+              {tracks.some(function(t){return t.type==="beat"&&t.audioBuffer;}) && (
+                <div style={{ padding:"0 16px 14px",display:"flex",alignItems:"center",gap:10 }}>
+                  <button onClick={detectBpm} disabled={bpmDetecting} style={{ background:"rgba(192,38,211,0.15)",border:"1px solid rgba(192,38,211,0.3)",borderRadius:8,color:"#C026D3",fontSize:12,fontWeight:700,padding:"7px 14px",cursor:bpmDetecting?"not-allowed":"pointer",opacity:bpmDetecting?0.6:1 }}>{bpmDetecting?"Detecting...":"Auto-detect BPM"}</button>
+                  {detectedBpm>0&&<span style={{ color:"#22C55E",fontSize:12,fontWeight:700 }}>→ {detectedBpm} BPM</span>}
+                  {detectedBpm===-1&&<span style={{ color:"#F87171",fontSize:12 }}>Could not detect</span>}
                 </div>
               )}
             </div>
-            <div style={{ margin:"0 16px 16px", background:"#1a1a1a", borderRadius:14 }}>
-              <button onClick={function(){ setShowTSPicker(true); }} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px", background:"none", border:"none", cursor:"pointer" }}>
-                <span style={{ color:"white", fontWeight:700, fontSize:14 }}>Time Signature</span>
-                <span style={{ color:"#C026D3", fontSize:16, fontWeight:700 }}>{timeSigNum}/4 ›</span>
+            <div style={{ margin:"0 16px 16px",background:"#1a1a1a",borderRadius:14 }}>
+              <button onClick={function(){ setShowTSPicker(true); }} style={{ width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px",background:"none",border:"none",cursor:"pointer" }}>
+                <span style={{ color:"white",fontWeight:700,fontSize:14 }}>Time Signature</span>
+                <span style={{ color:"#C026D3",fontSize:16,fontWeight:700 }}>{timeSigNum}/4 ›</span>
               </button>
             </div>
-            <div style={{ margin:"0 16px 16px", background:"#1a1a1a", borderRadius:14 }}>
-              <button onClick={function(){ setShowKeyPick(true); }} style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px", background:"none", border:"none", cursor:"pointer" }}>
-                <span style={{ color:"white", fontWeight:700, fontSize:14 }}>Project Key</span>
-                <span style={{ color:"#C026D3", fontSize:14, fontWeight:700 }}>{projectKey} ›</span>
+            <div style={{ margin:"0 16px 16px",background:"#1a1a1a",borderRadius:14 }}>
+              <button onClick={function(){ setShowKeyPick(true); }} style={{ width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px",background:"none",border:"none",cursor:"pointer" }}>
+                <span style={{ color:"white",fontWeight:700,fontSize:14 }}>Project Key</span>
+                <span style={{ color:"#C026D3",fontSize:14,fontWeight:700 }}>{projectKey} ›</span>
               </button>
             </div>
-            <div style={{ margin:"0 16px 16px", background:"#1a1a1a", borderRadius:14 }}>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px" }}>
-                <div><div style={{ color:"white", fontWeight:700, fontSize:13 }}>Snap to Grid</div><div style={{ color:"#555", fontSize:11, marginTop:2 }}>Snap clips to nearest beat</div></div>
-                <button onClick={function(){ setSnapToGrid(function(v){ return !v; }); }} style={{ background:snapToGrid?"rgba(192,38,211,0.2)":"#141414", border:"1px solid "+(snapToGrid?"#C026D3":"#2a2a2a"), borderRadius:20, color:snapToGrid?"#C026D3":"#555", fontWeight:700, fontSize:12, padding:"6px 16px", cursor:"pointer" }}>{snapToGrid?"ON":"OFF"}</button>
+            <div style={{ margin:"0 16px 16px",background:"#1a1a1a",borderRadius:14 }}>
+              <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px" }}>
+                <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Snap to Grid</div><div style={{ color:"#555",fontSize:11,marginTop:2 }}>Snap regions to nearest beat</div></div>
+                <button onClick={function(){ setSnapToGrid(function(v){ return !v; }); }} style={{ background:snapToGrid?"rgba(192,38,211,0.2)":"#141414",border:"1px solid "+(snapToGrid?"#C026D3":"#2a2a2a"),borderRadius:20,color:snapToGrid?"#C026D3":"#555",fontWeight:700,fontSize:12,padding:"6px 16px",cursor:"pointer" }}>{snapToGrid?"ON":"OFF"}</button>
               </div>
             </div>
-            <div style={{ margin:"0 16px 16px", background:"#1a1a1a", borderRadius:14 }}>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px" }}>
-                <div><div style={{ color:"white", fontWeight:700, fontSize:13 }}>Metronome</div><div style={{ color:"#555", fontSize:11, marginTop:2 }}>Click while recording</div></div>
-                <button onClick={function(){ setMetronomeOn(function(v){ return !v; }); }} style={{ background:metronomeOn?"rgba(192,38,211,0.2)":"#141414", border:"1px solid "+(metronomeOn?"#C026D3":"#2a2a2a"), borderRadius:20, color:metronomeOn?"#C026D3":"#555", fontWeight:700, fontSize:12, padding:"6px 16px", cursor:"pointer" }}>{metronomeOn?"ON":"OFF"}</button>
+            <div style={{ margin:"0 16px 32px",background:"#1a1a1a",borderRadius:14 }}>
+              <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px" }}>
+                <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Metronome</div><div style={{ color:"#555",fontSize:11,marginTop:2 }}>Click while recording</div></div>
+                <button onClick={function(){ setMetronomeOn(function(v){ return !v; }); }} style={{ background:metronomeOn?"rgba(192,38,211,0.2)":"#141414",border:"1px solid "+(metronomeOn?"#C026D3":"#2a2a2a"),borderRadius:20,color:metronomeOn?"#C026D3":"#555",fontWeight:700,fontSize:12,padding:"6px 16px",cursor:"pointer" }}>{metronomeOn?"ON":"OFF"}</button>
               </div>
             </div>
-            <label style={{ cursor:"pointer", display:"block", margin:"0 16px 32px" }}>
-              <div style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:14, padding:"14px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                <div><div style={{ color:"white", fontWeight:700, fontSize:13 }}>Beat File</div><div style={{ color:"#555", fontSize:12, marginTop:2 }}>{beatClip?beatClip.name:"No beat loaded"}</div></div>
-                <span style={{ color:"#C026D3", fontSize:13, fontWeight:700 }}>Upload</span>
-              </div>
-              <input type="file" accept=".mp3,.wav,.m4a,.aac,audio/*" onChange={handleBeatUpload} style={{ display:"none" }} />
-            </label>
           </div>
         </div>
       )}
 
       {showProjects && (
-        <div style={{ position:"absolute", inset:0, zIndex:900, background:"rgba(0,0,0,0.7)" }} onClick={function(){ setShowProjects(false); }}>
-          <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"#111", borderRadius:"20px 20px 0 0", padding:"20px 16px 40px", maxHeight:"70vh", overflowY:"auto" }} onClick={function(e){ e.stopPropagation(); }}>
-            <div style={{ color:"white", fontWeight:800, fontSize:16, marginBottom:16 }}>Saved Projects</div>
+        <div style={{ position:"absolute",inset:0,zIndex:900,background:"rgba(0,0,0,0.7)" }} onClick={function(){ setShowProjects(false); }}>
+          <div style={{ position:"absolute",bottom:0,left:0,right:0,background:"#111",borderRadius:"20px 20px 0 0",padding:"20px 16px 40px",maxHeight:"70vh",overflowY:"auto" }} onClick={function(e){ e.stopPropagation(); }}>
+            <div style={{ color:"white",fontWeight:800,fontSize:16,marginBottom:16 }}>Saved Projects</div>
             {savedProjects.length===0
-              ? <div style={{ color:"#444", fontSize:14, textAlign:"center", padding:"20px 0" }}>No saved projects yet</div>
-              : savedProjects.map(function(p){
-                return (
-                  <div key={p.id} style={{ background:"#1a1a1a", borderRadius:12, padding:"12px 14px", marginBottom:10, display:"flex", alignItems:"center" }}>
-                    <div onClick={function(){ loadProject(p); }} style={{ flex:1, cursor:"pointer" }}>
-                      <div style={{ color:"white", fontWeight:700, fontSize:14 }}>{p.name}</div>
-                      <div style={{ color:"#555", fontSize:11, marginTop:2 }}>{p.tracks.length} tracks · {p.bpm||120} BPM</div>
+              ?<div style={{ color:"#444",fontSize:14,textAlign:"center",padding:"20px 0" }}>No saved projects</div>
+              :savedProjects.map(function(p){
+                return(
+                  <div key={p.id} style={{ background:"#1a1a1a",borderRadius:12,padding:"12px 14px",marginBottom:10,display:"flex",alignItems:"center" }}>
+                    <div onClick={function(){ loadProject(p); }} style={{ flex:1,cursor:"pointer" }}>
+                      <div style={{ color:"white",fontWeight:700,fontSize:14 }}>{p.name}</div>
+                      <div style={{ color:"#555",fontSize:11,marginTop:2 }}>{p.tracks.length} tracks · {p.bpm||120} BPM</div>
                     </div>
-                    <button onClick={function(){ deleteProject(p.id); }} style={{ background:"none", border:"none", color:"#444", fontSize:16, cursor:"pointer", padding:"4px 8px" }}>✕</button>
+                    <button onClick={function(){ deleteProject(p.id); }} style={{ background:"none",border:"none",color:"#444",fontSize:16,cursor:"pointer",padding:"4px 8px" }}>✕</button>
                   </div>
                 );
               })
@@ -5129,277 +5222,234 @@ function StudioScreen({ user, onExit }) {
       )}
 
       {/* ══ TOP BAR ══════════════════════════════════════════════ */}
-      <div style={{ display:"flex", alignItems:"center", padding:"10px 12px", borderBottom:"1px solid #141414", background:"#0a0a0a", flexShrink:0, gap:8, zIndex:50 }}>
-        <button onClick={function(){ if(!isSaved&&hasContent) setUnsavedAlert(true); else onExit(); }} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", width:32, height:32, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", flexShrink:0 }}>
+      <div style={{ display:"flex",alignItems:"center",padding:"10px 12px",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:8,zIndex:50 }}>
+        <button onClick={function(){ if(!isSaved&&hasContent)setUnsavedAlert(true);else onExit(); }} style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:8,color:"#888",width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="#888"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
         </button>
         {renamingProj
-          ? <input autoFocus defaultValue={projectName} onBlur={function(e){ setProjectName(e.target.value||projectName); setRenamingProj(false); setIsSaved(false); }} onKeyDown={function(e){ if(e.key==="Enter"){ setProjectName(e.target.value||projectName); setRenamingProj(false); setIsSaved(false); } }} style={{ background:"none", border:"none", borderBottom:"1px solid #C026D3", color:"white", fontSize:14, fontWeight:700, outline:"none", flex:1, padding:"0 0 2px" }} />
-          : <span style={{ color:"white", fontWeight:700, fontSize:13, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{projectName}</span>
+          ?<input autoFocus defaultValue={projectName} onBlur={function(e){ setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false); }} onKeyDown={function(e){ if(e.key==="Enter"){setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false);} }} style={{ background:"none",border:"none",borderBottom:"1px solid #C026D3",color:"white",fontSize:14,fontWeight:700,outline:"none",flex:1,padding:"0 0 2px" }} />
+          :<span style={{ color:"white",fontWeight:700,fontSize:13,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{projectName}</span>
         }
-        <button onClick={function(e){ e.stopPropagation(); setShowProjMenu(function(v){ return !v; }); setShowSettings(false); }} style={{ background:showProjMenu?"rgba(192,38,211,0.15)":"#1a1a1a", border:"1px solid "+(showProjMenu?"rgba(192,38,211,0.4)":"#2a2a2a"), borderRadius:8, color:"#aaa", fontSize:13, fontWeight:700, padding:"5px 10px", cursor:"pointer", flexShrink:0, letterSpacing:2 }}>···</button>
-        <button onClick={function(e){ e.stopPropagation(); setShowProjMenu(false); setShowSettings(function(v){ return !v; }); }} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:12, padding:"5px 8px", cursor:"pointer", flexShrink:0 }}>⚙</button>
-        <div style={{ color:isRecording?"#EF4444":"#aaa", fontSize:11, fontFamily:"monospace", fontWeight:700, flexShrink:0, background:"#141414", border:"1px solid #222", borderRadius:6, padding:"4px 7px" }}>{fmt(currentTime)}</div>
+        <button onClick={function(e){ e.stopPropagation();setShowProjMenu(function(v){return !v;});setShowSettings(false); }} style={{ background:showProjMenu?"rgba(192,38,211,0.15)":"#1a1a1a",border:"1px solid "+(showProjMenu?"rgba(192,38,211,0.4)":"#2a2a2a"),borderRadius:8,color:"#aaa",fontSize:13,fontWeight:700,padding:"5px 10px",cursor:"pointer",flexShrink:0,letterSpacing:2 }}>···</button>
+        <button onClick={function(e){ e.stopPropagation();setShowProjMenu(false);setShowSettings(function(v){return !v;}); }} style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:8,color:"#888",fontSize:12,padding:"5px 8px",cursor:"pointer",flexShrink:0 }}>⚙</button>
+        <div style={{ color:isRecording?"#EF4444":"#aaa",fontSize:11,fontFamily:"monospace",fontWeight:700,flexShrink:0,background:"#141414",border:"1px solid #222",borderRadius:6,padding:"4px 7px" }}>{fmt(currentTime)}</div>
       </div>
 
-      {/* ··· menu */}
-      {showProjMenu && (
-        <div style={{ position:"absolute", top:58, right:52, zIndex:6000 }} onClick={function(e){ e.stopPropagation(); }}>
-          <div style={{ background:"#0d0d0d", border:"1px solid #2a2a2a", borderRadius:14, overflow:"hidden", minWidth:200, boxShadow:"0 8px 40px rgba(0,0,0,0.9)" }}>
+      {showProjMenu&&(
+        <div style={{ position:"absolute",top:58,right:52,zIndex:6000 }} onClick={function(e){ e.stopPropagation(); }}>
+          <div style={{ background:"#0d0d0d",border:"1px solid #2a2a2a",borderRadius:14,overflow:"hidden",minWidth:200,boxShadow:"0 8px 40px rgba(0,0,0,0.9)" }}>
             {[
-              { label:"💾  Save",         fn:function(){ setShowProjMenu(false); saveProject(); } },
-              { label:"📋  Save As…",     fn:function(){ setShowProjMenu(false); setTimeout(function(){ const n=window.prompt("Save as:",projectName+" (copy)"); if(n){ setProjectName(n); setIsSaved(false); setTimeout(saveProject,50); } },50); } },
-              { label:"✏️  Rename",       fn:function(){ setShowProjMenu(false); setRenamingProj(true); } },
-              { label:"📂  All Projects", fn:function(){ setShowProjMenu(false); setTimeout(function(){ setShowProjects(true); },50); } },
-              { label:"⬇️  Export Mix",   fn:function(){ setShowProjMenu(false); setTimeout(exportMix,50); }, hi:true },
-              { label:"🆕  New Project",  fn:function(){ setShowProjMenu(false); setTimeout(function(){ if(!isSaved&&hasContent) setUnsavedAlert("new"); else{ setTracks([]); setBeatClip(null); setProjectName("New Project"); setIsSaved(false); setCurrentTime(0); } },50); }, sep:true },
+              {label:"💾  Save",         fn:function(){setShowProjMenu(false);saveProject();}},
+              {label:"📋  Save As…",     fn:function(){setShowProjMenu(false);setTimeout(function(){const n=window.prompt("Save as:",projectName+" (copy)");if(n){setProjectName(n);setIsSaved(false);setTimeout(saveProject,50);}},50);}},
+              {label:"✏️  Rename",       fn:function(){setShowProjMenu(false);setRenamingProj(true);}},
+              {label:"📂  All Projects", fn:function(){setShowProjMenu(false);setTimeout(function(){setShowProjects(true);},50);}},
+              {label:"⬇️  Export Mix",   fn:function(){setShowProjMenu(false);setTimeout(exportMix,50);},hi:true},
+              {label:"🆕  New Project",  fn:function(){setShowProjMenu(false);setTimeout(function(){if(!isSaved&&hasContent)setUnsavedAlert("new");else{setTracks([]);setProjectName("New Project");setIsSaved(false);setCurrentTime(0);}},50);},sep:true},
             ].map(function(item){
-              return (
-                <button key={item.label} onClick={item.fn} style={{ display:"block", width:"100%", textAlign:"left", padding:"13px 16px", background:item.hi?"rgba(192,38,211,0.08)":"none", border:"none", borderBottom:"1px solid #1a1a1a", borderTop:item.sep?"1px solid #2a2a2a":"none", color:item.hi||item.sep?"#C026D3":"white", fontSize:14, cursor:"pointer" }}>
-                  {item.label}
-                </button>
-              );
+              return <button key={item.label} onClick={item.fn} style={{ display:"block",width:"100%",textAlign:"left",padding:"13px 16px",background:item.hi?"rgba(192,38,211,0.08)":"none",border:"none",borderBottom:"1px solid #1a1a1a",borderTop:item.sep?"1px solid #2a2a2a":"none",color:item.hi||item.sep?"#C026D3":"white",fontSize:14,cursor:"pointer" }}>{item.label}</button>;
             })}
           </div>
         </div>
       )}
 
-      {saveStatus && <div style={{ background:"rgba(34,197,94,0.1)", borderBottom:"1px solid rgba(34,197,94,0.2)", color:"#22C55E", fontSize:12, padding:"5px 16px", textAlign:"center", flexShrink:0 }}>{saveStatus}</div>}
-      {error && <div style={{ background:"rgba(239,68,68,0.1)", borderBottom:"1px solid rgba(239,68,68,0.2)", color:"#F87171", fontSize:12, padding:"5px 16px", textAlign:"center", flexShrink:0 }}>{error}</div>}
+      {saveStatus&&<div style={{ background:"rgba(34,197,94,0.1)",borderBottom:"1px solid rgba(34,197,94,0.2)",color:"#22C55E",fontSize:12,padding:"5px 16px",textAlign:"center",flexShrink:0 }}>{saveStatus}</div>}
+      {error&&<div style={{ background:"rgba(239,68,68,0.1)",borderBottom:"1px solid rgba(239,68,68,0.2)",color:"#F87171",fontSize:12,padding:"5px 16px",textAlign:"center",flexShrink:0 }}>{error}</div>}
 
-      {/* ══ ZOOM + LOOP BAR ══════════════════════════════════════ */}
-      <div style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 12px", background:"#090909", borderBottom:"1px solid #0f0f0f", flexShrink:0 }}>
-        <button onClick={function(){ setZoom(function(z){ return Math.max(0.25,+(z-0.25).toFixed(2)); }); }} style={{ background:"#141414", border:"1px solid #222", borderRadius:5, color:"#888", fontSize:16, width:24, height:24, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>-</button>
-        <span style={{ color:"#555", fontSize:10, fontFamily:"monospace", width:32, textAlign:"center" }}>{zoom}x</span>
-        <button onClick={function(){ setZoom(function(z){ return Math.min(4,+(z+0.25).toFixed(2)); }); }} style={{ background:"#141414", border:"1px solid #222", borderRadius:5, color:"#888", fontSize:16, width:24, height:24, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
-        <div style={{ width:1, background:"#1a1a1a", height:14, margin:"0 4px" }} />
-        <button onClick={function(){ setLoopEnabled(function(v){ return !v; }); }} style={{ background:loopEnabled?"rgba(59,130,246,0.2)":"#141414", border:"1px solid "+(loopEnabled?"#3B82F6":"#222"), borderRadius:6, color:loopEnabled?"#3B82F6":"#555", fontSize:10, fontWeight:700, padding:"3px 8px", cursor:"pointer" }}>LOOP</button>
-        {loopEnabled && <span style={{ color:"#3B82F6", fontSize:10, fontFamily:"monospace" }}>{fmt(loopIn)} – {fmt(loopOut)}</span>}
+      {/* Zoom / Loop / Follow bar */}
+      <div style={{ display:"flex",alignItems:"center",gap:6,padding:"4px 12px",background:"#090909",borderBottom:"1px solid #0f0f0f",flexShrink:0 }}>
+        <button onClick={function(){ setZoom(function(z){return Math.max(0.25,+(z-0.25).toFixed(2));});}} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:16,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>-</button>
+        <span style={{ color:"#555",fontSize:10,fontFamily:"monospace",width:32,textAlign:"center" }}>{zoom}x</span>
+        <button onClick={function(){ setZoom(function(z){return Math.min(4,+(z+0.25).toFixed(2));});}} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:16,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>+</button>
+        <div style={{ width:1,background:"#1a1a1a",height:14,margin:"0 4px" }} />
+        <button onClick={function(){ setLoopEnabled(function(v){return !v;});}} style={{ background:loopEnabled?"rgba(59,130,246,0.2)":"#141414",border:"1px solid "+(loopEnabled?"#3B82F6":"#222"),borderRadius:6,color:loopEnabled?"#3B82F6":"#555",fontSize:10,fontWeight:700,padding:"3px 8px",cursor:"pointer" }}>LOOP</button>
+        <div style={{ flex:1 }} />
+        <button onClick={function(){ setFollowMode(function(v){return !v;});}} style={{ background:followMode?"rgba(192,38,211,0.2)":"#141414",border:"1px solid "+(followMode?"#C026D3":"#222"),borderRadius:6,color:followMode?"#C026D3":"#555",fontSize:10,fontWeight:700,padding:"3px 8px",cursor:"pointer" }}>↗ FOLLOW</button>
       </div>
 
-      {/* ══ TWO-COLUMN DAW GRID ══════════════════════════════════
-          LEFT COLUMN  = sidebar (track headers) — fixed width, z-index:10
-          RIGHT COLUMN = timeline (ruler + waveforms) — flex-grow, scrolls horizontally
-          Both columns share overflow-y:auto so vertical scroll is locked together
+      {/* ══ TWO-COLUMN DAW LAYOUT ════════════════════════════════
+          LEFT:  sidebar — headers locked horizontally, scroll vertically
+          RIGHT: timeline — single horizontal scroll container
+                           ruler + all track lanes share ONE scrollLeft
       ══════════════════════════════════════════════════════════ */}
-      <div style={{ flex:1, display:"flex", minHeight:0, overflow:"hidden" }}>
+      <div style={{ flex:1,display:"flex",minHeight:0,overflow:"hidden" }}>
 
-        {/* LEFT COLUMN — SIDEBAR ─────────────────────────────── */}
+        {/* LEFT SIDEBAR — headers locked horizontally */}
         <div
           ref={sidebarRef}
-          style={{
-            width: SIDEBAR_W,
-            flexShrink: 0,
-            overflowY: "auto",
-            overflowX: "hidden",
-            background: "#0a0a0a",
-            borderRight: "1px solid #141414",
-            zIndex: 10,          // waveforms scroll behind this
-          }}
-          onScroll={function(e){
-            // Keep right column vertically in sync
-            if (timelineColRef.current) timelineColRef.current.scrollTop = e.target.scrollTop;
-          }}
+          style={{ width:SIDEBAR_W,flexShrink:0,overflowY:"auto",overflowX:"hidden",background:"#0a0a0a",borderRight:"1px solid #141414",zIndex:10 }}
+          onScroll={function(e){ if(scrollRef.current) scrollRef.current.scrollTop=e.target.scrollTop; }}
         >
-          {/* Ruler spacer — matches ruler height in right column */}
-          <div style={{ height:RULER_H, borderBottom:"1px solid #1a1a1a", background:"#0c0c0c", display:"flex", alignItems:"flex-end", paddingBottom:4, paddingLeft:8 }}>
-            <span style={{ color:"#333", fontSize:9 }}>TRACKS</span>
+          {/* Ruler height spacer */}
+          <div style={{ height:RULER_H,background:"#0c0c0c",borderBottom:"1px solid #1a1a1a",display:"flex",alignItems:"center",paddingLeft:8 }}>
+            <span style={{ color:"#333",fontSize:9 }}>TRACKS</span>
           </div>
 
-          {/* Beat header */}
-          {beatClip && (
-            <div style={{ height:TRACK_H, borderBottom:"1px solid #111", padding:"8px 10px", display:"flex", flexDirection:"column", justifyContent:"center" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:5, marginBottom:2 }}>
-                <div style={{ width:7, height:7, borderRadius:"50%", background:"#C026D3" }} />
-                <span style={{ color:"white", fontSize:10, fontWeight:700 }}>BEAT</span>
-              </div>
-              <span style={{ color:"#333", fontSize:8, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{beatClip.name}</span>
-            </div>
-          )}
-
-          {/* Track headers */}
+          {/* One row per track */}
           {tracks.map(function(track){
-            const isRecThis = isRecording && recTrackId === track.id;
+            const isRec = isRecording && recTrackId === track.id;
+            const hasSolo = tracks.some(function(t){return t.isSoloed;});
+            const dimmed = hasSolo && !track.isSoloed;
             return (
-              <div key={track.id} style={{ height:TRACK_H, borderBottom:"1px solid #0f0f0f", padding:"6px 8px", display:"flex", flexDirection:"column", justifyContent:"space-between" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-                  <div style={{ width:7, height:7, borderRadius:"50%", background:isRecThis?"#EF4444":track.color, flexShrink:0 }} />
-                  <span style={{ color:"white", fontSize:10, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{track.name}</span>
+              <div key={track.id} style={{ height:TRACK_H,borderBottom:"1px solid #0f0f0f",padding:"6px 8px",display:"flex",flexDirection:"column",justifyContent:"space-between",opacity:dimmed?0.4:1 }}>
+                <div style={{ display:"flex",alignItems:"center",gap:4 }}>
+                  <div style={{ width:7,height:7,borderRadius:"50%",background:isRec?"#EF4444":track.color,flexShrink:0 }} />
+                  <span style={{ color:"white",fontSize:10,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{track.name}</span>
+                  <span style={{ color:"#444",fontSize:8,marginLeft:"auto" }}>{track.type==="beat"?"🎵":"🎙"}</span>
                 </div>
-                <div style={{ display:"flex", gap:3, alignItems:"center" }}>
-                  <button onClick={function(){ toggleMute(track.id); }} style={{ background:track.muted?"rgba(245,158,11,0.2)":"#1a1a1a", border:"1px solid "+(track.muted?"#F59E0B":"#2a2a2a"), borderRadius:4, color:track.muted?"#F59E0B":"#555", fontSize:8, padding:"2px 5px", cursor:"pointer", fontWeight:700 }}>M</button>
-                  <input type="range" min={0} max={1} step={0.05} value={track.volume} onChange={function(e){ setVol(track.id,parseFloat(e.target.value)); }} style={{ width:26, accentColor:track.color, height:2 }} />
-                  <button onClick={function(){ deleteTrack(track.id); }} style={{ background:"none", border:"none", color:"#333", fontSize:10, cursor:"pointer", marginLeft:"auto", padding:"0 2px" }}>✕</button>
+                <div style={{ display:"flex",gap:3,alignItems:"center" }}>
+                  <button onClick={function(){ toggleMute(track.id); }} style={{ background:track.isMuted?"rgba(245,158,11,0.2)":"#1a1a1a",border:"1px solid "+(track.isMuted?"#F59E0B":"#2a2a2a"),borderRadius:4,color:track.isMuted?"#F59E0B":"#555",fontSize:8,padding:"2px 5px",cursor:"pointer",fontWeight:700 }}>M</button>
+                  <button onClick={function(){ toggleSolo(track.id); }} style={{ background:track.isSoloed?"rgba(34,197,94,0.2)":"#1a1a1a",border:"1px solid "+(track.isSoloed?"#22C55E":"#2a2a2a"),borderRadius:4,color:track.isSoloed?"#22C55E":"#555",fontSize:8,padding:"2px 5px",cursor:"pointer",fontWeight:700 }}>S</button>
+                  <button onClick={function(){ removeTrack(track.id); }} style={{ background:"none",border:"none",color:"#333",fontSize:10,cursor:"pointer",marginLeft:"auto",padding:"0 2px" }}>✕</button>
                 </div>
               </div>
             );
           })}
 
-          {/* ── ADD TRACK button — full width below track names, BandLab style ── */}
-          <button
-            onClick={function(e){ e.stopPropagation(); setShowAddMenu(function(v){ return !v; }); }}
-            style={{ width:"100%", height:52, background:showAddMenu?"rgba(192,38,211,0.1)":"#111", border:"none", borderBottom:"1px solid #1a1a1a", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}
-          >
-            <span style={{ color:showAddMenu?"#C026D3":"#555", fontSize:28, fontWeight:300, lineHeight:1 }}>+</span>
+          {/* Add track button */}
+          <button onClick={function(e){ e.stopPropagation();setShowAddMenu(function(v){return !v;}); }} style={{ width:"100%",height:52,background:showAddMenu?"rgba(192,38,211,0.1)":"#111",border:"none",borderBottom:"1px solid #1a1a1a",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>
+            <span style={{ color:showAddMenu?"#C026D3":"#555",fontSize:28,fontWeight:300,lineHeight:1 }}>+</span>
           </button>
         </div>
 
-        {/* RIGHT COLUMN — TIMELINE ────────────────────────────── */}
-        {/* position:relative so playhead can be absolutely positioned inside */}
-        <div style={{ flex:1, position:"relative", overflow:"hidden" }}>
+        {/* RIGHT TIMELINE — single horizontal scroll container */}
+        {/* ALL rulers and lane content share this one scrollLeft */}
+        <div style={{ flex:1,position:"relative",overflow:"hidden" }}>
 
-          {/* ── PLAYHEAD — absolute over right column only ── */}
-          <div style={{ position:"absolute", top:0, bottom:0, left:0, width:0, zIndex:20, pointerEvents:"none" }}>
-            {/* White triangle at very top of ruler, pointing downward */}
-            <div style={{ position:"absolute", top:0, left:-6, width:0, height:0, borderLeft:"6px solid transparent", borderRight:"6px solid transparent", borderTop:"10px solid white" }} />
-            {/* White line — full height from ruler top to bottom */}
-            <div style={{ position:"absolute", top:0, bottom:0, left:0, width:1, background:"rgba(255,255,255,0.85)" }} />
+          {/* ── FIXED PLAYHEAD — never moves, time comes to it ── */}
+          <div style={{ position:"absolute",top:0,bottom:0,left:PLAYHEAD_X,width:1,zIndex:30,pointerEvents:"none" }}>
+            <div style={{ position:"absolute",top:0,left:-5,width:0,height:0,borderLeft:"5px solid transparent",borderRight:"5px solid transparent",borderTop:"8px solid white" }} />
+            <div style={{ position:"absolute",top:0,bottom:0,left:0,width:1,background:"rgba(255,255,255,0.9)" }} />
           </div>
 
-          {/* Scrollable timeline content */}
           <div
-            ref={timelineColRef}
-            style={{ width:"100%", height:"100%", overflowX:"scroll", overflowY:"auto" }}
-            onScroll={function(e){
-              // Keep sidebar vertically in sync
-              if (sidebarRef.current) sidebarRef.current.scrollTop = e.target.scrollTop;
-            }}
+            ref={scrollRef}
+            style={{ width:"100%",height:"100%",overflowX:"scroll",overflowY:"auto" }}
+            onScroll={handleScroll}
           >
-            {/* Inner content — Bar1 at x=0, no offset needed */}
-            {/* minWidth ensures there's always enough content to scroll right */}
-            <div style={{ minWidth: totalW + 600, position:"relative" }}>
+            {/* Inner — wide enough for full timeline + padding */}
+            <div style={{ minWidth:totalW,position:"relative",paddingLeft:PLAYHEAD_X }}>
 
-              {/* ── RULER — bar numbers inside scrollable area ── */}
-              {/* x = barIndex * spBar * PPS → pure t*PPS, no offsets */}
+              {/* ── RULER ── bar markers, seekable by click+drag ── */}
               <div
-                style={{ height:RULER_H, position:"sticky", top:0, zIndex:15, background:"#0c0c0c", borderBottom:"1px solid #1a1a1a", cursor:"pointer" }}
-                onClick={handleRulerClick}
+                style={{ height:RULER_H,position:"sticky",top:0,zIndex:15,background:"#0c0c0c",borderBottom:"1px solid #1a1a1a",cursor:"col-resize" }}
+                onMouseDown={handleRulerMouseDown}
+                onTouchStart={handleRulerTouch}
               >
-                {Array.from({ length:numBars }, function(_,bi){
-                  const bx = bi * spBar * PPS;
-                  return (
-                    <div key={bi} style={{ position:"absolute", left:bx, top:0, bottom:0 }}>
-                      <div style={{ position:"absolute", left:0, top:0, bottom:0, width:1, background:bi===0?"#555":"#1e1e1e" }} />
-                      <span style={{ position:"absolute", top:5, left:4, color:"#555", fontSize:9, fontFamily:"monospace", fontWeight:700, userSelect:"none" }}>{bi+1}</span>
-                      {Array.from({ length:timeSigNum }, function(_,di){
-                        if (di===0) return null;
-                        return <div key={di} style={{ position:"absolute", left:di*spb*PPS, top:Math.round(RULER_H*0.55), bottom:0, width:1, background:"#181818" }} />;
+                {/* Playhead position indicator in ruler */}
+                <div style={{ position:"absolute",left:currentTime*effectivePPS,top:0,bottom:0,width:1,background:"rgba(255,255,255,0.2)",pointerEvents:"none" }} />
+                {Array.from({length:numBars},function(_,bi){
+                  const bx=bi*spBar*effectivePPS;
+                  return(
+                    <div key={bi} style={{ position:"absolute",left:bx,top:0,bottom:0 }}>
+                      <div style={{ position:"absolute",left:0,top:0,bottom:0,width:1,background:bi===0?"#555":"#1e1e1e" }} />
+                      <span style={{ position:"absolute",top:5,left:4,color:"#555",fontSize:9,fontFamily:"monospace",fontWeight:700,userSelect:"none" }}>{bi+1}</span>
+                      {Array.from({length:timeSigNum},function(_,di){
+                        if(di===0)return null;
+                        return <div key={di} style={{ position:"absolute",left:di*spb*effectivePPS,top:Math.round(RULER_H*0.55),bottom:0,width:1,background:"#181818" }} />;
                       })}
                     </div>
                   );
                 })}
-                {loopEnabled && loopOut>loopIn && (
-                  <div style={{ position:"absolute", left:loopIn*PPS, width:(loopOut-loopIn)*PPS, top:0, bottom:0, background:"rgba(59,130,246,0.1)", borderLeft:"2px solid #3B82F6", borderRight:"2px solid #3B82F6", pointerEvents:"none" }}>
-                    <span style={{ position:"absolute", top:4, left:4, color:"#3B82F6", fontSize:8, fontWeight:700 }}>LOOP</span>
+                {loopEnabled&&loopOut>loopIn&&(
+                  <div style={{ position:"absolute",left:loopIn*effectivePPS,width:(loopOut-loopIn)*effectivePPS,top:0,bottom:0,background:"rgba(59,130,246,0.1)",borderLeft:"2px solid #3B82F6",borderRight:"2px solid #3B82F6",pointerEvents:"none" }}>
+                    <span style={{ position:"absolute",top:4,left:4,color:"#3B82F6",fontSize:8,fontWeight:700 }}>LOOP</span>
                   </div>
                 )}
               </div>
 
-              {/* ── BEAT LANE ── */}
-              {/* left = 0 = time 0. x = t * PPS throughout */}
-              {beatClip && (
-                <div style={{ height:TRACK_H, borderBottom:"1px solid #111", position:"relative", background:"rgba(192,38,211,0.03)" }}>
-                  <div style={{ position:"absolute", left:0, top:0, width:Math.round(beatClip.duration*PPS), height:"100%" }}>
-                    <WaveformCanvas
-                      audioBuffer={beatClip.buffer}
-                      color="#C026D3"
-                      width={Math.max(1,Math.round(beatClip.duration*PPS))}
-                      height={TRACK_H}
-                      playedFraction={beatClip.duration>0?Math.min(1,currentTime/beatClip.duration):0}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* ── VOCAL TRACK LANES ── */}
+              {/* ── TRACK LANES ── one per track, regions at x=startTime*effectivePPS ── */}
               {tracks.map(function(track){
-                const isRecThis = isRecording && recTrackId === track.id;
-                return (
-                  <div key={track.id} style={{ height:TRACK_H, borderBottom:"1px solid #0f0f0f", position:"relative", background:"#090909", overflow:"hidden" }}>
+                const isRec = isRecording && recTrackId === track.id;
+                const hasSolo = tracks.some(function(t){return t.isSoloed;});
+                const dimmed = hasSolo && !track.isSoloed;
+                const regionL = (track.startTime||0)*effectivePPS;
+                const regionW = Math.max(40,(track.duration||2)*effectivePPS);
+                const playedF = Math.max(0,Math.min(1,(currentTime-(track.startTime||0))/(track.duration||1)));
+                const isDragging = draggingReg === track.id;
+                return(
+                  <div key={track.id} style={{ height:TRACK_H,borderBottom:"1px solid #0f0f0f",position:"relative",background:"#090909",overflow:"hidden",opacity:dimmed?0.4:1 }}>
 
-                    {/* Grid lines */}
-                    {Array.from({ length:Math.ceil(totalDur/spb)+1 }, function(_,i){
-                      return <div key={i} style={{ position:"absolute", left:i*spb*PPS, top:0, bottom:0, width:1, background:i%timeSigNum===0?"#181818":"#111", pointerEvents:"none" }} />;
+                    {/* Beat grid lines */}
+                    {Array.from({length:Math.ceil(totalDur/spb)+1},function(_,i){
+                      return <div key={i} style={{ position:"absolute",left:i*spb*effectivePPS,top:0,bottom:0,width:1,background:i%timeSigNum===0?"#181818":"#111",pointerEvents:"none" }} />;
                     })}
 
-                    {/* Live recording trail — anchored to currentTime*PPS */}
-                    {isRecThis && recTrail.length>0 && (
-                      <div style={{ position:"absolute", left:Math.max(0, currentTime*PPS - recTrail.length*2), top:4, height:TRACK_H-8, display:"flex", alignItems:"center", gap:0, pointerEvents:"none" }}>
+                    {/* Live recording trail */}
+                    {isRec&&recTrail.length>0&&(
+                      <div style={{ position:"absolute",left:Math.max(0,currentTime*effectivePPS-recTrail.length*2),top:4,height:TRACK_H-8,display:"flex",alignItems:"center",pointerEvents:"none" }}>
                         {recTrail.map(function(v,i){
-                          return <div key={i} style={{ width:2, background:"#EF4444", borderRadius:1, height:Math.max(2,v*(TRACK_H-12)), opacity:0.4+0.6*(i/recTrail.length) }} />;
+                          return <div key={i} style={{ width:2,background:"#EF4444",borderRadius:1,height:Math.max(2,v*(TRACK_H-12)),opacity:0.4+0.6*(i/recTrail.length) }} />;
                         })}
                       </div>
                     )}
 
-                    {/* Audio clips — left = clip.offset * PPS */}
-                    {track.clips.map(function(clip){
-                      const isSel  = selectedClip && selectedClip.trackId===track.id && selectedClip.clipId===clip.id;
-                      const isDrag = draggingClip && draggingClip.trackId===track.id && draggingClip.clipId===clip.id;
-                      const cLeft  = (clip.offset||0) * PPS;
-                      const cW     = Math.max(30, (clip.duration||2) * PPS);
-                      const frac   = Math.max(0, Math.min(1, (currentTime-(clip.offset||0))/(clip.duration||1)));
-                      return (
-                        <div key={clip.id}
-                          style={{ position:"absolute", left:cLeft, top:4, width:cW, height:TRACK_H-8, borderRadius:6, overflow:"hidden", border:"2px solid "+(isSel?track.color:track.color+"55"), boxShadow:isSel?"0 0 0 2px "+track.color+"44":"none", background:"#0a0a0a", cursor:isDrag?"grabbing":"grab", zIndex:isSel?10:1, touchAction:"none", transition:isDrag?"none":"box-shadow 0.1s" }}
-                          onClick={function(e){ e.stopPropagation(); setSelectedClip({ trackId:track.id, clipId:clip.id }); }}
-                          onMouseDown={function(e){ handleClipMouseDown(e,track.id,clip); }}
-                          onTouchStart={function(e){ handleClipTouchStart(e,track.id,clip); }}
-                          onTouchMove={function(e){ handleClipTouchMove(e,track.id,clip); }}
-                          onTouchEnd={handleClipTouchEnd}
-                          onContextMenu={function(e){ e.preventDefault(); const r=e.currentTarget.getBoundingClientRect(); setContextMenu({ trackId:track.id, clip, x:r.left, y:r.bottom }); }}
-                        >
-                          <WaveformCanvas audioBuffer={clip.buffer} color={track.color} width={Math.max(1,Math.round(cW))} height={TRACK_H-8} playedFraction={frac} />
-                          <div style={{ position:"absolute", bottom:2, left:5, color:"rgba(255,255,255,0.7)", fontSize:8, fontWeight:600, pointerEvents:"none", textShadow:"0 1px 3px rgba(0,0,0,0.8)" }}>{clip.label}</div>
-                        </div>
-                      );
-                    })}
+                    {/* Audio region — x = startTime * effectivePPS */}
+                    {track.url&&(
+                      <div
+                        style={{ position:"absolute",left:regionL,top:4,width:regionW,height:TRACK_H-8,borderRadius:6,overflow:"hidden",border:"2px solid "+track.color+(isDragging?"":"88"),boxShadow:isDragging?"0 0 0 2px "+track.color+"44":"none",background:"#0a0a0a",cursor:isDragging?"grabbing":"grab",zIndex:5,touchAction:"none" }}
+                        onMouseDown={function(e){ handleRegionMouseDown(e,track); }}
+                        onTouchStart={function(e){ handleRegionTouchStart(e,track); }}
+                        onTouchMove={function(e){ handleRegionTouchMove(e,track); }}
+                        onTouchEnd={handleRegionTouchEnd}
+                        onContextMenu={function(e){ e.preventDefault();const r=e.currentTarget.getBoundingClientRect();setContextMenu({track,x:r.left,y:r.bottom}); }}
+                      >
+                        <WaveformCanvas audioBuffer={track.audioBuffer} color={track.color} width={Math.max(1,Math.round(regionW))} height={TRACK_H-8} playedFraction={playedF} />
+                        <div style={{ position:"absolute",bottom:2,left:5,color:"rgba(255,255,255,0.7)",fontSize:8,fontWeight:600,pointerEvents:"none",textShadow:"0 1px 3px rgba(0,0,0,0.8)" }}>{track.name}</div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
 
-            </div>{/* end inner content */}
-          </div>{/* end scrollable */}
-        </div>{/* end RIGHT COLUMN */}
-
-      </div>{/* end two-column grid */}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Add menu popup */}
-      {showAddMenu && (
-        <div style={{ position:"absolute", bottom:90, left:12, zIndex:400, background:"#1c1c1c", border:"1px solid #2a2a2a", borderRadius:14, overflow:"hidden", minWidth:210, boxShadow:"0 8px 32px rgba(0,0,0,0.8)" }} onClick={function(e){ e.stopPropagation(); }}>
-          <div style={{ padding:"10px 16px 6px", color:"#555", fontSize:10, fontWeight:700 }}>ADD TO PROJECT</div>
-          <label style={{ display:"block", cursor:"pointer" }}>
-            <div style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12, borderBottom:"1px solid #1a1a1a" }}>
-              <div style={{ width:32, height:32, borderRadius:8, background:"rgba(192,38,211,0.2)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 }}>🎵</div>
-              <div><div style={{ color:"white", fontWeight:700, fontSize:13 }}>Upload Beat</div><div style={{ color:"#555", fontSize:11 }}>MP3 or WAV</div></div>
+      {showAddMenu&&(
+        <div style={{ position:"absolute",bottom:90,left:12,zIndex:400,background:"#1c1c1c",border:"1px solid #2a2a2a",borderRadius:14,overflow:"hidden",minWidth:220,boxShadow:"0 8px 32px rgba(0,0,0,0.8)" }} onClick={function(e){ e.stopPropagation(); }}>
+          <div style={{ padding:"10px 16px 6px",color:"#555",fontSize:10,fontWeight:700 }}>ADD TO PROJECT</div>
+          <label style={{ display:"block",cursor:"pointer" }}>
+            <div style={{ padding:"12px 16px",display:"flex",alignItems:"center",gap:12,borderBottom:"1px solid #1a1a1a" }}>
+              <div style={{ width:32,height:32,borderRadius:8,background:"rgba(192,38,211,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>🎵</div>
+              <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Upload Beat</div><div style={{ color:"#555",fontSize:11 }}>Adds to track list</div></div>
             </div>
-            <input type="file" accept=".mp3,.wav,.m4a,.aac,audio/*" onChange={handleBeatUpload} style={{ display:"none" }} />
+            <input type="file" accept=".mp3,.wav,.m4a,.aac,audio/*" multiple onChange={function(e){handleFileUpload(e,"beat");}} style={{ display:"none" }} />
           </label>
-          <div style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12, cursor:"pointer" }} onClick={function(){ addTrack(); setShowAddMenu(false); }}>
-            <div style={{ width:32, height:32, borderRadius:8, background:"rgba(239,68,68,0.2)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 }}>🎙</div>
-            <div><div style={{ color:"white", fontWeight:700, fontSize:13 }}>Add Vocal Track</div><div style={{ color:"#555", fontSize:11 }}>Record a new layer</div></div>
+          <label style={{ display:"block",cursor:"pointer" }}>
+            <div style={{ padding:"12px 16px",display:"flex",alignItems:"center",gap:12,borderBottom:"1px solid #1a1a1a" }}>
+              <div style={{ width:32,height:32,borderRadius:8,background:"rgba(59,130,246,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>🎵</div>
+              <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Upload Audio</div><div style={{ color:"#555",fontSize:11 }}>Any audio file</div></div>
+            </div>
+            <input type="file" accept=".mp3,.wav,.m4a,.aac,audio/*" multiple onChange={function(e){handleFileUpload(e,"vocal");}} style={{ display:"none" }} />
+          </label>
+          <div style={{ padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer" }} onClick={function(){ startCountIn(); setShowAddMenu(false); }}>
+            <div style={{ width:32,height:32,borderRadius:8,background:"rgba(239,68,68,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>🎙</div>
+            <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Record Vocals</div><div style={{ color:"#555",fontSize:11 }}>Record new take</div></div>
           </div>
         </div>
       )}
 
       {/* ══ TRANSPORT ════════════════════════════════════════════ */}
-      <div style={{ background:"#0a0a0a", borderTop:"1px solid #141414", padding:"8px 16px", paddingBottom:"calc(8px + env(safe-area-inset-bottom))", flexShrink:0, zIndex:50 }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          <div style={{ width:40, height:40, borderRadius:10, background:"#141414", border:"1px solid #222", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
-            <span style={{ color:tracks.length>0?"#C026D3":"#444", fontSize:13, fontWeight:800, lineHeight:1 }}>{tracks.length}</span>
-            <span style={{ color:"#333", fontSize:7 }}>TRK</span>
+      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"calc(8px + env(safe-area-inset-bottom))",flexShrink:0,zIndex:50 }}>
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+          <div style={{ width:40,height:40,borderRadius:10,background:"#141414",border:"1px solid #222",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center" }}>
+            <span style={{ color:tracks.length>0?"#C026D3":"#444",fontSize:13,fontWeight:800,lineHeight:1 }}>{tracks.length}</span>
+            <span style={{ color:"#333",fontSize:7 }}>TRK</span>
           </div>
-          <button onClick={rewind} style={{ width:36, height:36, borderRadius:8, background:"#141414", border:"1px solid #222", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <button onClick={rewind} style={{ width:36,height:36,borderRadius:8,background:"#141414",border:"1px solid #222",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
           </button>
-          <button onClick={function(){ if(isRecording) stopRecording(); else if(tracks.length>0&&!countIn) startCountIn(tracks[tracks.length-1].id); else if(tracks.length===0) addTrack(); }} disabled={countIn>0} style={{ width:52, height:52, borderRadius:"50%", background:isRecording?"#EF4444":"linear-gradient(135deg,#EF4444,#DC2626)", border:isRecording?"3px solid rgba(239,68,68,0.5)":"3px solid rgba(239,68,68,0.2)", cursor:countIn>0?"not-allowed":"pointer", opacity:countIn>0?0.4:1, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:isRecording?"0 0 20px rgba(239,68,68,0.5)":"none" }}>
-            {isRecording ? <div style={{ width:16, height:16, background:"white", borderRadius:3 }} /> : <div style={{ width:20, height:20, background:"white", borderRadius:"50%" }} />}
+          <button onClick={function(){ if(isRecording)stopRecording();else startCountIn(); }} disabled={countIn>0} style={{ width:52,height:52,borderRadius:"50%",background:isRecording?"#EF4444":"linear-gradient(135deg,#EF4444,#DC2626)",border:isRecording?"3px solid rgba(239,68,68,0.5)":"3px solid rgba(239,68,68,0.2)",cursor:countIn>0?"not-allowed":"pointer",opacity:countIn>0?0.4:1,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:isRecording?"0 0 20px rgba(239,68,68,0.5)":"none" }}>
+            {isRecording?<div style={{ width:16,height:16,background:"white",borderRadius:3 }} />:<div style={{ width:20,height:20,background:"white",borderRadius:"50%" }} />}
           </button>
-          <button onClick={togglePlay} style={{ width:40, height:40, borderRadius:"50%", background:"linear-gradient(135deg,#C026D3,#7C3AED)", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
-            {isPlaying ? <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg> : <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>}
+          <button onClick={togglePlay} style={{ width:40,height:40,borderRadius:"50%",background:"linear-gradient(135deg,#C026D3,#7C3AED)",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>
+            {isPlaying?<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>}
           </button>
-          <div style={{ width:40, height:40, borderRadius:10, background:"#141414", border:"1px solid #222", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
-            <span style={{ color:"#555", fontSize:11, fontWeight:800, lineHeight:1 }}>{zoom}x</span>
-            <span style={{ color:"#333", fontSize:7 }}>ZOOM</span>
+          <div style={{ width:40,height:40,borderRadius:10,background:"#141414",border:"1px solid #222",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center" }}>
+            <span style={{ color:"#555",fontSize:11,fontWeight:800,lineHeight:1 }}>{zoom}x</span>
+            <span style={{ color:"#333",fontSize:7 }}>ZOOM</span>
           </div>
         </div>
       </div>
