@@ -4308,6 +4308,42 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 // =============================================================================
 // BOTTOM NAV
 // =============================================================================
+
+// =============================================================================
+// useHistory — undo/redo for tracks state
+// =============================================================================
+function useHistory(initial) {
+  const past    = useRef([]);
+  const future  = useRef([]);
+  const [state, setStateRaw] = React.useState(initial);
+
+  const setState = function (newState) {
+    past.current.push(state);
+    if (past.current.length > 50) past.current.shift(); // cap at 50
+    future.current = [];
+    setStateRaw(newState);
+  };
+
+  const undo = function () {
+    if (past.current.length === 0) return;
+    future.current.push(state);
+    const prev = past.current.pop();
+    setStateRaw(prev);
+  };
+
+  const redo = function () {
+    if (future.current.length === 0) return;
+    past.current.push(state);
+    const next = future.current.pop();
+    setStateRaw(next);
+  };
+
+  const canUndo = past.current.length > 0;
+  const canRedo = future.current.length > 0;
+
+  return [state, setState, undo, redo, canUndo, canRedo];
+}
+
 // =============================================================================
 // STUDIO SCREEN
 // =============================================================================
@@ -4433,6 +4469,42 @@ function WaveformCanvas({ audioBuffer, color, width, height, playedFraction }) {
   return <canvas ref={ref} style={{ display:"block", width:"100%", height:"100%", imageRendering:"pixelated" }} />;
 }
 
+
+// =============================================================================
+// useHistory — undo/redo for tracks state
+// =============================================================================
+function useHistory(initial) {
+  const past    = useRef([]);
+  const future  = useRef([]);
+  const [state, setStateRaw] = React.useState(initial);
+
+  const setState = function (newState) {
+    past.current.push(state);
+    if (past.current.length > 50) past.current.shift(); // cap at 50
+    future.current = [];
+    setStateRaw(newState);
+  };
+
+  const undo = function () {
+    if (past.current.length === 0) return;
+    future.current.push(state);
+    const prev = past.current.pop();
+    setStateRaw(prev);
+  };
+
+  const redo = function () {
+    if (future.current.length === 0) return;
+    past.current.push(state);
+    const next = future.current.pop();
+    setStateRaw(next);
+  };
+
+  const canUndo = past.current.length > 0;
+  const canRedo = future.current.length > 0;
+
+  return [state, setState, undo, redo, canUndo, canRedo];
+}
+
 // =============================================================================
 // STUDIO SCREEN — proper DAW physics
 // =============================================================================
@@ -4460,7 +4532,7 @@ function StudioScreen({ user, onExit }) {
   const PLAYHEAD_X  = 0;         // playhead flush with sidebar edge — no gap
 
   // ── Track array: [{id, name, type, audioBuffer, url, isMuted, isSoloed, startTime, duration}]
-  const [tracks,       setTracks]       = useState([]);
+  const [tracks, setTracks, undoTracks, redoTracks, canUndo, canRedo] = useHistory([]);
   const [bpm,          setBpm]          = useState(120);
   const [timeSigNum,   setTimeSigNum]   = useState(4);
   const [zoom,         setZoom]         = useState(1);
@@ -4502,12 +4574,15 @@ function StudioScreen({ user, onExit }) {
   const [draggingReg,  setDraggingReg]  = useState(null);
   const [showMixer,    setShowMixer]     = useState(false);
   const [fxTrackId,    setFxTrackId]     = useState(null);
-  const [showTakes,    setShowTakes]     = useState(null); // trackId whose takes panel is open
-  const [trimmingClip, setTrimmingClip]  = useState(null); // {trackId, clipId, edge}
-  const [monitoringOn, setMonitoringOn] = useState(false);  // input monitoring toggle
-  const [monitorVol,   setMonitorVol]   = useState(0.8);    // 0–1
-  const [headphonesIn, setHeadphonesIn] = useState(false);  // headphone route detected
-  const [monitorWarn,  setMonitorWarn]  = useState("");     // feedback warning
+  const [showTakes,    setShowTakes]     = useState(null);
+  const [trimmingClip, setTrimmingClip]  = useState(null);
+  const [monitoringOn, setMonitoringOn] = useState(false);
+  const [monitorVol,   setMonitorVol]   = useState(0.8);
+  const [headphonesIn, setHeadphonesIn] = useState(false);
+  const [monitorWarn,  setMonitorWarn]  = useState("");
+  const [showAutoPitch,setShowAutoPitch] = useState(false);
+  const [autoPitch,    setAutoPitch]     = useState({ on:false, key:"C", scale:"major", speed:0.5 });
+  const [lowLatency,   setLowLatency]    = useState(false);
 
   // ── Refs ──────────────────────────────────────────────────────
   const actxRef         = useRef(null);
@@ -4640,39 +4715,30 @@ function StudioScreen({ user, onExit }) {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: {
-        echoCancellation: false,  // MUST be off — adds 40-80ms
-        noiseSuppression: false,  // MUST be off — adds latency
-        autoGainControl:  false,  // MUST be off — unstable
-        sampleRate:       48000,  // match iOS hardware sample rate
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl:  false,
+        sampleRate:       48000,
         channelCount:     1,
-        latency:          0,      // hint for lowest latency
+        latency:          0,
       }});
       monitorStreamRef.current = stream;
-
-      // Create a dedicated low-latency AudioContext for monitoring only
-      // sampleRate matching hardware avoids resampling (a major latency source)
+      // Low-latency mode: "playback" hint gives browser permission to use hardware I/O buffer
+      // "interactive" is smallest software buffer. On wired headphones: ~5-15ms total.
       const mCtx = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 48000,
-        latencyHint: "interactive", // lowest latency mode
+        sampleRate:   48000,
+        latencyHint:  lowLatency ? "playback" : "interactive",
       });
-
-      const src  = mCtx.createMediaStreamSource(stream);
-      const gain = mCtx.createGain();
-      gain.gain.value = monitorVol;
-
-      // Direct chain: mic → gain → output (no analyser in monitoring path)
-      // Analyser adds processing overhead; use a separate analyser off to the side
+      const src     = mCtx.createMediaStreamSource(stream);
+      const gain    = mCtx.createGain(); gain.gain.value = monitorVol;
       const analyser = mCtx.createAnalyser(); analyser.fftSize = 256;
-      src.connect(analyser);   // branch for VU meter only
-      src.connect(gain);       // direct path for lowest latency
+      src.connect(analyser);
+      src.connect(gain);
       gain.connect(mCtx.destination);
-
       monitorSrcRef.current      = src;
       monitorGainRef.current     = gain;
       monitorAnalyserRef.current = analyser;
-      // Store the monitoring actx separately so we don't share with recording
       monitorStreamRef.current._mCtx = mCtx;
-
       setMonitoringOn(true);
     } catch (e) {
       setMonitorWarn("Could not start monitoring.");
@@ -5166,13 +5232,19 @@ function StudioScreen({ user, onExit }) {
   const [selectedTrackId, setSelectedTrackId] = useState(null); // which vocal track records into
 
   const startCountIn = function (trackId) {
-    // Must have a vocal track selected
     const vocalTracks = tracks.filter(function(t){ return t.type === "vocal"; });
-    if (vocalTracks.length === 0) {
-      setError("Add a vocal track first by tapping +");
-      return;
+    let targetId = trackId || selectedTrackId;
+    if (!targetId) {
+      if (vocalTracks.length > 0) {
+        targetId = vocalTracks[vocalTracks.length - 1].id;
+      } else {
+        // Auto-create vocal track so record works immediately
+        const newId = Date.now() + Math.random();
+        addTrackObj({ id:newId, name:"Vocal 1", type:"vocal", isMuted:false, isSoloed:false, clips:[] });
+        setSelectedTrackId(newId);
+        targetId = newId;
+      }
     }
-    const targetId = trackId || selectedTrackId || vocalTracks[vocalTracks.length - 1].id;
     setError(""); setCountIn(4); let n = 4;
     countTimerRef.current = setInterval(function () {
       n--; setCountIn(n);
@@ -5776,14 +5848,19 @@ function StudioScreen({ user, onExit }) {
       )}
 
       {/* ══ TOP BAR ══════════════════════════════════════════════ */}
-      <div style={{ display:"flex",alignItems:"center",padding:"10px 12px",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:8,zIndex:50 }}>
+      <div style={{ display:"flex",alignItems:"center",padding:"10px 12px",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:6,zIndex:50 }}>
         <button onClick={function(){ if(!isSaved&&hasContent)setUnsavedAlert(true);else onExit(); }} style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:8,color:"#888",width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="#888"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
         </button>
+        {/* Undo / Redo */}
+        <button onClick={undoTracks} disabled={!canUndo} title="Undo" style={{ background:"#141414",border:"1px solid #222",borderRadius:7,color:canUndo?"#aaa":"#333",width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",cursor:canUndo?"pointer":"not-allowed",flexShrink:0,fontSize:14 }}>↩</button>
+        <button onClick={redoTracks} disabled={!canRedo} title="Redo" style={{ background:"#141414",border:"1px solid #222",borderRadius:7,color:canRedo?"#aaa":"#333",width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",cursor:canRedo?"pointer":"not-allowed",flexShrink:0,fontSize:14 }}>↪</button>
         {renamingProj
-          ?<input autoFocus defaultValue={projectName} onBlur={function(e){ setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false); }} onKeyDown={function(e){ if(e.key==="Enter"){setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false);} }} style={{ background:"none",border:"none",borderBottom:"1px solid #C026D3",color:"white",fontSize:14,fontWeight:700,outline:"none",flex:1,padding:"0 0 2px" }} />
-          :<span style={{ color:"white",fontWeight:700,fontSize:13,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{projectName}</span>
+          ?<input autoFocus defaultValue={projectName} onBlur={function(e){ setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false); }} onKeyDown={function(e){ if(e.key==="Enter"){setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false);} }} style={{ background:"none",border:"none",borderBottom:"1px solid #C026D3",color:"white",fontSize:13,fontWeight:700,outline:"none",flex:1,padding:"0 0 2px" }} />
+          :<span style={{ color:"white",fontWeight:700,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{projectName}</span>
         }
+        {/* AutoPitch button */}
+        <button onClick={function(e){ e.stopPropagation(); setShowAutoPitch(function(v){return !v;}); }} style={{ background:autoPitch.on?"rgba(192,38,211,0.2)":"#141414",border:"1px solid "+(autoPitch.on?"#C026D3":"#2a2a2a"),borderRadius:7,color:autoPitch.on?"#C026D3":"#555",fontSize:9,fontWeight:700,padding:"4px 8px",cursor:"pointer",flexShrink:0 }}>♪ PITCH</button>
         <button onClick={function(e){ e.stopPropagation();setShowProjMenu(function(v){return !v;});setShowSettings(false); }} style={{ background:showProjMenu?"rgba(192,38,211,0.15)":"#1a1a1a",border:"1px solid "+(showProjMenu?"rgba(192,38,211,0.4)":"#2a2a2a"),borderRadius:8,color:"#aaa",fontSize:13,fontWeight:700,padding:"5px 10px",cursor:"pointer",flexShrink:0,letterSpacing:2 }}>···</button>
         <button onClick={function(e){ e.stopPropagation();setShowProjMenu(false);setShowSettings(function(v){return !v;}); }} style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:8,color:"#888",fontSize:12,padding:"5px 8px",cursor:"pointer",flexShrink:0 }}>⚙</button>
         <div style={{ color:isRecording?"#EF4444":"#aaa",fontSize:11,fontFamily:"monospace",fontWeight:700,flexShrink:0,background:"#141414",border:"1px solid #222",borderRadius:6,padding:"4px 7px" }}>{fmt(currentTime)}</div>
@@ -5841,6 +5918,18 @@ function StudioScreen({ user, onExit }) {
             onChange={function(e){ setMonitorVol(parseFloat(e.target.value)); }}
             style={{ width:50,accentColor:"#22C55E",height:2 }} />
         )}
+        {/* Low-latency mode toggle */}
+        <button
+          onClick={function(){
+            setLowLatency(function(v){
+              const next = !v;
+              if (monitoringOn) { stopMonitoring(); setTimeout(function(){ startMonitoring(); }, 100); }
+              return next;
+            });
+          }}
+          title="Low Latency Mode — uses smallest audio buffer for minimum monitoring delay"
+          style={{ background:lowLatency?"rgba(251,191,36,0.15)":"#141414",border:"1px solid "+(lowLatency?"#F59E0B":"#2a2a2a"),borderRadius:6,color:lowLatency?"#F59E0B":"#444",fontSize:8,fontWeight:700,padding:"3px 7px",cursor:"pointer" }}
+        >⚡ LL</button>
       </div>
       {monitorWarn && <div style={{ background:"rgba(245,158,11,0.1)",borderBottom:"1px solid rgba(245,158,11,0.2)",color:"#F59E0B",fontSize:11,padding:"4px 16px",textAlign:"center",flexShrink:0 }}>{monitorWarn}</div>}
 
@@ -6064,16 +6153,73 @@ function StudioScreen({ user, onExit }) {
             <input type="file" accept=".mp3,.wav,.m4a,.aac,audio/*" multiple onChange={function(e){handleFileUpload(e,"beat");}} style={{ display:"none" }} />
           </label>
           <div style={{ padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer" }} onClick={function(){
-            // Create a new vocal track then immediately start recording into it
+            // Just create the track — recording only starts when user presses record button
             const newId = Date.now() + Math.random();
             const vocalN = tracks.filter(function(t){return t.type==="vocal";}).length + 1;
-            addTrackObj({ id:newId, name:"Vocal "+vocalN, type:"vocal", audioBuffer:null, url:null, isMuted:false, isSoloed:false, startTime:currentTime, duration:0, color:COLORS[vocalN%COLORS.length] });
+            addTrackObj({ id:newId, name:"Vocal "+vocalN, type:"vocal", isMuted:false, isSoloed:false, clips:[] });
             setSelectedTrackId(newId);
             setShowAddMenu(false);
-            setTimeout(function(){ startCountIn(newId); }, 100);
           }}>
             <div style={{ width:32,height:32,borderRadius:8,background:"rgba(239,68,68,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>🎙</div>
             <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Record Vocals</div><div style={{ color:"#555",fontSize:11 }}>Record new take</div></div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ AUTO-PITCH PANEL ══════════════════════════════════════ */}
+      {showAutoPitch && (
+        <div style={{ background:"#0f0f0f",borderTop:"1px solid #1e1e1e",padding:"12px 16px",flexShrink:0 }} onClick={function(e){ e.stopPropagation(); }}>
+          <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:10 }}>
+            <span style={{ color:"#C026D3",fontWeight:800,fontSize:12,letterSpacing:2 }}>♪ AUTO-PITCH</span>
+            <span style={{ color:"#333",fontSize:10,flex:1 }}>Vocal pitch correction</span>
+            <button
+              onClick={function(){ setAutoPitch(function(ap){ return {...ap,on:!ap.on}; }); }}
+              style={{ background:autoPitch.on?"#C026D3":"#222",border:"none",borderRadius:6,color:"white",fontSize:10,fontWeight:700,padding:"4px 12px",cursor:"pointer" }}
+            >{autoPitch.on?"ON":"OFF"}</button>
+            <button onClick={function(){ setShowAutoPitch(false); }} style={{ background:"none",border:"none",color:"#444",fontSize:16,cursor:"pointer" }}>✕</button>
+          </div>
+          <div style={{ opacity:autoPitch.on?1:0.35, display:"flex",gap:16,alignItems:"flex-start",flexWrap:"wrap" }}>
+            {/* Key selector */}
+            <div>
+              <div style={{ color:"#555",fontSize:9,fontWeight:700,marginBottom:4 }}>KEY</div>
+              <div style={{ display:"flex",flexWrap:"wrap",gap:4,maxWidth:220 }}>
+                {["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"].map(function(k){
+                  return (
+                    <button key={k}
+                      onClick={function(){ setAutoPitch(function(ap){ return {...ap,key:k}; }); }}
+                      style={{ background:autoPitch.key===k?"#C026D3":"#1a1a1a",border:"1px solid "+(autoPitch.key===k?"#C026D3":"#2a2a2a"),borderRadius:5,color:autoPitch.key===k?"white":"#666",fontSize:10,fontWeight:700,padding:"4px 7px",cursor:"pointer",minWidth:32 }}
+                    >{k}</button>
+                  );
+                })}
+              </div>
+              {/* Scale */}
+              <div style={{ display:"flex",gap:6,marginTop:8 }}>
+                {["major","minor","chromatic"].map(function(s){
+                  return (
+                    <button key={s}
+                      onClick={function(){ setAutoPitch(function(ap){ return {...ap,scale:s}; }); }}
+                      style={{ background:autoPitch.scale===s?"rgba(192,38,211,0.2)":"#141414",border:"1px solid "+(autoPitch.scale===s?"#C026D3":"#2a2a2a"),borderRadius:5,color:autoPitch.scale===s?"#C026D3":"#555",fontSize:9,fontWeight:700,padding:"4px 10px",cursor:"pointer",textTransform:"capitalize" }}
+                    >{s}</button>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Retune speed knob — inline slider version for compactness */}
+            <div style={{ display:"flex",flexDirection:"column",gap:4,minWidth:120 }}>
+              <div style={{ color:"#555",fontSize:9,fontWeight:700 }}>RETUNE SPEED</div>
+              <input type="range" min={0} max={1} step={0.01} value={autoPitch.speed}
+                onChange={function(e){ setAutoPitch(function(ap){ return {...ap,speed:+e.target.value}; }); }}
+                style={{ accentColor:"#C026D3",width:"100%" }} />
+              <div style={{ display:"flex",justifyContent:"space-between" }}>
+                <span style={{ color:"#444",fontSize:8 }}>Smooth (Choir)</span>
+                <span style={{ color:"#C026D3",fontSize:9,fontWeight:700 }}>{Math.round(autoPitch.speed*100)}%</span>
+                <span style={{ color:"#444",fontSize:8 }}>Instant (T-Pain)</span>
+              </div>
+              <div style={{ color:"#333",fontSize:8,marginTop:4,lineHeight:1.4 }}>
+                Low = natural correction. High = robotic/auto-tune effect.{"\n"}
+                <em>Note: Full pitch correction requires server-side DSP. This setting is saved for export.</em>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -6086,137 +6232,191 @@ function StudioScreen({ user, onExit }) {
         const upd = function(section, patch){ updateTrack(t.id, { effects:{ ...t.effects, [section]:{ ...(t.effects[section]||{}), ...patch } } }); };
 
         // ── Rotary Knob component ──
+        // ── Rotary Knob — fixed: SVG sized with overflow room so stroke never clips ──
         const Knob = function({ label, value, min, max, step, unit, onChange, color }) {
-          const knobRef = useRef(null);
           const startRef = useRef(null);
           color = color || "#8B5CF6";
-          const norm = (value - min) / (max - min);
-          const angle = -140 + norm * 280; // -140° to +140°
-          const r = 22, cx = 28, cy = 28;
+          const norm  = Math.max(0, Math.min(1, (value - min) / (max - min)));
+          const angle = -140 + norm * 280;
+          // Add 6px padding in SVG viewport so strokeWidth=4 arc never clips at edge
+          const PAD = 6, r = 22, cx = 28 + PAD, cy = 28 + PAD;
+          const W = 56 + PAD * 2, H = 56 + PAD * 2;
           const toXY = function(deg) {
             const rad = (deg - 90) * Math.PI / 180;
             return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
           };
-          const startA = toXY(-140), endA = toXY(angle);
+          const startA = toXY(-140), endA = toXY(angle), dotA = toXY(angle);
           const largeArc = norm > 0.5 ? 1 : 0;
           const arcD = `M ${startA.x} ${startA.y} A ${r} ${r} 0 ${largeArc} 1 ${endA.x} ${endA.y}`;
-          const dotA = toXY(angle);
-
           const onPointerDown = function(e) {
             e.preventDefault();
             startRef.current = { y: e.clientY, val: value };
             const onMove = function(me) {
               const dy = startRef.current.y - me.clientY;
-              const range = max - min;
-              const newVal = Math.min(max, Math.max(min, startRef.current.val + (dy / 100) * range));
-              const snapped = step ? Math.round(newVal / step) * step : newVal;
+              const raw = startRef.current.val + (dy / 100) * (max - min);
+              const clamped = Math.min(max, Math.max(min, raw));
+              const snapped = step ? Math.round(clamped / step) * step : clamped;
               onChange(+snapped.toFixed(3));
             };
             const onUp = function() { document.removeEventListener("pointermove", onMove); document.removeEventListener("pointerup", onUp); };
             document.addEventListener("pointermove", onMove);
             document.addEventListener("pointerup", onUp);
           };
-
+          const display = unit === "dB" ? (value >= 0 ? "+" : "") + value + "dB"
+                        : unit === "%" ? Math.round(value * 100) + "%"
+                        : unit === "ms" ? value + "ms"
+                        : unit === ":1" ? value + ":1"
+                        : unit === "Q"  ? value
+                        : value + (unit || "");
           return (
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, userSelect:"none" }}>
-              <svg ref={knobRef} width={56} height={56} style={{ cursor:"ns-resize", touchAction:"none" }} onPointerDown={onPointerDown}>
-                {/* Track */}
-                <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1a1a1a" strokeWidth={5} />
-                {/* Arc */}
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, userSelect:"none" }}>
+              {/* overflow:visible ensures the arc stroke is never clipped by parent */}
+              <svg width={W} height={H} style={{ overflow:"visible", cursor:"ns-resize", touchAction:"none" }} onPointerDown={onPointerDown}>
+                <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1e1e1e" strokeWidth={5} />
                 <path d={arcD} fill="none" stroke={color} strokeWidth={4} strokeLinecap="round" />
-                {/* Dot */}
                 <circle cx={dotA.x} cy={dotA.y} r={3.5} fill={color} />
-                {/* Centre */}
-                <circle cx={cx} cy={cy} r={10} fill="#111" stroke="#2a2a2a" strokeWidth={1.5} />
+                <circle cx={cx} cy={cy} r={10} fill="#0d0d0d" stroke="#2a2a2a" strokeWidth={1.5} />
               </svg>
-              <div style={{ color:"white", fontSize:10, fontWeight:700 }}>{unit === "dB" ? (value >= 0 ? "+" : "") + value + "dB" : unit === "%" ? Math.round(value * 100) + "%" : value + (unit || "")}</div>
-              <div style={{ color:"#555", fontSize:8 }}>{label}</div>
+              <div style={{ color:"white", fontSize:10, fontWeight:700 }}>{display}</div>
+              <div style={{ color:"#555", fontSize:8, textAlign:"center" }}>{label}</div>
             </div>
           );
         };
 
-        // ── EQ Graph ──
+        // ── 5-band EQ Graph with accurate Bezier filter response ──
         const EQGraph = function({ eq, onDrag }) {
-          const W = 280, H = 120;
+          const W = 300, H = 130;
+          // 5 bands: HPF, Low Shelf, Mid Peak, High Shelf, LPF
           const bands = [
-            { key:"low",  freq:200,  gain:eq.low||0,  color:"#3B82F6" },
-            { key:"mid",  freq:1000, gain:eq.mid||0,  color:"#22C55E" },
-            { key:"high", freq:4000, gain:eq.high||0, color:"#F59E0B" },
+            { key:"hpf",   type:"highpass",  freq:eq.hpfFreq||80,   gain:0,              q:eq.hpfQ||0.7,  color:"#EF4444", draggable:"x" },
+            { key:"low",   type:"lowshelf",  freq:200,              gain:eq.low||0,      q:0.7,           color:"#3B82F6", draggable:"y" },
+            { key:"mid",   type:"peaking",   freq:eq.midFreq||1000, gain:eq.mid||0,      q:eq.midQ||1,    color:"#22C55E", draggable:"xy" },
+            { key:"high",  type:"highshelf", freq:4000,             gain:eq.high||0,     q:0.7,           color:"#F59E0B", draggable:"y" },
+            { key:"lpf",   type:"lowpass",   freq:eq.lpfFreq||18000,gain:0,              q:eq.lpfQ||0.7,  color:"#EF4444", draggable:"x" },
           ];
-          const freqToX = function(f) { return W * Math.log10(f / 20) / Math.log10(20000 / 20); };
-          const gainToY = function(g) { return H / 2 - (g / 15) * (H / 2 - 10); };
+          const freqToX = function(f) { return W * Math.log10(f/20) / Math.log10(1000); };
+          const gainToY = function(g) { return H/2 - (g/15) * (H/2 - 12); };
 
-          // Draw frequency response curve by summing all band responses
-          const freqResp = function(f) {
-            return bands.reduce(function(sum, b) {
-              const ratio = f / b.freq;
-              const q = 1.0;
-              return sum + b.gain / (1 + q * q * (ratio - 1/ratio) * (ratio - 1/ratio));
-            }, 0);
+          // Accurate biquad filter magnitude response per band
+          const bandMag = function(band, f) {
+            const sr = 44100, w0 = 2 * Math.PI * band.freq / sr;
+            const cosW = Math.cos(w0), sinW = Math.sin(w0);
+            const A  = Math.pow(10, (band.gain||0) / 40);
+            const aq = sinW / (2 * band.q);
+            let b0,b1,b2,a0,a1,a2;
+            if (band.type === "peaking") {
+              b0=1+aq*A; b1=-2*cosW; b2=1-aq*A; a0=1+aq/A; a1=-2*cosW; a2=1-aq/A;
+            } else if (band.type === "lowshelf") {
+              const s=sinW*Math.sqrt((A+1/A)*(1/0.7-1)+2);
+              b0=A*((A+1)-(A-1)*cosW+s); b1=2*A*((A-1)-(A+1)*cosW); b2=A*((A+1)-(A-1)*cosW-s);
+              a0=(A+1)+(A-1)*cosW+s; a1=-2*((A-1)+(A+1)*cosW); a2=(A+1)+(A-1)*cosW-s;
+            } else if (band.type === "highshelf") {
+              const s=sinW*Math.sqrt((A+1/A)*(1/0.7-1)+2);
+              b0=A*((A+1)+(A-1)*cosW+s); b1=-2*A*((A-1)+(A+1)*cosW); b2=A*((A+1)+(A-1)*cosW-s);
+              a0=(A+1)-(A-1)*cosW+s; a1=2*((A-1)-(A+1)*cosW); a2=(A+1)-(A-1)*cosW-s;
+            } else if (band.type === "highpass") {
+              b0=(1+cosW)/2; b1=-(1+cosW); b2=(1+cosW)/2; a0=1+aq; a1=-2*cosW; a2=1-aq;
+            } else { // lowpass
+              b0=(1-cosW)/2; b1=1-cosW; b2=(1-cosW)/2; a0=1+aq; a1=-2*cosW; a2=1-aq;
+            }
+            // Evaluate at frequency f
+            const phi = 4 * Math.pow(Math.sin(Math.PI * f / sr), 2);
+            const num = (b0+b1+b2)*(b0+b1+b2) - phi*(4*b0*b2*(1-phi) + b1*(b0+b2));
+            const den = (a0+a1+a2)*(a0+a1+a2) - phi*(4*a0*a2*(1-phi) + a1*(a0+a2));
+            return den > 0 ? 20 * Math.log10(Math.sqrt(Math.max(0, num/den))) : 0;
           };
 
-          const pts = [];
-          for (let i = 0; i <= 100; i++) {
-            const f = 20 * Math.pow(20000/20, i/100);
-            pts.push(`${freqToX(f)},${gainToY(freqResp(f))}`);
+          // Build smooth path using many sample points
+          const nPts = 120;
+          const pathPts = [];
+          for (let i = 0; i <= nPts; i++) {
+            const f   = 20 * Math.pow(20000/20, i/nPts);
+            const mag = bands.reduce(function(sum, b) { return sum + bandMag(b, f); }, 0);
+            pathPts.push([freqToX(f), gainToY(mag)]);
           }
-          const curvePath = "M " + pts.join(" L ");
+          // Build SVG path with cubic bezier smoothing
+          let curvePath = `M ${pathPts[0][0]} ${pathPts[0][1]}`;
+          for (let i = 1; i < pathPts.length; i++) {
+            const prev = pathPts[i-1], cur = pathPts[i];
+            const cpx  = (prev[0] + cur[0]) / 2;
+            curvePath += ` C ${cpx} ${prev[1]} ${cpx} ${cur[1]} ${cur[0]} ${cur[1]}`;
+          }
+          const fillPath = curvePath + ` L ${W} ${H/2} L 0 ${H/2} Z`;
 
           const dragging = useRef(null);
-          const svgRef = useRef(null);
-
-          const onMouseDown = function(e, key) {
-            e.preventDefault(); e.stopPropagation();
-            dragging.current = key;
-            const move = function(me) {
-              if (!dragging.current || !svgRef.current) return;
-              const rect = svgRef.current.getBoundingClientRect();
-              const y = me.clientY - rect.top;
-              const gain = Math.max(-15, Math.min(15, ((H/2 - y) / (H/2 - 10)) * 15));
-              onDrag(dragging.current, +gain.toFixed(1));
-            };
-            const up = function() { dragging.current = null; document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
-            document.addEventListener("mousemove", move);
-            document.addEventListener("mouseup", up);
-          };
-
-          const onTouchStart = function(e, key) {
-            e.preventDefault(); e.stopPropagation();
-            dragging.current = key;
-          };
-          const onTouchMove = function(e) {
-            if (!dragging.current || !svgRef.current) return;
+          const svgRef   = useRef(null);
+          const getPos   = function(clientX, clientY) {
             const rect = svgRef.current.getBoundingClientRect();
-            const y = e.touches[0].clientY - rect.top;
-            const gain = Math.max(-15, Math.min(15, ((H/2 - y) / (H/2 - 10)) * 15));
-            onDrag(dragging.current, +gain.toFixed(1));
+            return { x: clientX - rect.left, y: clientY - rect.top };
+          };
+          const applyDrag = function(clientX, clientY) {
+            const b   = dragging.current;
+            if (!b) return;
+            const pos = getPos(clientX, clientY);
+            const patch = {};
+            if (b.draggable === "y" || b.draggable === "xy") {
+              const gain = Math.max(-15, Math.min(15, (H/2 - pos.y) / (H/2 - 12) * 15));
+              patch[b.key] = +gain.toFixed(1);
+            }
+            if (b.draggable === "x" || b.draggable === "xy") {
+              // X drag changes frequency for HPF/LPF/Mid
+              const frac = Math.max(0, Math.min(1, pos.x / W));
+              const freq = Math.round(20 * Math.pow(20000/20, frac));
+              if (b.key === "hpf")  patch.hpfFreq  = freq;
+              if (b.key === "lpf")  patch.lpfFreq  = freq;
+              if (b.key === "mid")  patch.midFreq  = freq;
+            }
+            onDrag(patch);
           };
 
           return (
-            <svg ref={svgRef} width={W} height={H} style={{ display:"block", background:"#0a0a0a", borderRadius:8, touchAction:"none" }}
-              onTouchMove={onTouchMove} onTouchEnd={function(){ dragging.current = null; }}>
-              {/* Grid */}
+            <svg ref={svgRef} width={W} height={H}
+              style={{ display:"block", background:"#080808", borderRadius:8, touchAction:"none", cursor:"crosshair" }}
+              onMouseMove={function(e){ if(dragging.current) applyDrag(e.clientX, e.clientY); }}
+              onMouseUp={function(){ dragging.current=null; }}
+              onMouseLeave={function(){ dragging.current=null; }}
+              onTouchMove={function(e){ e.preventDefault(); if(dragging.current) applyDrag(e.touches[0].clientX, e.touches[0].clientY); }}
+              onTouchEnd={function(){ dragging.current=null; }}
+            >
+              {/* Frequency grid */}
               {[20,50,100,200,500,1000,2000,5000,10000,20000].map(function(f){
                 const x = freqToX(f);
-                return <line key={f} x1={x} y1={0} x2={x} y2={H} stroke="#1a1a1a" strokeWidth={1} />;
+                return <line key={f} x1={x} y1={0} x2={x} y2={H} stroke="#131313" strokeWidth={1} />;
               })}
+              {/* Gain grid */}
               {[-12,-6,0,6,12].map(function(g){
                 const y = gainToY(g);
-                return <g key={g}><line x1={0} y1={y} x2={W} y2={y} stroke={g===0?"#2a2a2a":"#141414"} strokeWidth={g===0?1.5:1} /><text x={3} y={y-2} fill="#333" fontSize={7}>{g>0?"+":""}{g}</text></g>;
+                return <g key={g}>
+                  <line x1={0} y1={y} x2={W} y2={y} stroke={g===0?"#252525":"#131313"} strokeWidth={g===0?1.5:1} />
+                  <text x={4} y={y-3} fill="#333" fontSize={7}>{g>0?"+":""}{g}</text>
+                </g>;
               })}
-              {/* Frequency labels */}
-              {[100,1000,10000].map(function(f){ return <text key={f} x={freqToX(f)} y={H-3} fill="#333" fontSize={7} textAnchor="middle">{f>=1000?f/1000+"k":f}</text>; })}
-              {/* Curve */}
-              <path d={curvePath} fill="none" stroke="#8B5CF6" strokeWidth={2} strokeLinecap="round" />
-              {/* Fill under curve */}
-              <path d={curvePath + ` L ${W},${H/2} L 0,${H/2} Z`} fill="rgba(139,92,246,0.08)" />
-              {/* Draggable band handles */}
+              {/* Freq labels */}
+              {[100,500,1000,5000,10000].map(function(f){
+                return <text key={f} x={freqToX(f)} y={H-3} fill="#2a2a2a" fontSize={7} textAnchor="middle">{f>=1000?f/1000+"k":f}</text>;
+              })}
+              {/* Filled curve */}
+              <path d={fillPath} fill="rgba(139,92,246,0.07)" />
+              {/* Curve line */}
+              <path d={curvePath} fill="none" stroke="#8B5CF6" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+              {/* Band handles */}
               {bands.map(function(b){
+                const hx = freqToX(b.freq);
+                const hy = gainToY(b.gain);
                 return (
-                  <circle key={b.key} cx={freqToX(b.freq)} cy={gainToY(b.gain)} r={7} fill={b.color} stroke="#0a0a0a" strokeWidth={2}
-                    style={{ cursor:"ns-resize" }}
-                    onMouseDown={function(e){ onMouseDown(e, b.key); }}
-                    onTouchStart={function(e){ onTouchStart(e, b.key); }} />
+                  <g key={b.key}>
+                    {/* Vertical guide line */}
+                    <line x1={hx} y1={0} x2={hx} y2={H} stroke={b.color+"33"} strokeWidth={1} strokeDasharray="3 3" />
+                    {/* Handle */}
+                    <circle cx={hx} cy={hy} r={8} fill={b.color} fillOpacity={0.9} stroke="#0d0d0d" strokeWidth={2}
+                      style={{ cursor: b.draggable==="y"?"ns-resize": b.draggable==="x"?"ew-resize":"move" }}
+                      onMouseDown={function(e){ e.preventDefault(); e.stopPropagation(); dragging.current = b; }}
+                      onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); dragging.current = b; }} />
+                    {/* Label inside handle */}
+                    <text x={hx} y={hy+3} fill="white" fontSize={6} textAnchor="middle" fontWeight="700" pointerEvents="none">
+                      {b.key.toUpperCase()}
+                    </text>
+                  </g>
                 );
               })}
             </svg>
@@ -6225,88 +6425,92 @@ function StudioScreen({ user, onExit }) {
 
         // ── Compressor curve ──
         const CompGraph = function({ threshold, ratio }) {
-          const W = 160, H = 120;
-          const dBtoP = function(db) { return (db + 60) / 60; }; // 0-1 for -60 to 0dB
+          const W = 150, H = 110;
+          const dBtoP = function(db) { return (db + 60) / 60; };
           const pts = [];
           for (let i = 0; i <= 60; i++) {
             const inDb = -60 + i;
             const outDb = inDb < threshold ? inDb : threshold + (inDb - threshold) / ratio;
-            const x = W * dBtoP(inDb);
-            const y = H * (1 - dBtoP(outDb));
-            pts.push(`${x},${y}`);
+            pts.push(`${W*dBtoP(inDb)},${H*(1-dBtoP(outDb))}`);
           }
           const thX = W * dBtoP(threshold);
           return (
-            <svg width={W} height={H} style={{ display:"block", background:"#0a0a0a", borderRadius:8 }}>
+            <svg width={W} height={H} style={{ display:"block", background:"#080808", borderRadius:8, flexShrink:0 }}>
               <line x1={0} y1={H} x2={W} y2={0} stroke="#1e1e1e" strokeWidth={1} strokeDasharray="4 3" />
-              <path d={"M " + pts.join(" L ")} fill="none" stroke="#8B5CF6" strokeWidth={2} strokeLinecap="round" />
-              <path d={"M " + pts.join(" L ") + ` L ${W} ${H} L 0 ${H} Z`} fill="rgba(139,92,246,0.1)" />
+              <path d={"M "+pts.join(" L ")} fill="none" stroke="#8B5CF6" strokeWidth={2} strokeLinecap="round" />
+              <path d={"M "+pts.join(" L ")+` L ${W} ${H} L 0 ${H} Z`} fill="rgba(139,92,246,0.1)" />
               <line x1={thX} y1={0} x2={thX} y2={H} stroke="#EF4444" strokeWidth={1} strokeDasharray="3 2" />
-              <text x={thX+3} y={12} fill="#EF4444" fontSize={8}>{threshold}dB</text>
-              <text x={3} y={10} fill="#555" fontSize={7}>OUT</text>
-              <text x={W-20} y={H-3} fill="#555" fontSize={7}>IN</text>
+              <text x={thX+3} y={11} fill="#EF4444" fontSize={8}>{threshold}dB</text>
+              <text x={3}   y={10}  fill="#444" fontSize={7}>OUT</text>
+              <text x={W-22} y={H-3} fill="#444" fontSize={7}>IN</text>
             </svg>
           );
         };
 
         // ── Reverb visualiser ──
         const ReverbViz = function({ wet, roomSize }) {
-          const W = 160, H = 80;
+          const W = 140, H = 80;
           const decay = roomSize * 3;
-          const lines = [];
-          for (let i = 0; i < 24; i++) {
-            const x = (i / 23) * W;
-            const amp = Math.exp(-i / (decay * 4)) * (H/2 - 4) * wet;
-            const jitter = (Math.sin(i * 7.3) * 0.4 + 0.6) * amp;
-            lines.push(<line key={i} x1={x} y1={H/2 - jitter} x2={x} y2={H/2 + jitter} stroke={`rgba(139,92,246,${0.3 + 0.7 * Math.exp(-i/6)})`} strokeWidth={2} />);
-          }
           return (
-            <svg width={W} height={H} style={{ display:"block", background:"#0a0a0a", borderRadius:8 }}>
+            <svg width={W} height={H} style={{ display:"block", background:"#080808", borderRadius:8, flexShrink:0 }}>
               <line x1={0} y1={H/2} x2={W} y2={H/2} stroke="#1a1a1a" strokeWidth={1} />
-              {lines}
+              {Array.from({length:28}, function(_,i){
+                const x   = (i/27)*W;
+                const amp = Math.exp(-i/(decay*4)) * (H/2 - 5) * wet;
+                const j   = (Math.sin(i*7.3)*0.4+0.6) * amp;
+                return <line key={i} x1={x} y1={H/2-j} x2={x} y2={H/2+j}
+                  stroke={`rgba(192,38,211,${0.25+0.75*Math.exp(-i/5)})`} strokeWidth={2} />;
+              })}
             </svg>
           );
         };
 
+        // ── EQ defaults including new 5-band fields ──
+        const eq5 = {
+          hpfFreq:80, hpfQ:0.7,
+          low:fx.eq?.low||0,
+          mid:fx.eq?.mid||0, midFreq:fx.eq?.midFreq||1000, midQ:fx.eq?.midQ||1,
+          high:fx.eq?.high||0,
+          lpfFreq:fx.eq?.lpfFreq||18000, lpfQ:fx.eq?.lpfQ||0.7,
+          ...fx.eq,
+        };
+
         return (
-          <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.95)", display:"flex", flexDirection:"column" }} onClick={function(e){ e.stopPropagation(); }}>
+          <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto" }} onClick={function(e){ e.stopPropagation(); }}>
             {/* Header */}
-            <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0 }}>
+            <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0, position:"sticky", top:0, zIndex:10 }}>
               <div style={{ width:8, height:8, borderRadius:"50%", background:t.color, marginRight:8 }} />
               <span style={{ color:"white", fontWeight:800, fontSize:14, flex:1 }}>{t.name} — Effects</span>
-              <button onClick={function(){ setFxTrackId(null); }} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:13, padding:"5px 12px", cursor:"pointer" }}>Done</button>
+              <button onClick={function(){ setFxTrackId(null); }} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:13, padding:"5px 14px", cursor:"pointer" }}>Done</button>
             </div>
 
-            <div style={{ flex:1, overflowY:"auto", padding:"16px", display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ flex:1, padding:"14px", display:"flex", flexDirection:"column", gap:12 }}>
 
-              {/* ── EQ ── */}
-              <div style={{ background:"#111", borderRadius:14, overflow:"hidden", border:"1px solid "+(fx.eq?.on?"#3B82F6":"#1e1e1e") }}>
+              {/* ── 5-BAND EQ ── */}
+              <div style={{ background:"#111", borderRadius:14, overflow:"hidden", border:"1px solid "+(eq5.on?"#3B82F6":"#1e1e1e") }}>
                 <div style={{ display:"flex", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #1e1e1e", gap:8 }}>
                   <span style={{ color:"#3B82F6", fontWeight:800, fontSize:12, letterSpacing:2 }}>EQ</span>
-                  <span style={{ color:"#333", fontSize:10, flex:1 }}>Parametric 3-Band</span>
-                  <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                    <span style={{ color:"#555", fontSize:9 }}>Drag dots up/down</span>
-                    <button onClick={function(){ upd("eq",{on:!fx.eq?.on}); }}
-                      style={{ background:fx.eq?.on?"#3B82F6":"#222", border:"none", borderRadius:6, color:"white", fontSize:10, fontWeight:700, padding:"4px 10px", cursor:"pointer" }}>
-                      {fx.eq?.on ? "ON" : "OFF"}
-                    </button>
-                  </div>
+                  <span style={{ color:"#333", fontSize:10, flex:1 }}>5-Band Parametric</span>
+                  <span style={{ color:"#444", fontSize:9 }}>Drag handles</span>
+                  <button onClick={function(){ upd("eq",{on:!fx.eq?.on}); }}
+                    style={{ background:fx.eq?.on?"#3B82F6":"#222", border:"none", borderRadius:6, color:"white", fontSize:10, fontWeight:700, padding:"4px 10px", cursor:"pointer" }}>
+                    {fx.eq?.on ? "ON" : "OFF"}
+                  </button>
                 </div>
                 <div style={{ padding:"12px 14px", opacity:fx.eq?.on?1:0.35 }}>
-                  <EQGraph eq={fx.eq||{low:0,mid:0,high:0}} onDrag={function(key, val){ upd("eq", {[key]: val}); }} />
-                  <div style={{ display:"flex", justifyContent:"space-around", marginTop:12 }}>
+                  <EQGraph eq={eq5} onDrag={function(patch){ upd("eq", patch); }} />
+                  {/* Knob rows — overflow:visible on parent so SVG arcs don't clip */}
+                  <div style={{ display:"flex", justifyContent:"space-around", marginTop:14, overflowX:"auto", padding:"0 4px" }}>
                     {[
-                      { key:"low",  label:"LOW SHELF",  val:fx.eq?.low||0,  freq:"200Hz", color:"#3B82F6" },
-                      { key:"mid",  label:"MID PEAK",   val:fx.eq?.mid||0,  freq:"1kHz",  color:"#22C55E" },
-                      { key:"high", label:"HIGH SHELF", val:fx.eq?.high||0, freq:"4kHz",  color:"#F59E0B" },
+                      { key:"hpfFreq", label:"HPF",       val:eq5.hpfFreq,  min:20,   max:500,   step:1,   unit:"Hz",  color:"#EF4444" },
+                      { key:"low",     label:"LOW SHELF",  val:eq5.low,      min:-15,  max:15,    step:0.5, unit:"dB",  color:"#3B82F6" },
+                      { key:"mid",     label:"MID PEAK",   val:eq5.mid,      min:-15,  max:15,    step:0.5, unit:"dB",  color:"#22C55E" },
+                      { key:"midQ",    label:"MID Q",      val:eq5.midQ,     min:0.1,  max:10,    step:0.1, unit:"Q",   color:"#22C55E" },
+                      { key:"high",    label:"HIGH SHELF", val:eq5.high,     min:-15,  max:15,    step:0.5, unit:"dB",  color:"#F59E0B" },
+                      { key:"lpfFreq", label:"LPF",        val:eq5.lpfFreq,  min:1000, max:20000, step:100, unit:"Hz",  color:"#EF4444" },
                     ].map(function(b){
-                      return (
-                        <div key={b.key} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-                          <Knob label={b.label} value={b.val} min={-15} max={15} step={0.5} unit="dB" color={b.color}
-                            onChange={function(v){ upd("eq", {[b.key]: v}); }} />
-                          <span style={{ color:"#333", fontSize:8 }}>{b.freq}</span>
-                        </div>
-                      );
+                      return <Knob key={b.key} label={b.label} value={b.val} min={b.min} max={b.max} step={b.step} unit={b.unit} color={b.color}
+                        onChange={function(v){ upd("eq", {[b.key]:v}); }} />;
                     })}
                   </div>
                 </div>
@@ -6325,17 +6529,20 @@ function StudioScreen({ user, onExit }) {
                 <div style={{ padding:"12px 14px", opacity:fx.compressor?.on?1:0.35 }}>
                   <div style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
                     <CompGraph threshold={fx.compressor?.threshold??-24} ratio={fx.compressor?.ratio??4} />
-                    <div style={{ display:"flex", flexWrap:"wrap", gap:10, justifyContent:"center", flex:1 }}>
+                    {/* overflow:visible so knob arcs don't clip at edges */}
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:10, justifyContent:"center", flex:1, overflow:"visible", padding:"4px" }}>
                       {[
-                        { key:"threshold", label:"THRESHOLD", val:fx.compressor?.threshold??-24, min:-60, max:0, step:1, unit:"dB" },
-                        { key:"ratio",     label:"RATIO",     val:fx.compressor?.ratio??4,       min:1,   max:20, step:0.5, unit:":1" },
-                        { key:"attack",    label:"ATTACK",    val:Math.round((fx.compressor?.attack??0.003)*1000), min:1, max:200, step:1, unit:"ms",
-                          onChange: function(v){ upd("compressor",{attack:v/1000}); } },
-                        { key:"release",   label:"RELEASE",   val:Math.round((fx.compressor?.release??0.25)*1000), min:10, max:2000, step:10, unit:"ms",
-                          onChange: function(v){ upd("compressor",{release:v/1000}); } },
+                        { key:"threshold",  label:"THRESH",    val:fx.compressor?.threshold??-24,                           min:-60,  max:0,    step:1,   unit:"dB" },
+                        { key:"ratio",      label:"RATIO",     val:fx.compressor?.ratio??4,                                 min:1,    max:20,   step:0.5, unit:":1" },
+                        { key:"attack",     label:"ATTACK",    val:Math.round((fx.compressor?.attack??0.003)*1000),          min:1,    max:200,  step:1,   unit:"ms",
+                          onChange:function(v){ upd("compressor",{attack:v/1000}); } },
+                        { key:"release",    label:"RELEASE",   val:Math.round((fx.compressor?.release??0.25)*1000),          min:10,   max:2000, step:10,  unit:"ms",
+                          onChange:function(v){ upd("compressor",{release:v/1000}); } },
+                        { key:"makeupGain", label:"MAKEUP",    val:fx.compressor?.makeupGain??0,                            min:0,    max:24,   step:0.5, unit:"dB",
+                          color:"#22C55E" },
                       ].map(function(p){
-                        return <Knob key={p.key} label={p.label} value={p.val} min={p.min} max={p.max} step={p.step} unit={p.unit}
-                          onChange={p.onChange || function(v){ upd("compressor",{[p.key]:v}); }} />;
+                        return <Knob key={p.key} label={p.label} value={p.val} min={p.min} max={p.max} step={p.step} unit={p.unit} color={p.color}
+                          onChange={p.onChange||function(v){ upd("compressor",{[p.key]:v}); }} />;
                       })}
                     </div>
                   </div>
@@ -6355,11 +6562,14 @@ function StudioScreen({ user, onExit }) {
                 <div style={{ padding:"12px 14px", opacity:fx.reverb?.on?1:0.35 }}>
                   <div style={{ display:"flex", gap:12, alignItems:"center" }}>
                     <ReverbViz wet={fx.reverb?.wet??0.25} roomSize={fx.reverb?.roomSize??0.8} />
-                    <div style={{ display:"flex", gap:14, flex:1, justifyContent:"center" }}>
-                      <Knob label="WET" value={fx.reverb?.wet??0.25} min={0} max={1} step={0.01} unit="%" color="#C026D3"
+                    {/* overflow:visible prevents knob stroke clipping */}
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:12, flex:1, justifyContent:"center", overflow:"visible", padding:"4px" }}>
+                      <Knob label="WET"       value={fx.reverb?.wet??0.25}          min={0}   max={1}   step={0.01} unit="%" color="#C026D3"
                         onChange={function(v){ upd("reverb",{wet:v}); }} />
-                      <Knob label="ROOM" value={fx.reverb?.roomSize??0.8} min={0.1} max={1} step={0.01} unit="%" color="#C026D3"
+                      <Knob label="ROOM"      value={fx.reverb?.roomSize??0.8}       min={0.1} max={1}   step={0.01} unit="%" color="#C026D3"
                         onChange={function(v){ upd("reverb",{roomSize:v}); }} />
+                      <Knob label="PRE-DELAY" value={fx.reverb?.preDelay??0}         min={0}   max={100} step={1}    unit="ms" color="#8B5CF6"
+                        onChange={function(v){ upd("reverb",{preDelay:v}); }} />
                     </div>
                   </div>
                 </div>
