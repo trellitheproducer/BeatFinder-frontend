@@ -4510,7 +4510,8 @@ function StudioScreen({ user, onExit }) {
   const masterStartRef  = useRef(0);
   const playheadAtRef   = useRef(0);
   const animRef         = useRef(null);
-  const scrollRef       = useRef(null);  // THE single horizontal scroll container
+  const scrollRef       = useRef(null);   // right column viewport (for width measurement)
+  const trackContainerRef = useRef(null); // the translateX container — moved by RAF directly
   const sidebarRef      = useRef(null);  // left column (locked horizontal)
   const mediaRecRef     = useRef(null);
   const chunksRef       = useRef([]);
@@ -4535,6 +4536,13 @@ function StudioScreen({ user, onExit }) {
 
   useEffect(function () { zoomRef.current = zoom; }, [zoom]);
   useEffect(function () { isPlayingRef.current = isPlaying; }, [isPlaying]);
+
+  // Set initial position — Bar1 under centred playhead at t=0
+  useEffect(function () {
+    if (scrollRef.current && trackContainerRef.current) {
+      setOffsetForTime(0);
+    }
+  }, []);
 
   // ── ONE-TIME mic permission on Studio mount ────────────────────
   // We only request permission here — we do NOT keep the stream open.
@@ -4624,25 +4632,40 @@ function StudioScreen({ user, onExit }) {
       return;
     }
     try {
-      // Open a fresh stream for monitoring with lowest-latency constraints
       const stream = await navigator.mediaDevices.getUserMedia({ audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl:  false,
-        sampleRate:       44100,
+        echoCancellation: false,  // MUST be off — adds 40-80ms
+        noiseSuppression: false,  // MUST be off — adds latency
+        autoGainControl:  false,  // MUST be off — unstable
+        sampleRate:       48000,  // match iOS hardware sample rate
         channelCount:     1,
+        latency:          0,      // hint for lowest latency
       }});
       monitorStreamRef.current = stream;
-      const actx     = getActx();
-      const src      = actx.createMediaStreamSource(stream);
-      const analyser = actx.createAnalyser(); analyser.fftSize = 256;
-      const gain     = actx.createGain(); gain.gain.value = monitorVol;
-      src.connect(analyser);
-      analyser.connect(gain);
-      gain.connect(actx.destination);
+
+      // Create a dedicated low-latency AudioContext for monitoring only
+      // sampleRate matching hardware avoids resampling (a major latency source)
+      const mCtx = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: 48000,
+        latencyHint: "interactive", // lowest latency mode
+      });
+
+      const src  = mCtx.createMediaStreamSource(stream);
+      const gain = mCtx.createGain();
+      gain.gain.value = monitorVol;
+
+      // Direct chain: mic → gain → output (no analyser in monitoring path)
+      // Analyser adds processing overhead; use a separate analyser off to the side
+      const analyser = mCtx.createAnalyser(); analyser.fftSize = 256;
+      src.connect(analyser);   // branch for VU meter only
+      src.connect(gain);       // direct path for lowest latency
+      gain.connect(mCtx.destination);
+
       monitorSrcRef.current      = src;
       monitorGainRef.current     = gain;
       monitorAnalyserRef.current = analyser;
+      // Store the monitoring actx separately so we don't share with recording
+      monitorStreamRef.current._mCtx = mCtx;
+
       setMonitoringOn(true);
     } catch (e) {
       setMonitorWarn("Could not start monitoring.");
@@ -4650,17 +4673,22 @@ function StudioScreen({ user, onExit }) {
   };
 
   const stopMonitoring = function () {
-    // Ramp gain to zero to avoid click
-    if (monitorGainRef.current && actxRef.current) {
-      monitorGainRef.current.gain.setTargetAtTime(0, actxRef.current.currentTime, 0.02);
+    if (monitorGainRef.current) {
+      const mCtx = monitorStreamRef.current && monitorStreamRef.current._mCtx;
+      if (mCtx) {
+        monitorGainRef.current.gain.setTargetAtTime(0, mCtx.currentTime, 0.02);
+      }
     }
     setTimeout(function () {
       try { monitorGainRef.current && monitorGainRef.current.disconnect(); } catch(e) {}
       try { monitorSrcRef.current && monitorSrcRef.current.disconnect(); } catch(e) {}
       try { monitorAnalyserRef.current && monitorAnalyserRef.current.disconnect(); } catch(e) {}
-      // Stop the monitoring mic stream to release the orange indicator
       if (monitorStreamRef.current) {
         monitorStreamRef.current.getTracks().forEach(function(t){ t.stop(); });
+        // Close the dedicated monitoring AudioContext
+        if (monitorStreamRef.current._mCtx) {
+          try { monitorStreamRef.current._mCtx.close(); } catch(e) {}
+        }
       }
       monitorStreamRef.current   = null;
       monitorSrcRef.current      = null;
@@ -4670,10 +4698,9 @@ function StudioScreen({ user, onExit }) {
     setMonitoringOn(false);
   };
 
-  // Live volume update
   useEffect(function(){
-    if(monitorGainRef.current && actxRef.current){
-      monitorGainRef.current.gain.setTargetAtTime(monitorVol, actxRef.current.currentTime, 0.01);
+    if (monitorGainRef.current && monitorStreamRef.current && monitorStreamRef.current._mCtx) {
+      monitorGainRef.current.gain.setTargetAtTime(monitorVol, monitorStreamRef.current._mCtx.currentTime, 0.01);
     }
   }, [monitorVol]);
 
@@ -4681,28 +4708,44 @@ function StudioScreen({ user, onExit }) {
   // With paddingLeft=PLAYHEAD_X on inner div, Bar1 (x=0) sits exactly under the playhead.
   // scrollLeft=0 → t=0 (Bar1 under playhead). scrollLeft=t*effectivePPS → t plays through.
   const getTimeFromScroll = function () {
-    const el = scrollRef.current;
+    // With centred playhead: t = -offsetX / PPS  (offsetX is negative during playback)
+    const el = trackContainerRef.current;
     if (!el) return 0;
-    return Math.max(0, el.scrollLeft / effectivePPS);
+    const offsetX = parseFloat(el.style.transform.replace("translateX(","").replace("px)","") || "0");
+    const colW = scrollRef.current ? scrollRef.current.clientWidth : 300;
+    return Math.max(0, (colW / 2 - offsetX) / effectivePPS);
   };
 
-  const scrollToTime = function (t) {
+  // Set the waveform container's translateX so Bar1 is under the centred playhead
+  // Formula: offsetX = colWidth/2 - t * PPS
+  // At t=0: offsetX = colWidth/2  → Bar1 is at the centre
+  // At t=5s: offsetX = colWidth/2 - 500  → content scrolled 500px left
+  const setOffsetForTime = function (t) {
     const el = scrollRef.current;
-    if (!el) return;
-    el.scrollLeft = Math.max(0, t * effectivePPS);
+    const tc = trackContainerRef.current;
+    if (!el || !tc) return;
+    const colW = el.clientWidth;
+    const offsetX = colW / 2 - t * effectivePPS;
+    tc.style.transform = "translateX(" + offsetX + "px)";
   };
 
   // ── RAF playback loop ─────────────────────────────────────────
+  // Mutates DOM transform directly — no React re-render per frame = smooth 60fps
   useEffect(function () {
     if (!isPlaying) { cancelAnimationFrame(animRef.current); return; }
-    const tick = function () {
+    var lastUIUpdate = 0;
+    const tick = function (ts) {
       const actx = actxRef.current;
       if (!actx) return;
       const elapsed = actx.currentTime - masterStartRef.current;
       const t       = playheadAtRef.current + elapsed;
-      setCurrentTime(t);
-      // Scroll so playhead stays fixed at PLAYHEAD_X
-      scrollToTime(t);
+      // Move waveforms directly — bypasses React for animation smoothness
+      setOffsetForTime(t);
+      // Update timer display at ~30fps only (saves CPU)
+      if (!lastUIUpdate || ts - lastUIUpdate > 33) {
+        setCurrentTime(t);
+        lastUIUpdate = ts;
+      }
       if (loopEnabled && loopOut > loopIn && t >= loopOut) {
         stopAll(); doPlay(loopIn); setCurrentTime(loopIn); return;
       }
@@ -4847,44 +4890,68 @@ function StudioScreen({ user, onExit }) {
     setIsPlaying(false);
     const t = loopEnabled ? loopIn : 0;
     setCurrentTime(t);
-    scrollToTime(t);
+    setOffsetForTime(t);
     playheadAtRef.current = t;
     masterStartRef.current = 0;
   };
 
-  // ── Seek: click ruler or drag ─────────────────────────────────
-  const seekToX = function (clientX) {
+  const stopRecording = function () {
+    if (mediaRecRef.current && mediaRecRef.current.state !== "inactive") {
+      mediaRecRef.current.stop(); // triggers mr.onstop async which saves the clip
+    }
+    clearInterval(recIntRef.current);
+    mediaRecRef.current = null;
+    // Stop playback too — user pressed stop
+    stopAll();
+    setIsPlaying(false);
+  };
+
+  // ── Ruler seek — mouse ────────────────────────────────────────
+  // ── Ruler tap → set loop in/out points ───────────────────────
+  // Single tap: seek to that position
+  // With LOOP on: first tap sets loop-in, second tap (to the right) sets loop-out
+  const handleRulerTap = function (clientX) {
     const el = scrollRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    // x in scroll-space = clientX - rect.left + scrollLeft
-    // time = (x) / effectivePPS  (ruler ticks are at t*effectivePPS)
-    // Click x in content space: subtract PLAYHEAD_X offset because content is padded
-    const x = clientX - rect.left + el.scrollLeft;
-    const t = Math.max(0, x / effectivePPS);
+    const tc = trackContainerRef.current;
+    if (!el || !tc) return;
+    const rect    = el.getBoundingClientRect();
+    const colW    = el.clientWidth;
+    const offsetX = parseFloat((tc.style.transform || "").replace("translateX(","").replace("px)","")) || (colW / 2);
+    const tapX    = clientX - rect.left;
+    const t       = Math.max(0, (tapX - offsetX) / effectivePPS);
+
+    if (loopEnabled) {
+      // Tap sets loop-in, second tap to the right sets loop-out
+      if (t > loopIn + 0.1) {
+        setLoopOut(t);
+      } else {
+        setLoopIn(t);
+        setLoopOut(Math.max(t + 1, loopOut));
+      }
+    }
+    // Always seek on tap
     setCurrentTime(t);
-    scrollToTime(t);
-    if (isPlayingRef.current) { stopAll(); doPlay(t); }
+    playheadAtRef.current = t;
+    setOffsetForTime(t);
+    if (isPlayingRef.current) { stopAll(); doPlay(t); setIsPlaying(true); }
   };
 
   const handleRulerMouseDown = function (e) {
-    seekToX(e.clientX);
-    const onMove = function (me) { seekToX(me.clientX); };
-    const onUp   = function ()   { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup",   onUp);
+    e.preventDefault();
+    handleRulerTap(e.clientX);
   };
 
-  const handleRulerTouch = function (e) {
-    seekToX(e.touches[0].clientX);
+  const handleRulerTouchStart = function (e) {
+    e.preventDefault();
+    handleRulerTap(e.touches[0].clientX);
   };
 
-  // ── Manual scroll → update currentTime (when not playing) ────
+  const handleRulerTouchMove = function (e) {
+    e.preventDefault(); // prevent page scroll only
+  };
+
   const handleScroll = function (e) {
-    if (!isPlayingRef.current) {
-      setCurrentTime(getTimeFromScroll());
-    }
-    // Sync sidebar vertical scroll
+    // Vertical scroll syncs sidebar only
     if (sidebarRef.current) sidebarRef.current.scrollTop = e.target.scrollTop;
   };
 
@@ -5108,13 +5175,6 @@ function StudioScreen({ user, onExit }) {
     }
   };
 
-  const stopRecording = function () {
-    if (mediaRecRef.current && mediaRecRef.current.state !== "inactive") {
-      mediaRecRef.current.stop(); // triggers mr.onstop async
-    }
-    clearInterval(recIntRef.current);
-    mediaRecRef.current = null;
-  };
 
   // ── Region gestures ───────────────────────────────────────────
   // ── Clip selection & drag state ───────────────────────────────
@@ -5466,7 +5526,7 @@ function StudioScreen({ user, onExit }) {
                   setTracks([]); setProjectName("New Project");
                   setBpm(120); setProjectKey("C major"); setTimeSigNum(4);
                   setCurrentTime(0); setIsSaved(true); setSelectedTrackId(null);
-                  if(scrollRef.current) scrollRef.current.scrollLeft=0;
+                  setOffsetForTime(0);
                 }
               }} style={{ background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:12,color:"#EF4444",fontWeight:700,fontSize:15,padding:"14px",cursor:"pointer" }}>Don't Save</button>
               <button onClick={function(){ setUnsavedAlert(false); }} style={{ background:"none",border:"1px solid #2a2a2a",borderRadius:12,color:"#666",fontSize:14,padding:"12px",cursor:"pointer" }}>Cancel</button>
@@ -5618,7 +5678,7 @@ function StudioScreen({ user, onExit }) {
                   setTracks([]); setProjectName("New Project");
                   setBpm(120); setProjectKey("C major"); setTimeSigNum(4);
                   setCurrentTime(0); setIsSaved(true); setSelectedTrackId(null);
-                  if(scrollRef.current) scrollRef.current.scrollLeft=0;
+                  setOffsetForTime(0);
                 }
               },50);},sep:true},
             ].map(function(item){
@@ -5631,14 +5691,31 @@ function StudioScreen({ user, onExit }) {
       {saveStatus&&<div style={{ background:"rgba(34,197,94,0.1)",borderBottom:"1px solid rgba(34,197,94,0.2)",color:"#22C55E",fontSize:12,padding:"5px 16px",textAlign:"center",flexShrink:0 }}>{saveStatus}</div>}
       {error&&<div style={{ background:"rgba(239,68,68,0.1)",borderBottom:"1px solid rgba(239,68,68,0.2)",color:"#F87171",fontSize:12,padding:"5px 16px",textAlign:"center",flexShrink:0 }}>{error}</div>}
 
-      {/* Zoom / Loop / Follow bar */}
+      {/* Zoom / Loop bar — monitoring toggle lives here too */}
       <div style={{ display:"flex",alignItems:"center",gap:6,padding:"4px 12px",background:"#090909",borderBottom:"1px solid #0f0f0f",flexShrink:0 }}>
         <button onClick={function(){ setZoom(function(z){return Math.max(0.25,+(z-0.25).toFixed(2));});}} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:16,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>-</button>
         <span style={{ color:"#555",fontSize:10,fontFamily:"monospace",width:32,textAlign:"center" }}>{zoom}x</span>
         <button onClick={function(){ setZoom(function(z){return Math.min(4,+(z+0.25).toFixed(2));});}} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:16,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>+</button>
         <div style={{ width:1,background:"#1a1a1a",height:14,margin:"0 4px" }} />
         <button onClick={function(){ setLoopEnabled(function(v){return !v;});}} style={{ background:loopEnabled?"rgba(59,130,246,0.2)":"#141414",border:"1px solid "+(loopEnabled?"#3B82F6":"#222"),borderRadius:6,color:loopEnabled?"#3B82F6":"#555",fontSize:10,fontWeight:700,padding:"3px 8px",cursor:"pointer" }}>LOOP</button>
+        <div style={{ flex:1 }} />
+        {/* 🎧 Input monitoring toggle */}
+        <button
+          onClick={function(){ monitoringOn ? stopMonitoring() : startMonitoring(); }}
+          style={{ display:"flex",alignItems:"center",gap:5,background:monitoringOn?"rgba(34,197,94,0.15)":"#141414",border:"1px solid "+(monitoringOn?"#22C55E":"#2a2a2a"),borderRadius:8,padding:"4px 8px",cursor:"pointer" }}
+        >
+          <span style={{ fontSize:13 }}>🎧</span>
+          <div style={{ width:22,height:12,borderRadius:6,background:monitoringOn?"#22C55E":"#333",position:"relative",transition:"background 0.15s" }}>
+            <div style={{ position:"absolute",top:2,left:monitoringOn?10:2,width:8,height:8,borderRadius:"50%",background:"white",transition:"left 0.15s" }} />
+          </div>
+        </button>
+        {monitoringOn && (
+          <input type="range" min={0} max={1} step={0.05} value={monitorVol}
+            onChange={function(e){ setMonitorVol(parseFloat(e.target.value)); }}
+            style={{ width:50,accentColor:"#22C55E",height:2 }} />
+        )}
       </div>
+      {monitorWarn && <div style={{ background:"rgba(245,158,11,0.1)",borderBottom:"1px solid rgba(245,158,11,0.2)",color:"#F59E0B",fontSize:11,padding:"4px 16px",textAlign:"center",flexShrink:0 }}>{monitorWarn}</div>}
 
       {/* ══ TWO-COLUMN DAW LAYOUT ════════════════════════════════
           LEFT:  sidebar — headers locked horizontally, scroll vertically
@@ -5653,34 +5730,9 @@ function StudioScreen({ user, onExit }) {
           style={{ width:SIDEBAR_W,flexShrink:0,overflowY:"auto",overflowX:"hidden",background:"#0a0a0a",borderRight:"1px solid #141414",zIndex:10 }}
           onScroll={function(e){ if(scrollRef.current) scrollRef.current.scrollTop=e.target.scrollTop; }}
         >
-          {/* Ruler height spacer */}
-          <div style={{ height:RULER_H,background:"#0c0c0c",borderBottom:"1px solid #1a1a1a",display:"flex",alignItems:"center",paddingLeft:8 }}>
+          {/* Ruler height spacer — must match RULER_H in right column exactly */}
+          <div style={{ height:RULER_H,background:"#0c0c0c",borderBottom:"1px solid #1a1a1a",display:"flex",alignItems:"center",paddingLeft:8,flexShrink:0 }}>
             <span style={{ color:"#333",fontSize:9 }}>TRACKS</span>
-          </div>
-
-          {/* ── INPUT MONITORING PANEL ── */}
-          <div style={{ borderBottom:"1px solid #1a1a1a", background:"#0c0c0c", padding:"8px" }}>
-            <button
-              onClick={function(){ monitoringOn ? stopMonitoring() : startMonitoring(); }}
-              style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", background: monitoringOn ? "rgba(34,197,94,0.15)" : "#141414", border:"1px solid "+(monitoringOn?"#22C55E":"#2a2a2a"), borderRadius:8, padding:"5px 8px", cursor:"pointer" }}
-            >
-              <span style={{ fontSize:14 }}>🎧</span>
-              <div style={{ width:24, height:14, borderRadius:7, background: monitoringOn?"#22C55E":"#2a2a2a", position:"relative", transition:"background 0.2s" }}>
-                <div style={{ position:"absolute", top:2, left: monitoringOn?10:2, width:10, height:10, borderRadius:"50%", background:"white", transition:"left 0.2s" }} />
-              </div>
-            </button>
-            {monitoringOn && (
-              <div style={{ marginTop:5, display:"flex", alignItems:"center", gap:4 }}>
-                <span style={{ color:"#555", fontSize:8 }}>🔉</span>
-                <input type="range" min={0} max={1} step={0.05} value={monitorVol}
-                  onChange={function(e){ setMonitorVol(parseFloat(e.target.value)); }}
-                  style={{ flex:1, accentColor:"#22C55E", height:2 }} />
-                <span style={{ color:"#555", fontSize:8 }}>🔊</span>
-              </div>
-            )}
-            {monitorWarn && (
-              <div style={{ marginTop:4, color:"#F59E0B", fontSize:8, lineHeight:1.3, textAlign:"center" }}>{monitorWarn}</div>
-            )}
           </div>
 
           {/* One row per track */}
@@ -5712,29 +5764,30 @@ function StudioScreen({ user, onExit }) {
           </button>
         </div>
 
-        {/* RIGHT TIMELINE — single horizontal scroll container */}
-        {/* ALL rulers and lane content share this one scrollLeft */}
-        <div style={{ flex:1,position:"relative",overflow:"hidden" }}>
+        {/* RIGHT TIMELINE — fixed viewport, content moves via translateX */}
+        <div ref={scrollRef} style={{ flex:1, position:"relative", overflow:"hidden" }}>
 
-          {/* ── FIXED PLAYHEAD — never moves, time comes to it ── */}
-          <div style={{ position:"absolute",top:0,bottom:0,left:PLAYHEAD_X,width:1,zIndex:30,pointerEvents:"none" }}>
-            <div style={{ position:"absolute",top:0,left:-5,width:0,height:0,borderLeft:"5px solid transparent",borderRight:"5px solid transparent",borderTop:"8px solid white" }} />
-            <div style={{ position:"absolute",top:0,bottom:0,left:0,width:1,background:"rgba(255,255,255,0.9)" }} />
+          {/* ── CENTRED PLAYHEAD — pinned at 50%, never moves ── */}
+          <div style={{ position:"absolute", top:0, bottom:0, left:"50%", width:1, zIndex:30, pointerEvents:"none", transform:"translateX(-0.5px)" }}>
+            <div style={{ position:"absolute", top:0, left:-5, width:0, height:0, borderLeft:"5px solid transparent", borderRight:"5px solid transparent", borderTop:"8px solid white" }} />
+            <div style={{ position:"absolute", top:0, bottom:0, left:0, width:1, background:"rgba(255,255,255,0.9)" }} />
           </div>
 
+          {/* Scrollable content — moved via translateX, NOT scroll */}
           <div
-            ref={scrollRef}
-            style={{ width:"100%",height:"100%",overflowX:"scroll",overflowY:"auto" }}
+            ref={trackContainerRef}
+            style={{ position:"absolute", top:0, left:0, willChange:"transform", overflowY:"auto", height:"100%" }}
             onScroll={handleScroll}
           >
-            {/* Inner — wide enough for full timeline + padding */}
-            <div style={{ minWidth:totalW,position:"relative" }}>
+            {/* Width = total timeline + half screen on each side so content never runs out */}
+            <div style={{ minWidth:totalW + 2000, position:"relative" }}>
 
-              {/* ── RULER ── bar markers, seekable by click+drag ── */}
+              {/* ── RULER ── */}
               <div
-                style={{ height:RULER_H,position:"sticky",top:0,zIndex:15,background:"#0c0c0c",borderBottom:"1px solid #1a1a1a",cursor:"col-resize" }}
+                style={{ height:RULER_H, background:"#0c0c0c", borderBottom:"1px solid #1a1a1a", cursor:"col-resize", touchAction:"none", position:"relative" }}
                 onMouseDown={handleRulerMouseDown}
-                onTouchStart={handleRulerTouch}
+                onTouchStart={handleRulerTouchStart}
+                onTouchMove={handleRulerTouchMove}
               >
                 {/* Playhead position indicator in ruler */}
 
