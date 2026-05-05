@@ -11,7 +11,12 @@ const LOADER_STYLE = `
   @keyframes bf-scale-in  { from { opacity:0; transform:scale(0.96); } to { opacity:1; transform:scale(1); } }
   @keyframes bf-play-pulse { 0%,100% { box-shadow:0 0 0 0 rgba(192,38,211,0.4); } 70% { box-shadow:0 0 0 10px rgba(192,38,211,0); } }
   @keyframes bf-tab-in     { from { opacity:0; transform:translateX(8px); } to { opacity:1; transform:translateX(0); } }
-  .bf-page    { animation: bf-fadein-up 0.28s cubic-bezier(0.22,1,0.36,1) both; }
+  .bf-page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  animation: bf-fadein-up 0.28s cubic-bezier(0.22,1,0.36,1) both;
+}
   .bf-card    { animation: bf-scale-in  0.22s cubic-bezier(0.22,1,0.36,1) both; }
   .bf-tab-in  { animation: bf-tab-in   0.22s cubic-bezier(0.22,1,0.36,1) both; }
   .bf-btn     { transition: transform 0.12s ease, opacity 0.12s ease; }
@@ -1833,7 +1838,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
   );
 
   return (
-    <div className="bf-page" style={{ paddingBottom: 100, overflowX: "hidden" }}>
+    <div className="bf-page" style={{ overflowX: "hidden" }}>
 
       {/* Logo */}
       <div style={{ padding: "18px 16px 0" }}>
@@ -4404,9 +4409,30 @@ function WheelPicker({ items, value, onChange, onClose, title, inline, label }) 
   if (inline) return wheel;
 
   return (
-    <div style={{ position:"absolute", inset:0, zIndex:9999, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"flex-end" }}
-      onClick={onClose}>
-      <div style={{ width:"100%", background:"#1c1c1c", borderRadius:"20px 20px 0 0", paddingBottom:"calc(20px + env(safe-area-inset-bottom))" }}
+    <div
+  style={{
+    position:"absolute",
+    inset:0,
+    zIndex:9999,
+    display:"flex",
+    alignItems:"flex-end",
+    pointerEvents: "box-none"
+  }}
+  onClick={onClose}
+>
+<div style={{
+  position:"absolute",
+  inset:0,
+  background:"rgba(0,0,0,0.7)",
+  pointerEvents:"none"
+}} />
+      <div style={{
+  width:"100%",
+  background:"#1c1c1c",
+  borderRadius:"20px 20px 0 0",
+  paddingBottom:"calc(20px + env(safe-area-inset-bottom))",
+  pointerEvents:"auto"
+}}
         onClick={function(e){ e.stopPropagation(); }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px 12px", borderBottom:"1px solid #2a2a2a" }}>
           <button onClick={onClose} style={{ background:"none", border:"none", color:"#888", fontSize:14, cursor:"pointer" }}>Cancel</button>
