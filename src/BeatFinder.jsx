@@ -4537,37 +4537,24 @@ function StudioScreen({ user, onExit }) {
   useEffect(function () { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
   // ── ONE-TIME mic permission on Studio mount ────────────────────
+  // We only request permission here — we do NOT keep the stream open.
+  // Keeping a stream open = orange mic indicator on iPhone constantly.
+  // Instead: request, immediately stop, browser remembers permission.
   useEffect(function () {
-    var requestMic = async function () {
+    var requestMicPermission = async function () {
       try {
-        // Ask for mic access immediately when Studio opens
-        // After user grants once, browser remembers — no more prompts
-        var stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl:  false,
-            sampleRate:       44100,
-            channelCount:     1,
-          }
-        });
-        micStreamRef.current = stream;
+        var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Immediately stop — we just needed the permission grant
+        stream.getTracks().forEach(function (t) { t.stop(); });
         setMicReady(true);
       } catch (e) {
         setMicDenied(true);
-        setError(e.name === "NotAllowedError"
-          ? "Mic access denied. Go to Settings → Safari → Microphone → Allow."
-          : "Could not access microphone.");
+        if (e.name === "NotAllowedError") {
+          setError("Mic access denied. Go to Settings → Safari → Microphone → Allow.");
+        }
       }
     };
-    requestMic();
-    // Stop mic tracks on unmount to release the device
-    return function () {
-      if (micStreamRef.current) {
-        micStreamRef.current.getTracks().forEach(function (t) { t.stop(); });
-        micStreamRef.current = null;
-      }
-    };
+    requestMicPermission();
   }, []);
 
   // ── Computed ──────────────────────────────────────────────────
@@ -4633,42 +4620,52 @@ function StudioScreen({ user, onExit }) {
     setMonitorWarn("");
     const safe = await checkHeadphones();
     if (!safe) {
-      setMonitorWarn("⚠️ Plug in headphones first — monitoring disabled to prevent feedback.");
-      return;
-    }
-    // Use the persistent stream — no new permission prompt needed
-    const stream = micStreamRef.current;
-    if (!stream) {
-      setMonitorWarn("Mic not ready. Check permissions and reload.");
+      setMonitorWarn("⚠️ Plug in headphones — monitoring disabled to prevent feedback.");
       return;
     }
     try {
+      // Open a fresh stream for monitoring with lowest-latency constraints
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl:  false,
+        sampleRate:       44100,
+        channelCount:     1,
+      }});
       monitorStreamRef.current = stream;
-      const actx    = getActx();
-      const src     = actx.createMediaStreamSource(stream);
+      const actx     = getActx();
+      const src      = actx.createMediaStreamSource(stream);
       const analyser = actx.createAnalyser(); analyser.fftSize = 256;
-      const gain    = actx.createGain(); gain.gain.value = monitorVol;
-      src.connect(analyser); analyser.connect(gain); gain.connect(actx.destination);
-      monitorSrcRef.current     = src;
-      monitorGainRef.current    = gain;
+      const gain     = actx.createGain(); gain.gain.value = monitorVol;
+      src.connect(analyser);
+      analyser.connect(gain);
+      gain.connect(actx.destination);
+      monitorSrcRef.current      = src;
+      monitorGainRef.current     = gain;
       monitorAnalyserRef.current = analyser;
       setMonitoringOn(true);
-    } catch(e) {
+    } catch (e) {
       setMonitorWarn("Could not start monitoring.");
     }
   };
 
   const stopMonitoring = function () {
+    // Ramp gain to zero to avoid click
     if (monitorGainRef.current && actxRef.current) {
       monitorGainRef.current.gain.setTargetAtTime(0, actxRef.current.currentTime, 0.02);
     }
-    setTimeout(function(){
-      try{ monitorGainRef.current && monitorGainRef.current.disconnect(); }catch(e){}
-      try{ monitorSrcRef.current && monitorSrcRef.current.disconnect(); }catch(e){}
-      try{ monitorAnalyserRef.current && monitorAnalyserRef.current.disconnect(); }catch(e){}
-      // Do NOT stop micStreamRef tracks — keep the persistent stream alive
-      monitorStreamRef.current=null; monitorSrcRef.current=null;
-      monitorGainRef.current=null; monitorAnalyserRef.current=null;
+    setTimeout(function () {
+      try { monitorGainRef.current && monitorGainRef.current.disconnect(); } catch(e) {}
+      try { monitorSrcRef.current && monitorSrcRef.current.disconnect(); } catch(e) {}
+      try { monitorAnalyserRef.current && monitorAnalyserRef.current.disconnect(); } catch(e) {}
+      // Stop the monitoring mic stream to release the orange indicator
+      if (monitorStreamRef.current) {
+        monitorStreamRef.current.getTracks().forEach(function(t){ t.stop(); });
+      }
+      monitorStreamRef.current   = null;
+      monitorSrcRef.current      = null;
+      monitorGainRef.current     = null;
+      monitorAnalyserRef.current = null;
     }, 60);
     setMonitoringOn(false);
   };
@@ -4995,88 +4992,129 @@ function StudioScreen({ user, onExit }) {
   };
 
   const doRecord = async function (targetTrackId) {
-    // Always use the persistent mic stream — opened once on Studio mount
-    const stream = micStreamRef.current;
-    if (!stream) {
-      setError("Mic not ready. Reload and allow microphone access when prompted.");
-      setCountIn(0);
-      return;
-    }
     try {
-      const actx = getActx();
-      // Reuse monitoring analyser if active, else create a new one
-      let analyser = monitorAnalyserRef.current;
-      if (!analyser) {
-        const srcNode = actx.createMediaStreamSource(stream);
-        analyser = actx.createAnalyser(); analyser.fftSize = 256;
-        srcNode.connect(analyser);
-      }
+      // Open a dedicated stream for recording — separate from monitoring
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+        echoCancellation: true,   // ON for recording — removes room echo
+        noiseSuppression: true,   // ON for recording — cleaner vocals
+        autoGainControl:  false,
+        sampleRate:       44100,
+        channelCount:     1,
+      }});
+
+      const actx       = getActx();
+      const srcNode    = actx.createMediaStreamSource(stream);
+      const analyser   = actx.createAnalyser(); analyser.fftSize = 256;
+      // Do NOT connect srcNode to destination — that would cause feedback/monitoring
+      // Just route mic → analyser for the waveform trail visualisation only
+      srcNode.connect(analyser);
+
       setRecTrail([]);
       chunksRef.current = [];
 
-      // Capture the exact start time NOW — before any async delay
-      const recStartTime = currentTime; // seconds into the timeline when recording began
+      // Capture exact timeline position BEFORE any async work
+      const recStartTime = currentTime;
 
-      const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
-      const mr   = new MediaRecorder(stream, { mimeType: mime });
-      mr.ondataavailable = function (ev) { if (ev.data.size > 0) chunksRef.current.push(ev.data); };
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : "audio/mp4";
+
+      const mr = new MediaRecorder(stream, { mimeType: mime });
+
+      mr.ondataavailable = function (ev) {
+        if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data);
+      };
+
       mr.onstop = async function () {
-        // Never stop micStreamRef tracks — they persist for the Studio session
+        // Stop mic — release iPhone orange indicator
+        stream.getTracks().forEach(function (t) { t.stop(); });
         clearInterval(recIntRef.current);
-        // Only disconnect our analyser if monitoring isn't using it
-        if (!monitorAnalyserRef.current) { try{ analyser.disconnect(); }catch(e){} }
-        analyser.disconnect(); srcNode.disconnect();
+        try { analyser.disconnect(); } catch(e) {}
+        try { srcNode.disconnect(); } catch(e) {}
+
         const dur  = recDurRef.current;
+        if (dur < 0.1) {
+          // Nothing recorded
+          setIsRecording(false); setRecTrackId(null); setRecTrail([]);
+          return;
+        }
+
         const blob = new Blob(chunksRef.current, { type: mime });
         const url  = URL.createObjectURL(blob);
-        // Use the captured start time — NOT currentTime (which has moved on)
-        const clipStart = recStartTime;
+
         let buf = null;
-        try { const ab = await blob.arrayBuffer(); buf = await getActx().decodeAudioData(ab.slice(0)); } catch(e) {}
+        try {
+          const ab = await blob.arrayBuffer();
+          buf = await getActx().decodeAudioData(ab.slice(0));
+        } catch (decErr) {
+          setError("Could not decode recording. Try again.");
+        }
 
         if (targetTrackId) {
-          // Record INTO existing track — replace its clip data
-          setTracks(function(prev){
-            return prev.map(function(t){
+          setTracks(function (prev) {
+            return prev.map(function (t) {
               if (t.id !== targetTrackId) return t;
-              return { ...t, audioBuffer: buf, url, blob, startTime: clipStart, duration: dur };
+              return { ...t, audioBuffer: buf, url, blob, startTime: recStartTime, duration: dur };
             });
           });
         } else {
-          // Create new vocal track
           addTrackObj({
-            id: Date.now(),
-            name: "Vocal " + (tracks.filter(function(t){return t.type==="vocal";}).length + 1),
+            id: Date.now() + Math.random(),
+            name: "Vocal " + (tracks.filter(function (t) { return t.type === "vocal"; }).length + 1),
             type: "vocal",
             audioBuffer: buf, url, blob,
             isMuted: false, isSoloed: false,
-            startTime: clipStart,
+            startTime: recStartTime,
             duration: dur,
-            color: COLORS[tracks.length % COLORS.length]
+            color: COLORS[tracks.length % COLORS.length],
           });
         }
         setRecTrail([]); setIsRecording(false); setRecTrackId(null);
       };
+
+      // Track duration via wall clock
       recDurRef.current = 0;
       const recStart = Date.now();
       recIntRef.current = setInterval(function () {
-        recDurRef.current = (Date.now()-recStart)/1000;
+        recDurRef.current = (Date.now() - recStart) / 1000;
+        // Waveform trail
         const data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteTimeDomainData(data);
         let peak = 0;
-        for (let i=0; i<data.length; i++) { const v=Math.abs(data[i]-128)/128; if(v>peak) peak=v; }
-        setRecTrail(function(prev){ return [...prev.slice(-200), peak]; });
+        for (var i = 0; i < data.length; i++) {
+          var v = Math.abs(data[i] - 128) / 128;
+          if (v > peak) peak = v;
+        }
+        setRecTrail(function (prev) { return [...prev.slice(-200), peak]; });
       }, 50);
-      mr.start(100); mediaRecRef.current = mr;
-      setIsRecording(true); setRecTrackId(targetTrackId);
+
+      mr.start(250); // 250ms chunks for reliable ondataavailable on iOS
+      mediaRecRef.current = mr;
+      setIsRecording(true);
+      setRecTrackId(targetTrackId);
+
+      // Start playback so vocalist hears the beat
       if (!isPlaying) { doPlay(currentTime); setIsPlaying(true); }
+
     } catch (e) {
-      setError("Recording failed: " + e.message);
+      if (e.name === "NotAllowedError") {
+        setError("Mic access denied. Go to Settings → Safari → Microphone → Allow.");
+      } else {
+        setError("Could not start recording: " + e.message);
+      }
       setCountIn(0);
     }
   };
 
-  const stopRecording = function () { if (mediaRecRef.current && isRecording) mediaRecRef.current.stop(); };
+  const stopRecording = function () {
+    if (mediaRecRef.current && mediaRecRef.current.state !== "inactive") {
+      mediaRecRef.current.stop(); // triggers mr.onstop async
+    }
+    clearInterval(recIntRef.current);
+    mediaRecRef.current = null;
+  };
 
   // ── Region gestures ───────────────────────────────────────────
   // ── Clip selection & drag state ───────────────────────────────
