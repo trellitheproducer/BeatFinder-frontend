@@ -4457,7 +4457,7 @@ function StudioScreen({ user, onExit }) {
   const SIDEBAR_W   = 140;       // left column: track headers (locked horizontally)
   const TRACK_H     = 68;        // each track row height
   const RULER_H     = 32;        // timeline ruler height
-  const PLAYHEAD_X  = 80;        // playhead's fixed X from right-column left edge
+  const PLAYHEAD_X  = 0;         // playhead flush with sidebar edge — no gap
 
   // ── Track array: [{id, name, type, audioBuffer, url, isMuted, isSoloed, startTime, duration}]
   const [tracks,       setTracks]       = useState([]);
@@ -4475,7 +4475,6 @@ function StudioScreen({ user, onExit }) {
   const [loopEnabled,  setLoopEnabled]  = useState(false);
   const [loopIn,       setLoopIn]       = useState(0);
   const [loopOut,      setLoopOut]      = useState(0);
-  const [followMode,   setFollowMode]   = useState(true);
 
   // ── UI ────────────────────────────────────────────────────────
   const [contextMenu,  setContextMenu]  = useState(null); // {region, x, y}
@@ -4501,6 +4500,10 @@ function StudioScreen({ user, onExit }) {
   const [showTSPicker, setShowTSPicker] = useState(false);
   const [showKeyPick,  setShowKeyPick]  = useState(false);
   const [draggingReg,  setDraggingReg]  = useState(null);
+  const [monitoringOn, setMonitoringOn] = useState(false);  // input monitoring toggle
+  const [monitorVol,   setMonitorVol]   = useState(0.8);    // 0–1
+  const [headphonesIn, setHeadphonesIn] = useState(false);  // headphone route detected
+  const [monitorWarn,  setMonitorWarn]  = useState("");     // feedback warning
 
   // ── Refs ──────────────────────────────────────────────────────
   const actxRef         = useRef(null);
@@ -4518,17 +4521,61 @@ function StudioScreen({ user, onExit }) {
   const pinchRef        = useRef(null);
   const zoomRef         = useRef(zoom);
   const scheduledRef    = useRef([]);
-  const isPlayingRef    = useRef(false);  // for use inside event handlers
+  const isPlayingRef    = useRef(false);
+
+  // ── Input monitoring refs ──────────────────────────────────────
+  const monitorStreamRef    = useRef(null);
+  const monitorSrcRef       = useRef(null);
+  const monitorGainRef      = useRef(null);
+  const monitorAnalyserRef  = useRef(null);
+  // Persistent mic stream — requested once on mount, reused for both monitoring and recording
+  const micStreamRef        = useRef(null);
+  const [micReady,      setMicReady]      = useState(false);
+  const [micDenied,     setMicDenied]     = useState(false);
 
   useEffect(function () { zoomRef.current = zoom; }, [zoom]);
   useEffect(function () { isPlayingRef.current = isPlaying; }, [isPlaying]);
+
+  // ── ONE-TIME mic permission on Studio mount ────────────────────
+  useEffect(function () {
+    var requestMic = async function () {
+      try {
+        // Ask for mic access immediately when Studio opens
+        // After user grants once, browser remembers — no more prompts
+        var stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl:  false,
+            sampleRate:       44100,
+            channelCount:     1,
+          }
+        });
+        micStreamRef.current = stream;
+        setMicReady(true);
+      } catch (e) {
+        setMicDenied(true);
+        setError(e.name === "NotAllowedError"
+          ? "Mic access denied. Go to Settings → Safari → Microphone → Allow."
+          : "Could not access microphone.");
+      }
+    };
+    requestMic();
+    // Stop mic tracks on unmount to release the device
+    return function () {
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach(function (t) { t.stop(); });
+        micStreamRef.current = null;
+      }
+    };
+  }, []);
 
   // ── Computed ──────────────────────────────────────────────────
   const effectivePPS = PPS * zoom;
   const spb          = 60 / bpm;
   const spBar        = spb * timeSigNum;
-  const totalDur     = Math.max(60, currentTime + 30, ...tracks.map(function(t){ return (t.startTime||0)+(t.duration||0); }));
-  const totalW       = totalDur * effectivePPS + PLAYHEAD_X * 2;
+  const totalDur     = Math.max(60, currentTime + 30, ...tracks.map(function(t){ return (t.startTime||0)+((t.audioBuffer&&t.audioBuffer.duration)||t.duration||0); }));
+  const totalW       = totalDur * effectivePPS + 300;
   const numBars      = Math.ceil(totalDur / spBar) + 2;
   const COLORS       = ["#3B82F6","#22C55E","#F59E0B","#EC4899","#8B5CF6","#06B6D4","#EF4444","#F97316"];
   const hasContent   = tracks.length > 0;
@@ -4546,6 +4593,92 @@ function StudioScreen({ user, onExit }) {
     if (actxRef.current.state === "suspended") actxRef.current.resume();
     return actxRef.current;
   };
+
+  // ── Headphone detection ───────────────────────────────────────
+  const checkHeadphones = async function () {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const outputs = devices.filter(function(d){ return d.kind === "audiooutput"; });
+      const hp = outputs.some(function(d){
+        const l = (d.label||"").toLowerCase();
+        return l.includes("headphone")||l.includes("earphone")||l.includes("airpods")||l.includes("bluetooth")||l.includes("headset")||l.includes("wired");
+      });
+      // If no labels (iOS blocks without permission), allow and trust user
+      const ok = hp || outputs.length === 0 || outputs.every(function(d){ return !d.label; });
+      setHeadphonesIn(ok);
+      return ok;
+    } catch(e){ setHeadphonesIn(true); return true; }
+  };
+
+  useEffect(function () {
+    checkHeadphones();
+    navigator.mediaDevices.addEventListener("devicechange", checkHeadphones);
+    return function(){ navigator.mediaDevices.removeEventListener("devicechange", checkHeadphones); };
+  }, []);
+
+  // Auto-stop if headphones pulled during monitoring
+  useEffect(function () {
+    if (monitoringOn && !headphonesIn) {
+      stopMonitoring();
+      setMonitorWarn("⚠️ Headphones disconnected — monitoring stopped to prevent feedback.");
+    }
+  }, [headphonesIn]);
+
+  // ── Input Monitoring ──────────────────────────────────────────
+  // Graph: mic → analyser → gainNode(volume) → destination (headphones only)
+  // echoCancellation/noiseSuppression MUST be false — they add 40–80ms latency.
+  // Achievable latency: ~10–30ms on wired, ~150–300ms on Bluetooth.
+  const startMonitoring = async function () {
+    if (monitorStreamRef.current) return;
+    setMonitorWarn("");
+    const safe = await checkHeadphones();
+    if (!safe) {
+      setMonitorWarn("⚠️ Plug in headphones first — monitoring disabled to prevent feedback.");
+      return;
+    }
+    // Use the persistent stream — no new permission prompt needed
+    const stream = micStreamRef.current;
+    if (!stream) {
+      setMonitorWarn("Mic not ready. Check permissions and reload.");
+      return;
+    }
+    try {
+      monitorStreamRef.current = stream;
+      const actx    = getActx();
+      const src     = actx.createMediaStreamSource(stream);
+      const analyser = actx.createAnalyser(); analyser.fftSize = 256;
+      const gain    = actx.createGain(); gain.gain.value = monitorVol;
+      src.connect(analyser); analyser.connect(gain); gain.connect(actx.destination);
+      monitorSrcRef.current     = src;
+      monitorGainRef.current    = gain;
+      monitorAnalyserRef.current = analyser;
+      setMonitoringOn(true);
+    } catch(e) {
+      setMonitorWarn("Could not start monitoring.");
+    }
+  };
+
+  const stopMonitoring = function () {
+    if (monitorGainRef.current && actxRef.current) {
+      monitorGainRef.current.gain.setTargetAtTime(0, actxRef.current.currentTime, 0.02);
+    }
+    setTimeout(function(){
+      try{ monitorGainRef.current && monitorGainRef.current.disconnect(); }catch(e){}
+      try{ monitorSrcRef.current && monitorSrcRef.current.disconnect(); }catch(e){}
+      try{ monitorAnalyserRef.current && monitorAnalyserRef.current.disconnect(); }catch(e){}
+      // Do NOT stop micStreamRef tracks — keep the persistent stream alive
+      monitorStreamRef.current=null; monitorSrcRef.current=null;
+      monitorGainRef.current=null; monitorAnalyserRef.current=null;
+    }, 60);
+    setMonitoringOn(false);
+  };
+
+  // Live volume update
+  useEffect(function(){
+    if(monitorGainRef.current && actxRef.current){
+      monitorGainRef.current.gain.setTargetAtTime(monitorVol, actxRef.current.currentTime, 0.01);
+    }
+  }, [monitorVol]);
 
   // ── Scroll container helpers ──────────────────────────────────
   // With paddingLeft=PLAYHEAD_X on inner div, Bar1 (x=0) sits exactly under the playhead.
@@ -4572,7 +4705,7 @@ function StudioScreen({ user, onExit }) {
       const t       = playheadAtRef.current + elapsed;
       setCurrentTime(t);
       // Scroll so playhead stays fixed at PLAYHEAD_X
-      if (followMode) scrollToTime(t);
+      scrollToTime(t);
       if (loopEnabled && loopOut > loopIn && t >= loopOut) {
         stopAll(); doPlay(loopIn); setCurrentTime(loopIn); return;
       }
@@ -4580,7 +4713,7 @@ function StudioScreen({ user, onExit }) {
     };
     animRef.current = requestAnimationFrame(tick);
     return function () { cancelAnimationFrame(animRef.current); };
-  }, [isPlaying, effectivePPS, loopEnabled, loopIn, loopOut, followMode]);
+  }, [isPlaying, effectivePPS, loopEnabled, loopIn, loopOut]);
 
   // ── Audio engine — gain nodes persist so mute/solo works in real-time ──
   const gainNodesRef  = useRef({});   // trackId → GainNode
@@ -4627,16 +4760,29 @@ function StudioScreen({ user, onExit }) {
     setIsSaved(false);
   };
 
-  // ── Stop all audio nodes ──────────────────────────────────────
+  // ── Stop all audio nodes — hard stop, no glitch ──────────────
   const stopAll = function () {
     cancelAnimationFrame(animRef.current);
-    scheduledRef.current.forEach(function (s) { try { s.stop(); s.disconnect(); } catch (e) {} });
+    // Stop and disconnect every scheduled source node immediately
+    scheduledRef.current.forEach(function (s) {
+      try { s.stop(0); } catch (e) {} // stop(0) = immediate
+      try { s.disconnect(); } catch (e) {}
+    });
     scheduledRef.current = [];
+    // Disconnect gain nodes so nothing bleeds through on next play
+    Object.values(gainNodesRef.current).forEach(function (g) {
+      try { g.disconnect(); } catch (e) {}
+    });
     gainNodesRef.current = {};
+    // Ramp master gain to 0 instantly to cut any tail
+    if (masterGainRef.current) {
+      try { masterGainRef.current.gain.cancelScheduledValues(0); masterGainRef.current.gain.value = 0; } catch (e) {}
+      masterGainRef.current = null; // force recreate on next play
+    }
   };
 
   // ── Play from a given time — all tracks share master destination ──
-  const doPlay = async function (fromTime) {
+  const doPlay = function (fromTime) {
     stopAll();
     const actx   = getActx();
     const master = getOrCreateMaster();
@@ -4647,13 +4793,12 @@ function StudioScreen({ user, onExit }) {
 
     const hasSolo = tracks.some(function(t){ return t.isSoloed; });
 
-    const scheduleTrack = async function (track) {
-      if (!track.url) return;
+    const scheduleTrack = function (track) {
+      // Use the already-decoded AudioBuffer directly — never re-fetch blob URLs
+      if (!track.audioBuffer) return;
       try {
-        const resp = await fetch(track.url);
-        const ab   = await resp.arrayBuffer();
-        const buf  = await actx.decodeAudioData(ab);
-        const src  = actx.createBufferSource();
+        const buf = track.audioBuffer;
+        const src = actx.createBufferSource();
         src.buffer = buf;
 
         // Each track gets its own GainNode → master → destination
@@ -4662,7 +4807,7 @@ function StudioScreen({ user, onExit }) {
         gain.gain.value = shouldPlay ? 1 : 0;
         src.connect(gain);
         gain.connect(master);
-        gainNodesRef.current[track.id] = gain; // store for real-time updates
+        gainNodesRef.current[track.id] = gain;
 
         const clipStart = track.startTime || 0;
         const clipEnd   = clipStart + buf.duration;
@@ -4681,26 +4826,33 @@ function StudioScreen({ user, onExit }) {
           src.start(when, bufOff, remain);
           scheduledRef.current.push(src);
         }
-      } catch (e) {}
+      } catch (e) { console.error("schedule error", e); }
     };
 
-    // Schedule ALL tracks simultaneously
-    await Promise.all(tracks.map(scheduleTrack));
+    // Schedule ALL tracks simultaneously (sync, using pre-decoded buffers)
+    tracks.forEach(scheduleTrack);
   };
 
   const togglePlay = function () {
     if (isPlaying) {
-      stopAll(); setIsPlaying(false);
+      stopAll();
+      setIsPlaying(false);
+      // Freeze playhead at current position — don't jump
+      playheadAtRef.current = currentTime;
     } else {
-      doPlay(currentTime); setIsPlaying(true);
+      doPlay(currentTime);
+      setIsPlaying(true);
     }
   };
 
   const rewind = function () {
-    stopAll(); setIsPlaying(false);
+    stopAll();
+    setIsPlaying(false);
     const t = loopEnabled ? loopIn : 0;
     setCurrentTime(t);
     scrollToTime(t);
+    playheadAtRef.current = t;
+    masterStartRef.current = 0;
   };
 
   // ── Seek: click ruler or drag ─────────────────────────────────
@@ -4711,7 +4863,7 @@ function StudioScreen({ user, onExit }) {
     // x in scroll-space = clientX - rect.left + scrollLeft
     // time = (x) / effectivePPS  (ruler ticks are at t*effectivePPS)
     // Click x in content space: subtract PLAYHEAD_X offset because content is padded
-    const x = clientX - rect.left + el.scrollLeft - PLAYHEAD_X;
+    const x = clientX - rect.left + el.scrollLeft;
     const t = Math.max(0, x / effectivePPS);
     setCurrentTime(t);
     scrollToTime(t);
@@ -4762,7 +4914,13 @@ function StudioScreen({ user, onExit }) {
   };
 
   const cloneTrack = function (track) {
-    addTrackObj({ ...track, id: Date.now()+Math.random(), startTime: (track.startTime||0)+(track.duration||2)+0.25, name: track.name+" (copy)" });
+    // Duplicate directly below — offset by duration + 1 beat
+    addTrackObj({
+      ...track,
+      id: Date.now() + Math.random(),
+      startTime: (track.startTime || 0) + (track.duration || 2) + (60 / bpm),
+      name: track.name + " (copy)"
+    });
     setContextMenu(null);
   };
 
@@ -4799,49 +4957,104 @@ function StudioScreen({ user, onExit }) {
   };
 
   // ── Recording ─────────────────────────────────────────────────
-  const startCountIn = function () {
+  // ── Resume AudioContext when app returns from background ─────
+  useEffect(function () {
+    const onVisible = function () {
+      if (actxRef.current && actxRef.current.state === "suspended") {
+        actxRef.current.resume().then(function () {
+          // Re-sync master start so elapsed time is correct
+          if (isPlayingRef.current) {
+            masterStartRef.current = actxRef.current.currentTime - (playheadAtRef.current);
+          }
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return function () {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, []);
+
+  const [selectedTrackId, setSelectedTrackId] = useState(null); // which vocal track records into
+
+  const startCountIn = function (trackId) {
+    // Must have a vocal track selected
+    const vocalTracks = tracks.filter(function(t){ return t.type === "vocal"; });
+    if (vocalTracks.length === 0) {
+      setError("Add a vocal track first by tapping +");
+      return;
+    }
+    const targetId = trackId || selectedTrackId || vocalTracks[vocalTracks.length - 1].id;
     setError(""); setCountIn(4); let n = 4;
     countTimerRef.current = setInterval(function () {
       n--; setCountIn(n);
-      if (n <= 0) { clearInterval(countTimerRef.current); setCountIn(0); doRecord(); }
+      if (n <= 0) { clearInterval(countTimerRef.current); setCountIn(0); doRecord(targetId); }
     }, 800);
   };
 
-  const doRecord = async function () {
+  const doRecord = async function (targetTrackId) {
+    // Always use the persistent mic stream — opened once on Studio mount
+    const stream = micStreamRef.current;
+    if (!stream) {
+      setError("Mic not ready. Reload and allow microphone access when prompted.");
+      setCountIn(0);
+      return;
+    }
     try {
-      const constraints = { audio:{ echoCancellation:true, noiseSuppression:true, sampleRate:44100 } };
-      if (inputDevice && inputDevice !== "default") constraints.audio.deviceId = { exact: inputDevice };
-      const stream   = await navigator.mediaDevices.getUserMedia(constraints);
-      const actx     = getActx();
-      const srcNode  = actx.createMediaStreamSource(stream);
-      const analyser = actx.createAnalyser(); analyser.fftSize = 256;
-      srcNode.connect(analyser);
+      const actx = getActx();
+      // Reuse monitoring analyser if active, else create a new one
+      let analyser = monitorAnalyserRef.current;
+      if (!analyser) {
+        const srcNode = actx.createMediaStreamSource(stream);
+        analyser = actx.createAnalyser(); analyser.fftSize = 256;
+        srcNode.connect(analyser);
+      }
       setRecTrail([]);
       chunksRef.current = [];
+
+      // Capture the exact start time NOW — before any async delay
+      const recStartTime = currentTime; // seconds into the timeline when recording began
+
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
       const mr   = new MediaRecorder(stream, { mimeType: mime });
       mr.ondataavailable = function (ev) { if (ev.data.size > 0) chunksRef.current.push(ev.data); };
       mr.onstop = async function () {
-        stream.getTracks().forEach(function(t){ t.stop(); });
+        // Never stop micStreamRef tracks — they persist for the Studio session
         clearInterval(recIntRef.current);
+        // Only disconnect our analyser if monitoring isn't using it
+        if (!monitorAnalyserRef.current) { try{ analyser.disconnect(); }catch(e){} }
         analyser.disconnect(); srcNode.disconnect();
         const dur  = recDurRef.current;
         const blob = new Blob(chunksRef.current, { type: mime });
         const url  = URL.createObjectURL(blob);
-        const clipStart = Math.max(0, currentTime - dur);
+        // Use the captured start time — NOT currentTime (which has moved on)
+        const clipStart = recStartTime;
         let buf = null;
         try { const ab = await blob.arrayBuffer(); buf = await getActx().decodeAudioData(ab.slice(0)); } catch(e) {}
-        const newTrackId = Date.now();
-        addTrackObj({
-          id: newTrackId,
-          name: "Vocal " + (tracks.filter(function(t){return t.type==="vocal";}).length + 1),
-          type: "vocal",
-          audioBuffer: buf, url, blob,
-          isMuted: false, isSoloed: false,
-          startTime: clipStart,
-          duration: dur,
-          color: COLORS[tracks.length % COLORS.length]
-        });
+
+        if (targetTrackId) {
+          // Record INTO existing track — replace its clip data
+          setTracks(function(prev){
+            return prev.map(function(t){
+              if (t.id !== targetTrackId) return t;
+              return { ...t, audioBuffer: buf, url, blob, startTime: clipStart, duration: dur };
+            });
+          });
+        } else {
+          // Create new vocal track
+          addTrackObj({
+            id: Date.now(),
+            name: "Vocal " + (tracks.filter(function(t){return t.type==="vocal";}).length + 1),
+            type: "vocal",
+            audioBuffer: buf, url, blob,
+            isMuted: false, isSoloed: false,
+            startTime: clipStart,
+            duration: dur,
+            color: COLORS[tracks.length % COLORS.length]
+          });
+        }
         setRecTrail([]); setIsRecording(false); setRecTrackId(null);
       };
       recDurRef.current = 0;
@@ -4855,69 +5068,107 @@ function StudioScreen({ user, onExit }) {
         setRecTrail(function(prev){ return [...prev.slice(-200), peak]; });
       }, 50);
       mr.start(100); mediaRecRef.current = mr;
-      setIsRecording(true); setRecTrackId(Date.now());
-      // Auto-play beat tracks when recording
+      setIsRecording(true); setRecTrackId(targetTrackId);
       if (!isPlaying) { doPlay(currentTime); setIsPlaying(true); }
     } catch (e) {
-      if (e.name==="NotAllowedError") setError("Mic blocked. Go to Settings → Safari → Microphone.");
-      else setError("Could not access microphone.");
+      setError("Recording failed: " + e.message);
       setCountIn(0);
     }
   };
 
   const stopRecording = function () { if (mediaRecRef.current && isRecording) mediaRecRef.current.stop(); };
 
-  // ── Region drag ───────────────────────────────────────────────
+  // ── Region gestures ───────────────────────────────────────────
+  // ── Clip selection & drag state ───────────────────────────────
+  const [selectedClipId, setSelectedClipId] = useState(null);
+  const dragRef = useRef(null); // { trackId, startX, startT, moved, lp }
+
+  const selectClip = function (trackId) {
+    setSelectedClipId(trackId);
+  };
+
+  const deselectClip = function () {
+    setSelectedClipId(null);
+  };
+
+  // Context menu for clip actions
+  const showClipMenu = function (track, x, y) {
+    if (navigator.vibrate) navigator.vibrate(30);
+    setContextMenu({ track, x, y });
+  };
+
+  // ── Clip gesture handlers ──────────────────────────────────────
+
   const handleRegionMouseDown = function (e, track) {
+    if (e.button === 2) return; // right-click handled by onContextMenu
     e.stopPropagation();
+    selectClip(track.id);
+
     const startX = e.clientX;
     const startT = track.startTime || 0;
-    let moved = false;
+    dragRef.current = { trackId: track.id, startX, startT, moved: false };
+
     const onMove = function (me) {
-      const dx = me.clientX - startX;
-      if (!moved && Math.abs(dx) < 5) return;
-      moved = true;
-      setDraggingReg(track.id);
+      if (!dragRef.current) return;
+      const dx = me.clientX - dragRef.current.startX;
+      if (!dragRef.current.moved && Math.abs(dx) < 5) return;
+      dragRef.current.moved = true;
       updateTrack(track.id, { startTime: snapSecs(startT + dx / effectivePPS) });
     };
     const onUp = function () {
+      dragRef.current = null;
       document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup",   onUp);
-      setDraggingReg(null);
+      document.removeEventListener("mouseup", onUp);
     };
     document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup",   onUp);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  const handleRegionRightClick = function (e, track) {
+    e.preventDefault();
+    e.stopPropagation();
+    selectClip(track.id);
+    showClipMenu(track, e.clientX, e.clientY);
   };
 
   const handleRegionTouchStart = function (e, track) {
     if (e.touches.length === 2) return;
     e.stopPropagation();
+    selectClip(track.id);
+
     const startX = e.touches[0].clientX;
     const startT = track.startTime || 0;
+    const elem = e.currentTarget;
+
+    // Long-press timer — fires context menu if no drag occurs
     const lp = setTimeout(function () {
-      const r = e.currentTarget.getBoundingClientRect();
-      setContextMenu({ track, x: r.left, y: r.bottom });
-    }, 600);
-    e.currentTarget._lp = lp;
-    e.currentTarget._ts = { startX, startT };
+      if (!dragRef.current || !dragRef.current.moved) {
+        const r = elem.getBoundingClientRect();
+        showClipMenu(track, r.left + r.width / 2, r.top - 8);
+      }
+    }, 500);
+
+    dragRef.current = { trackId: track.id, startX, startT, moved: false, lp };
   };
 
   const handleRegionTouchMove = function (e, track) {
     if (e.touches.length === 2) return;
     e.stopPropagation();
-    clearTimeout(e.currentTarget._lp);
-    const ts = e.currentTarget._ts;
-    if (!ts) return;
-    const dx = e.touches[0].clientX - ts.startX;
+    if (!dragRef.current) return;
+    const dx = e.touches[0].clientX - dragRef.current.startX;
     if (Math.abs(dx) > 6) {
-      setDraggingReg(track.id);
-      updateTrack(track.id, { startTime: snapSecs(ts.startT + dx / effectivePPS) });
+      // Cancel long-press — user is dragging
+      clearTimeout(dragRef.current.lp);
+      dragRef.current.moved = true;
+      updateTrack(track.id, { startTime: snapSecs(dragRef.current.startT + dx / effectivePPS) });
     }
   };
 
-  const handleRegionTouchEnd = function (e) {
-    clearTimeout(e.currentTarget._lp);
-    setDraggingReg(null);
+  const handleRegionTouchEnd = function () {
+    if (dragRef.current) {
+      clearTimeout(dragRef.current.lp);
+      dragRef.current = null;
+    }
   };
 
   // ── Pinch zoom ────────────────────────────────────────────────
@@ -4960,10 +5211,44 @@ function StudioScreen({ user, onExit }) {
   }, [metronomeOn, bpm, timeSigNum]);
 
   // ── Save/Load ─────────────────────────────────────────────────
-  const saveProject = function () {
+  const audioBufferToBase64 = function (buf) {
     try {
-      const proj = { id:Date.now(), name:projectName, bpm, timeSigNum, projectKey, savedAt:new Date().toISOString(),
-        tracks:tracks.map(function(t){ return {...t,audioBuffer:null,url:null,blob:null}; }) };
+      const nc=buf.numberOfChannels, sr=buf.sampleRate, len=buf.length, bl=len*nc*2;
+      const ab=new ArrayBuffer(44+bl), dv=new DataView(ab);
+      const ws=function(o,s){for(let i=0;i<s.length;i++)dv.setUint8(o+i,s.charCodeAt(i));};
+      ws(0,"RIFF");dv.setUint32(4,36+bl,true);ws(8,"WAVE");ws(12,"fmt ");
+      dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,nc,true);
+      dv.setUint32(24,sr,true);dv.setUint32(28,sr*nc*2,true);dv.setUint16(32,nc*2,true);
+      dv.setUint16(34,16,true);ws(36,"data");dv.setUint32(40,bl,true);
+      let off=44;
+      for(let i=0;i<len;i++)for(let c=0;c<nc;c++){
+        const s=Math.max(-1,Math.min(1,buf.getChannelData(c)[i]));
+        dv.setInt16(off,s<0?s*0x8000:s*0x7FFF,true);off+=2;
+      }
+      const bytes=new Uint8Array(ab);
+      let b64=""; for(let i=0;i<bytes.length;i++)b64+=String.fromCharCode(bytes[i]);
+      return btoa(b64);
+    } catch(e){ return null; }
+  };
+
+  const base64ToAudioBuffer = async function (b64) {
+    try {
+      const bin=atob(b64);
+      const ab=new ArrayBuffer(bin.length);
+      const ua=new Uint8Array(ab);
+      for(let i=0;i<bin.length;i++)ua[i]=bin.charCodeAt(i);
+      const actx=getActx();
+      return await actx.decodeAudioData(ab);
+    } catch(e){ return null; }
+  };
+
+  const saveProject = async function () {
+    try {
+      const savedTracks = await Promise.all(tracks.map(async function(t){
+        const b64 = t.audioBuffer ? audioBufferToBase64(t.audioBuffer) : null;
+        return { ...t, audioBuffer:null, url:null, blob:null, audioB64:b64 };
+      }));
+      const proj = { id:Date.now(), name:projectName, bpm, timeSigNum, projectKey, savedAt:new Date().toISOString(), tracks:savedTracks };
       let list = JSON.parse(localStorage.getItem("bf_studio_projects")||"[]");
       const idx = list.findIndex(function(p){ return p.name===projectName; });
       if (idx>=0) list[idx]=proj; else list.unshift(proj);
@@ -4971,14 +5256,22 @@ function StudioScreen({ user, onExit }) {
       localStorage.setItem("bf_studio_projects",JSON.stringify(list));
       setSavedProjects(list); setIsSaved(true);
       setSaveStatus("Saved!"); setTimeout(function(){ setSaveStatus(""); },2000);
-    } catch(e){}
+    } catch(e){ setSaveStatus("Save failed — file too large?"); setTimeout(function(){ setSaveStatus(""); },3000); }
   };
 
-  const loadProject = function (p) {
+  const loadProject = async function (p) {
     setProjectName(p.name); setBpm(p.bpm||120);
-    setTracks(p.tracks.map(function(t){ return {...t,audioBuffer:null,url:null,blob:null}; }));
     setShowProjects(false); setIsSaved(true);
-    setSaveStatus("Loaded — re-upload audio to restore"); setTimeout(function(){ setSaveStatus(""); },4000);
+    setSaveStatus("Loading...");
+    // Restore audioBuffers from base64
+    const restored = await Promise.all((p.tracks||[]).map(async function(t){
+      let buf = null;
+      if (t.audioB64) { buf = await base64ToAudioBuffer(t.audioB64); }
+      const url = buf ? URL.createObjectURL(new Blob([new Uint8Array(0)], {type:"audio/wav"})) : null;
+      return { ...t, audioBuffer:buf, url:buf?URL.createObjectURL(new Blob([],{type:"audio/wav"})):null, blob:null };
+    }));
+    setTracks(restored);
+    setSaveStatus("Loaded!"); setTimeout(function(){ setSaveStatus(""); },1500);
   };
 
   const deleteProject = function (id) {
@@ -5044,10 +5337,16 @@ function StudioScreen({ user, onExit }) {
       const dec=async function(url){const r=await fetch(url);const ab=await r.arrayBuffer();return oc.decodeAudioData(ab);};
       const hasSolo=tracks.some(function(t){return t.isSoloed;});
       for(const tr of tracks){
-        if(tr.isMuted||!tr.url)continue;
+        if(tr.isMuted||!tr.audioBuffer)continue;
         if(hasSolo&&!tr.isSoloed)continue;
         setExportMsg("Loading "+tr.name+"...");
-        try{const b=await dec(tr.url);const g=oc.createGain();g.gain.value=1;const s=oc.createBufferSource();s.buffer=b;s.connect(g);g.connect(oc.destination);s.start(tr.startTime||0,0,b.duration);}catch(e){}
+        try{
+          // Copy buffer into offline context
+          const oc2 = new OfflineAudioContext(tr.audioBuffer.numberOfChannels, tr.audioBuffer.length, tr.audioBuffer.sampleRate);
+          const g=oc.createGain();g.gain.value=1;
+          const s=oc.createBufferSource();s.buffer=tr.audioBuffer;s.connect(g);g.connect(oc.destination);
+          s.start(tr.startTime||0,0,tr.audioBuffer.duration);
+        }catch(e){}
       }
       setExportMsg("Rendering...");
       const rendered=await oc.startRendering();
@@ -5067,7 +5366,7 @@ function StudioScreen({ user, onExit }) {
   return (
     <div
       style={{ background:"#080808", height:"calc(100vh - env(safe-area-inset-bottom))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
-      onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); }}
+      onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
     >
       {/* ── Overlays ── */}
       {exporting && (
@@ -5086,11 +5385,29 @@ function StudioScreen({ user, onExit }) {
       )}
 
       {contextMenu && (
-        <div style={{ position:"fixed",top:Math.min(contextMenu.y+4,window.innerHeight-120),left:Math.max(8,Math.min(contextMenu.x,window.innerWidth-200)),zIndex:5000,background:"#1c1c1c",border:"1px solid #2a2a2a",borderRadius:14,overflow:"hidden",minWidth:180,boxShadow:"0 8px 32px rgba(0,0,0,0.9)" }}
-          onClick={function(e){ e.stopPropagation(); }}>
-          <div style={{ padding:"10px 16px 8px",color:"#555",fontSize:11,fontWeight:600,borderBottom:"1px solid #222" }}>{contextMenu.track.name}</div>
-          <button onClick={function(){ cloneTrack(contextMenu.track); }} style={{ display:"block",width:"100%",textAlign:"left",padding:"13px 16px",background:"none",border:"none",borderBottom:"1px solid #1a1a1a",color:"white",fontSize:14,cursor:"pointer" }}>⧉  Clone</button>
-          <button onClick={function(){ removeTrack(contextMenu.track.id); }} style={{ display:"block",width:"100%",textAlign:"left",padding:"13px 16px",background:"none",border:"none",color:"#EF4444",fontSize:14,cursor:"pointer" }}>🗑  Delete</button>
+        <div style={{ position:"fixed", inset:0, zIndex:9000 }} onClick={function(){ setContextMenu(null); }}>
+          <div
+            onClick={function(e){ e.stopPropagation(); }}
+            style={{ position:"absolute", top:Math.min(contextMenu.y+8, window.innerHeight-210), left:Math.max(12, Math.min(contextMenu.x-100, window.innerWidth-220)), background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:16, overflow:"hidden", minWidth:204, boxShadow:"0 16px 48px rgba(0,0,0,0.95)" }}
+          >
+            <div style={{ padding:"10px 16px 8px", borderBottom:"1px solid #222", display:"flex", alignItems:"center", gap:8 }}>
+              <div style={{ width:8, height:8, borderRadius:"50%", background:contextMenu.track.color, flexShrink:0 }} />
+              <span style={{ color:"#666", fontSize:11, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:160 }}>{contextMenu.track.name}</span>
+            </div>
+            <button onClick={function(){ cloneTrack(contextMenu.track); setContextMenu(null); }} style={{ display:"flex", alignItems:"center", gap:12, width:"100%", padding:"13px 16px", background:"none", border:"none", borderBottom:"1px solid #111", color:"white", fontSize:14, cursor:"pointer" }}>
+              <span style={{ width:20, textAlign:"center" }}>⧉</span> Duplicate
+            </button>
+            <button onClick={function(){
+              const n = window.prompt("Rename clip:", contextMenu.track.name);
+              if (n && n.trim()) updateTrack(contextMenu.track.id, { name: n.trim() });
+              setContextMenu(null);
+            }} style={{ display:"flex", alignItems:"center", gap:12, width:"100%", padding:"13px 16px", background:"none", border:"none", borderBottom:"1px solid #111", color:"white", fontSize:14, cursor:"pointer" }}>
+              <span style={{ width:20, textAlign:"center" }}>✏️</span> Rename
+            </button>
+            <button onClick={function(){ removeTrack(contextMenu.track.id); setContextMenu(null); }} style={{ display:"flex", alignItems:"center", gap:12, width:"100%", padding:"13px 16px", background:"none", border:"none", color:"#EF4444", fontSize:14, cursor:"pointer" }}>
+              <span style={{ width:20, textAlign:"center" }}>🗑</span> Delete
+            </button>
+          </div>
         </div>
       )}
 
@@ -5101,7 +5418,19 @@ function StudioScreen({ user, onExit }) {
             <div style={{ color:"#888",fontSize:14,marginBottom:28,lineHeight:1.6 }}>Save before {unsavedAlert==="new"?"new project?":"leaving?"}</div>
             <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
               <button onClick={function(){ saveProject();setUnsavedAlert(false);if(unsavedAlert!=="new")onExit();else{setTracks([]);setProjectName("New Project");setIsSaved(false);setCurrentTime(0);} }} style={{ background:"linear-gradient(135deg,#C026D3,#7C3AED)",border:"none",borderRadius:12,color:"white",fontWeight:800,fontSize:15,padding:"14px",cursor:"pointer" }}>Save {unsavedAlert==="new"?"& New":"& Exit"}</button>
-              <button onClick={function(){ setUnsavedAlert(false);if(unsavedAlert!=="new")onExit();else{setTracks([]);setProjectName("New Project");setIsSaved(false);setCurrentTime(0);} }} style={{ background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:12,color:"#EF4444",fontWeight:700,fontSize:15,padding:"14px",cursor:"pointer" }}>Don't Save</button>
+              <button onClick={function(){
+                setUnsavedAlert(false);
+                if(unsavedAlert!=="new"){
+                  onExit();
+                } else {
+                  // Full reset — clear everything so old project can't ghost back
+                  stopAll(); setIsPlaying(false);
+                  setTracks([]); setProjectName("New Project");
+                  setBpm(120); setProjectKey("C major"); setTimeSigNum(4);
+                  setCurrentTime(0); setIsSaved(true); setSelectedTrackId(null);
+                  if(scrollRef.current) scrollRef.current.scrollLeft=0;
+                }
+              }} style={{ background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:12,color:"#EF4444",fontWeight:700,fontSize:15,padding:"14px",cursor:"pointer" }}>Don't Save</button>
               <button onClick={function(){ setUnsavedAlert(false); }} style={{ background:"none",border:"1px solid #2a2a2a",borderRadius:12,color:"#666",fontSize:14,padding:"12px",cursor:"pointer" }}>Cancel</button>
             </div>
           </div>
@@ -5244,7 +5573,16 @@ function StudioScreen({ user, onExit }) {
               {label:"✏️  Rename",       fn:function(){setShowProjMenu(false);setRenamingProj(true);}},
               {label:"📂  All Projects", fn:function(){setShowProjMenu(false);setTimeout(function(){setShowProjects(true);},50);}},
               {label:"⬇️  Export Mix",   fn:function(){setShowProjMenu(false);setTimeout(exportMix,50);},hi:true},
-              {label:"🆕  New Project",  fn:function(){setShowProjMenu(false);setTimeout(function(){if(!isSaved&&hasContent)setUnsavedAlert("new");else{setTracks([]);setProjectName("New Project");setIsSaved(false);setCurrentTime(0);}},50);},sep:true},
+              {label:"🆕  New Project",  fn:function(){setShowProjMenu(false);setTimeout(function(){
+                if(!isSaved&&hasContent) setUnsavedAlert("new");
+                else{
+                  stopAll(); setIsPlaying(false);
+                  setTracks([]); setProjectName("New Project");
+                  setBpm(120); setProjectKey("C major"); setTimeSigNum(4);
+                  setCurrentTime(0); setIsSaved(true); setSelectedTrackId(null);
+                  if(scrollRef.current) scrollRef.current.scrollLeft=0;
+                }
+              },50);},sep:true},
             ].map(function(item){
               return <button key={item.label} onClick={item.fn} style={{ display:"block",width:"100%",textAlign:"left",padding:"13px 16px",background:item.hi?"rgba(192,38,211,0.08)":"none",border:"none",borderBottom:"1px solid #1a1a1a",borderTop:item.sep?"1px solid #2a2a2a":"none",color:item.hi||item.sep?"#C026D3":"white",fontSize:14,cursor:"pointer" }}>{item.label}</button>;
             })}
@@ -5262,8 +5600,6 @@ function StudioScreen({ user, onExit }) {
         <button onClick={function(){ setZoom(function(z){return Math.min(4,+(z+0.25).toFixed(2));});}} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:16,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>+</button>
         <div style={{ width:1,background:"#1a1a1a",height:14,margin:"0 4px" }} />
         <button onClick={function(){ setLoopEnabled(function(v){return !v;});}} style={{ background:loopEnabled?"rgba(59,130,246,0.2)":"#141414",border:"1px solid "+(loopEnabled?"#3B82F6":"#222"),borderRadius:6,color:loopEnabled?"#3B82F6":"#555",fontSize:10,fontWeight:700,padding:"3px 8px",cursor:"pointer" }}>LOOP</button>
-        <div style={{ flex:1 }} />
-        <button onClick={function(){ setFollowMode(function(v){return !v;});}} style={{ background:followMode?"rgba(192,38,211,0.2)":"#141414",border:"1px solid "+(followMode?"#C026D3":"#222"),borderRadius:6,color:followMode?"#C026D3":"#555",fontSize:10,fontWeight:700,padding:"3px 8px",cursor:"pointer" }}>↗ FOLLOW</button>
       </div>
 
       {/* ══ TWO-COLUMN DAW LAYOUT ════════════════════════════════
@@ -5284,13 +5620,40 @@ function StudioScreen({ user, onExit }) {
             <span style={{ color:"#333",fontSize:9 }}>TRACKS</span>
           </div>
 
+          {/* ── INPUT MONITORING PANEL ── */}
+          <div style={{ borderBottom:"1px solid #1a1a1a", background:"#0c0c0c", padding:"8px" }}>
+            <button
+              onClick={function(){ monitoringOn ? stopMonitoring() : startMonitoring(); }}
+              style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", background: monitoringOn ? "rgba(34,197,94,0.15)" : "#141414", border:"1px solid "+(monitoringOn?"#22C55E":"#2a2a2a"), borderRadius:8, padding:"5px 8px", cursor:"pointer" }}
+            >
+              <span style={{ fontSize:14 }}>🎧</span>
+              <div style={{ width:24, height:14, borderRadius:7, background: monitoringOn?"#22C55E":"#2a2a2a", position:"relative", transition:"background 0.2s" }}>
+                <div style={{ position:"absolute", top:2, left: monitoringOn?10:2, width:10, height:10, borderRadius:"50%", background:"white", transition:"left 0.2s" }} />
+              </div>
+            </button>
+            {monitoringOn && (
+              <div style={{ marginTop:5, display:"flex", alignItems:"center", gap:4 }}>
+                <span style={{ color:"#555", fontSize:8 }}>🔉</span>
+                <input type="range" min={0} max={1} step={0.05} value={monitorVol}
+                  onChange={function(e){ setMonitorVol(parseFloat(e.target.value)); }}
+                  style={{ flex:1, accentColor:"#22C55E", height:2 }} />
+                <span style={{ color:"#555", fontSize:8 }}>🔊</span>
+              </div>
+            )}
+            {monitorWarn && (
+              <div style={{ marginTop:4, color:"#F59E0B", fontSize:8, lineHeight:1.3, textAlign:"center" }}>{monitorWarn}</div>
+            )}
+          </div>
+
           {/* One row per track */}
           {tracks.map(function(track){
             const isRec = isRecording && recTrackId === track.id;
             const hasSolo = tracks.some(function(t){return t.isSoloed;});
             const dimmed = hasSolo && !track.isSoloed;
             return (
-              <div key={track.id} style={{ height:TRACK_H,borderBottom:"1px solid #0f0f0f",padding:"6px 8px",display:"flex",flexDirection:"column",justifyContent:"space-between",opacity:dimmed?0.4:1 }}>
+              <div key={track.id}
+                onClick={function(){ if(track.type==="vocal") setSelectedTrackId(track.id); }}
+                style={{ height:TRACK_H,borderBottom:"1px solid #0f0f0f",padding:"6px 8px",display:"flex",flexDirection:"column",justifyContent:"space-between",opacity:dimmed?0.4:1,background:selectedTrackId===track.id?"rgba(192,38,211,0.06)":"transparent",cursor:track.type==="vocal"?"pointer":"default" }}>
                 <div style={{ display:"flex",alignItems:"center",gap:4 }}>
                   <div style={{ width:7,height:7,borderRadius:"50%",background:isRec?"#EF4444":track.color,flexShrink:0 }} />
                   <span style={{ color:"white",fontSize:10,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{track.name}</span>
@@ -5327,7 +5690,7 @@ function StudioScreen({ user, onExit }) {
             onScroll={handleScroll}
           >
             {/* Inner — wide enough for full timeline + padding */}
-            <div style={{ minWidth:totalW,position:"relative",paddingLeft:PLAYHEAD_X }}>
+            <div style={{ minWidth:totalW,position:"relative" }}>
 
               {/* ── RULER ── bar markers, seekable by click+drag ── */}
               <div
@@ -5336,7 +5699,7 @@ function StudioScreen({ user, onExit }) {
                 onTouchStart={handleRulerTouch}
               >
                 {/* Playhead position indicator in ruler */}
-                <div style={{ position:"absolute",left:currentTime*effectivePPS,top:0,bottom:0,width:1,background:"rgba(255,255,255,0.2)",pointerEvents:"none" }} />
+
                 {Array.from({length:numBars},function(_,bi){
                   const bx=bi*spBar*effectivePPS;
                   return(
@@ -5357,24 +5720,27 @@ function StudioScreen({ user, onExit }) {
                 )}
               </div>
 
-              {/* ── TRACK LANES ── one per track, regions at x=startTime*effectivePPS ── */}
+              {/* ── TRACK LANES ── */}
               {tracks.map(function(track){
-                const isRec = isRecording && recTrackId === track.id;
-                const hasSolo = tracks.some(function(t){return t.isSoloed;});
-                const dimmed = hasSolo && !track.isSoloed;
-                const regionL = (track.startTime||0)*effectivePPS;
-                const regionW = Math.max(40,(track.duration||2)*effectivePPS);
-                const playedF = Math.max(0,Math.min(1,(currentTime-(track.startTime||0))/(track.duration||1)));
-                const isDragging = draggingReg === track.id;
+                const isRec     = isRecording && recTrackId === track.id;
+                const hasSolo   = tracks.some(function(t){return t.isSoloed;});
+                const dimmed    = hasSolo && !track.isSoloed;
+                const regionL   = (track.startTime||0)*effectivePPS;
+                const regionW   = Math.max(40,((track.audioBuffer&&track.audioBuffer.duration)||track.duration||2)*effectivePPS);
+                const playedF   = Math.max(0,Math.min(1,(currentTime-(track.startTime||0))/((track.audioBuffer&&track.audioBuffer.duration)||track.duration||1)));
+                const isSelected = selectedClipId === track.id;
                 return(
-                  <div key={track.id} style={{ height:TRACK_H,borderBottom:"1px solid #0f0f0f",position:"relative",background:"#090909",overflow:"hidden",opacity:dimmed?0.4:1 }}>
-
-                    {/* Beat grid lines */}
+                  <div
+                    key={track.id}
+                    style={{ height:TRACK_H, borderBottom:"1px solid #0f0f0f", position:"relative", background:"#090909", opacity:dimmed?0.4:1 }}
+                    onClick={deselectClip}
+                  >
+                    {/* Beat grid */}
                     {Array.from({length:Math.ceil(totalDur/spb)+1},function(_,i){
                       return <div key={i} style={{ position:"absolute",left:i*spb*effectivePPS,top:0,bottom:0,width:1,background:i%timeSigNum===0?"#181818":"#111",pointerEvents:"none" }} />;
                     })}
 
-                    {/* Live recording trail */}
+                    {/* Recording trail */}
                     {isRec&&recTrail.length>0&&(
                       <div style={{ position:"absolute",left:Math.max(0,currentTime*effectivePPS-recTrail.length*2),top:4,height:TRACK_H-8,display:"flex",alignItems:"center",pointerEvents:"none" }}>
                         {recTrail.map(function(v,i){
@@ -5383,18 +5749,45 @@ function StudioScreen({ user, onExit }) {
                       </div>
                     )}
 
-                    {/* Audio region — x = startTime * effectivePPS */}
-                    {track.url&&(
+                    {/* Clip — tap=select, drag=move, long-press=menu */}
+                    {track.audioBuffer&&(
                       <div
-                        style={{ position:"absolute",left:regionL,top:4,width:regionW,height:TRACK_H-8,borderRadius:6,overflow:"hidden",border:"2px solid "+track.color+(isDragging?"":"88"),boxShadow:isDragging?"0 0 0 2px "+track.color+"44":"none",background:"#0a0a0a",cursor:isDragging?"grabbing":"grab",zIndex:5,touchAction:"none" }}
+                        onClick={function(e){ e.stopPropagation(); selectClip(track.id); }}
                         onMouseDown={function(e){ handleRegionMouseDown(e,track); }}
                         onTouchStart={function(e){ handleRegionTouchStart(e,track); }}
                         onTouchMove={function(e){ handleRegionTouchMove(e,track); }}
                         onTouchEnd={handleRegionTouchEnd}
-                        onContextMenu={function(e){ e.preventDefault();const r=e.currentTarget.getBoundingClientRect();setContextMenu({track,x:r.left,y:r.bottom}); }}
+                        onContextMenu={function(e){ handleRegionRightClick(e,track); }}
+                        style={{
+                          position:"absolute", left:regionL, top:3, width:regionW, height:TRACK_H-6,
+                          borderRadius:7, overflow:"hidden", touchAction:"none",
+                          border: isSelected
+                            ? "2px solid "+track.color
+                            : "2px solid "+track.color+"55",
+                          boxShadow: isSelected
+                            ? "0 0 0 2px "+track.color+"55, inset 0 0 0 1px "+track.color+"22"
+                            : "none",
+                          background: isSelected ? track.color+"18" : "#0a0a0a",
+                          cursor: "grab",
+                          zIndex: isSelected ? 10 : 5,
+                          transition: "border 0.1s, box-shadow 0.1s, background 0.1s",
+                        }}
                       >
-                        <WaveformCanvas audioBuffer={track.audioBuffer} color={track.color} width={Math.max(1,Math.round(regionW))} height={TRACK_H-8} playedFraction={playedF} />
-                        <div style={{ position:"absolute",bottom:2,left:5,color:"rgba(255,255,255,0.7)",fontSize:8,fontWeight:600,pointerEvents:"none",textShadow:"0 1px 3px rgba(0,0,0,0.8)" }}>{track.name}</div>
+                        <WaveformCanvas
+                          audioBuffer={track.audioBuffer}
+                          color={track.color}
+                          width={Math.max(1,Math.round(regionW))}
+                          height={TRACK_H-6}
+                          playedFraction={playedF}
+                        />
+                        {/* Clip label */}
+                        <div style={{ position:"absolute", bottom:3, left:6, right:6, color: isSelected ? "white" : "rgba(255,255,255,0.6)", fontSize:8, fontWeight:700, pointerEvents:"none", textShadow:"0 1px 3px rgba(0,0,0,0.9)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {track.name}
+                        </div>
+                        {/* Selection corner dot */}
+                        {isSelected && (
+                          <div style={{ position:"absolute", top:4, right:4, width:6, height:6, borderRadius:"50%", background:track.color, pointerEvents:"none" }} />
+                        )}
                       </div>
                     )}
                   </div>
@@ -5412,19 +5805,20 @@ function StudioScreen({ user, onExit }) {
           <div style={{ padding:"10px 16px 6px",color:"#555",fontSize:10,fontWeight:700 }}>ADD TO PROJECT</div>
           <label style={{ display:"block",cursor:"pointer" }}>
             <div style={{ padding:"12px 16px",display:"flex",alignItems:"center",gap:12,borderBottom:"1px solid #1a1a1a" }}>
-              <div style={{ width:32,height:32,borderRadius:8,background:"rgba(192,38,211,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>🎵</div>
-              <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Upload Beat</div><div style={{ color:"#555",fontSize:11 }}>Adds to track list</div></div>
+              <div style={{ width:32,height:32,borderRadius:8,background:"rgba(59,130,246,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>🎵</div>
+              <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Upload Audio</div><div style={{ color:"#555",fontSize:11 }}>Beat, vocal, any audio file</div></div>
             </div>
             <input type="file" accept=".mp3,.wav,.m4a,.aac,audio/*" multiple onChange={function(e){handleFileUpload(e,"beat");}} style={{ display:"none" }} />
           </label>
-          <label style={{ display:"block",cursor:"pointer" }}>
-            <div style={{ padding:"12px 16px",display:"flex",alignItems:"center",gap:12,borderBottom:"1px solid #1a1a1a" }}>
-              <div style={{ width:32,height:32,borderRadius:8,background:"rgba(59,130,246,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>🎵</div>
-              <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Upload Audio</div><div style={{ color:"#555",fontSize:11 }}>Any audio file</div></div>
-            </div>
-            <input type="file" accept=".mp3,.wav,.m4a,.aac,audio/*" multiple onChange={function(e){handleFileUpload(e,"vocal");}} style={{ display:"none" }} />
-          </label>
-          <div style={{ padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer" }} onClick={function(){ startCountIn(); setShowAddMenu(false); }}>
+          <div style={{ padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer" }} onClick={function(){
+            // Create a new vocal track then immediately start recording into it
+            const newId = Date.now() + Math.random();
+            const vocalN = tracks.filter(function(t){return t.type==="vocal";}).length + 1;
+            addTrackObj({ id:newId, name:"Vocal "+vocalN, type:"vocal", audioBuffer:null, url:null, isMuted:false, isSoloed:false, startTime:currentTime, duration:0, color:COLORS[vocalN%COLORS.length] });
+            setSelectedTrackId(newId);
+            setShowAddMenu(false);
+            setTimeout(function(){ startCountIn(newId); }, 100);
+          }}>
             <div style={{ width:32,height:32,borderRadius:8,background:"rgba(239,68,68,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>🎙</div>
             <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Record Vocals</div><div style={{ color:"#555",fontSize:11 }}>Record new take</div></div>
           </div>
@@ -5441,7 +5835,7 @@ function StudioScreen({ user, onExit }) {
           <button onClick={rewind} style={{ width:36,height:36,borderRadius:8,background:"#141414",border:"1px solid #222",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
           </button>
-          <button onClick={function(){ if(isRecording)stopRecording();else startCountIn(); }} disabled={countIn>0} style={{ width:52,height:52,borderRadius:"50%",background:isRecording?"#EF4444":"linear-gradient(135deg,#EF4444,#DC2626)",border:isRecording?"3px solid rgba(239,68,68,0.5)":"3px solid rgba(239,68,68,0.2)",cursor:countIn>0?"not-allowed":"pointer",opacity:countIn>0?0.4:1,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:isRecording?"0 0 20px rgba(239,68,68,0.5)":"none" }}>
+          <button onClick={function(){ if(isRecording)stopRecording();else startCountIn(selectedTrackId); }} disabled={countIn>0} style={{ width:52,height:52,borderRadius:"50%",background:isRecording?"#EF4444":"linear-gradient(135deg,#EF4444,#DC2626)",border:isRecording?"3px solid rgba(239,68,68,0.5)":"3px solid rgba(239,68,68,0.2)",cursor:countIn>0?"not-allowed":"pointer",opacity:countIn>0?0.4:1,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:isRecording?"0 0 20px rgba(239,68,68,0.5)":"none" }}>
             {isRecording?<div style={{ width:16,height:16,background:"white",borderRadius:3 }} />:<div style={{ width:20,height:20,background:"white",borderRadius:"50%" }} />}
           </button>
           <button onClick={togglePlay} style={{ width:40,height:40,borderRadius:"50%",background:"linear-gradient(135deg,#C026D3,#7C3AED)",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>
