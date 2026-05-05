@@ -4473,6 +4473,7 @@ function WaveformCanvas({ audioBuffer, color, width, height, playedFraction }) {
 // =============================================================================
 // useHistory — undo/redo for tracks state
 // =============================================================================
+function useCustomHistory(initial) {
   const past    = useRef([]);
   const future  = useRef([]);
   const [state, setStateRaw] = React.useState(initial);
