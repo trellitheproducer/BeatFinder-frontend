@@ -4555,7 +4555,7 @@ function StudioScreen({ user, onExit }) {
   const SIDEBAR_W   = 140;       // left column: track headers (locked horizontally)
   const TRACK_H     = 68;        // each track row height
   const RULER_H     = 32;        // timeline ruler height
-  const PLAYHEAD_X  = 0;         // playhead flush with sidebar edge — no gap
+  const PLAYHEAD_X  = SIDEBAR_W;         // playhead flush with sidebar edge — no gap
 
   // ── Track array: [{id, name, type, audioBuffer, url, isMuted, isSoloed, startTime, duration}]
   const [tracks, setTracks, undoTracks, redoTracks, canUndo, canRedo] = useHistory([]);
