@@ -4599,7 +4599,10 @@ function StudioScreen({ user, onExit }) {
   const monitorAnalyserRef  = useRef(null);
   // Persistent mic stream — requested once on mount, reused for both monitoring and recording
   const micStreamRef        = useRef(null);
-  const [micReady,      setMicReady]      = useState(false);
+  // Persist mic permission across StudioScreen remounts so we never re-prompt
+  const [micReady,      setMicReady]      = useState(function() {
+    try { return localStorage.getItem("bf_mic_granted") === "1"; } catch { return false; }
+  });
   const [micDenied,     setMicDenied]     = useState(false);
 
   useEffect(function () { zoomRef.current = zoom; }, [zoom]);
@@ -4647,6 +4650,7 @@ function StudioScreen({ user, onExit }) {
         const status = await navigator.permissions.query({ name: "microphone" });
         if (status.state === "granted") {
           setMicReady(true);
+          try { localStorage.setItem("bf_mic_granted", "1"); } catch {}
           return true;
         }
         if (status.state === "denied") {
@@ -4663,9 +4667,17 @@ function StudioScreen({ user, onExit }) {
     // Ask the user (only reaches here on first-ever request or when state is "prompt")
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(function (t) { t.stop(); }); // release immediately
+              // Only stop the stream if monitoring isn't using it
+        if (!monitoringOn) {
+      stream.getTracks().forEach(function (t) { t.stop(); });
+          micStreamRef.current = null;
+        }
+ // release immediately
       setMicReady(true);
       setMicDenied(false);
+      try { localStorage.setItem("bf_mic_granted", "1"); } catch {}
+      // Now safe to check headphone state (enumerateDevices reveals labels after mic grant)
+      checkHeadphones();
       return true;
     } catch (e) {
       setMicDenied(true);
@@ -4724,7 +4736,12 @@ function StudioScreen({ user, onExit }) {
   };
 
   useEffect(function () {
-    checkHeadphones();
+    // Only enumerate devices on mount if mic was already granted (stored in localStorage).
+    // If not yet granted, checkHeadphones() will be called after the user allows mic access
+    // in ensureMicPermission() — this avoids the iOS mic prompt firing on Studio entry.
+    if (micReady) {
+      checkHeadphones();
+    }
 
     // When headphones plug in or out, iOS re-routes audio hardware and
     // suspends any active AudioContext. Resume it after a short delay
@@ -4771,6 +4788,59 @@ function StudioScreen({ user, onExit }) {
     if (monitorStreamRef.current) return;
     setMonitorWarn("");
     const safe = await checkHeadphones();
+    if (!safe) {
+      setMonitorWarn("⚠️ Plug in headphones — monitoring disabled to prevent feedback.");
+      return;
+    }
+
+    // FIX: Route through ensureMicPermission — never ask twice
+    const allowed = await ensureMicPermission();
+    if (!allowed) return;
+
+    try {
+      // FIX: Reuse existing mic stream if already open, else open one
+      let stream = micStreamRef.current;
+      if (!stream || stream.getTracks().every(function(t){ return t.readyState === "ended"; })) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl:  false,
+          sampleRate:       48000,
+          channelCount:     1,
+          latency:          0,
+        }});
+        micStreamRef.current = stream;
+      }
+
+      monitorStreamRef.current = stream;
+
+      // FIX: "interactive" = smallest buffer = lowest latency for monitoring
+      const mCtx = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate:  48000,
+        latencyHint: "interactive",
+      });
+
+      const src      = mCtx.createMediaStreamSource(stream);
+      const analyser = mCtx.createAnalyser(); analyser.fftSize = 256;
+      const gain     = mCtx.createGain(); gain.gain.value = monitorVol;
+
+      // FIX: Mono → stereo: merge channel 0 into both L and R
+      const merger = mCtx.createChannelMerger(2);
+      src.connect(analyser);
+      src.connect(gain);
+      gain.connect(merger, 0, 0); // mono → left
+      gain.connect(merger, 0, 1); // mono → right (fixes left-ear-only bug)
+      merger.connect(mCtx.destination);
+
+      monitorSrcRef.current      = src;
+      monitorGainRef.current     = gain;
+      monitorAnalyserRef.current = analyser;
+      monitorStreamRef.current._mCtx = mCtx;
+      setMonitoringOn(true);
+    } catch (e) {
+      setMonitorWarn("Could not start monitoring: " + e.message);
+    }
+  };
     if (!safe) {
       setMonitorWarn("⚠️ Plug in headphones — monitoring disabled to prevent feedback.");
       return;
@@ -5341,7 +5411,16 @@ function StudioScreen({ user, onExit }) {
         });
       }
     };
-    document.addEventListener("visibilitychange", onVisible);
+      // Release mic stream when leaving Studio — clears iPhone orange indicator
+  useEffect(function () {
+    return function () {
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach(function(t){ t.stop(); });
+        micStreamRef.current = null;
+      }
+    };
+  }, []);
+document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
     return function () {
       document.removeEventListener("visibilitychange", onVisible);
@@ -5380,14 +5459,19 @@ function StudioScreen({ user, onExit }) {
   const doRecord = async function (targetTrackId) {
     try {
       // Open a dedicated stream for recording — separate from monitoring
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: {
-        echoCancellation: true,   // ON for recording — removes room echo
-        noiseSuppression: true,   // ON for recording — cleaner vocals
-        autoGainControl:  false,
-        sampleRate:       44100,
-        channelCount:     1,
-      }});
-
+            // Reuse existing mic stream — no second permission prompt, no OS conflict
+      let stream = micStreamRef.current;
+      const streamNeedsOpen = !stream || stream.getTracks().every(function(t){ return t.readyState === "ended"; });
+      if (streamNeedsOpen) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl:  false,
+          sampleRate:       48000,
+          channelCount:     1,
+        }});
+        micStreamRef.current = stream;
+      }
       const actx       = getActx();
       const srcNode    = actx.createMediaStreamSource(stream);
       const analyser   = actx.createAnalyser(); analyser.fftSize = 256;
