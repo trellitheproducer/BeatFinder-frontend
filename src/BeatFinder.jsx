@@ -4819,7 +4819,13 @@ function StudioScreen({ user, onExit }) {
         lastUIUpdate = ts;
       }
       if (loopEnabled && loopOut > loopIn && t >= loopOut) {
-        stopAll(); doPlay(loopIn); setCurrentTime(loopIn); return;
+        // Restart audio from loopIn, then let the RAF keep ticking
+        stopAll();
+        doPlay(loopIn);
+        setCurrentTime(loopIn);
+        setIsPlaying(true);
+        animRef.current = requestAnimationFrame(tick);
+        return;
       }
       animRef.current = requestAnimationFrame(tick);
     };
@@ -4830,6 +4836,9 @@ function StudioScreen({ user, onExit }) {
   // ── Audio engine — gain nodes persist so mute/solo works in real-time ──
   const gainNodesRef  = useRef({});   // trackId → GainNode
   const masterGainRef = useRef(null); // single master output
+  // ── Live FX nodes — updated in real-time without restarting playback ──
+  // fxNodesRef.current[trackId] = { eq:{hpf,low,mid,high,lpf}, comp, reverbDry, reverbWet, preDelay, makeupGain }
+  const fxNodesRef    = useRef({});   // trackId → live audio node references
 
   const getOrCreateMaster = function () {
     const actx = getActx();
@@ -4851,6 +4860,65 @@ function StudioScreen({ user, onExit }) {
       const shouldPlay = !t.isMuted && (!hasSolo || t.isSoloed);
       g.gain.setTargetAtTime(shouldPlay ? 1 : 0, getActx().currentTime, 0.01);
     });
+  };
+
+  // ── Real-time FX update — called by upd() whenever FX params change while playing ──
+  // Directly mutates live Web Audio nodes so changes are heard immediately with no restart.
+  const applyFxLive = function (trackId, effects) {
+    const actx = actxRef.current;
+    if (!actx || actx.state === "closed") return;
+    if (!isPlayingRef.current) return;
+    const live = fxNodesRef.current[trackId];
+    if (!live) return;
+    const fx = effects || {};
+    const T = 0.008; // 8ms ramp — smooth, inaudible transition
+    const now = actx.currentTime;
+
+    // ── EQ ──
+    if (live.eq) {
+      const eq = fx.eq || {};
+      const on = !!(fx.eq && fx.eq.on);
+      live.eq.hpf.frequency.setTargetAtTime(on ? (eq.hpfFreq||80)    : 20,    now, T);
+      live.eq.hpf.Q.setTargetAtTime(        on ? (eq.hpfQ||0.707)    : 0.001, now, T);
+      live.eq.low.frequency.setTargetAtTime(on ? (eq.lowFreq||200)   : 200,   now, T);
+      live.eq.low.gain.setTargetAtTime(     on ? (eq.low||0)         : 0,     now, T);
+      live.eq.mid.frequency.setTargetAtTime(on ? (eq.midFreq||1000)  : 1000,  now, T);
+      live.eq.mid.gain.setTargetAtTime(     on ? (eq.mid||0)         : 0,     now, T);
+      live.eq.mid.Q.setTargetAtTime(        on ? (eq.midQ||1.0)      : 1.0,   now, T);
+      live.eq.high.frequency.setTargetAtTime(on ? (eq.highFreq||8000) : 8000, now, T);
+      live.eq.high.gain.setTargetAtTime(     on ? (eq.high||0)        : 0,    now, T);
+      live.eq.lpf.frequency.setTargetAtTime(on ? (eq.lpfFreq||18000) : 22050, now, T);
+      live.eq.lpf.Q.setTargetAtTime(        on ? (eq.lpfQ||0.707)    : 0.001, now, T);
+    }
+
+    // ── Compressor ──
+    if (live.comp) {
+      const compOn = !!(fx.compressor && fx.compressor.on);
+      live.comp.threshold.setTargetAtTime(compOn ? (fx.compressor.threshold ?? -24) : 0,     now, T);
+      live.comp.ratio.setTargetAtTime(    compOn ? (fx.compressor.ratio ?? 4)       : 1,     now, T);
+      live.comp.attack.setTargetAtTime(   compOn ? (fx.compressor.attack ?? 0.003)  : 0.003, now, T);
+      live.comp.release.setTargetAtTime(  compOn ? (fx.compressor.release ?? 0.25)  : 0.25,  now, T);
+    }
+
+    // ── Makeup gain ──
+    if (live.makeupGain) {
+      const mgOn = !!(fx.compressor && fx.compressor.on && fx.compressor.makeupGain);
+      const mgVal = mgOn ? Math.pow(10, (fx.compressor.makeupGain || 0) / 20) : 1;
+      live.makeupGain.gain.setTargetAtTime(mgVal, now, T);
+    }
+
+    // ── Reverb wet/dry ──
+    if (live.reverb) {
+      const revOn = !!(fx.reverb && fx.reverb.on);
+      const wet = revOn ? (fx.reverb.wet || 0.25) : 0;
+      live.reverb.wetG.gain.setTargetAtTime(wet,     now, T);
+      live.reverb.dryG.gain.setTargetAtTime(1 - wet, now, T);
+      if (revOn && fx.reverb.preDelay !== undefined) {
+        live.reverb.preDelay.delayTime.setTargetAtTime(fx.reverb.preDelay / 1000, now, T);
+      }
+      // Note: room size changes the IR buffer — requires a brief rebuild only when roomSize changes
+      // For smooth real-time feel, we defer that to the next play() call. Wet/dry is instant.
+    }
   };
 
   // Wrap toggleMute/toggleSolo to also update gains live
@@ -4886,6 +4954,8 @@ function StudioScreen({ user, onExit }) {
       try { g.disconnect(); } catch (e) {}
     });
     gainNodesRef.current = {};
+    // Clear live FX node refs
+    fxNodesRef.current = {};
     // Ramp master gain to 0 instantly to cut any tail
     if (masterGainRef.current) {
       try { masterGainRef.current.gain.cancelScheduledValues(0); masterGainRef.current.gain.value = 0; } catch (e) {}
@@ -4909,20 +4979,22 @@ function StudioScreen({ user, onExit }) {
     const buildChain = function (track) {
       let node = master;
       const fx = track.effects || {};
+      const liveNodes = {}; // collect refs for real-time updates
 
       // Pan
       if (actx.createStereoPanner) {
         const panner = actx.createStereoPanner();
         panner.pan.value = track.pan || 0;
         panner.connect(node); node = panner;
+        liveNodes.panner = panner;
       }
 
-      // Makeup gain (post-compressor) — separate from volume
-      if (fx.compressor && fx.compressor.on && fx.compressor.makeupGain) {
-        const mg = actx.createGain();
-        mg.gain.value = Math.pow(10, (fx.compressor.makeupGain || 0) / 20);
-        mg.connect(node); node = mg;
-      }
+      // Makeup gain (post-compressor) — always create so we can update it live
+      const mg = actx.createGain();
+      mg.gain.value = (fx.compressor && fx.compressor.on && fx.compressor.makeupGain)
+        ? Math.pow(10, (fx.compressor.makeupGain || 0) / 20) : 1;
+      mg.connect(node); node = mg;
+      liveNodes.makeupGain = mg;
 
       // Track volume
       const volGain = actx.createGain();
@@ -4931,81 +5003,87 @@ function StudioScreen({ user, onExit }) {
       volGain.connect(node); node = volGain;
       gainNodesRef.current[track.id] = volGain;
 
-      // Reverb (synthetic IR convolver)
-      if (fx.reverb && fx.reverb.on) {
+      // ── Reverb — always built so wet/dry can be morphed live ──
+      // We always allocate the reverb graph; when off, wetG = 0 and dryG = 1
+      {
         const sr = actx.sampleRate;
-        // Pre-delay: create a tiny delay node before reverb
-        const preDelaySec = (fx.reverb.preDelay || 0) / 1000;
+        const preDelaySec = (fx.reverb && fx.reverb.preDelay) ? fx.reverb.preDelay / 1000 : 0;
         const preDelay = actx.createDelay(0.2);
         preDelay.delayTime.value = preDelaySec;
-        preDelay.connect(node);
-        const len = Math.round(sr * (fx.reverb.roomSize || 0.8) * 3);
+        const roomSize = (fx.reverb && fx.reverb.on) ? (fx.reverb.roomSize || 0.8) : 0.8;
+        const len = Math.round(sr * roomSize * 3);
         const ir = actx.createBuffer(2, len, sr);
         for (let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.5);}
         const conv = actx.createConvolver(); conv.buffer = ir;
-        const dryG = actx.createGain(); dryG.gain.value = 1-(fx.reverb.wet||0.25);
-        const wetG = actx.createGain(); wetG.gain.value = fx.reverb.wet||0.25;
+        const wetVal = (fx.reverb && fx.reverb.on) ? (fx.reverb.wet || 0.25) : 0;
+        const dryG = actx.createGain(); dryG.gain.value = 1 - wetVal;
+        const wetG = actx.createGain(); wetG.gain.value = wetVal;
         const mix  = actx.createGain();
         dryG.connect(mix); wetG.connect(mix); mix.connect(node);
+        preDelay.connect(conv); conv.connect(wetG);
         const split = actx.createGain(); split.gain.value = 1;
-        split.connect(dryG); split.connect(conv); conv.connect(wetG); conv.connect(preDelay);
+        split.connect(dryG); split.connect(preDelay);
         node = split;
+        liveNodes.reverb = { dryG, wetG, preDelay, conv };
       }
 
-      // 5-band parametric EQ — reads all freq/gain/Q params from fx.eq
-      if (fx.eq && fx.eq.on) {
-        const eq = fx.eq;
-        const T  = 0.005; // 5ms smooth transition — prevents zipper noise on param changes
+      // ── 5-band parametric EQ — always built; bypass = unity gain when off ──
+      {
+        const eq = fx.eq || {};
+        const T  = 0.005;
+        const eqOn = !!(fx.eq && fx.eq.on);
 
         const hpf = actx.createBiquadFilter();
         hpf.type = "highpass";
-        hpf.frequency.setTargetAtTime(eq.hpfFreq||80,    actx.currentTime, T);
-        hpf.Q.setTargetAtTime(        eq.hpfQ||0.707,    actx.currentTime, T);
+        hpf.frequency.setTargetAtTime(eqOn ? (eq.hpfFreq||80)   : 20,    actx.currentTime, T);
+        hpf.Q.setTargetAtTime(        eqOn ? (eq.hpfQ||0.707)   : 0.001, actx.currentTime, T);
 
         const low = actx.createBiquadFilter();
         low.type = "lowshelf";
-        low.frequency.setTargetAtTime(eq.lowFreq||200,   actx.currentTime, T);
-        low.gain.setTargetAtTime(     eq.low||0,         actx.currentTime, T);
+        low.frequency.setTargetAtTime(eqOn ? (eq.lowFreq||200)  : 200,   actx.currentTime, T);
+        low.gain.setTargetAtTime(     eqOn ? (eq.low||0)        : 0,     actx.currentTime, T);
 
         const mid = actx.createBiquadFilter();
         mid.type = "peaking";
-        mid.frequency.setTargetAtTime(eq.midFreq||1000,  actx.currentTime, T);
-        mid.gain.setTargetAtTime(     eq.mid||0,         actx.currentTime, T);
-        mid.Q.setTargetAtTime(        eq.midQ||1.0,      actx.currentTime, T);
+        mid.frequency.setTargetAtTime(eqOn ? (eq.midFreq||1000) : 1000,  actx.currentTime, T);
+        mid.gain.setTargetAtTime(     eqOn ? (eq.mid||0)        : 0,     actx.currentTime, T);
+        mid.Q.setTargetAtTime(        eqOn ? (eq.midQ||1.0)     : 1.0,   actx.currentTime, T);
 
         const high = actx.createBiquadFilter();
         high.type = "highshelf";
-        high.frequency.setTargetAtTime(eq.highFreq||8000, actx.currentTime, T);
-        high.gain.setTargetAtTime(     eq.high||0,        actx.currentTime, T);
+        high.frequency.setTargetAtTime(eqOn ? (eq.highFreq||8000) : 8000, actx.currentTime, T);
+        high.gain.setTargetAtTime(     eqOn ? (eq.high||0)        : 0,    actx.currentTime, T);
 
         const lpf = actx.createBiquadFilter();
         lpf.type = "lowpass";
-        lpf.frequency.setTargetAtTime(eq.lpfFreq||18000, actx.currentTime, T);
-        lpf.Q.setTargetAtTime(        eq.lpfQ||0.707,    actx.currentTime, T);
+        lpf.frequency.setTargetAtTime(eqOn ? (eq.lpfFreq||18000) : 22050, actx.currentTime, T);
+        lpf.Q.setTargetAtTime(        eqOn ? (eq.lpfQ||0.707)    : 0.001, actx.currentTime, T);
 
         // Chain: hpf → low → mid → high → lpf → [rest of chain]
         lpf.connect(node); high.connect(lpf); mid.connect(high); low.connect(mid); hpf.connect(low);
         node = hpf;
+        liveNodes.eq = { hpf, low, mid, high, lpf };
       }
 
-      // Compressor
-      if (fx.compressor && fx.compressor.on) {
+      // ── Compressor — always built; bypass when off via extreme settings ──
+      {
         const comp = actx.createDynamicsCompressor();
-        comp.threshold.value = fx.compressor.threshold ?? -24;
-        comp.ratio.value     = fx.compressor.ratio ?? 4;
-        comp.attack.value    = fx.compressor.attack ?? 0.003;
-        comp.release.value   = fx.compressor.release ?? 0.25;
+        const compOn = !!(fx.compressor && fx.compressor.on);
+        comp.threshold.value = compOn ? (fx.compressor.threshold ?? -24) : 0;
+        comp.ratio.value     = compOn ? (fx.compressor.ratio ?? 4)       : 1;
+        comp.attack.value    = compOn ? (fx.compressor.attack ?? 0.003)  : 0.003;
+        comp.release.value   = compOn ? (fx.compressor.release ?? 0.25)  : 0.25;
         comp.connect(node); node = comp;
+        liveNodes.comp = comp;
       }
 
       // Auto-Pitch — per-track pitch shift using playback rate scaling
-      // This shifts pitch by semitones without changing tempo (approximation via pitch semitone offset)
       if (fx.pitch && fx.pitch.on) {
-        // PitchShifter using two buffer source trick: pitch is approximated by
-        // sending through a BiquadFilter tuned to the target key + scale.
-        // For playback we store the semitoneShift on the chain for scheduleClip to use.
         node._pitchSemitones = fx.pitch.semitones || 0;
       }
+
+      // Store live nodes for this track
+      fxNodesRef.current[track.id] = liveNodes;
 
       return node; // clips connect here
     };
@@ -5089,40 +5167,84 @@ function StudioScreen({ user, onExit }) {
     setIsPlaying(false);
   };
 
-  // ── Ruler seek — mouse ────────────────────────────────────────
-  // ── Ruler tap → set loop in/out points ───────────────────────
-  // Single tap: seek to that position
-  // With LOOP on: first tap sets loop-in, second tap (to the right) sets loop-out
-  const handleRulerTap = function (clientX) {
-    const el = scrollRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    // Ruler lane starts after SIDEBAR_W. Convert tap → timeline time.
-    const laneX = clientX - rect.left - SIDEBAR_W + el.scrollLeft;
-    const t     = Math.max(0, laneX / effectivePPS);
+  // ── Ruler tap/drag → set loop in/out points ONLY ─────────────
+  // Tapping the ruler only creates/adjusts the loop region.
+  // It never seeks the playhead or interrupts playback.
+  // First tap on empty area: sets loop-in, second tap to the right: sets loop-out.
+  // Dragging: if tap lands within 0.3s of loopIn → drag loopIn,
+  //           if tap lands within 0.3s of loopOut → drag loopOut,
+  //           otherwise start a new loop region from that point.
+  const rulerDragRef = useRef(null); // { mode: "in"|"out"|"new", startX, startT }
 
-    if (loopEnabled) {
-      if (t > loopIn + 0.1) { setLoopOut(t); }
-      else { setLoopIn(t); setLoopOut(Math.max(t + 1, loopOut)); }
-    }
-    setCurrentTime(t);
-    playheadAtRef.current = t;
-    el.scrollLeft = Math.max(0, t * effectivePPS);
-    if (isPlayingRef.current) { stopAll(); doPlay(t); setIsPlaying(true); }
+  const rulerTimeFromClientX = function (clientX) {
+    const el = scrollRef.current;
+    if (!el) return 0;
+    const rect  = el.getBoundingClientRect();
+    const laneX = clientX - rect.left - SIDEBAR_W + el.scrollLeft;
+    return Math.max(0, laneX / effectivePPS);
+  };
+
+  // Ruler always snaps to the nearest bar boundary for clean loop regions.
+  // Falls back to beat-snap when bars are very short (high BPM / many beats).
+  const snapToBar = function (t) {
+    const grid = spBar > 0 ? spBar : spb;
+    return Math.max(0, Math.round(t / grid) * grid);
   };
 
   const handleRulerMouseDown = function (e) {
     e.preventDefault();
-    handleRulerTap(e.clientX);
+    const raw = rulerTimeFromClientX(e.clientX);
+    const t   = snapToBar(raw);
+    // Snap the grab threshold to one bar so handles feel magnetic
+    const grabThresh = Math.max(0.3, spBar * 0.5);
+    let mode = "new";
+    if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
+    else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
+    rulerDragRef.current = { mode, startX: e.clientX, startT: t };
+
+    if (mode === "new") { setLoopEnabled(true); setLoopIn(t); setLoopOut(snapToBar(t + spBar)); }
+
+    const onMove = function (me) {
+      const nt = snapToBar(rulerTimeFromClientX(me.clientX));
+      if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spBar)); }
+      else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spBar)); }
+      else {
+        if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spBar));
+        else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
+      }
+    };
+    const onUp = function () {
+      rulerDragRef.current = null;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup",   onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup",   onUp);
   };
 
   const handleRulerTouchStart = function (e) {
     e.preventDefault();
-    handleRulerTap(e.touches[0].clientX);
+    const raw = rulerTimeFromClientX(e.touches[0].clientX);
+    const t   = snapToBar(raw);
+    const grabThresh = Math.max(0.3, spBar * 0.5);
+    let mode = "new";
+    if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
+    else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
+    rulerDragRef.current = { mode, startT: t };
+
+    if (mode === "new") { setLoopEnabled(true); setLoopIn(t); setLoopOut(snapToBar(t + spBar)); }
   };
 
   const handleRulerTouchMove = function (e) {
-    e.preventDefault(); // prevent page scroll only
+    e.preventDefault();
+    if (!rulerDragRef.current) return;
+    const nt = snapToBar(rulerTimeFromClientX(e.touches[0].clientX));
+    if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spBar)); }
+    else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spBar)); }
+    else {
+      if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spBar));
+      else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
+    }
   };
 
   const handleScroll = function (e) {
@@ -6287,7 +6409,12 @@ mediaRecRef.current = mr;
         const t = tracks.find(function(tr){ return tr.id===fxTrackId; });
         if (!t) return null;
         const fx = t.effects || {};
-        const upd = function(section, patch){ updateTrack(t.id, { effects:{ ...t.effects, [section]:{ ...(t.effects[section]||{}), ...patch } } }); };
+        const upd = function(section, patch){
+          const newEffects = { ...t.effects, [section]:{ ...(t.effects[section]||{}), ...patch } };
+          updateTrack(t.id, { effects: newEffects });
+          // Apply changes to live audio nodes immediately — no playback restart needed
+          applyFxLive(t.id, newEffects);
+        };
 
         // ── Rotary Knob — arc and track share identical radius + strokeWidth ──
         const Knob = function({ label, value, min, max, step, unit, onChange, color }) {
