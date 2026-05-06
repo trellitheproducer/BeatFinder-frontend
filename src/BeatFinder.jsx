@@ -4310,41 +4310,6 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 // =============================================================================
 
 // =============================================================================
-// useHistory — undo/redo for tracks state
-// =============================================================================
-function useHistory(initial) {
-  const past    = useRef([]);
-  const future  = useRef([]);
-  const [state, setStateRaw] = React.useState(initial);
-
-  const setState = function (newState) {
-    past.current.push(state);
-    if (past.current.length > 50) past.current.shift(); // cap at 50
-    future.current = [];
-    setStateRaw(newState);
-  };
-
-  const undo = function () {
-    if (past.current.length === 0) return;
-    future.current.push(state);
-    const prev = past.current.pop();
-    setStateRaw(prev);
-  };
-
-  const redo = function () {
-    if (future.current.length === 0) return;
-    past.current.push(state);
-    const next = future.current.pop();
-    setStateRaw(next);
-  };
-
-  const canUndo = past.current.length > 0;
-  const canRedo = future.current.length > 0;
-
-  return [state, setState, undo, redo, canUndo, canRedo];
-}
-
-// =============================================================================
 // STUDIO SCREEN
 // =============================================================================
 // iOS-style wheel picker
