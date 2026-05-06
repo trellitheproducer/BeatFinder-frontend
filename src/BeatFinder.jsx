@@ -4613,26 +4613,26 @@ function StudioScreen({ user, onExit }) {
     }
   }, []);
 
-  // ── ONE-TIME mic permission on Studio mount ────────────────────
-  // We only request permission here — we do NOT keep the stream open.
-  // Keeping a stream open = orange mic indicator on iPhone constantly.
-  // Instead: request, immediately stop, browser remembers permission.
-  useEffect(function () {
-    var requestMicPermission = async function () {
-      try {
-        var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // Immediately stop — we just needed the permission grant
-        stream.getTracks().forEach(function (t) { t.stop(); });
-        setMicReady(true);
-      } catch (e) {
-        setMicDenied(true);
-        if (e.name === "NotAllowedError") {
-          setError("Mic access denied. Go to Settings → Safari → Microphone → Allow.");
-        }
+  // ── Lazy mic permission — requested only when user clicks Record or + Vocal ──
+  // We do NOT request on mount. Request is made inside startCountIn/addVocalTrack
+  // so the orange mic indicator only appears during actual recording.
+  // Browser caches the grant so it never asks twice.
+  const requestMicPermissionOnce = async function () {
+    if (micReady) return true;
+    try {
+      var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Immediately stop — we just needed the permission grant
+      stream.getTracks().forEach(function (t) { t.stop(); });
+      setMicReady(true);
+      return true;
+    } catch (e) {
+      setMicDenied(true);
+      if (e.name === "NotAllowedError") {
+        setError("Mic access denied. Go to Settings → Safari → Microphone → Allow.");
       }
-    };
-    requestMicPermission();
-  }, []);
+      return false;
+    }
+  };
 
   // ── Computed ──────────────────────────────────────────────────
   const effectivePPS = PPS * zoom;
@@ -5282,7 +5282,11 @@ function StudioScreen({ user, onExit }) {
 
   const [selectedTrackId, setSelectedTrackId] = useState(null); // which vocal track records into
 
-  const startCountIn = function (trackId) {
+  const startCountIn = async function (trackId) {
+    // Request mic permission here (lazy) — only fires on first use, browser caches grant
+    const granted = await requestMicPermissionOnce();
+    if (!granted) return;
+
     const vocalTracks = tracks.filter(function(t){ return t.type === "vocal"; });
     let targetId = trackId || selectedTrackId;
     if (!targetId) {
@@ -5306,18 +5310,8 @@ function StudioScreen({ user, onExit }) {
   const doRecord = async function (targetTrackId) {
   const newClipId = Date.now();
   clipIdRef.current = newClipId;
-const startTime = currentTime; // or whatever your playhead time is
+  const startTime = currentTime;
 
-addClip({
-  id: newClipId,
-  trackId: targetTrackId,
-  startTime: startTime,
-  duration: 0,
-  isRecording: true
-});
-
-setRecordingClipId(newClipId);
-setRecordingStartTime(startTime);
     try {
       // Open a dedicated stream for recording — separate from monitoring
       const stream = await navigator.mediaDevices.getUserMedia({ audio: {
@@ -5399,23 +5393,13 @@ setRecordingStartTime(startTime);
             clips: [newClip],
           });
         }
-        updateClip(recordingClipId, {
-  isRecording: false,
-  duration: recDurRef.current
-});
         setRecTrail([]); setIsRecording(false); setRecTrackId(null);
       };
 
-      // Track duration via wall clock
       recDurRef.current = 0;
       const recStart = Date.now();
       recIntRef.current = setInterval(function () {
         recDurRef.current = (Date.now() - recStart) / 1000;
-        if (clipIdRef.current) {
-  updateClip(clipIdRef.current, {
-    duration: recDurRef.current
-  });
-}
         // Waveform trail
         const data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteTimeDomainData(data);
