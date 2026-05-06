@@ -5294,7 +5294,7 @@ function StudioScreen({ user, onExit }) {
         targetId = newId;
       }
     }
-    setError(""); setCountIn(4); let n = 4;
+    setError(""); setCountIn(3); let n = 3;
     countTimerRef.current = setInterval(function () {
       n--; setCountIn(n);
       if (n <= 0) { clearInterval(countTimerRef.current); setCountIn(0); doRecord(targetId); }
@@ -5302,6 +5302,19 @@ function StudioScreen({ user, onExit }) {
   };
 
   const doRecord = async function (targetTrackId) {
+  const newClipId = Date.now();
+const startTime = currentTime; // or whatever your playhead time is
+
+addClip({
+  id: newClipId,
+  trackId: targetTrackId,
+  startTime: startTime,
+  duration: 0,
+  isRecording: true
+});
+
+setRecordingClipId(newClipId);
+setRecordingStartTime(startTime);
     try {
       // Open a dedicated stream for recording — separate from monitoring
       const stream = await navigator.mediaDevices.getUserMedia({ audio: {
@@ -5383,6 +5396,10 @@ function StudioScreen({ user, onExit }) {
             clips: [newClip],
           });
         }
+        updateClip(recordingClipId, {
+  isRecording: false,
+  duration: recDurRef.current
+});
         setRecTrail([]); setIsRecording(false); setRecTrackId(null);
       };
 
@@ -5391,6 +5408,11 @@ function StudioScreen({ user, onExit }) {
       const recStart = Date.now();
       recIntRef.current = setInterval(function () {
         recDurRef.current = (Date.now() - recStart) / 1000;
+        if (recordingClipId) {
+  updateClip(recordingClipId, {
+    duration: recDurRef.current
+  });
+}
         // Waveform trail
         const data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteTimeDomainData(data);
