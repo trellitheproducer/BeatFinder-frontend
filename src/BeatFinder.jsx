@@ -6142,7 +6142,7 @@ function StudioScreen({ user, onExit }) {
                         const trimS   = clip.trimStart || 0;
                         const trimE   = clip.trimEnd !== undefined ? clip.trimEnd : (clip.audioBuffer ? clip.audioBuffer.duration : clip.duration || 2);
                         const clipW   = Math.max(20, (trimE - trimS) * effectivePPS);
-                        const clipL   = Math.max(0, (clip.startTime || 0) * effectivePPS);
+const clipL = SIDEBAR_W + Math.max(0, (clip.startTime || 0) * effectivePPS);
                         const playedF = Math.max(0, Math.min(1, (currentTime - (clip.startTime||0)) / (trimE - trimS || 1)));
                         const isSel   = selectedClipId === clip.id;
                         const isActv  = clip.active !== false;
