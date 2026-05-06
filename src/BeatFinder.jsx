@@ -6095,7 +6095,7 @@ function StudioScreen({ user, onExit }) {
                     style={{
                       width:SIDEBAR_W, flexShrink:0,
                       position:"sticky", left:0, zIndex:10,
-                      background:selectedTrackId===track.id?"rgba(192,38,211,0.07)":"#0a0a0a",
+                      background:selectedTrackId===track.id?"rgba(192,38,211)":"#0a0a0a",
                       borderRight:"1px solid #141414",
                       padding:"5px 7px", display:"flex", flexDirection:"column", justifyContent:"space-between",
                       cursor:track.type==="vocal"?"pointer":"default",
