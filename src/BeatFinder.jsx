@@ -5151,9 +5151,13 @@ function StudioScreen({ user, onExit }) {
     stopAll();
     const actx   = getActx();
     const master = getOrCreateMaster();
-    // Use a precise start time slightly in the future so all tracks align exactly
+    // Schedule audio 50ms ahead so all tracks start at exactly the same moment.
+    // masterStartRef MUST equal `now` (the scheduled start), NOT actx.currentTime.
+    // Recording timing: playheadAtRef + (startActxTime - masterStartRef).
+    // If masterStartRef is 50ms behind `now`, every clip is placed 50ms too early
+    // on the timeline, causing it to play back late (behind the beat) on playback.
     const now    = actx.currentTime + 0.05;
-    masterStartRef.current = actx.currentTime;
+    masterStartRef.current = now;
     playheadAtRef.current  = fromTime;
 
     const hasSolo = tracksRef.current.some(function(t){ return t.isSoloed; });
