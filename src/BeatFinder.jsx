@@ -4585,6 +4585,7 @@ function StudioScreen({ user, onExit }) {
   const chunksRef       = useRef([]);
   const recIntRef       = useRef(null);
   const recDurRef       = useRef(0);
+  const clipIdRef = useRef(null);
   const countTimerRef   = useRef(null);
   const metroRef        = useRef(null);
   const pinchRef        = useRef(null);
@@ -5303,6 +5304,7 @@ function StudioScreen({ user, onExit }) {
 
   const doRecord = async function (targetTrackId) {
   const newClipId = Date.now();
+  clipIdRef.current = newClipId;
 const startTime = currentTime; // or whatever your playhead time is
 
 addClip({
@@ -5353,7 +5355,7 @@ setRecordingStartTime(startTime);
       mr.onstop = async function () {
         // Stop mic — release iPhone orange indicator
         stream.getTracks().forEach(function (t) { t.stop(); });
-        clearInterval(recIntRef.current);
+        
         try { analyser.disconnect(); } catch(e) {}
         try { srcNode.disconnect(); } catch(e) {}
 
@@ -5408,8 +5410,8 @@ setRecordingStartTime(startTime);
       const recStart = Date.now();
       recIntRef.current = setInterval(function () {
         recDurRef.current = (Date.now() - recStart) / 1000;
-        if (recordingClipId) {
-  updateClip(recordingClipId, {
+        if (clipIdRef.current) {
+  updateClip(clipIdRef.current, {
     duration: recDurRef.current
   });
 }
