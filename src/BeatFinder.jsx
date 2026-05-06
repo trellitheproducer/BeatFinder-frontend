@@ -4592,6 +4592,7 @@ function StudioScreen({ user, onExit }) {
   const zoomRef         = useRef(zoom);
   const scheduledRef    = useRef([]);
   const isPlayingRef    = useRef(false);
+  const tracksRef       = useRef([]);  // always mirrors tracks — gives doPlay a fresh snapshot
 
   // ── Input monitoring refs ──────────────────────────────────────
   const monitorStreamRef    = useRef(null);
@@ -4605,6 +4606,7 @@ function StudioScreen({ user, onExit }) {
 
   useEffect(function () { zoomRef.current = zoom; }, [zoom]);
   useEffect(function () { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  useEffect(function () { tracksRef.current = tracks; }, [tracks]);
 
   // Set initial position — Bar1 under centred playhead at t=0
   useEffect(function () {
@@ -4973,7 +4975,7 @@ function StudioScreen({ user, onExit }) {
     masterStartRef.current = actx.currentTime;
     playheadAtRef.current  = fromTime;
 
-    const hasSolo = tracks.some(function(t){ return t.isSoloed; });
+    const hasSolo = tracksRef.current.some(function(t){ return t.isSoloed; });
 
     // Build Web Audio effects chain for a track, return the gain node for mute/solo control
     const buildChain = function (track) {
@@ -5121,7 +5123,7 @@ function StudioScreen({ user, onExit }) {
       } catch(e) {}
     };
 
-    tracks.forEach(function(track) {
+    tracksRef.current.forEach(function(track) {
       const clips = track.clips && track.clips.length > 0
         ? track.clips
         : track.audioBuffer // legacy flat model
