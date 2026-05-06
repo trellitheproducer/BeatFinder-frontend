@@ -1107,6 +1107,21 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
           </button>
         )}
 
+        {/* ── License notice — shown on every beat ── */}
+        <div style={{
+          marginTop: 18,
+          padding: "12px 14px",
+          borderRadius: 12,
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid #2a2a2a",
+          color: "#666",
+          fontSize: 12,
+          lineHeight: 1.5,
+          textAlign: "center",
+        }}>
+          🎵 To use this beat in Studio Mode, purchase or obtain a valid license from the creator and upload the MP3/WAV file.
+        </div>
+
       </div>
     </div>
   );
