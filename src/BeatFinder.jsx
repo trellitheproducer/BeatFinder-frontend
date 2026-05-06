@@ -4642,6 +4642,7 @@ function StudioScreen({ user, onExit }) {
   const recIntRef       = useRef(null);
   const recDurRef       = useRef(0);
   const recStartTimeRef = useRef(0);  // AudioContext-clock-derived timeline position at rec start
+  const recStopActxTimeRef = useRef(null); // actx.currentTime snapshot at the moment stop is pressed
   const clipIdRef = useRef(null);
   const countTimerRef   = useRef(null);
   const metroRef        = useRef(null);
@@ -4656,6 +4657,7 @@ function StudioScreen({ user, onExit }) {
   const monitorSrcRef       = useRef(null);
   const monitorGainRef      = useRef(null);
   const monitorAnalyserRef  = useRef(null);
+  const monitorCtxRef       = useRef(null); // persistent AudioContext — never closed between sessions
   // Persistent mic stream — requested once on mount, reused for both monitoring and recording
   const micStreamRef        = useRef(null);
   const [micReady,      setMicReady]      = useState(false);
@@ -4841,12 +4843,18 @@ function StudioScreen({ user, onExit }) {
   };
 
   // ── Input Monitoring ──────────────────────────────────────────
-  // Graph: mic → merger (mono→stereo) → gain → destination
-  // forceMicSource: pass "builtin" or "headset" (or a real deviceId) directly
-  // to avoid reading stale state when called from effects/callbacks.
+  // ZERO-LATENCY DESIGN:
+  //   • AudioContext is created once and kept alive (no re-init cost on each toggle)
+  //   • Mic stream is kept alive via micStreamRef and reused (no getUserMedia round-trip on toggle)
+  //   • No sampleRate override — OS native rate avoids hidden resampler latency
+  //   • Analyser is a side-branch off gain (not in the signal path) so it adds zero latency
+  //   • Graph: mic → merger (mono→stereo) → gain → destination
+  //                                              ↘ analyser (side branch, read-only)
+  // forceMicSource: pass "builtin" or "headset" directly to avoid reading stale state.
   const startMonitoring = async function (forceLowLatency, forceMicSource) {
-    if (monitorStreamRef.current) return;
+    if (monitorSrcRef.current) return; // already wired up
     setMonitorWarn("");
+
     const check = await checkHeadphones();
     const safe  = check.headphonesConnected !== undefined ? check.headphonesConnected : check;
     if (!safe) {
@@ -4855,58 +4863,68 @@ function StudioScreen({ user, onExit }) {
     }
 
     const useMicSource = forceMicSource !== undefined ? forceMicSource : micSource;
-
-    // Build constraints using the shared helper
     const audioConstraints = await buildMicConstraints(useMicSource);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      // ── Reuse existing mic stream — avoids getUserMedia round-trip latency on every toggle ──
+      let stream = micStreamRef.current;
+      if (!stream || !stream.active) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+        micStreamRef.current = stream;
+      }
       monitorStreamRef.current = stream;
 
-      const mCtx = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate:  48000,
-        latencyHint: "interactive", // smallest buffer = lowest latency (~5–15ms wired)
-      });
+      // ── Reuse or create persistent monitoring AudioContext ──
+      // Never closed between sessions — eliminates ~20–50ms re-init cost on each toggle.
+      // No sampleRate override: letting the OS use its native rate (usually 44100 on iOS)
+      // avoids a hidden software resampler that adds latency.
+      if (!monitorCtxRef.current || monitorCtxRef.current.state === "closed") {
+        monitorCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({
+          latencyHint: "interactive",
+        });
+      }
+      const mCtx = monitorCtxRef.current;
+      if (mCtx.state === "suspended") await mCtx.resume();
 
-      const src      = mCtx.createMediaStreamSource(stream);
-      const analyser = mCtx.createAnalyser(); analyser.fftSize = 256;
-      const gain     = mCtx.createGain(); gain.gain.value = monitorVol;
-
-      // Duplicate mono mic signal into both L and R channels
+      const src    = mCtx.createMediaStreamSource(stream);
       const merger = mCtx.createChannelMerger(2);
-      src.connect(analyser);
+      const gain   = mCtx.createGain();
+      gain.gain.value = monitorVol;
+
+      // Analyser as a SIDE BRANCH off gain — not in the audio path, so zero added latency
+      const analyser = mCtx.createAnalyser();
+      analyser.fftSize = 256;
+
+      // Duplicate mono mic to both L and R channels
       src.connect(merger, 0, 0);
       src.connect(merger, 0, 1);
       merger.connect(gain);
       gain.connect(mCtx.destination);
+      gain.connect(analyser); // side branch — read-only, not in the output chain
 
       monitorSrcRef.current      = src;
       monitorGainRef.current     = gain;
       monitorAnalyserRef.current = analyser;
-      monitorStreamRef.current._mCtx = mCtx;
       setMonitoringOn(true);
     } catch (e) {
+      monitorStreamRef.current = null;
       setMonitorWarn("Could not start monitoring: " + (e.message || e.name));
     }
   };
 
   const stopMonitoring = function () {
-    if (monitorGainRef.current) {
-      const mCtx = monitorStreamRef.current && monitorStreamRef.current._mCtx;
-      if (mCtx) {
-        monitorGainRef.current.gain.setTargetAtTime(0, mCtx.currentTime, 0.02);
-      }
+    // Ramp gain to zero first to avoid a click/pop
+    if (monitorGainRef.current && monitorCtxRef.current) {
+      monitorGainRef.current.gain.setTargetAtTime(0, monitorCtxRef.current.currentTime, 0.02);
     }
     setTimeout(function () {
-      try { monitorGainRef.current && monitorGainRef.current.disconnect(); } catch(e) {}
-      try { monitorSrcRef.current && monitorSrcRef.current.disconnect(); } catch(e) {}
+      // Disconnect all nodes — leave the stream and AudioContext alive for next toggle
+      try { monitorGainRef.current    && monitorGainRef.current.disconnect(); }    catch(e) {}
+      try { monitorSrcRef.current     && monitorSrcRef.current.disconnect(); }     catch(e) {}
       try { monitorAnalyserRef.current && monitorAnalyserRef.current.disconnect(); } catch(e) {}
-      if (monitorStreamRef.current) {
-        monitorStreamRef.current.getTracks().forEach(function(t){ t.stop(); });
-        // Close the dedicated monitoring AudioContext
-        if (monitorStreamRef.current._mCtx) {
-          try { monitorStreamRef.current._mCtx.close(); } catch(e) {}
-        }
+      // Suspend (not close) the AudioContext so it wakes instantly next time
+      if (monitorCtxRef.current && monitorCtxRef.current.state === "running") {
+        monitorCtxRef.current.suspend().catch(function(){});
       }
       monitorStreamRef.current   = null;
       monitorSrcRef.current      = null;
@@ -4917,8 +4935,8 @@ function StudioScreen({ user, onExit }) {
   };
 
   useEffect(function(){
-    if (monitorGainRef.current && monitorStreamRef.current && monitorStreamRef.current._mCtx) {
-      monitorGainRef.current.gain.setTargetAtTime(monitorVol, monitorStreamRef.current._mCtx.currentTime, 0.01);
+    if (monitorGainRef.current && monitorCtxRef.current) {
+      monitorGainRef.current.gain.setTargetAtTime(monitorVol, monitorCtxRef.current.currentTime, 0.01);
     }
   }, [monitorVol]);
 
@@ -5310,12 +5328,15 @@ function StudioScreen({ user, onExit }) {
 
   const stopRecording = function () {
     if (mediaRecRef.current && mediaRecRef.current.state !== "inactive") {
-      mediaRecRef.current.stop(); // triggers mr.onstop async which saves the clip
+      // Capture the AudioContext clock the instant stop is called —
+      // this is used in mr.onstop to derive the true clip end time.
+      const actx = actxRef.current;
+      recStopActxTimeRef.current = actx ? actx.currentTime : null;
+      mediaRecRef.current.stop();
     }
     clearInterval(recIntRef.current);
     clipIdRef.current = null;
     mediaRecRef.current = null;
-    // Stop playback too — user pressed stop
     stopAll();
     setIsPlaying(false);
   };
@@ -5624,12 +5645,6 @@ function StudioScreen({ user, onExit }) {
         try { analyser.disconnect(); } catch(e) {}
         try { srcNode.disconnect(); } catch(e) {}
 
-        const dur = recDurRef.current;
-        if (dur < 0.1) {
-          setIsRecording(false); setRecTrackId(null); setRecTrail([]);
-          return;
-        }
-
         const blob = new Blob(chunksRef.current, { type: mime });
         const url  = URL.createObjectURL(blob);
 
@@ -5639,14 +5654,44 @@ function StudioScreen({ user, onExit }) {
           buf = await getActx().decodeAudioData(ab.slice(0));
         } catch (decErr) {
           setError("Could not decode recording. Try again.");
+          setIsRecording(false); setRecTrackId(null); setRecTrail([]);
+          return;
+        }
+
+        if (!buf || buf.duration < 0.05) {
+          setIsRecording(false); setRecTrackId(null); setRecTrail([]);
+          return;
+        }
+
+        // ── Ground-truth timing ───────────────────────────────────────────
+        // buf.duration is the ONLY reliable measure of how long was actually recorded.
+        // Wall-clock (recDurRef) always runs longer due to async gaps and codec buffering.
+        //
+        // Strategy: anchor from the stop time, not the start time.
+        // We captured actx.currentTime the moment stop() was pressed (recStopActxTimeRef).
+        // The timeline position at stop = playheadAtRef + (stopActxTime - masterStartRef).
+        // The clip startTime = stopTimelinePos - buf.duration.
+        // This is more accurate than the start-anchor because stop() is synchronous
+        // whereas start has async getUserMedia delay baked in.
+        //
+        // Fall back to start-anchor if stop time wasn't captured (shouldn't happen).
+        let clipStartTime;
+        const stopActxTime = recStopActxTimeRef.current;
+        if (stopActxTime !== null && masterStartRef.current > 0) {
+          const stopTimelinePos = playheadAtRef.current + (stopActxTime - masterStartRef.current);
+          clipStartTime = Math.max(0, stopTimelinePos - buf.duration);
+        } else {
+          // Fallback: use the start-anchor captured when mr.start() fired
+          clipStartTime = recStartTimeRef.current;
         }
 
         const newClip = {
           id: String(Date.now()) + "_rec",
           audioBuffer: buf, url, blob,
-          startTime: recStartTimeRef.current,
-          duration: dur,
-          trimStart: 0, trimEnd: dur,
+          startTime: clipStartTime,
+          duration:  buf.duration,   // always use actual decoded duration, never wall-clock
+          trimStart: 0,
+          trimEnd:   buf.duration,
           label: "Take " + new Date().toLocaleTimeString(),
           active: true,
         };
