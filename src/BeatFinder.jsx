@@ -1107,9 +1107,32 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
           </button>
         )}
 
+        {/* ── Contact creator button ── */}
+        {beat.channel && (
+          <a
+            href={"https://www.youtube.com/results?search_query=" + encodeURIComponent(beat.channel)}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              marginTop: 12, width: "100%", borderRadius: 14, padding: "15px",
+              fontWeight: 800, fontSize: 15, cursor: "pointer", textDecoration: "none",
+              background: "rgba(255,0,0,0.08)",
+              border: "1.5px solid rgba(255,0,0,0.35)",
+              color: "#ff4444",
+              boxSizing: "border-box",
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="#ff4444" style={{flexShrink:0}}>
+              <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+            </svg>
+            Contact {beat.channel} on YouTube
+          </a>
+        )}
+
         {/* ── License notice — shown on every beat ── */}
         <div style={{
-          marginTop: 18,
+          marginTop: 12,
           padding: "12px 14px",
           borderRadius: 12,
           background: "rgba(255,255,255,0.04)",
