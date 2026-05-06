@@ -5741,12 +5741,42 @@ function StudioScreen({ user, onExit }) {
           // Otherwise keep start-anchor (recStartTimeRef) — it was stamped before any resets
         }
 
+        // ── Strip leading silence from the decoded buffer ──────────────────
+        // On iOS, getUserMedia + MediaRecorder always produce a silent warmup
+        // period at the start of the buffer (~50–250ms). If we don't account for
+        // this, the clip plays back late — the vocal content starts after a gap.
+        //
+        // Strategy: scan the buffer from the front, find the first sample that
+        // exceeds a noise floor threshold (-60 dBFS = 0.001 linear), treat
+        // everything before that as silence.
+        //
+        // We then:
+        //   1. Set trimStart = silence duration (skip the silent front on playback)
+        //   2. Move clipStartTime FORWARD by the same amount (the clip still
+        //      starts at the right wall-clock moment — we just skip the silence)
+        //
+        // This makes the vocal hit exactly where it was performed, every time.
+        const SILENCE_THRESHOLD = 0.001; // -60 dBFS
+        const MAX_SILENCE_SCAN  = 0.5;   // never strip more than 500ms
+        let leadingSilenceSec   = 0;
+        try {
+          const ch  = buf.getChannelData(0);
+          const sr  = buf.sampleRate;
+          const max = Math.min(ch.length, Math.floor(sr * MAX_SILENCE_SCAN));
+          for (let i = 0; i < max; i++) {
+            if (Math.abs(ch[i]) > SILENCE_THRESHOLD) {
+              leadingSilenceSec = i / sr;
+              break;
+            }
+          }
+        } catch(e) { leadingSilenceSec = 0; }
+
         const newClip = {
           id: String(Date.now()) + "_rec",
           audioBuffer: buf, url, blob,
-          startTime: clipStartTime,
-          duration:  buf.duration,   // always use actual decoded duration, never wall-clock
-          trimStart: 0,
+          startTime: clipStartTime + leadingSilenceSec, // shift clip forward past the silence
+          duration:  buf.duration,
+          trimStart: leadingSilenceSec,  // skip silent warmup during playback
           trimEnd:   buf.duration,
           label: "Take " + new Date().toLocaleTimeString(),
           active: true,
