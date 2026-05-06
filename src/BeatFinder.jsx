@@ -5969,7 +5969,7 @@ function StudioScreen({ user, onExit }) {
         {/* LEFT SIDEBAR — headers locked horizontally */}
         <div
           ref={sidebarRef}
-          style={{ width:SIDEBAR_W,flexShrink:0,overflowY:"auto",overflowX:"hidden",background:"#0a0a0a",borderRight:"none",zIndex:10 }}
+          style={{ width:SIDEBAR_W,flexShrink:0,overflowY:"auto",overflowX:"hidden",background:"#0a0a0a",borderRight:"1px solid #141414",zIndex:10 }}
           onScroll={function(e){ if(scrollRef.current) scrollRef.current.scrollTop=e.target.scrollTop; }}
         >
           {/* Ruler height spacer — must match RULER_H in right column exactly */}
@@ -6016,7 +6016,7 @@ function StudioScreen({ user, onExit }) {
         <div ref={scrollRef} style={{ flex:1, position:"relative", overflow:"hidden" }}>
 
           {/* ── CENTRED PLAYHEAD — pinned at 50%, never moves ── */}
-          <div style={{ position:"absolute", top:0, bottom:0, left:"50%", width:1, zIndex:30, pointerEvents:"none", transform:"translateX(-0.5px)" }}>
+          <div style={{ position:"absolute", top:0, bottom:0, left:"SIDEBAR_W", width:1, zIndex:30, pointerEvents:"none", transform:"translateX(-1px)" }}>
             <div style={{ position:"absolute", top:0, left:-5, width:0, height:0, borderLeft:"5px solid transparent", borderRight:"5px solid transparent", borderTop:"8px solid white" }} />
             <div style={{ position:"absolute", top:0, bottom:0, left:0, width:1, background:"rgba(255,255,255,0.9)" }} />
           </div>
