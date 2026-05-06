@@ -5664,25 +5664,27 @@ function StudioScreen({ user, onExit }) {
         }
 
         // ── Ground-truth timing ───────────────────────────────────────────
-        // buf.duration is the ONLY reliable measure of how long was actually recorded.
-        // Wall-clock (recDurRef) always runs longer due to async gaps and codec buffering.
+        // buf.duration = the ONLY reliable measure of how long was captured (always use this).
+        // Wall-clock (recDurRef) drifts due to async gaps and codec buffering — never use it.
         //
-        // Strategy: anchor from the stop time, not the start time.
-        // We captured actx.currentTime the moment stop() was pressed (recStopActxTimeRef).
-        // The timeline position at stop = playheadAtRef + (stopActxTime - masterStartRef).
-        // The clip startTime = stopTimelinePos - buf.duration.
-        // This is more accurate than the start-anchor because stop() is synchronous
-        // whereas start has async getUserMedia delay baked in.
+        // PRIMARY strategy: start-anchor.
+        // recStartTimeRef was stamped the instant mr.start() fired, with inputLatency subtracted.
+        // clipStartTime = recStartTimeRef (already accounting for mic hardware delay).
         //
-        // Fall back to start-anchor if stop time wasn't captured (shouldn't happen).
-        let clipStartTime;
+        // SECONDARY (sanity check): stop-anchor.
+        // stopActxTime was captured when stop() was pressed. If stopAll() hasn't run yet,
+        // we can derive stopTimelinePos. If the two methods agree within 50ms we use start-anchor.
+        // If they disagree badly it means stopAll() had already reset masterStartRef — start-anchor wins.
+        let clipStartTime = recStartTimeRef.current;
+
         const stopActxTime = recStopActxTimeRef.current;
         if (stopActxTime !== null && masterStartRef.current > 0) {
-          const stopTimelinePos = playheadAtRef.current + (stopActxTime - masterStartRef.current);
-          clipStartTime = Math.max(0, stopTimelinePos - buf.duration);
-        } else {
-          // Fallback: use the start-anchor captured when mr.start() fired
-          clipStartTime = recStartTimeRef.current;
+          const stopTimelinePos  = playheadAtRef.current + (stopActxTime - masterStartRef.current);
+          const stopAnchorStart  = Math.max(0, stopTimelinePos - buf.duration);
+          const diff = Math.abs(stopAnchorStart - clipStartTime);
+          // Only trust stop-anchor if it agrees closely — large diff means masterStart was reset
+          if (diff < 0.05) clipStartTime = stopAnchorStart;
+          // Otherwise keep start-anchor (recStartTimeRef) — it was stamped before any resets
         }
 
         const newClip = {
@@ -5713,26 +5715,30 @@ function StudioScreen({ user, onExit }) {
 
       recDurRef.current = 0;
 
-      // ── Start playback FIRST so the beat is running before the mic opens ──
-      // This ensures masterStartRef is set before we read actx.currentTime below.
+      // ── Start playback FIRST so masterStartRef is stamped before we read the clock ──
       if (!isPlaying) { doPlay(currentTime); setIsPlaying(true); }
 
       // ── Precise timeline sync ─────────────────────────────────────────────
-      // We start the MediaRecorder and immediately read actx.currentTime.
-      // The true timeline position = actx.currentTime - masterStartRef + playheadAtRef.
-      // We then subtract the hardware input latency so the clip sits where the
-      // sound physically entered the mic, not where the buffer was first written.
+      // CRITICAL ORDER: read actx.currentTime AFTER doPlay() so masterStartRef.current
+      // is already set. Then start the MediaRecorder and take a second clock reading
+      // immediately after mr.start() — this is the tightest timestamp we can get for
+      // when audio actually started being captured.
       //
-      // actx.inputLatency  — mic hardware buffer delay (typically 5–20ms wired, 0 if unknown)
-      // actx.baseLatency   — output buffer delay (already baked into playback, not needed here)
+      // actx.inputLatency = mic hardware buffer (5–20ms wired). Subtracting it shifts
+      // the clip earlier so it aligns with when sound entered the mic, not when the
+      // first buffer was handed to the browser.
       //
-      mr.start(100); // 100ms chunks — smaller than 250ms for tighter timing on iOS
+      // We do NOT use the stop-anchor approach for start because getUserMedia and
+      // doPlay() both stamp their clocks before mr.start(), so the start-anchor is
+      // the most accurate reference point.
 
-      // Read the AudioContext clock immediately after mr.start() for maximum precision
+      mr.start(50); // 50ms chunks — tighter than 100ms, reduces end-of-clip timing error
+
+      // Read clock the instant after mr.start() fires — this is our ground truth
       const startActxTime = actx.currentTime;
-      const inputLatency  = actx.inputLatency || 0; // seconds; 0 if browser doesn't expose it
+      const inputLatency  = actx.inputLatency || 0;
 
-      // Timeline position = how far the playhead has advanced since doPlay() was called
+      // Timeline position when recording actually started
       const trueStartTime = Math.max(0,
         playheadAtRef.current + (startActxTime - masterStartRef.current) - inputLatency
       );
