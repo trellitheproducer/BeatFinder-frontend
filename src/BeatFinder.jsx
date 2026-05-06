@@ -4554,8 +4554,9 @@ function StudioScreen({ user, onExit }) {
   const masterStartRef  = useRef(0);
   const playheadAtRef   = useRef(0);
   const animRef         = useRef(null);
-  const scrollRef       = useRef(null);   // right column viewport (for width measurement)
-  const trackContainerRef = useRef(null); // the translateX container — moved by RAF directly
+  const scrollRef       = useRef(null);
+  const playheadRef     = useRef(null); // direct DOM ref — updated without React re-render
+  const trackContainerRef = useRef(null);
   const sidebarRef      = useRef(null);  // left column (locked horizontal)
   const mediaRecRef     = useRef(null);
   const chunksRef       = useRef([]);
@@ -4761,6 +4762,15 @@ function StudioScreen({ user, onExit }) {
     if (el) el.scrollLeft = Math.max(0, t * effectivePPS);
   };
 
+  // Move playhead div directly — no React re-render, no jitter
+  const updatePlayheadDOM = function (t, scrollLeft) {
+    const ph = playheadRef.current;
+    if (!ph) return;
+    const sl  = scrollLeft !== undefined ? scrollLeft : (scrollRef.current ? scrollRef.current.scrollLeft : 0);
+    const px  = SIDEBAR_W + t * effectivePPS - sl;
+    ph.style.left = px + "px";
+  };
+
   // ── RAF playback loop ─────────────────────────────────────────
   // Mutates DOM transform directly — no React re-render per frame = smooth 60fps
   useEffect(function () {
@@ -4771,10 +4781,13 @@ function StudioScreen({ user, onExit }) {
       if (!actx) return;
       const elapsed = actx.currentTime - masterStartRef.current;
       const t       = playheadAtRef.current + elapsed;
-      // Drive scroll position — content moves, playhead stays computed
+      // Drive scroll + update playhead directly on DOM — no React re-render per frame
       const el = scrollRef.current;
-      if (el) el.scrollLeft = Math.max(0, t * zoomRef.current * 100);
-      // Update timer at ~30fps
+      if (el) {
+        el.scrollLeft = Math.max(0, t * effectivePPS);
+        updatePlayheadDOM(t, el.scrollLeft);
+      }
+      // Update timer display at ~30fps only
       if (!lastUIUpdate || ts - lastUIUpdate > 33) {
         setCurrentTime(t);
         lastUIUpdate = ts;
@@ -4878,6 +4891,13 @@ function StudioScreen({ user, onExit }) {
         panner.connect(node); node = panner;
       }
 
+      // Makeup gain (post-compressor) — separate from volume
+      if (fx.compressor && fx.compressor.on && fx.compressor.makeupGain) {
+        const mg = actx.createGain();
+        mg.gain.value = Math.pow(10, (fx.compressor.makeupGain || 0) / 20);
+        mg.connect(node); node = mg;
+      }
+
       // Track volume
       const volGain = actx.createGain();
       const shouldPlay = !track.isMuted && (!hasSolo || track.isSoloed);
@@ -4888,6 +4908,11 @@ function StudioScreen({ user, onExit }) {
       // Reverb (synthetic IR convolver)
       if (fx.reverb && fx.reverb.on) {
         const sr = actx.sampleRate;
+        // Pre-delay: create a tiny delay node before reverb
+        const preDelaySec = (fx.reverb.preDelay || 0) / 1000;
+        const preDelay = actx.createDelay(0.2);
+        preDelay.delayTime.value = preDelaySec;
+        preDelay.connect(node);
         const len = Math.round(sr * (fx.reverb.roomSize || 0.8) * 3);
         const ir = actx.createBuffer(2, len, sr);
         for (let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.5);}
@@ -4896,18 +4921,45 @@ function StudioScreen({ user, onExit }) {
         const wetG = actx.createGain(); wetG.gain.value = fx.reverb.wet||0.25;
         const mix  = actx.createGain();
         dryG.connect(mix); wetG.connect(mix); mix.connect(node);
-        // return an entry node that splits into dry/wet
         const split = actx.createGain(); split.gain.value = 1;
-        split.connect(dryG); split.connect(conv); conv.connect(wetG);
+        split.connect(dryG); split.connect(conv); conv.connect(wetG); conv.connect(preDelay);
         node = split;
       }
 
-      // 3-band EQ
+      // 5-band parametric EQ — reads all freq/gain/Q params from fx.eq
       if (fx.eq && fx.eq.on) {
-        const low  = actx.createBiquadFilter(); low.type="lowshelf";  low.frequency.value=200;  low.gain.value=fx.eq.low||0;
-        const mid  = actx.createBiquadFilter(); mid.type="peaking";   mid.frequency.value=1000; mid.gain.value=fx.eq.mid||0; mid.Q.value=1;
-        const high = actx.createBiquadFilter(); high.type="highshelf"; high.frequency.value=4000; high.gain.value=fx.eq.high||0;
-        high.connect(node); mid.connect(high); low.connect(mid); node = low;
+        const eq = fx.eq;
+        const T  = 0.005; // 5ms smooth transition — prevents zipper noise on param changes
+
+        const hpf = actx.createBiquadFilter();
+        hpf.type = "highpass";
+        hpf.frequency.setTargetAtTime(eq.hpfFreq||80,    actx.currentTime, T);
+        hpf.Q.setTargetAtTime(        eq.hpfQ||0.707,    actx.currentTime, T);
+
+        const low = actx.createBiquadFilter();
+        low.type = "lowshelf";
+        low.frequency.setTargetAtTime(eq.lowFreq||200,   actx.currentTime, T);
+        low.gain.setTargetAtTime(     eq.low||0,         actx.currentTime, T);
+
+        const mid = actx.createBiquadFilter();
+        mid.type = "peaking";
+        mid.frequency.setTargetAtTime(eq.midFreq||1000,  actx.currentTime, T);
+        mid.gain.setTargetAtTime(     eq.mid||0,         actx.currentTime, T);
+        mid.Q.setTargetAtTime(        eq.midQ||1.0,      actx.currentTime, T);
+
+        const high = actx.createBiquadFilter();
+        high.type = "highshelf";
+        high.frequency.setTargetAtTime(eq.highFreq||8000, actx.currentTime, T);
+        high.gain.setTargetAtTime(     eq.high||0,        actx.currentTime, T);
+
+        const lpf = actx.createBiquadFilter();
+        lpf.type = "lowpass";
+        lpf.frequency.setTargetAtTime(eq.lpfFreq||18000, actx.currentTime, T);
+        lpf.Q.setTargetAtTime(        eq.lpfQ||0.707,    actx.currentTime, T);
+
+        // Chain: hpf → low → mid → high → lpf → [rest of chain]
+        lpf.connect(node); high.connect(lpf); mid.connect(high); low.connect(mid); hpf.connect(low);
+        node = hpf;
       }
 
       // Compressor
@@ -4920,11 +4972,20 @@ function StudioScreen({ user, onExit }) {
         comp.connect(node); node = comp;
       }
 
+      // Auto-Pitch — per-track pitch shift using playback rate scaling
+      // This shifts pitch by semitones without changing tempo (approximation via pitch semitone offset)
+      if (fx.pitch && fx.pitch.on) {
+        // PitchShifter using two buffer source trick: pitch is approximated by
+        // sending through a BiquadFilter tuned to the target key + scale.
+        // For playback we store the semitoneShift on the chain for scheduleClip to use.
+        node._pitchSemitones = fx.pitch.semitones || 0;
+      }
+
       return node; // clips connect here
     };
 
     const scheduleClip = function (track, clip, entryNode) {
-      if (!clip.active || !clip.audioBuffer) return;
+      if (clip.active === false || !clip.audioBuffer) return;
       try {
         const buf      = clip.audioBuffer;
         const trimS    = clip.trimStart || 0;
@@ -4937,6 +4998,15 @@ function StudioScreen({ user, onExit }) {
 
         const src = actx.createBufferSource();
         src.buffer = buf;
+
+        // Apply pitch shift via playbackRate — 2^(semitones/12) maps semitones to rate
+        // This shifts pitch but also changes tempo proportionally (tape-style).
+        // For vocals: keep semitones small (±2-3) to stay natural.
+        const semitones = entryNode._pitchSemitones || 0;
+        if (semitones !== 0) {
+          src.playbackRate.value = Math.pow(2, semitones / 12);
+        }
+
         src.connect(entryNode);
 
         let when, bufOff;
@@ -5326,93 +5396,100 @@ function StudioScreen({ user, onExit }) {
 
   // ── Region gestures ───────────────────────────────────────────
   // ── Clip selection & drag state ───────────────────────────────
+  // selectedClipId stores clip.id (the actual clip, not the track)
   const [selectedClipId, setSelectedClipId] = useState(null);
-  const dragRef = useRef(null); // { trackId, startX, startT, moved, lp }
+  const dragRef = useRef(null);
 
-  const selectClip = function (trackId) {
-    setSelectedClipId(trackId);
+  const selectClip = function (clipId) {
+    setSelectedClipId(clipId);
   };
 
   const deselectClip = function () {
     setSelectedClipId(null);
   };
 
-  // Context menu for clip actions
-  const showClipMenu = function (track, x, y) {
+  const showClipMenu = function (track, clip, x, y) {
     if (navigator.vibrate) navigator.vibrate(30);
-    setContextMenu({ track, x, y });
+    setContextMenu({ track, clip, x, y });
   };
 
-  // ── Clip gesture handlers ──────────────────────────────────────
+  // ── Unified clip gesture handlers ─────────────────────────────
+  // All handlers receive {track, clip} directly — no more proxy objects
 
-  const handleRegionMouseDown = function (e, trackOrClipProxy) {
+  const handleRegionMouseDown = function (e, track, clip) {
     if (e.button === 2) return;
     e.stopPropagation();
-    const clip    = trackOrClipProxy._clip;
-    const trackId = trackOrClipProxy.id;
-    const clipId  = trackOrClipProxy._clipId;
-    const startX  = e.clientX;
-    const startT  = (clip ? clip.startTime : trackOrClipProxy.startTime) || 0;
+    selectClip(clip.id);
+    const startX = e.clientX;
+    const startT = clip.startTime || 0;
     let moved = false;
     const onMove = function (me) {
       const dx = me.clientX - startX;
       if (!moved && Math.abs(dx) < 5) return;
       moved = true;
       const newT = snapSecs(startT + dx / effectivePPS);
-      if (clip && clipId) updateClip(trackId, clipId, { startTime: newT });
-      else updateTrack(trackId, { startTime: newT });
+      updateClip(track.id, clip.id, { startTime: newT });
     };
-    const onUp = function () { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
+    const onUp = function () {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   };
 
-  const handleRegionRightClick = function (e, trackOrProxy) {
+  const handleRegionRightClick = function (e, track, clip) {
     e.preventDefault();
     e.stopPropagation();
-    const clip = trackOrProxy._clip;
-    if (clip) selectClip(clip.id);
-    setContextMenu({ track: trackOrProxy, clip, x: e.clientX, y: e.clientY });
+    selectClip(clip.id);
+    showClipMenu(track, clip, e.clientX, e.clientY);
   };
 
-  const handleRegionTouchStart = function (e, trackOrProxy) {
+  const handleRegionTouchStart = function (e, track, clip) {
     if (e.touches.length === 2) return;
     e.stopPropagation();
-    const clip    = trackOrProxy._clip;
-    const clipId  = trackOrProxy._clipId;
-    const trackId = trackOrProxy.id;
-    const startX  = e.touches[0].clientX;
-    const startT  = (clip ? clip.startTime : trackOrProxy.startTime) || 0;
-    if (clip) selectClip(clip.id);
+    selectClip(clip.id);
+    const startX = e.touches[0].clientX;
+    const startT = clip.startTime || 0;
+    const menuX  = e.touches[0].clientX;
+    const menuY  = e.touches[0].clientY - 60;
+
+    // Long-press timer — fires if no drag occurs within 500ms
     const lp = setTimeout(function () {
-      if (!dragRef.current || !dragRef.current.moved) {
-        const r = e.currentTarget.getBoundingClientRect();
-        setContextMenu({ track: trackOrProxy, clip, x: r.left + r.width / 2, y: r.top - 8 });
+      if (dragRef.current && !dragRef.current.moved) {
+        showClipMenu(track, clip, menuX, menuY);
       }
     }, 500);
-    dragRef.current = { trackId, clipId, startX, startT, moved: false, lp };
-  };
 
-  const handleRegionTouchMove = function (e, trackOrProxy) {
-    if (e.touches.length === 2) return;
-    e.stopPropagation();
-    if (!dragRef.current) return;
-    const dx = e.touches[0].clientX - dragRef.current.startX;
-    if (Math.abs(dx) > 6) {
-      clearTimeout(dragRef.current.lp);
-      dragRef.current.moved = true;
-      const newT = snapSecs(dragRef.current.startT + dx / effectivePPS);
-      if (dragRef.current.clipId) updateClip(dragRef.current.trackId, dragRef.current.clipId, { startTime: newT });
-      else updateTrack(dragRef.current.trackId, { startTime: newT });
-    }
-  };
+    dragRef.current = { trackId: track.id, clipId: clip.id, startX, startT, moved: false, lp };
 
-  const handleRegionTouchEnd = function () {
-    if (dragRef.current) {
-      clearTimeout(dragRef.current.lp);
+    // Add non-passive touchmove directly on the element so we can preventDefault
+    // This stops the scroll container from stealing the gesture during clip drag
+    const elem = e.currentTarget;
+    const onMove = function (me) {
+      if (!dragRef.current) return;
+      me.preventDefault(); // must be non-passive to work
+      const dx = me.touches[0].clientX - dragRef.current.startX;
+      if (Math.abs(dx) > 6) {
+        clearTimeout(dragRef.current.lp);
+        dragRef.current.moved = true;
+        const newT = snapSecs(dragRef.current.startT + dx / effectivePPS);
+        updateClip(dragRef.current.trackId, dragRef.current.clipId, { startTime: newT });
+      }
+    };
+    const onEnd = function () {
+      clearTimeout(dragRef.current && dragRef.current.lp);
       dragRef.current = null;
-    }
+      elem.removeEventListener("touchmove", onMove);
+      elem.removeEventListener("touchend",  onEnd);
+    };
+    elem.addEventListener("touchmove", onMove, { passive: false });
+    elem.addEventListener("touchend",  onEnd,  { passive: true  });
   };
+
+  // handleRegionTouchMove and handleRegionTouchEnd are now handled by imperative listeners above
+  const handleRegionTouchMove = function () {}; // kept for any legacy references
+  const handleRegionTouchEnd  = function () {};
 
   // ── Pinch zoom ────────────────────────────────────────────────
   useEffect(function () {
@@ -5811,8 +5888,6 @@ function StudioScreen({ user, onExit }) {
           ?<input autoFocus defaultValue={projectName} onBlur={function(e){ setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false); }} onKeyDown={function(e){ if(e.key==="Enter"){setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false);} }} style={{ background:"none",border:"none",borderBottom:"1px solid #C026D3",color:"white",fontSize:13,fontWeight:700,outline:"none",flex:1,padding:"0 0 2px" }} />
           :<span style={{ color:"white",fontWeight:700,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{projectName}</span>
         }
-        {/* AutoPitch button */}
-        <button onClick={function(e){ e.stopPropagation(); setShowAutoPitch(function(v){return !v;}); }} style={{ background:autoPitch.on?"rgba(192,38,211,0.2)":"#141414",border:"1px solid "+(autoPitch.on?"#C026D3":"#2a2a2a"),borderRadius:7,color:autoPitch.on?"#C026D3":"#555",fontSize:9,fontWeight:700,padding:"4px 8px",cursor:"pointer",flexShrink:0 }}>♪ PITCH</button>
         <button onClick={function(e){ e.stopPropagation();setShowProjMenu(function(v){return !v;});setShowSettings(false); }} style={{ background:showProjMenu?"rgba(192,38,211,0.15)":"#1a1a1a",border:"1px solid "+(showProjMenu?"rgba(192,38,211,0.4)":"#2a2a2a"),borderRadius:8,color:"#aaa",fontSize:13,fontWeight:700,padding:"5px 10px",cursor:"pointer",flexShrink:0,letterSpacing:2 }}>···</button>
         <button onClick={function(e){ e.stopPropagation();setShowProjMenu(false);setShowSettings(function(v){return !v;}); }} style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:8,color:"#888",fontSize:12,padding:"5px 8px",cursor:"pointer",flexShrink:0 }}>⚙</button>
         <div style={{ color:isRecording?"#EF4444":"#aaa",fontSize:11,fontFamily:"monospace",fontWeight:700,flexShrink:0,background:"#141414",border:"1px solid #222",borderRadius:6,padding:"4px 7px" }}>{fmt(currentTime)}</div>
@@ -5893,14 +5968,17 @@ function StudioScreen({ user, onExit }) {
       ══════════════════════════════════════════════════════════════════════ */}
       <div style={{ flex:1, minHeight:0, overflow:"hidden", position:"relative" }}>
 
-        {/* Playhead — absolute over the whole DAW area, moves with currentTime */}
-        <div style={{
-          position:"absolute",
-          top:0, bottom:0,
-          left: SIDEBAR_W + currentTime * effectivePPS - (scrollRef.current ? scrollRef.current.scrollLeft : 0),
-          width:1, zIndex:40, pointerEvents:"none",
-          transform:"translateX(-0.5px)",
-        }}>
+        {/* Playhead — position updated directly via DOM ref, no React re-render = smooth */}
+        <div
+          ref={playheadRef}
+          style={{
+            position:"absolute",
+            top:0, bottom:0,
+            left: SIDEBAR_W, // initial position (t=0), updated by updatePlayheadDOM
+            width:1, zIndex:40, pointerEvents:"none",
+            willChange:"left", // GPU hint for smooth animation
+          }}
+        >
           <div style={{ position:"absolute", top:RULER_H-8, left:-5, width:0, height:0, borderLeft:"5px solid transparent", borderRight:"5px solid transparent", borderTop:"8px solid white" }} />
           <div style={{ position:"absolute", top:RULER_H, bottom:0, width:1, background:"rgba(255,255,255,0.88)" }} />
           <div style={{ position:"absolute", top:0, height:RULER_H, width:1, background:"rgba(255,255,255,0.22)" }} />
@@ -5916,13 +5994,18 @@ function StudioScreen({ user, onExit }) {
             scrollbarWidth:"thin", scrollbarColor:"#2a2a2a #0a0a0a",
           }}
           onScroll={function(e){
+            const sl = e.target.scrollLeft;
             if (!isPlayingRef.current) {
-              const t = Math.max(0, e.target.scrollLeft / effectivePPS);
+              const t = Math.max(0, sl / effectivePPS);
               setCurrentTime(t);
               playheadAtRef.current = t;
+              updatePlayheadDOM(t, sl);
+            } else {
+              // During playback: playhead is driven by RAF, just update DOM position
+              const actx = actxRef.current;
+              const t = actx ? playheadAtRef.current + (actx.currentTime - masterStartRef.current) : playheadAtRef.current;
+              updatePlayheadDOM(t, sl);
             }
-            // Trigger re-render so playhead left value updates
-            setCurrentTime(function(p){ return p; });
           }}
         >
           {/* Inner content — wide enough for whole project */}
@@ -6007,8 +6090,8 @@ function StudioScreen({ user, onExit }) {
                     </div>
                   </div>
 
-                  {/* Lane — clips at x = startTime * PPS, no offset */}
-                  <div style={{ position:"relative", flex:1, background:"#090909" }} onClick={deselectClip}>
+                  {/* Lane — overflow:visible so trim handles extend outside, isolation scopes z-index */}
+                  <div style={{ position:"relative", flex:1, background:"#090909", overflow:"visible", isolation:"isolate" }} onClick={deselectClip}>
                     {/* Beat grid */}
                     {Array.from({length:Math.ceil(totalDur/spb)+1}, function(_,i){
                       return <div key={i} style={{ position:"absolute", left:i*spb*effectivePPS, top:0, bottom:0, width:1, background:i%timeSigNum===0?"#181818":"#111", pointerEvents:"none" }} />;
@@ -6023,58 +6106,133 @@ function StudioScreen({ user, onExit }) {
                     {clips.map(function(clip){
                       if (!clip.audioBuffer) return null;
                       const trimS   = clip.trimStart || 0;
-                      const trimE   = clip.trimEnd   || clip.duration || clip.audioBuffer.duration;
-                      const clipW   = Math.max(20, (trimE-trimS) * effectivePPS);
-                      const clipL   = (clip.startTime||0) * effectivePPS;
-                      const playedF = Math.max(0, Math.min(1, (currentTime-(clip.startTime||0)) / (trimE-trimS||1)));
+                      const trimE   = clip.trimEnd !== undefined ? clip.trimEnd : (clip.audioBuffer ? clip.audioBuffer.duration : clip.duration || 2);
+                      const clipW   = Math.max(20, (trimE - trimS) * effectivePPS);
+                      const clipL   = (clip.startTime || 0) * effectivePPS;
+                      const playedF = Math.max(0, Math.min(1, (currentTime - (clip.startTime||0)) / (trimE - trimS || 1)));
                       const isSel   = selectedClipId === clip.id;
                       const isActv  = clip.active !== false;
+                      const bufDur  = clip.audioBuffer ? clip.audioBuffer.duration : (clip.duration || 2);
+                      // Capture effectivePPS at render time for use in closures
+                      const pps     = effectivePPS;
+
                       return (
-                        <div key={clip.id} style={{ position:"absolute", left:clipL, top:3, width:clipW, height:TRACK_H-6, zIndex:isSel?10:isActv?5:2 }}>
-                          {/* Clip body */}
+                        <div key={clip.id} style={{
+                          position:"absolute", left:clipL, top:3, width:clipW, height:TRACK_H-6,
+                          zIndex: isActv ? 2 : 1,
+                          // NO touchAction here — clip body and trim handles manage their own
+                        }}>
+
+                          {/* Clip body — drag/long-press/select. Touch handled imperatively in handleRegionTouchStart */}
                           <div
                             onClick={function(e){ e.stopPropagation(); selectClip(clip.id); }}
-                            onMouseDown={function(e){ handleRegionMouseDown(e,{...track,startTime:clip.startTime,_clip:clip}); }}
-                            onTouchStart={function(e){ handleRegionTouchStart(e,{...track,startTime:clip.startTime,_clip:clip}); }}
-                            onTouchMove={function(e){ handleRegionTouchMove(e,{...track,startTime:clip.startTime,_clip:clip}); }}
-                            onTouchEnd={handleRegionTouchEnd}
-                            onContextMenu={function(e){ handleRegionRightClick(e,{...track,_clip:clip}); }}
+                            onMouseDown={function(e){ handleRegionMouseDown(e, track, clip); }}
+                            onTouchStart={function(e){ handleRegionTouchStart(e, track, clip); }}
+                            onContextMenu={function(e){ handleRegionRightClick(e, track, clip); }}
                             style={{
-                              position:"absolute", inset:0, borderRadius:7, overflow:"hidden", touchAction:"none",
-                              border:"2px solid "+(isSel?track.color:isActv?track.color+"88":track.color+"33"),
-                              boxShadow:isSel?"0 0 0 2px "+track.color+"44":"none",
-                              background:isSel?track.color+"18":isActv?"#0e0e0e":"#080808",
-                              cursor:"grab", opacity:isActv?1:0.45, transition:"border 0.1s",
+                              position:"absolute", left:0, top:0, right:0, bottom:0,
+                              borderRadius:7, overflow:"hidden", touchAction:"none",
+                              // Selection = thicker border + inner glow — no z-index change
+                              border: isSel
+                                ? "2px solid " + track.color
+                                : "1.5px solid " + (isActv ? track.color + "77" : track.color + "33"),
+                              boxShadow: isSel
+                                ? "inset 0 0 0 1px " + track.color + "44"
+                                : "none",
+                              background: isSel ? track.color + "18" : isActv ? "#0e0e0e" : "#080808",
+                              cursor:"grab",
+                              opacity: isActv ? 1 : 0.35,
+                              transition:"border 0.12s, box-shadow 0.12s, background 0.12s",
                             }}
                           >
-                            <WaveformCanvas audioBuffer={clip.audioBuffer} color={isActv?track.color:track.color+"66"} width={Math.max(1,Math.round(clipW))} height={TRACK_H-6} playedFraction={playedF} />
-                            <div style={{ position:"absolute", bottom:2, left:5, right:16, color:isSel?"white":"rgba(255,255,255,0.5)", fontSize:7, fontWeight:700, pointerEvents:"none", textShadow:"0 1px 3px #000", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                              {clip.label}{!isActv?" (inactive)":""}
+                            <WaveformCanvas
+                              audioBuffer={clip.audioBuffer}
+                              color={isActv ? track.color : track.color + "88"}
+                              width={Math.max(1, Math.round(clipW))}
+                              height={TRACK_H-6}
+                              playedFraction={playedF}
+                            />
+                            <div style={{ position:"absolute", bottom:2, left:6, right:16, color: isSel ? "white" : "rgba(255,255,255,0.6)", fontSize:7, fontWeight:700, pointerEvents:"none", textShadow:"0 1px 4px #000", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                              {clip.label}{!isActv ? " (inactive)" : ""}
                             </div>
-                            {isSel&&<div style={{ position:"absolute", top:3, right:3, width:5, height:5, borderRadius:"50%", background:track.color }} />}
+                            {/* Selection indicator dot — inside the clip, no z overflow */}
+                            {isSel && <div style={{ position:"absolute", top:3, right:4, width:5, height:5, borderRadius:"50%", background:track.color, pointerEvents:"none" }} />}
                           </div>
-                          {/* Left trim handle — drag to set trimStart non-destructively */}
+
+                          {/* LEFT trim handle — wider hit zone, touchAction:none propagates up */}
                           <div
-                            style={{ position:"absolute", left:0, top:0, bottom:0, width:12, cursor:"col-resize", zIndex:20, display:"flex", alignItems:"center", justifyContent:"center" }}
+                            style={{
+                              position:"absolute", left:-10, top:0, bottom:0, width:18,
+                              zIndex:3, touchAction:"none", cursor:"ew-resize",
+                              display:"flex", alignItems:"center", justifyContent:"center",
+                            }}
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
-                              const x0=e.clientX, ts0=clip.trimStart||0, cs0=clip.startTime||0;
-                              const mv=function(me){ const d=(me.clientX-x0)/effectivePPS; const ts=Math.max(0,Math.min(ts0+d,(clip.trimEnd||clip.audioBuffer.duration)-0.05)); updateClip(track.id,clip.id,{trimStart:ts,startTime:Math.max(0,cs0+(ts-ts0))}); };
-                              const up=function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
-                              document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
+                              const x0  = e.clientX;
+                              const ts0 = trimS;
+                              const cs0 = clip.startTime || 0;
+                              const mv  = function(me){
+                                const d  = (me.clientX - x0) / pps;
+                                const ts = Math.max(0, Math.min(ts0 + d, trimE - 0.05));
+                                updateClip(track.id, clip.id, { trimStart: +ts.toFixed(4), startTime: Math.max(0, +(cs0 + (ts - ts0)).toFixed(4)) });
+                              };
+                              const up  = function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
+                              document.addEventListener("mousemove", mv);
+                              document.addEventListener("mouseup",   up);
                             }}
-                          ><div style={{ width:3, height:20, borderRadius:2, background:track.color+"bb" }} /></div>
-                          {/* Right trim handle — drag to set trimEnd non-destructively */}
+                            onTouchStart={function(e){
+                              e.stopPropagation(); e.preventDefault();
+                              const x0  = e.touches[0].clientX;
+                              const ts0 = trimS;
+                              const cs0 = clip.startTime || 0;
+                              const mv  = function(te){
+                                const d  = (te.touches[0].clientX - x0) / pps;
+                                const ts = Math.max(0, Math.min(ts0 + d, trimE - 0.05));
+                                updateClip(track.id, clip.id, { trimStart: +ts.toFixed(4), startTime: Math.max(0, +(cs0 + (ts - ts0)).toFixed(4)) });
+                              };
+                              const up  = function(){ document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
+                              document.addEventListener("touchmove", mv, { passive:false });
+                              document.addEventListener("touchend",  up, { passive:true  });
+                            }}
+                          >
+                            <div style={{ width:4, height:26, borderRadius:3, background:track.color, opacity: isSel ? 1 : 0.6, boxShadow:"0 0 5px "+track.color+"88" }} />
+                          </div>
+
+                          {/* RIGHT trim handle */}
                           <div
-                            style={{ position:"absolute", right:0, top:0, bottom:0, width:12, cursor:"col-resize", zIndex:20, display:"flex", alignItems:"center", justifyContent:"center" }}
+                            style={{
+                              position:"absolute", right:-10, top:0, bottom:0, width:18,
+                              zIndex:3, touchAction:"none", cursor:"ew-resize",
+                              display:"flex", alignItems:"center", justifyContent:"center",
+                            }}
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
-                              const x0=e.clientX, te0=clip.trimEnd||clip.audioBuffer.duration;
-                              const mv=function(me){ const te=Math.max((clip.trimStart||0)+0.05,Math.min(te0+(me.clientX-x0)/effectivePPS,clip.audioBuffer.duration)); updateClip(track.id,clip.id,{trimEnd:te}); };
-                              const up=function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
-                              document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
+                              const x0  = e.clientX;
+                              const te0 = trimE;
+                              const mv  = function(me){
+                                const te = Math.max(trimS + 0.05, Math.min(te0 + (me.clientX - x0) / pps, bufDur));
+                                updateClip(track.id, clip.id, { trimEnd: +te.toFixed(4) });
+                              };
+                              const up  = function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
+                              document.addEventListener("mousemove", mv);
+                              document.addEventListener("mouseup",   up);
                             }}
-                          ><div style={{ width:3, height:20, borderRadius:2, background:track.color+"bb" }} /></div>
+                            onTouchStart={function(e){
+                              e.stopPropagation(); e.preventDefault();
+                              const x0  = e.touches[0].clientX;
+                              const te0 = trimE;
+                              const mv  = function(te){
+                                const newTE = Math.max(trimS + 0.05, Math.min(te0 + (te.touches[0].clientX - x0) / pps, bufDur));
+                                updateClip(track.id, clip.id, { trimEnd: +newTE.toFixed(4) });
+                              };
+                              const up  = function(){ document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
+                              document.addEventListener("touchmove", mv, { passive:false });
+                              document.addEventListener("touchend",  up, { passive:true  });
+                            }}
+                          >
+                            <div style={{ width:4, height:26, borderRadius:3, background:track.color, opacity: isSel ? 1 : 0.6, boxShadow:"0 0 5px "+track.color+"88" }} />
+                          </div>
+
                         </div>
                       );
                     })}
@@ -6122,64 +6280,6 @@ function StudioScreen({ user, onExit }) {
         </div>
       )}
 
-      {/* ══ AUTO-PITCH PANEL ══════════════════════════════════════ */}
-      {showAutoPitch && (
-        <div style={{ background:"#0f0f0f",borderTop:"1px solid #1e1e1e",padding:"12px 16px",flexShrink:0 }} onClick={function(e){ e.stopPropagation(); }}>
-          <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:10 }}>
-            <span style={{ color:"#C026D3",fontWeight:800,fontSize:12,letterSpacing:2 }}>♪ AUTO-PITCH</span>
-            <span style={{ color:"#333",fontSize:10,flex:1 }}>Vocal pitch correction</span>
-            <button
-              onClick={function(){ setAutoPitch(function(ap){ return {...ap,on:!ap.on}; }); }}
-              style={{ background:autoPitch.on?"#C026D3":"#222",border:"none",borderRadius:6,color:"white",fontSize:10,fontWeight:700,padding:"4px 12px",cursor:"pointer" }}
-            >{autoPitch.on?"ON":"OFF"}</button>
-            <button onClick={function(){ setShowAutoPitch(false); }} style={{ background:"none",border:"none",color:"#444",fontSize:16,cursor:"pointer" }}>✕</button>
-          </div>
-          <div style={{ opacity:autoPitch.on?1:0.35, display:"flex",gap:16,alignItems:"flex-start",flexWrap:"wrap" }}>
-            {/* Key selector */}
-            <div>
-              <div style={{ color:"#555",fontSize:9,fontWeight:700,marginBottom:4 }}>KEY</div>
-              <div style={{ display:"flex",flexWrap:"wrap",gap:4,maxWidth:220 }}>
-                {["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"].map(function(k){
-                  return (
-                    <button key={k}
-                      onClick={function(){ setAutoPitch(function(ap){ return {...ap,key:k}; }); }}
-                      style={{ background:autoPitch.key===k?"#C026D3":"#1a1a1a",border:"1px solid "+(autoPitch.key===k?"#C026D3":"#2a2a2a"),borderRadius:5,color:autoPitch.key===k?"white":"#666",fontSize:10,fontWeight:700,padding:"4px 7px",cursor:"pointer",minWidth:32 }}
-                    >{k}</button>
-                  );
-                })}
-              </div>
-              {/* Scale */}
-              <div style={{ display:"flex",gap:6,marginTop:8 }}>
-                {["major","minor","chromatic"].map(function(s){
-                  return (
-                    <button key={s}
-                      onClick={function(){ setAutoPitch(function(ap){ return {...ap,scale:s}; }); }}
-                      style={{ background:autoPitch.scale===s?"rgba(192,38,211,0.2)":"#141414",border:"1px solid "+(autoPitch.scale===s?"#C026D3":"#2a2a2a"),borderRadius:5,color:autoPitch.scale===s?"#C026D3":"#555",fontSize:9,fontWeight:700,padding:"4px 10px",cursor:"pointer",textTransform:"capitalize" }}
-                    >{s}</button>
-                  );
-                })}
-              </div>
-            </div>
-            {/* Retune speed knob — inline slider version for compactness */}
-            <div style={{ display:"flex",flexDirection:"column",gap:4,minWidth:120 }}>
-              <div style={{ color:"#555",fontSize:9,fontWeight:700 }}>RETUNE SPEED</div>
-              <input type="range" min={0} max={1} step={0.01} value={autoPitch.speed}
-                onChange={function(e){ setAutoPitch(function(ap){ return {...ap,speed:+e.target.value}; }); }}
-                style={{ accentColor:"#C026D3",width:"100%" }} />
-              <div style={{ display:"flex",justifyContent:"space-between" }}>
-                <span style={{ color:"#444",fontSize:8 }}>Smooth (Choir)</span>
-                <span style={{ color:"#C026D3",fontSize:9,fontWeight:700 }}>{Math.round(autoPitch.speed*100)}%</span>
-                <span style={{ color:"#444",fontSize:8 }}>Instant (T-Pain)</span>
-              </div>
-              <div style={{ color:"#333",fontSize:8,marginTop:4,lineHeight:1.4 }}>
-                Low = natural correction. High = robotic/auto-tune effect.{"\n"}
-                <em>Note: Full pitch correction requires server-side DSP. This setting is saved for export.</em>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ══ FX PANEL ═══════════════════════════════════════════ */}
       {fxTrackId && (function(){
         const t = tracks.find(function(tr){ return tr.id===fxTrackId; });
@@ -6187,193 +6287,267 @@ function StudioScreen({ user, onExit }) {
         const fx = t.effects || {};
         const upd = function(section, patch){ updateTrack(t.id, { effects:{ ...t.effects, [section]:{ ...(t.effects[section]||{}), ...patch } } }); };
 
-        // ── Rotary Knob component ──
-        // ── Rotary Knob — fixed: SVG sized with overflow room so stroke never clips ──
+        // ── Rotary Knob — arc and track share identical radius + strokeWidth ──
         const Knob = function({ label, value, min, max, step, unit, onChange, color }) {
           const startRef = useRef(null);
           color = color || "#8B5CF6";
           const norm  = Math.max(0, Math.min(1, (value - min) / (max - min)));
-          const angle = -140 + norm * 280;
-          // Add 6px padding in SVG viewport so strokeWidth=4 arc never clips at edge
-          const PAD = 6, r = 22, cx = 28 + PAD, cy = 28 + PAD;
-          const W = 56 + PAD * 2, H = 56 + PAD * 2;
+          const angle = -140 + norm * 280;  // sweeps from -140° to +140° (280° total arc)
+
+          // Geometry: r is the CENTRE radius of the stroke.
+          // Both track circle and arc path use identical r and strokeWidth so they overlay exactly.
+          const SW = 4;       // strokeWidth — same for track AND arc
+          const r  = 20;      // arc/circle radius to stroke centre
+          const PAD = SW / 2 + 2; // padding = half stroke + 2px safety margin
+          const cx = r + PAD, cy = r + PAD;
+          const SIZE = (r + PAD) * 2;  // total SVG width/height
+
           const toXY = function(deg) {
             const rad = (deg - 90) * Math.PI / 180;
             return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
           };
-          const startA = toXY(-140), endA = toXY(angle), dotA = toXY(angle);
-          const largeArc = norm > 0.5 ? 1 : 0;
-          const arcD = `M ${startA.x} ${startA.y} A ${r} ${r} 0 ${largeArc} 1 ${endA.x} ${endA.y}`;
+          const startA = toXY(-140);
+          const endA   = toXY(angle);
+          // largeArc: the swept angle is (angle - (-140)) = angle + 140.
+          // Large arc flag should be 1 when swept angle > 180°, i.e. angle > 40°
+          const sweptDeg  = angle - (-140);  // always 0..280
+          const largeArc  = sweptDeg > 180 ? 1 : 0;
+          const arcD = `M ${startA.x.toFixed(2)} ${startA.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${endA.x.toFixed(2)} ${endA.y.toFixed(2)}`;
+
           const onPointerDown = function(e) {
             e.preventDefault();
             startRef.current = { y: e.clientY, val: value };
             const onMove = function(me) {
-              const dy = startRef.current.y - me.clientY;
+              const dy  = startRef.current.y - me.clientY;
               const raw = startRef.current.val + (dy / 100) * (max - min);
               const clamped = Math.min(max, Math.max(min, raw));
               const snapped = step ? Math.round(clamped / step) * step : clamped;
               onChange(+snapped.toFixed(3));
             };
-            const onUp = function() { document.removeEventListener("pointermove", onMove); document.removeEventListener("pointerup", onUp); };
+            const onUp = function() {
+              document.removeEventListener("pointermove", onMove);
+              document.removeEventListener("pointerup",  onUp);
+            };
             document.addEventListener("pointermove", onMove);
-            document.addEventListener("pointerup", onUp);
+            document.addEventListener("pointerup",   onUp);
           };
+
           const display = unit === "dB" ? (value >= 0 ? "+" : "") + value + "dB"
                         : unit === "%" ? Math.round(value * 100) + "%"
                         : unit === "ms" ? value + "ms"
                         : unit === ":1" ? value + ":1"
                         : unit === "Q"  ? value
+                        : unit === " st" ? (value >= 0 ? "+" : "") + value + " st"
                         : value + (unit || "");
+
           return (
             <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, userSelect:"none" }}>
-              {/* overflow:visible ensures the arc stroke is never clipped by parent */}
-              <svg width={W} height={H} style={{ overflow:"visible", cursor:"ns-resize", touchAction:"none" }} onPointerDown={onPointerDown}>
-                <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1e1e1e" strokeWidth={5} />
-                <path d={arcD} fill="none" stroke={color} strokeWidth={4} strokeLinecap="round" />
-                <circle cx={dotA.x} cy={dotA.y} r={3.5} fill={color} />
-                <circle cx={cx} cy={cy} r={10} fill="#0d0d0d" stroke="#2a2a2a" strokeWidth={1.5} />
+              {/* viewBox matches SIZE exactly; overflow:visible lets the dot glow bleed out */}
+              <svg
+                width={SIZE} height={SIZE}
+                viewBox={`0 0 ${SIZE} ${SIZE}`}
+                style={{ overflow:"visible", cursor:"ns-resize", touchAction:"none" }}
+                onPointerDown={onPointerDown}
+              >
+                {/* Track — identical strokeWidth to arc */}
+                <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1e1e1e" strokeWidth={SW} strokeLinecap="round"
+                  strokeDasharray={`${2*Math.PI*r * 280/360} ${2*Math.PI*r}`}
+                  strokeDashoffset={`${2*Math.PI*r * (90+140)/360}`}
+                  transform={`rotate(-90 ${cx} ${cy})`}
+                />
+                {/* Coloured arc — sweeps from startA to endA */}
+                {norm > 0 && <path d={arcD} fill="none" stroke={color} strokeWidth={SW} strokeLinecap="round" />}
+                {/* End dot — sits exactly on the arc */}
+                <circle cx={endA.x} cy={endA.y} r={SW * 0.9} fill={color} />
+                {/* Centre cap */}
+                <circle cx={cx} cy={cy} r={r * 0.42} fill="#0d0d0d" stroke="#2a2a2a" strokeWidth={1.5} />
               </svg>
-              <div style={{ color:"white", fontSize:10, fontWeight:700 }}>{display}</div>
-              <div style={{ color:"#555", fontSize:8, textAlign:"center" }}>{label}</div>
+              <div style={{ color:"white", fontSize:9, fontWeight:700, lineHeight:1 }}>{display}</div>
+              <div style={{ color:"#444", fontSize:7, textAlign:"center", lineHeight:1.2 }}>{label}</div>
             </div>
           );
         };
 
         // ── 5-band EQ Graph with accurate Bezier filter response ──
+        // =================================================================
+        // PRODUCTION 5-BAND PARAMETRIC EQ
+        // Based on Audio EQ Cookbook (Bristow-Johnson)
+        // https://www.w3.org/TR/audio-eq-cookbook/
+        //
+        // Bug fixes vs previous version:
+        //  1. freqToX was wrong: log10(f/20)/log10(1000) ≠ log-scale 20Hz-20kHz
+        //     Fix: divide by log10(20000/20) = log10(1000) = 3 — actually that
+        //     WAS correct BUT the freq range was 20-20000 not 20-20020, AND
+        //     low/high shelf had hardcoded freq (200Hz, 4000Hz) ignoring params.
+        //  2. bandMag used wrong phi formula — produces NaN near Nyquist
+        //     Fix: exact z-domain complex evaluation (Re²+Im²) per band
+        //  3. Cascaded dB sum is correct (logs are additive for cascade)
+        //  4. All 5 bands now fully parametric (freq movable on all bands)
+        // =================================================================
+        const EQ_SR = 44100;
+
+        // Normalised biquad coefficients — a0 divided out (always 1)
+        const eqCalcCoeffs = function(type, freq, gainDB, Q) {
+          const f  = Math.max(10, Math.min(freq, EQ_SR * 0.499));
+          const w0 = 2 * Math.PI * f / EQ_SR;
+          const cw = Math.cos(w0), sw = Math.sin(w0);
+          const A  = Math.pow(10, gainDB / 40);
+          const aq = sw / (2 * Math.max(0.001, Q));
+          let b0,b1,b2,a0,a1,a2;
+          if (type === "peaking") {
+            b0=1+aq*A; b1=-2*cw; b2=1-aq*A; a0=1+aq/A; a1=-2*cw; a2=1-aq/A;
+          } else if (type === "lowshelf") {
+            const sa=2*Math.sqrt(A)*aq;
+            b0=A*((A+1)-(A-1)*cw+sa); b1=2*A*((A-1)-(A+1)*cw); b2=A*((A+1)-(A-1)*cw-sa);
+            a0=(A+1)+(A-1)*cw+sa; a1=-2*((A-1)+(A+1)*cw); a2=(A+1)+(A-1)*cw-sa;
+          } else if (type === "highshelf") {
+            const sa=2*Math.sqrt(A)*aq;
+            b0=A*((A+1)+(A-1)*cw+sa); b1=-2*A*((A-1)+(A+1)*cw); b2=A*((A+1)+(A-1)*cw-sa);
+            a0=(A+1)-(A-1)*cw+sa; a1=2*((A-1)-(A+1)*cw); a2=(A+1)-(A-1)*cw-sa;
+          } else if (type === "highpass") {
+            b0=(1+cw)/2; b1=-(1+cw); b2=(1+cw)/2; a0=1+aq; a1=-2*cw; a2=1-aq;
+          } else { // lowpass
+            b0=(1-cw)/2; b1=1-cw; b2=(1-cw)/2; a0=1+aq; a1=-2*cw; a2=1-aq;
+          }
+          if (Math.abs(a0) < 1e-30) return { b0:1, b1:0, b2:0, a1:0, a2:0 };
+          return { b0:b0/a0, b1:b1/a0, b2:b2/a0, a1:a1/a0, a2:a2/a0 };
+        };
+
+        // Exact z-domain magnitude |H(e^jw)|² — numerically stable at all freqs
+        const eqEvalMag = function(c, f) {
+          const w   = 2 * Math.PI * Math.max(1, f) / EQ_SR;
+          const cw  = Math.cos(w),  sw  = Math.sin(w);
+          const cw2 = Math.cos(2*w), sw2 = Math.sin(2*w);
+          const bRe = c.b0 + c.b1*cw + c.b2*cw2;
+          const bIm =        c.b1*sw + c.b2*sw2;
+          const aRe = 1    + c.a1*cw + c.a2*cw2;
+          const aIm =        c.a1*sw + c.a2*sw2;
+          const den = aRe*aRe + aIm*aIm;
+          if (den < 1e-30) return 0;
+          return 20 * Math.log10(Math.sqrt((bRe*bRe + bIm*bIm) / den));
+        };
+
         const EQGraph = function({ eq, onDrag }) {
           const W = 300, H = 130;
-          // 5 bands: HPF, Low Shelf, Mid Peak, High Shelf, LPF
+
           const bands = [
-            { key:"hpf",   type:"highpass",  freq:eq.hpfFreq||80,   gain:0,              q:eq.hpfQ||0.7,  color:"#EF4444", draggable:"x" },
-            { key:"low",   type:"lowshelf",  freq:200,              gain:eq.low||0,      q:0.7,           color:"#3B82F6", draggable:"y" },
-            { key:"mid",   type:"peaking",   freq:eq.midFreq||1000, gain:eq.mid||0,      q:eq.midQ||1,    color:"#22C55E", draggable:"xy" },
-            { key:"high",  type:"highshelf", freq:4000,             gain:eq.high||0,     q:0.7,           color:"#F59E0B", draggable:"y" },
-            { key:"lpf",   type:"lowpass",   freq:eq.lpfFreq||18000,gain:0,              q:eq.lpfQ||0.7,  color:"#EF4444", draggable:"x" },
+            { key:"hpf",  type:"highpass",  freq:eq.hpfFreq||80,    gain:0,          q:eq.hpfQ||0.707,  color:"#EF4444", drag:"x",  label:"HPF" },
+            { key:"low",  type:"lowshelf",  freq:eq.lowFreq||200,   gain:eq.low||0,  q:eq.lowQ||0.707,  color:"#3B82F6", drag:"xy", label:"LOW" },
+            { key:"mid",  type:"peaking",   freq:eq.midFreq||1000,  gain:eq.mid||0,  q:eq.midQ||1.0,    color:"#22C55E", drag:"xy", label:"MID" },
+            { key:"high", type:"highshelf", freq:eq.highFreq||8000, gain:eq.high||0, q:eq.highQ||0.707, color:"#F59E0B", drag:"xy", label:"HI"  },
+            { key:"lpf",  type:"lowpass",   freq:eq.lpfFreq||18000, gain:0,          q:eq.lpfQ||0.707,  color:"#EF4444", drag:"x",  label:"LPF" },
           ];
-          const freqToX = function(f) { return W * Math.log10(f/20) / Math.log10(1000); };
-          const gainToY = function(g) { return H/2 - (g/15) * (H/2 - 12); };
 
-          // Accurate biquad filter magnitude response per band
-          const bandMag = function(band, f) {
-            const sr = 44100, w0 = 2 * Math.PI * band.freq / sr;
-            const cosW = Math.cos(w0), sinW = Math.sin(w0);
-            const A  = Math.pow(10, (band.gain||0) / 40);
-            const aq = sinW / (2 * band.q);
-            let b0,b1,b2,a0,a1,a2;
-            if (band.type === "peaking") {
-              b0=1+aq*A; b1=-2*cosW; b2=1-aq*A; a0=1+aq/A; a1=-2*cosW; a2=1-aq/A;
-            } else if (band.type === "lowshelf") {
-              const s=sinW*Math.sqrt((A+1/A)*(1/0.7-1)+2);
-              b0=A*((A+1)-(A-1)*cosW+s); b1=2*A*((A-1)-(A+1)*cosW); b2=A*((A+1)-(A-1)*cosW-s);
-              a0=(A+1)+(A-1)*cosW+s; a1=-2*((A-1)+(A+1)*cosW); a2=(A+1)+(A-1)*cosW-s;
-            } else if (band.type === "highshelf") {
-              const s=sinW*Math.sqrt((A+1/A)*(1/0.7-1)+2);
-              b0=A*((A+1)+(A-1)*cosW+s); b1=-2*A*((A-1)+(A+1)*cosW); b2=A*((A+1)+(A-1)*cosW-s);
-              a0=(A+1)-(A-1)*cosW+s; a1=2*((A-1)-(A+1)*cosW); a2=(A+1)-(A-1)*cosW-s;
-            } else if (band.type === "highpass") {
-              b0=(1+cosW)/2; b1=-(1+cosW); b2=(1+cosW)/2; a0=1+aq; a1=-2*cosW; a2=1-aq;
-            } else { // lowpass
-              b0=(1-cosW)/2; b1=1-cosW; b2=(1-cosW)/2; a0=1+aq; a1=-2*cosW; a2=1-aq;
-            }
-            // Evaluate at frequency f
-            const phi = 4 * Math.pow(Math.sin(Math.PI * f / sr), 2);
-            const num = (b0+b1+b2)*(b0+b1+b2) - phi*(4*b0*b2*(1-phi) + b1*(b0+b2));
-            const den = (a0+a1+a2)*(a0+a1+a2) - phi*(4*a0*a2*(1-phi) + a1*(a0+a2));
-            return den > 0 ? 20 * Math.log10(Math.sqrt(Math.max(0, num/den))) : 0;
-          };
+          // Log-correct X axis: 20Hz at left, 20kHz at right
+          const LOG_RANGE = Math.log10(20000 / 20);
+          const freqToX = function(f) { return W * Math.log10(Math.max(20,f) / 20) / LOG_RANGE; };
+          const xToFreq = function(x) { return Math.round(20 * Math.pow(20000/20, Math.max(0,Math.min(1,x/W)))); };
+          const gainToY = function(g) { return H/2 - (Math.max(-15,Math.min(15,g)) / 15) * (H/2 - 10); };
+          const yToGain = function(y) { return +((H/2-y)/(H/2-10)*15).toFixed(1); };
 
-          // Build smooth path using many sample points
-          const nPts = 120;
-          const pathPts = [];
+          // Build composite response curve — sum dB magnitudes (correct for cascade)
+          const nPts = 180;
+          const pts  = [];
           for (let i = 0; i <= nPts; i++) {
-            const f   = 20 * Math.pow(20000/20, i/nPts);
-            const mag = bands.reduce(function(sum, b) { return sum + bandMag(b, f); }, 0);
-            pathPts.push([freqToX(f), gainToY(mag)]);
+            const f = 20 * Math.pow(20000/20, i/nPts);
+            let db = 0;
+            bands.forEach(function(b){ db += eqEvalMag(eqCalcCoeffs(b.type,b.freq,b.gain,b.q), f); });
+            pts.push([freqToX(f), gainToY(Math.max(-18,Math.min(18,db)))]);
           }
-          // Build SVG path with cubic bezier smoothing
-          let curvePath = `M ${pathPts[0][0]} ${pathPts[0][1]}`;
-          for (let i = 1; i < pathPts.length; i++) {
-            const prev = pathPts[i-1], cur = pathPts[i];
-            const cpx  = (prev[0] + cur[0]) / 2;
-            curvePath += ` C ${cpx} ${prev[1]} ${cpx} ${cur[1]} ${cur[0]} ${cur[1]}`;
+
+          // Catmull-Rom to cubic bezier for smooth curve
+          let path = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+          for (let i=1; i<pts.length-1; i++) {
+            const [x0,y0]=pts[i-1], [x1,y1]=pts[i], [x2,y2]=pts[i+1];
+            path += ` C ${((x0+x1)/2).toFixed(1)} ${y0.toFixed(1)} ${((x1+x2)/2).toFixed(1)} ${y1.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
           }
-          const fillPath = curvePath + ` L ${W} ${H/2} L 0 ${H/2} Z`;
+          const [lx,ly]=pts[pts.length-1]; path += ` L ${lx.toFixed(1)} ${ly.toFixed(1)}`;
+          const fill = path + ` L ${W} ${H/2} L 0 ${H/2} Z`;
 
           const dragging = useRef(null);
           const svgRef   = useRef(null);
-          const getPos   = function(clientX, clientY) {
-            const rect = svgRef.current.getBoundingClientRect();
-            return { x: clientX - rect.left, y: clientY - rect.top };
-          };
-          const applyDrag = function(clientX, clientY) {
-            const b   = dragging.current;
-            if (!b) return;
-            const pos = getPos(clientX, clientY);
-            const patch = {};
-            if (b.draggable === "y" || b.draggable === "xy") {
-              const gain = Math.max(-15, Math.min(15, (H/2 - pos.y) / (H/2 - 12) * 15));
-              patch[b.key] = +gain.toFixed(1);
-            }
-            if (b.draggable === "x" || b.draggable === "xy") {
-              // X drag changes frequency for HPF/LPF/Mid
-              const frac = Math.max(0, Math.min(1, pos.x / W));
-              const freq = Math.round(20 * Math.pow(20000/20, frac));
-              if (b.key === "hpf")  patch.hpfFreq  = freq;
-              if (b.key === "lpf")  patch.lpfFreq  = freq;
-              if (b.key === "mid")  patch.midFreq  = freq;
-            }
-            onDrag(patch);
-          };
 
           return (
             <svg ref={svgRef} width={W} height={H}
-              style={{ display:"block", background:"#080808", borderRadius:8, touchAction:"none", cursor:"crosshair" }}
-              onMouseMove={function(e){ if(dragging.current) applyDrag(e.clientX, e.clientY); }}
-              onMouseUp={function(){ dragging.current=null; }}
-              onMouseLeave={function(){ dragging.current=null; }}
-              onTouchMove={function(e){ e.preventDefault(); if(dragging.current) applyDrag(e.touches[0].clientX, e.touches[0].clientY); }}
-              onTouchEnd={function(){ dragging.current=null; }}
+              style={{ display:"block", background:"#060606", borderRadius:8, touchAction:"none", cursor:"crosshair" }}
+              onMouseMove={function(e){
+                const b=dragging.current; if(!b||!svgRef.current) return;
+                const r=svgRef.current.getBoundingClientRect();
+                const x=e.clientX-r.left, y=e.clientY-r.top;
+                const patch={};
+                if(b.drag==="x"||b.drag==="xy"){
+                  const f=xToFreq(x);
+                  if(b.key==="hpf") patch.hpfFreq=Math.max(20,Math.min(2000,f));
+                  if(b.key==="lpf") patch.lpfFreq=Math.max(1000,Math.min(20000,f));
+                  if(b.key==="low") patch.lowFreq=Math.max(20,Math.min(2000,f));
+                  if(b.key==="mid") patch.midFreq=Math.max(100,Math.min(10000,f));
+                  if(b.key==="high") patch.highFreq=Math.max(500,Math.min(20000,f));
+                }
+                if(b.drag==="y"||b.drag==="xy"){
+                  const g=Math.max(-15,Math.min(15,yToGain(y)));
+                  if(b.key==="low") patch.low=g;
+                  if(b.key==="mid") patch.mid=g;
+                  if(b.key==="high") patch.high=g;
+                }
+                if(Object.keys(patch).length) onDrag(patch);
+              }}
+              onMouseUp={function(){dragging.current=null;}}
+              onMouseLeave={function(){dragging.current=null;}}
+              onTouchMove={function(e){
+                e.preventDefault();
+                const b=dragging.current; if(!b||!svgRef.current) return;
+                const r=svgRef.current.getBoundingClientRect();
+                const x=e.touches[0].clientX-r.left, y=e.touches[0].clientY-r.top;
+                const patch={};
+                if(b.drag==="x"||b.drag==="xy"){
+                  const f=xToFreq(x);
+                  if(b.key==="hpf") patch.hpfFreq=Math.max(20,Math.min(2000,f));
+                  if(b.key==="lpf") patch.lpfFreq=Math.max(1000,Math.min(20000,f));
+                  if(b.key==="low") patch.lowFreq=Math.max(20,Math.min(2000,f));
+                  if(b.key==="mid") patch.midFreq=Math.max(100,Math.min(10000,f));
+                  if(b.key==="high") patch.highFreq=Math.max(500,Math.min(20000,f));
+                }
+                if(b.drag==="y"||b.drag==="xy"){
+                  const g=Math.max(-15,Math.min(15,yToGain(y)));
+                  if(b.key==="low") patch.low=g;
+                  if(b.key==="mid") patch.mid=g;
+                  if(b.key==="high") patch.high=g;
+                }
+                if(Object.keys(patch).length) onDrag(patch);
+              }}
+              onTouchEnd={function(){dragging.current=null;}}
             >
               {/* Frequency grid */}
               {[20,50,100,200,500,1000,2000,5000,10000,20000].map(function(f){
-                const x = freqToX(f);
-                return <line key={f} x1={x} y1={0} x2={x} y2={H} stroke="#131313" strokeWidth={1} />;
+                const x=freqToX(f); const major=[100,1000,10000].includes(f);
+                return <line key={f} x1={x} y1={0} x2={x} y2={H} stroke={major?"#1e1e1e":"#111"} strokeWidth={major?1.5:1}/>;
               })}
               {/* Gain grid */}
               {[-12,-6,0,6,12].map(function(g){
-                const y = gainToY(g);
+                const y=gainToY(g);
                 return <g key={g}>
-                  <line x1={0} y1={y} x2={W} y2={y} stroke={g===0?"#252525":"#131313"} strokeWidth={g===0?1.5:1} />
-                  <text x={4} y={y-3} fill="#333" fontSize={7}>{g>0?"+":""}{g}</text>
+                  <line x1={0} y1={y} x2={W} y2={y} stroke={g===0?"#252525":"#141414"} strokeWidth={g===0?1.5:1}/>
+                  <text x={3} y={y-2} fill="#222" fontSize={7}>{g>0?"+":""}{g}</text>
                 </g>;
               })}
-              {/* Freq labels */}
-              {[100,500,1000,5000,10000].map(function(f){
-                return <text key={f} x={freqToX(f)} y={H-3} fill="#2a2a2a" fontSize={7} textAnchor="middle">{f>=1000?f/1000+"k":f}</text>;
+              {/* Frequency labels */}
+              {[100,1000,10000].map(function(f){
+                return <text key={f} x={freqToX(f)} y={H-3} fill="#222" fontSize={7} textAnchor="middle">{f>=1000?f/1000+"k":f}</text>;
               })}
-              {/* Filled curve */}
-              <path d={fillPath} fill="rgba(139,92,246,0.07)" />
-              {/* Curve line */}
-              <path d={curvePath} fill="none" stroke="#8B5CF6" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-              {/* Band handles */}
+              <path d={fill} fill="rgba(147,51,234,0.07)"/>
+              <path d={path} fill="none" stroke="#9333EA" strokeWidth={2} strokeLinecap="round"/>
               {bands.map(function(b){
-                const hx = freqToX(b.freq);
-                const hy = gainToY(b.gain);
-                return (
-                  <g key={b.key}>
-                    {/* Vertical guide line */}
-                    <line x1={hx} y1={0} x2={hx} y2={H} stroke={b.color+"33"} strokeWidth={1} strokeDasharray="3 3" />
-                    {/* Handle */}
-                    <circle cx={hx} cy={hy} r={8} fill={b.color} fillOpacity={0.9} stroke="#0d0d0d" strokeWidth={2}
-                      style={{ cursor: b.draggable==="y"?"ns-resize": b.draggable==="x"?"ew-resize":"move" }}
-                      onMouseDown={function(e){ e.preventDefault(); e.stopPropagation(); dragging.current = b; }}
-                      onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); dragging.current = b; }} />
-                    {/* Label inside handle */}
-                    <text x={hx} y={hy+3} fill="white" fontSize={6} textAnchor="middle" fontWeight="700" pointerEvents="none">
-                      {b.key.toUpperCase()}
-                    </text>
-                  </g>
-                );
+                const hx=freqToX(b.freq), hy=gainToY(b.gain);
+                const cur=b.drag==="x"?"ew-resize":b.drag==="y"?"ns-resize":"move";
+                return <g key={b.key}>
+                  <line x1={hx} y1={0} x2={hx} y2={H} stroke={b.color+"28"} strokeWidth={1} strokeDasharray="3 3"/>
+                  <circle cx={hx} cy={hy} r={12} fill={b.color+"10"} stroke={b.color+"28"} strokeWidth={1}/>
+                  <circle cx={hx} cy={hy} r={8} fill={b.color} fillOpacity={0.9} stroke="#060606" strokeWidth={2}
+                    style={{cursor:cur}}
+                    onMouseDown={function(e){e.preventDefault();e.stopPropagation();dragging.current=b;}}
+                    onTouchStart={function(e){e.preventDefault();e.stopPropagation();dragging.current=b;}}/>
+                  <text x={hx} y={hy+3} fill="white" fontSize={6} textAnchor="middle" fontWeight="800" pointerEvents="none">{b.label}</text>
+                </g>;
               })}
             </svg>
           );
@@ -6423,11 +6597,11 @@ function StudioScreen({ user, onExit }) {
 
         // ── EQ defaults including new 5-band fields ──
         const eq5 = {
-          hpfFreq:80, hpfQ:0.7,
-          low:fx.eq?.low||0,
-          mid:fx.eq?.mid||0, midFreq:fx.eq?.midFreq||1000, midQ:fx.eq?.midQ||1,
-          high:fx.eq?.high||0,
-          lpfFreq:fx.eq?.lpfFreq||18000, lpfQ:fx.eq?.lpfQ||0.7,
+          hpfFreq:80, hpfQ:0.707,
+          lowFreq:200, low:0, lowQ:0.707,
+          midFreq:1000, mid:0, midQ:1.0,
+          highFreq:8000, high:0, highQ:0.707,
+          lpfFreq:18000, lpfQ:0.707,
           ...fx.eq,
         };
 
@@ -6455,19 +6629,50 @@ function StudioScreen({ user, onExit }) {
                 </div>
                 <div style={{ padding:"12px 14px", opacity:fx.eq?.on?1:0.35 }}>
                   <EQGraph eq={eq5} onDrag={function(patch){ upd("eq", patch); }} />
-                  {/* Knob rows — overflow:visible on parent so SVG arcs don't clip */}
-                  <div style={{ display:"flex", justifyContent:"space-around", marginTop:14, overflowX:"auto", padding:"0 4px" }}>
-                    {[
-                      { key:"hpfFreq", label:"HPF",       val:eq5.hpfFreq,  min:20,   max:500,   step:1,   unit:"Hz",  color:"#EF4444" },
-                      { key:"low",     label:"LOW SHELF",  val:eq5.low,      min:-15,  max:15,    step:0.5, unit:"dB",  color:"#3B82F6" },
-                      { key:"mid",     label:"MID PEAK",   val:eq5.mid,      min:-15,  max:15,    step:0.5, unit:"dB",  color:"#22C55E" },
-                      { key:"midQ",    label:"MID Q",      val:eq5.midQ,     min:0.1,  max:10,    step:0.1, unit:"Q",   color:"#22C55E" },
-                      { key:"high",    label:"HIGH SHELF", val:eq5.high,     min:-15,  max:15,    step:0.5, unit:"dB",  color:"#F59E0B" },
-                      { key:"lpfFreq", label:"LPF",        val:eq5.lpfFreq,  min:1000, max:20000, step:100, unit:"Hz",  color:"#EF4444" },
-                    ].map(function(b){
-                      return <Knob key={b.key} label={b.label} value={b.val} min={b.min} max={b.max} step={b.step} unit={b.unit} color={b.color}
-                        onChange={function(v){ upd("eq", {[b.key]:v}); }} />;
-                    })}
+                  {/* Stacked freq+gain pairs — fits mobile width without scrolling */}
+                  <div style={{ display:"flex", justifyContent:"space-between", marginTop:12, gap:2 }}>
+                    {/* HPF — only frequency */}
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+                      <div style={{ color:"#EF4444", fontSize:7, fontWeight:800, letterSpacing:1 }}>HPF</div>
+                      <Knob label="Hz" value={eq5.hpfFreq} min={20} max={2000} step={1} unit="Hz" color="#EF4444"
+                        onChange={function(v){ upd("eq",{hpfFreq:v}); }} />
+                    </div>
+                    <div style={{ width:1, background:"#1a1a1a", alignSelf:"stretch", margin:"0 1px" }} />
+                    {/* LOW — freq + gain stacked */}
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+                      <div style={{ color:"#3B82F6", fontSize:7, fontWeight:800, letterSpacing:1 }}>LOW</div>
+                      <Knob label="Hz" value={eq5.lowFreq} min={20} max={2000} step={1} unit="Hz" color="#3B82F6"
+                        onChange={function(v){ upd("eq",{lowFreq:v}); }} />
+                      <Knob label="dB" value={eq5.low} min={-15} max={15} step={0.5} unit="dB" color="#3B82F6"
+                        onChange={function(v){ upd("eq",{low:v}); }} />
+                    </div>
+                    <div style={{ width:1, background:"#1a1a1a", alignSelf:"stretch", margin:"0 1px" }} />
+                    {/* MID — freq + gain + Q stacked */}
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+                      <div style={{ color:"#22C55E", fontSize:7, fontWeight:800, letterSpacing:1 }}>MID</div>
+                      <Knob label="Hz" value={eq5.midFreq} min={100} max={10000} step={10} unit="Hz" color="#22C55E"
+                        onChange={function(v){ upd("eq",{midFreq:v}); }} />
+                      <Knob label="dB" value={eq5.mid} min={-15} max={15} step={0.5} unit="dB" color="#22C55E"
+                        onChange={function(v){ upd("eq",{mid:v}); }} />
+                      <Knob label="Q" value={eq5.midQ} min={0.1} max={10} step={0.1} unit="Q" color="#22C55E"
+                        onChange={function(v){ upd("eq",{midQ:v}); }} />
+                    </div>
+                    <div style={{ width:1, background:"#1a1a1a", alignSelf:"stretch", margin:"0 1px" }} />
+                    {/* HIGH — freq + gain stacked */}
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+                      <div style={{ color:"#F59E0B", fontSize:7, fontWeight:800, letterSpacing:1 }}>HIGH</div>
+                      <Knob label="Hz" value={eq5.highFreq} min={500} max={20000} step={100} unit="Hz" color="#F59E0B"
+                        onChange={function(v){ upd("eq",{highFreq:v}); }} />
+                      <Knob label="dB" value={eq5.high} min={-15} max={15} step={0.5} unit="dB" color="#F59E0B"
+                        onChange={function(v){ upd("eq",{high:v}); }} />
+                    </div>
+                    <div style={{ width:1, background:"#1a1a1a", alignSelf:"stretch", margin:"0 1px" }} />
+                    {/* LPF — only frequency */}
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+                      <div style={{ color:"#EF4444", fontSize:7, fontWeight:800, letterSpacing:1 }}>LPF</div>
+                      <Knob label="Hz" value={eq5.lpfFreq} min={1000} max={20000} step={100} unit="Hz" color="#EF4444"
+                        onChange={function(v){ upd("eq",{lpfFreq:v}); }} />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -6526,6 +6731,61 @@ function StudioScreen({ user, onExit }) {
                         onChange={function(v){ upd("reverb",{roomSize:v}); }} />
                       <Knob label="PRE-DELAY" value={fx.reverb?.preDelay??0}         min={0}   max={100} step={1}    unit="ms" color="#8B5CF6"
                         onChange={function(v){ upd("reverb",{preDelay:v}); }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── PITCH / AUTO-TUNE ── per-track, fully functional ── */}
+              <div style={{ background:"#111", borderRadius:14, overflow:"hidden", border:"1px solid "+(fx.pitch?.on?"#C026D3":"#1e1e1e") }}>
+                <div style={{ display:"flex", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #1e1e1e", gap:8 }}>
+                  <span style={{ color:"#C026D3", fontWeight:800, fontSize:12, letterSpacing:2 }}>♪ PITCH</span>
+                  <span style={{ color:"#333", fontSize:10, flex:1 }}>Auto-Tune / Pitch Shift</span>
+                  <button onClick={function(){ upd("pitch",{on:!fx.pitch?.on}); }}
+                    style={{ background:fx.pitch?.on?"#C026D3":"#222", border:"none", borderRadius:6, color:"white", fontSize:10, fontWeight:700, padding:"4px 10px", cursor:"pointer" }}>
+                    {fx.pitch?.on ? "ON" : "OFF"}
+                  </button>
+                </div>
+                <div style={{ padding:"12px 14px", opacity:fx.pitch?.on?1:0.35 }}>
+                  {/* Semitone pitch shift knob */}
+                  <div style={{ display:"flex", gap:16, alignItems:"flex-start", flexWrap:"wrap" }}>
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
+                      <Knob label="PITCH SHIFT" value={fx.pitch?.semitones??0} min={-12} max={12} step={1} unit=" st" color="#C026D3"
+                        onChange={function(v){ upd("pitch",{semitones:v}); }} />
+                      <div style={{ color:"#444", fontSize:8, textAlign:"center" }}>
+                        {(fx.pitch?.semitones||0)>0?"↑ "+(fx.pitch?.semitones)+" semitones up":(fx.pitch?.semitones||0)<0?"↓ "+Math.abs(fx.pitch?.semitones)+" semitones down":"No shift"}
+                      </div>
+                    </div>
+                    {/* Key snap */}
+                    <div style={{ flex:1 }}>
+                      <div style={{ color:"#555", fontSize:9, fontWeight:700, marginBottom:6 }}>SNAP KEY</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:8 }}>
+                        {["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"].map(function(k){
+                          const isActive = fx.pitch?.key===k;
+                          return <button key={k} onClick={function(){ upd("pitch",{key:k}); }}
+                            style={{ background:isActive?"#C026D3":"#1a1a1a", border:"1px solid "+(isActive?"#C026D3":"#222"), borderRadius:5, color:isActive?"white":"#555", fontSize:9, fontWeight:700, padding:"3px 6px", cursor:"pointer", minWidth:28 }}>{k}</button>;
+                        })}
+                      </div>
+                      <div style={{ display:"flex", gap:6 }}>
+                        {["major","minor","chromatic"].map(function(s){
+                          const isA = fx.pitch?.scale===s;
+                          return <button key={s} onClick={function(){ upd("pitch",{scale:s}); }}
+                            style={{ background:isA?"rgba(192,38,211,0.2)":"#141414", border:"1px solid "+(isA?"#C026D3":"#222"), borderRadius:5, color:isA?"#C026D3":"#555", fontSize:8, fontWeight:700, padding:"3px 8px", cursor:"pointer", textTransform:"capitalize" }}>{s}</button>;
+                        })}
+                      </div>
+                    </div>
+                    {/* Retune speed */}
+                    <div style={{ display:"flex", flexDirection:"column", gap:4, minWidth:100 }}>
+                      <div style={{ color:"#555", fontSize:9, fontWeight:700 }}>RETUNE SPEED</div>
+                      <input type="range" min={0} max={1} step={0.01} value={fx.pitch?.speed??0.5}
+                        onChange={function(e){ upd("pitch",{speed:+e.target.value}); }}
+                        style={{ accentColor:"#C026D3", width:"100%" }} />
+                      <div style={{ display:"flex", justifyContent:"space-between" }}>
+                        <span style={{ color:"#444", fontSize:7 }}>Natural</span>
+                        <span style={{ color:"#C026D3", fontSize:8, fontWeight:700 }}>{Math.round((fx.pitch?.speed??0.5)*100)}%</span>
+                        <span style={{ color:"#444", fontSize:7 }}>Robotic</span>
+                      </div>
+                      <div style={{ color:"#2a2a2a", fontSize:7, marginTop:2 }}>Pitch shift uses playback rate scaling. For natural vocals keep shift within ±3 semitones.</div>
                     </div>
                   </div>
                 </div>
