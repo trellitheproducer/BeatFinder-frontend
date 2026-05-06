@@ -6117,178 +6117,115 @@ function StudioScreen({ user, onExit }) {
                     </div>
                   </div>
 
-                  {/* Lane outer — overflow:visible ONLY so trim handles can extend beyond bounds
-                      The inner clip-mask div prevents waveforms from bleeding into the header */}
+                  {/* Lane outer — overflow:visible for trim handles only */}
                   <div style={{
                     position:"relative", flex:1,
-                    overflow:"visible",   // needed for trim handles
-                    isolation:"isolate",  // scopes z-index so clips never escape this row
+                    overflow:"visible",
+                    isolation:"isolate",
                   }} onClick={deselectClip}>
 
-                    {/* Inner clip mask — waveforms and grid are strictly contained here */}
-                    <div style={{
-                      position:"absolute", inset:0,
-                      overflow:"hidden",  // hard clip — nothing escapes
-                      background:"#0a0a0a",
-                    }}>
-                      {/* Beat grid — lowest layer */}
+                    {/* ── INNER MASK — hard overflow:hidden, everything inside is clipped ── */}
+                    <div style={{ position:"absolute", inset:0, overflow:"hidden", background:"#0a0a0a" }}>
+                      {/* Beat grid */}
                       {Array.from({length:Math.ceil(totalDur/spb)+1}, function(_,i){
                         return <div key={i} style={{ position:"absolute", left:i*spb*effectivePPS, top:0, bottom:0, width:1, background:i%timeSigNum===0?"#191919":"#131313", pointerEvents:"none" }} />;
                       })}
-                      {/* Recording waveform trail */}
+                      {/* Recording trail — inside mask, can never bleed left */}
                       {isRec&&recTrail.length>0&&(
                         <div style={{ position:"absolute", left:Math.max(0,currentTime*effectivePPS-recTrail.length*2), top:4, height:TRACK_H-8, display:"flex", alignItems:"center", pointerEvents:"none" }}>
-                          {recTrail.map(function(v,i){ return <div key={i} style={{ width:2, background:"#EF4444", borderRadius:1, height:Math.max(2,v*(TRACK_H-12)), opacity:0.4+0.6*(i/recTrail.length) }} />; })}
+                          {recTrail.map(function(v,i){ return <div key={i} style={{ width:2, background:track.color||"#EF4444", borderRadius:1, height:Math.max(2,v*(TRACK_H-12)), opacity:0.4+0.6*(i/recTrail.length) }} />; })}
                         </div>
                       )}
-                    </div>{/* end inner clip mask */}
-
-                    {/* Clips — rendered OVER the inner mask, but contained by isolation:isolate */}
-                    {clips.map(function(clip){
-                      if (!clip.audioBuffer) return null;
-                      const trimS   = clip.trimStart || 0;
-                      const trimE   = clip.trimEnd !== undefined ? clip.trimEnd : (clip.audioBuffer ? clip.audioBuffer.duration : clip.duration || 2);
-                      const clipW   = Math.max(20, (trimE - trimS) * effectivePPS);
-                      const clipL   = (clip.startTime || 0) * effectivePPS;
-                      const playedF = Math.max(0, Math.min(1, (currentTime - (clip.startTime||0)) / (trimE - trimS || 1)));
-                      const isSel   = selectedClipId === clip.id;
-                      const isActv  = clip.active !== false;
-                      const bufDur  = clip.audioBuffer ? clip.audioBuffer.duration : (clip.duration || 2);
-                      // Capture effectivePPS at render time for use in closures
-                      const pps     = effectivePPS;
-
-                      // Clamp to lane bounds — negative startTime clips must not bleed into header
-                      const clampedL = Math.max(0, clipL);
-                      const clampedW = Math.max(10, clipW - (clampedL - clipL));
-                      return (
-                        <div key={clip.id} style={{
-                          position:"absolute", left:clampedL, top:3, width:clampedW, height:TRACK_H-6,
-                          zIndex: isActv ? 2 : 1,
-                        }}>
-
-                          {/* Clip body — waveform strictly inside overflow:hidden container */}
+                      {/* Clip bodies — inside mask so waveforms never bleed outside lane */}
+                      {clips.map(function(clip){
+                        if (!clip.audioBuffer) return null;
+                        const trimS   = clip.trimStart || 0;
+                        const trimE   = clip.trimEnd !== undefined ? clip.trimEnd : (clip.audioBuffer ? clip.audioBuffer.duration : clip.duration || 2);
+                        const clipW   = Math.max(20, (trimE - trimS) * effectivePPS);
+                        const clipL   = Math.max(0, (clip.startTime || 0) * effectivePPS);
+                        const playedF = Math.max(0, Math.min(1, (currentTime - (clip.startTime||0)) / (trimE - trimS || 1)));
+                        const isSel   = selectedClipId === clip.id;
+                        const isActv  = clip.active !== false;
+                        return (
                           <div
+                            key={clip.id + "_body"}
                             onClick={function(e){ e.stopPropagation(); selectClip(clip.id); }}
                             onMouseDown={function(e){ handleRegionMouseDown(e, track, clip); }}
                             onTouchStart={function(e){ handleRegionTouchStart(e, track, clip); }}
                             onContextMenu={function(e){ handleRegionRightClick(e, track, clip); }}
                             style={{
-                              position:"absolute", left:0, top:0, right:0, bottom:0,
-                              borderRadius:6,
-                              overflow:"hidden",     // waveform canvas hard-clipped here
-                              touchAction:"none",
-                              // Layer: solid background first so waveform never bleeds through border
+                              position:"absolute", left:clipL, top:3, width:clipW, height:TRACK_H-6,
+                              borderRadius:6, overflow:"hidden", touchAction:"none",
                               background: isActv ? "#111" : "#0a0a0a",
-                              // Selection border — purely visual, no z change
-                              border: isSel
-                                ? "2px solid " + track.color
-                                : "1.5px solid " + (isActv ? track.color + "66" : track.color + "22"),
-                              boxShadow: isSel ? "inset 0 0 0 1px " + track.color + "33" : "none",
+                              border: isSel ? "2px solid "+track.color : "1.5px solid "+(isActv?track.color+"66":track.color+"22"),
+                              boxShadow: isSel ? "inset 0 0 0 1px "+track.color+"33" : "none",
                               opacity: isActv ? 1 : 0.3,
-                              cursor: "grab",
-                              transition: "border 0.12s, box-shadow 0.12s",
+                              cursor:"grab", zIndex: isActv ? 2 : 1,
+                              transition:"border 0.12s, box-shadow 0.12s",
                             }}
                           >
-                            {/* Waveform canvas — fills clip body exactly, clipped by overflow:hidden */}
-                            <WaveformCanvas
-                              audioBuffer={clip.audioBuffer}
-                              color={track.color}
-                              width={Math.max(1, Math.round(clampedW))}
-                              height={TRACK_H - 6}
-                              playedFraction={playedF}
-                              dim={!isActv}
-                            />
-                            {/* Clip label — above waveform, never bleeds out */}
-                            <div style={{
-                              position:"absolute", bottom:2, left:6, right:isSel?14:6,
-                              color: "rgba(255,255,255,0.85)",
-                              fontSize:7, fontWeight:700, pointerEvents:"none",
-                              textShadow:"0 1px 3px rgba(0,0,0,0.95)",
-                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                            }}>
-                              {clip.label}{!isActv ? " (inactive)" : ""}
+                            <WaveformCanvas audioBuffer={clip.audioBuffer} color={track.color}
+                              width={Math.max(1,Math.round(clipW))} height={TRACK_H-6}
+                              playedFraction={playedF} dim={!isActv} />
+                            <div style={{ position:"absolute", bottom:2, left:6, right:isSel?14:6, color:"rgba(255,255,255,0.85)", fontSize:7, fontWeight:700, pointerEvents:"none", textShadow:"0 1px 3px rgba(0,0,0,0.95)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                              {clip.label}{!isActv?" (inactive)":""}
                             </div>
-                            {/* Selection dot — inside, contained */}
-                            {isSel && <div style={{ position:"absolute", top:3, right:3, width:5, height:5, borderRadius:"50%", background:track.color, boxShadow:"0 0 4px "+track.color, pointerEvents:"none" }} />}
+                            {isSel&&<div style={{ position:"absolute", top:3, right:3, width:5, height:5, borderRadius:"50%", background:track.color, pointerEvents:"none" }} />}
                           </div>
+                        );
+                      })}
+                    </div>{/* end inner mask */}
 
-                          {/* LEFT trim handle — wider hit zone, touchAction:none propagates up */}
-                          <div
-                            style={{
-                              position:"absolute", left:-10, top:0, bottom:0, width:18,
-                              zIndex:3, touchAction:"none", cursor:"ew-resize",
-                              display:"flex", alignItems:"center", justifyContent:"center",
-                            }}
+                    {/* ── TRIM HANDLES — in outer overflow:visible div, positioned to match clip bodies ── */}
+                    {clips.map(function(clip){
+                      if (!clip.audioBuffer) return null;
+                      const trimS  = clip.trimStart || 0;
+                      const trimE  = clip.trimEnd !== undefined ? clip.trimEnd : (clip.audioBuffer ? clip.audioBuffer.duration : clip.duration || 2);
+                      const clipW  = Math.max(20, (trimE - trimS) * effectivePPS);
+                      const clipL  = Math.max(0, (clip.startTime || 0) * effectivePPS);
+                      const bufDur = clip.audioBuffer ? clip.audioBuffer.duration : (clip.duration || 2);
+                      const isSel  = selectedClipId === clip.id;
+                      const pps    = effectivePPS;
+                      return (
+                        <div key={clip.id+"_handles"} style={{ position:"absolute", left:clipL, top:3, width:clipW, height:TRACK_H-6, pointerEvents:"none", zIndex:3 }}>
+                          {/* Left */}
+                          <div style={{ position:"absolute", left:-10, top:0, bottom:0, width:18, cursor:"ew-resize", display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"all", touchAction:"none" }}
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
-                              const x0  = e.clientX;
-                              const ts0 = trimS;
-                              const cs0 = clip.startTime || 0;
-                              const mv  = function(me){
-                                const d  = (me.clientX - x0) / pps;
-                                const ts = Math.max(0, Math.min(ts0 + d, trimE - 0.05));
-                                updateClip(track.id, clip.id, { trimStart: +ts.toFixed(4), startTime: Math.max(0, +(cs0 + (ts - ts0)).toFixed(4)) });
-                              };
-                              const up  = function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
-                              document.addEventListener("mousemove", mv);
-                              document.addEventListener("mouseup",   up);
+                              const x0=e.clientX, ts0=trimS, cs0=clip.startTime||0;
+                              const mv=function(me){ const d=(me.clientX-x0)/pps; const ts=Math.max(0,Math.min(ts0+d,trimE-0.05)); updateClip(track.id,clip.id,{trimStart:+ts.toFixed(4),startTime:Math.max(0,+(cs0+(ts-ts0)).toFixed(4))}); };
+                              const up=function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
+                              document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
                             }}
                             onTouchStart={function(e){
                               e.stopPropagation(); e.preventDefault();
-                              const x0  = e.touches[0].clientX;
-                              const ts0 = trimS;
-                              const cs0 = clip.startTime || 0;
-                              const mv  = function(te){
-                                const d  = (te.touches[0].clientX - x0) / pps;
-                                const ts = Math.max(0, Math.min(ts0 + d, trimE - 0.05));
-                                updateClip(track.id, clip.id, { trimStart: +ts.toFixed(4), startTime: Math.max(0, +(cs0 + (ts - ts0)).toFixed(4)) });
-                              };
-                              const up  = function(){ document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
-                              document.addEventListener("touchmove", mv, { passive:false });
-                              document.addEventListener("touchend",  up, { passive:true  });
+                              const x0=e.touches[0].clientX, ts0=trimS, cs0=clip.startTime||0;
+                              const mv=function(te){ const d=(te.touches[0].clientX-x0)/pps; const ts=Math.max(0,Math.min(ts0+d,trimE-0.05)); updateClip(track.id,clip.id,{trimStart:+ts.toFixed(4),startTime:Math.max(0,+(cs0+(ts-ts0)).toFixed(4))}); };
+                              const up=function(){ document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
+                              document.addEventListener("touchmove",mv,{passive:false}); document.addEventListener("touchend",up,{passive:true});
                             }}
-                          >
-                            <div style={{ width:4, height:26, borderRadius:3, background:track.color, opacity: isSel ? 1 : 0.6, boxShadow:"0 0 5px "+track.color+"88" }} />
-                          </div>
-
-                          {/* RIGHT trim handle */}
-                          <div
-                            style={{
-                              position:"absolute", right:-10, top:0, bottom:0, width:18,
-                              zIndex:3, touchAction:"none", cursor:"ew-resize",
-                              display:"flex", alignItems:"center", justifyContent:"center",
-                            }}
+                          ><div style={{ width:4, height:26, borderRadius:3, background:track.color, opacity:isSel?1:0.5, boxShadow:"0 0 5px "+track.color+"88" }} /></div>
+                          {/* Right */}
+                          <div style={{ position:"absolute", right:-10, top:0, bottom:0, width:18, cursor:"ew-resize", display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"all", touchAction:"none" }}
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
-                              const x0  = e.clientX;
-                              const te0 = trimE;
-                              const mv  = function(me){
-                                const te = Math.max(trimS + 0.05, Math.min(te0 + (me.clientX - x0) / pps, bufDur));
-                                updateClip(track.id, clip.id, { trimEnd: +te.toFixed(4) });
-                              };
-                              const up  = function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
-                              document.addEventListener("mousemove", mv);
-                              document.addEventListener("mouseup",   up);
+                              const x0=e.clientX, te0=trimE;
+                              const mv=function(me){ const te=Math.max(trimS+0.05,Math.min(te0+(me.clientX-x0)/pps,bufDur)); updateClip(track.id,clip.id,{trimEnd:+te.toFixed(4)}); };
+                              const up=function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
+                              document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
                             }}
                             onTouchStart={function(e){
                               e.stopPropagation(); e.preventDefault();
-                              const x0  = e.touches[0].clientX;
-                              const te0 = trimE;
-                              const mv  = function(te){
-                                const newTE = Math.max(trimS + 0.05, Math.min(te0 + (te.touches[0].clientX - x0) / pps, bufDur));
-                                updateClip(track.id, clip.id, { trimEnd: +newTE.toFixed(4) });
-                              };
-                              const up  = function(){ document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
-                              document.addEventListener("touchmove", mv, { passive:false });
-                              document.addEventListener("touchend",  up, { passive:true  });
+                              const x0=e.touches[0].clientX, te0=trimE;
+                              const mv=function(te){ const newTE=Math.max(trimS+0.05,Math.min(te0+(te.touches[0].clientX-x0)/pps,bufDur)); updateClip(track.id,clip.id,{trimEnd:+newTE.toFixed(4)}); };
+                              const up=function(){ document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
+                              document.addEventListener("touchmove",mv,{passive:false}); document.addEventListener("touchend",up,{passive:true});
                             }}
-                          >
-                            <div style={{ width:4, height:26, borderRadius:3, background:track.color, opacity: isSel ? 1 : 0.6, boxShadow:"0 0 5px "+track.color+"88" }} />
-                          </div>
-
+                          ><div style={{ width:4, height:26, borderRadius:3, background:track.color, opacity:isSel?1:0.5, boxShadow:"0 0 5px "+track.color+"88" }} /></div>
                         </div>
                       );
                     })}
+
                   </div>{/* end lane outer */}
                 </div>
               );
