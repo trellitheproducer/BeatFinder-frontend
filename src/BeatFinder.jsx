@@ -4393,7 +4393,7 @@ function WheelPicker({ items, value, onChange, onClose, title, inline, label }) 
 // =============================================================================
 // WAVEFORM CANVAS — real PCM rendering
 // =============================================================================
-function WaveformCanvas({ audioBuffer, color, width, height, playedFraction }) {
+function WaveformCanvas({ audioBuffer, color, width, height, playedFraction, dim }) {
   const ref = useRef(null);
   useEffect(function () {
     const cv = ref.current;
@@ -4404,34 +4404,57 @@ function WaveformCanvas({ audioBuffer, color, width, height, playedFraction }) {
     const ctx = cv.getContext("2d");
     ctx.clearRect(0, 0, W, H);
     const mid = H / 2;
+
     if (!audioBuffer) {
-      ctx.strokeStyle = color + "33"; ctx.lineWidth = 1;
+      // Placeholder centre line
+      ctx.strokeStyle = color + "44";
+      ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
       return;
     }
+
     const raw = audioBuffer.getChannelData(0);
     const spp = raw.length / W;
-    ctx.fillStyle = color + "55";
+
+    // Pre-compute peaks once
+    const peaks = new Float32Array(W);
     for (let px = 0; px < W; px++) {
-      const s = Math.floor(px * spp), e = Math.floor((px + 1) * spp);
-      let peak = 0;
-      for (let i = s; i < e && i < raw.length; i++) { const v = Math.abs(raw[i]); if (v > peak) peak = v; }
-      const h = Math.max(1, peak * mid * 0.95);
+      const s = Math.floor(px * spp), e = Math.min(Math.floor((px+1)*spp)+1, raw.length);
+      let pk = 0;
+      for (let i = s; i < e; i++) { const v = Math.abs(raw[i]); if (v > pk) pk = v; }
+      peaks[px] = pk;
+    }
+
+    const playedPx = Math.floor(W * Math.min(1, Math.max(0, playedFraction)));
+
+    // dim = inactive take — use very low opacity
+    // active = full brightness
+    const unplayedAlpha = dim ? "28" : "88"; // hex alpha: 16% dim, 53% normal
+    const playedAlpha   = dim ? "44" : "ee"; // hex alpha: 27% dim, 93% played
+
+    // Unplayed portion
+    ctx.fillStyle = color + unplayedAlpha;
+    for (let px = playedPx; px < W; px++) {
+      const h = Math.max(1, peaks[px] * mid * 0.92);
       ctx.fillRect(px, mid - h, 1, h * 2);
     }
-    if (playedFraction > 0) {
-      const pp = Math.floor(W * Math.min(1, playedFraction));
-      ctx.fillStyle = color + "cc";
-      for (let px = 0; px < pp; px++) {
-        const s = Math.floor(px * spp), e = Math.floor((px + 1) * spp);
-        let peak = 0;
-        for (let i = s; i < e && i < raw.length; i++) { const v = Math.abs(raw[i]); if (v > peak) peak = v; }
-        const h = Math.max(1, peak * mid * 0.95);
+
+    // Played portion — brighter, progress indicator
+    if (playedPx > 0) {
+      ctx.fillStyle = color + playedAlpha;
+      for (let px = 0; px < playedPx; px++) {
+        const h = Math.max(1, peaks[px] * mid * 0.92);
         ctx.fillRect(px, mid - h, 1, h * 2);
       }
     }
-  }, [audioBuffer, width, height, color, playedFraction]);
-  return <canvas ref={ref} style={{ display:"block", width:"100%", height:"100%", imageRendering:"pixelated" }} />;
+  }, [audioBuffer, width, height, color, playedFraction, dim]);
+
+  return (
+    <canvas
+      ref={ref}
+      style={{ display:"block", width:"100%", height:"100%", imageRendering:"pixelated" }}
+    />
+  );
 }
 
 
@@ -4620,7 +4643,9 @@ function StudioScreen({ user, onExit }) {
   }));
   const totalW       = totalDur * effectivePPS + 300;
   const numBars      = Math.ceil(totalDur / spBar) + 2;
+  // Beat tracks always get purple/magenta. Vocal tracks cycle through bright high-contrast colours.
   const COLORS       = ["#3B82F6","#22C55E","#F59E0B","#EC4899","#8B5CF6","#06B6D4","#EF4444","#F97316"];
+  const VOCAL_COLORS = ["#38BDF8","#34D399","#FB923C","#F472B6","#A78BFA","#22D3EE","#F87171","#FBBF24"];
   const hasContent   = tracks.length > 0;
 
   // ── Load projects ─────────────────────────────────────────────
@@ -5218,7 +5243,7 @@ function StudioScreen({ user, onExit }) {
         addTrackObj({
           id: tId, name, type: type || "beat",
           isMuted: false, isSoloed: false,
-          color: type === "beat" ? "#C026D3" : COLORS[tracks.length % COLORS.length],
+          color: type === "beat" ? "#C026D3" : VOCAL_COLORS[tracks.filter(function(t){return t.type==="vocal";}).length % VOCAL_COLORS.length],
           clips: [{ id:tId+"_c0", audioBuffer:buf, url, startTime:0, duration:buf.duration,
             trimStart:0, trimEnd:buf.duration, label:"Main", active:true }],
         });
@@ -5352,7 +5377,7 @@ function StudioScreen({ user, onExit }) {
             name: "Vocal " + (tracks.filter(function (t) { return t.type === "vocal"; }).length + 1),
             type: "vocal",
             isMuted: false, isSoloed: false,
-            color: COLORS[tracks.length % COLORS.length],
+            color: VOCAL_COLORS[tracks.filter(function(t){return t.type==="vocal";}).length % VOCAL_COLORS.length],
             clips: [newClip],
           });
         }
@@ -6090,19 +6115,33 @@ function StudioScreen({ user, onExit }) {
                     </div>
                   </div>
 
-                  {/* Lane — overflow:visible so trim handles extend outside, isolation scopes z-index */}
-                  <div style={{ position:"relative", flex:1, background:"#090909", overflow:"visible", isolation:"isolate" }} onClick={deselectClip}>
-                    {/* Beat grid */}
-                    {Array.from({length:Math.ceil(totalDur/spb)+1}, function(_,i){
-                      return <div key={i} style={{ position:"absolute", left:i*spb*effectivePPS, top:0, bottom:0, width:1, background:i%timeSigNum===0?"#181818":"#111", pointerEvents:"none" }} />;
-                    })}
-                    {/* Recording waveform trail */}
-                    {isRec&&recTrail.length>0&&(
-                      <div style={{ position:"absolute", left:Math.max(0,currentTime*effectivePPS-recTrail.length*2), top:4, height:TRACK_H-8, display:"flex", alignItems:"center", pointerEvents:"none" }}>
-                        {recTrail.map(function(v,i){ return <div key={i} style={{ width:2, background:"#EF4444", borderRadius:1, height:Math.max(2,v*(TRACK_H-12)), opacity:0.4+0.6*(i/recTrail.length) }} />; })}
-                      </div>
-                    )}
-                    {/* Clips */}
+                  {/* Lane outer — overflow:visible ONLY so trim handles can extend beyond bounds
+                      The inner clip-mask div prevents waveforms from bleeding into the header */}
+                  <div style={{
+                    position:"relative", flex:1,
+                    overflow:"visible",   // needed for trim handles
+                    isolation:"isolate",  // scopes z-index so clips never escape this row
+                  }} onClick={deselectClip}>
+
+                    {/* Inner clip mask — waveforms and grid are strictly contained here */}
+                    <div style={{
+                      position:"absolute", inset:0,
+                      overflow:"hidden",  // hard clip — nothing escapes
+                      background:"#0a0a0a",
+                    }}>
+                      {/* Beat grid — lowest layer */}
+                      {Array.from({length:Math.ceil(totalDur/spb)+1}, function(_,i){
+                        return <div key={i} style={{ position:"absolute", left:i*spb*effectivePPS, top:0, bottom:0, width:1, background:i%timeSigNum===0?"#191919":"#131313", pointerEvents:"none" }} />;
+                      })}
+                      {/* Recording waveform trail */}
+                      {isRec&&recTrail.length>0&&(
+                        <div style={{ position:"absolute", left:Math.max(0,currentTime*effectivePPS-recTrail.length*2), top:4, height:TRACK_H-8, display:"flex", alignItems:"center", pointerEvents:"none" }}>
+                          {recTrail.map(function(v,i){ return <div key={i} style={{ width:2, background:"#EF4444", borderRadius:1, height:Math.max(2,v*(TRACK_H-12)), opacity:0.4+0.6*(i/recTrail.length) }} />; })}
+                        </div>
+                      )}
+                    </div>{/* end inner clip mask */}
+
+                    {/* Clips — rendered OVER the inner mask, but contained by isolation:isolate */}
                     {clips.map(function(clip){
                       if (!clip.audioBuffer) return null;
                       const trimS   = clip.trimStart || 0;
@@ -6123,7 +6162,7 @@ function StudioScreen({ user, onExit }) {
                           // NO touchAction here — clip body and trim handles manage their own
                         }}>
 
-                          {/* Clip body — drag/long-press/select. Touch handled imperatively in handleRegionTouchStart */}
+                          {/* Clip body — waveform strictly inside overflow:hidden container */}
                           <div
                             onClick={function(e){ e.stopPropagation(); selectClip(clip.id); }}
                             onMouseDown={function(e){ handleRegionMouseDown(e, track, clip); }}
@@ -6131,32 +6170,42 @@ function StudioScreen({ user, onExit }) {
                             onContextMenu={function(e){ handleRegionRightClick(e, track, clip); }}
                             style={{
                               position:"absolute", left:0, top:0, right:0, bottom:0,
-                              borderRadius:7, overflow:"hidden", touchAction:"none",
-                              // Selection = thicker border + inner glow — no z-index change
+                              borderRadius:6,
+                              overflow:"hidden",     // waveform canvas hard-clipped here
+                              touchAction:"none",
+                              // Layer: solid background first so waveform never bleeds through border
+                              background: isActv ? "#111" : "#0a0a0a",
+                              // Selection border — purely visual, no z change
                               border: isSel
                                 ? "2px solid " + track.color
-                                : "1.5px solid " + (isActv ? track.color + "77" : track.color + "33"),
-                              boxShadow: isSel
-                                ? "inset 0 0 0 1px " + track.color + "44"
-                                : "none",
-                              background: isSel ? track.color + "18" : isActv ? "#0e0e0e" : "#080808",
-                              cursor:"grab",
-                              opacity: isActv ? 1 : 0.35,
-                              transition:"border 0.12s, box-shadow 0.12s, background 0.12s",
+                                : "1.5px solid " + (isActv ? track.color + "66" : track.color + "22"),
+                              boxShadow: isSel ? "inset 0 0 0 1px " + track.color + "33" : "none",
+                              opacity: isActv ? 1 : 0.3,
+                              cursor: "grab",
+                              transition: "border 0.12s, box-shadow 0.12s",
                             }}
                           >
+                            {/* Waveform canvas — fills clip body exactly, clipped by overflow:hidden */}
                             <WaveformCanvas
                               audioBuffer={clip.audioBuffer}
-                              color={isActv ? track.color : track.color + "88"}
+                              color={track.color}
                               width={Math.max(1, Math.round(clipW))}
-                              height={TRACK_H-6}
+                              height={TRACK_H - 6}
                               playedFraction={playedF}
+                              dim={!isActv}
                             />
-                            <div style={{ position:"absolute", bottom:2, left:6, right:16, color: isSel ? "white" : "rgba(255,255,255,0.6)", fontSize:7, fontWeight:700, pointerEvents:"none", textShadow:"0 1px 4px #000", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                            {/* Clip label — above waveform, never bleeds out */}
+                            <div style={{
+                              position:"absolute", bottom:2, left:6, right:isSel?14:6,
+                              color: "rgba(255,255,255,0.85)",
+                              fontSize:7, fontWeight:700, pointerEvents:"none",
+                              textShadow:"0 1px 3px rgba(0,0,0,0.95)",
+                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                            }}>
                               {clip.label}{!isActv ? " (inactive)" : ""}
                             </div>
-                            {/* Selection indicator dot — inside the clip, no z overflow */}
-                            {isSel && <div style={{ position:"absolute", top:3, right:4, width:5, height:5, borderRadius:"50%", background:track.color, pointerEvents:"none" }} />}
+                            {/* Selection dot — inside, contained */}
+                            {isSel && <div style={{ position:"absolute", top:3, right:3, width:5, height:5, borderRadius:"50%", background:track.color, boxShadow:"0 0 4px "+track.color, pointerEvents:"none" }} />}
                           </div>
 
                           {/* LEFT trim handle — wider hit zone, touchAction:none propagates up */}
@@ -6236,7 +6285,7 @@ function StudioScreen({ user, onExit }) {
                         </div>
                       );
                     })}
-                  </div>
+                  </div>{/* end lane outer */}
                 </div>
               );
             })}
