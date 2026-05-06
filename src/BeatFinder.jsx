@@ -4612,71 +4612,26 @@ function StudioScreen({ user, onExit }) {
     }
   }, []);
 
-  // ── Claim iOS audio session on Studio mount (NO mic prompt) ───
-  // Playing a silent buffer registers this page as an audio app so
-  // headphone plug-in events route here instead of Siri/Voice Memos.
-  // We do NOT request mic permission here — that only happens when the
-  // user explicitly hits Record or adds a Vocal track.
+  // ── ONE-TIME mic permission on Studio mount ────────────────────
+  // We only request permission here — we do NOT keep the stream open.
+  // Keeping a stream open = orange mic indicator on iPhone constantly.
+  // Instead: request, immediately stop, browser remembers permission.
   useEffect(function () {
-    var claimAudioSession = function () {
+    var requestMicPermission = async function () {
       try {
-        var silentCtx = new (window.AudioContext || window.webkitAudioContext)();
-        var buf = silentCtx.createBuffer(1, 1, 22050);
-        var src = silentCtx.createBufferSource();
-        src.buffer = buf;
-        src.connect(silentCtx.destination);
-        src.start(0);
-        setTimeout(function () {
-          try { silentCtx.close(); } catch (e) {}
-        }, 500);
-      } catch (e) {}
-    };
-    claimAudioSession();
-  }, []);
-
-  // ── Lazy mic permission — called only when user initiates recording ──
-  // Checks the PermissionsAPI first so we never re-prompt if already granted.
-  // Sets micReady/micDenied so the rest of the recording flow can proceed.
-  const ensureMicPermission = async function () {
-    // If already confirmed ready, skip the getUserMedia call entirely
-    if (micReady) return true;
-
-    // PermissionsAPI: check without prompting (not supported on all browsers)
-    if (navigator.permissions && navigator.permissions.query) {
-      try {
-        const status = await navigator.permissions.query({ name: "microphone" });
-        if (status.state === "granted") {
-          setMicReady(true);
-          return true;
-        }
-        if (status.state === "denied") {
-          setMicDenied(true);
-          setError("Mic access denied. Go to Settings → Safari → Microphone → Allow.");
-          return false;
-        }
-        // state === "prompt" — fall through to getUserMedia below
+        var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Immediately stop — we just needed the permission grant
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        setMicReady(true);
       } catch (e) {
-        // PermissionsAPI not available — fall through
+        setMicDenied(true);
+        if (e.name === "NotAllowedError") {
+          setError("Mic access denied. Go to Settings → Safari → Microphone → Allow.");
+        }
       }
-    }
-
-    // Ask the user (only reaches here on first-ever request or when state is "prompt")
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(function (t) { t.stop(); }); // release immediately
-      setMicReady(true);
-      setMicDenied(false);
-      return true;
-    } catch (e) {
-      setMicDenied(true);
-      if (e.name === "NotAllowedError") {
-        setError("Mic access denied. Go to Settings → Safari → Microphone → Allow.");
-      } else {
-        setError("Could not access microphone: " + e.message);
-      }
-      return false;
-    }
-  };
+    };
+    requestMicPermission();
+  }, []);
 
   // ── Computed ──────────────────────────────────────────────────
   const effectivePPS = PPS * zoom;
@@ -4725,34 +4680,8 @@ function StudioScreen({ user, onExit }) {
 
   useEffect(function () {
     checkHeadphones();
-
-    // When headphones plug in or out, iOS re-routes audio hardware and
-    // suspends any active AudioContext. Resume it after a short delay
-    // (iOS needs ~300ms to finish the route change) so playback and
-    // recording keep working without requiring a manual tap.
-    const handleDeviceChange = async function () {
-      await checkHeadphones();
-      setTimeout(function () {
-        if (actxRef.current && actxRef.current.state === "suspended") {
-          actxRef.current.resume().catch(function () {});
-        }
-        // If playback was running, restart from current position so
-        // the track doesn't go permanently silent after re-routing.
-        if (isPlayingRef.current) {
-          const elapsed = actxRef.current
-            ? actxRef.current.currentTime - masterStartRef.current
-            : 0;
-          const resumeAt = Math.max(0, playheadAtRef.current + elapsed);
-          stopAll();
-          doPlay(resumeAt);
-        }
-      }, 350);
-    };
-
-    navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
-    return function () {
-      navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
-    };
+    navigator.mediaDevices.addEventListener("devicechange", checkHeadphones);
+    return function(){ navigator.mediaDevices.removeEventListener("devicechange", checkHeadphones); };
   }, []);
 
   // Auto-stop if headphones pulled during monitoring
@@ -5351,12 +5280,7 @@ function StudioScreen({ user, onExit }) {
 
   const [selectedTrackId, setSelectedTrackId] = useState(null); // which vocal track records into
 
-  const startCountIn = async function (trackId) {
-    // Request mic permission only now — first time the user tries to record.
-    // On subsequent calls the PermissionsAPI short-circuits and no prompt appears.
-    const allowed = await ensureMicPermission();
-    if (!allowed) return;
-
+  const startCountIn = function (trackId) {
     const vocalTracks = tracks.filter(function(t){ return t.type === "vocal"; });
     let targetId = trackId || selectedTrackId;
     if (!targetId) {
@@ -5419,12 +5343,6 @@ function StudioScreen({ user, onExit }) {
         clearInterval(recIntRef.current);
         try { analyser.disconnect(); } catch(e) {}
         try { srcNode.disconnect(); } catch(e) {}
-
-        // iOS suspends the AudioContext when the mic stream closes.
-        // Resume it so playback still works immediately after recording.
-        if (actxRef.current && actxRef.current.state === "suspended") {
-          try { await actxRef.current.resume(); } catch(e) {}
-        }
 
         const dur  = recDurRef.current;
         if (dur < 0.1) {
@@ -6338,10 +6256,7 @@ function StudioScreen({ user, onExit }) {
             </div>
             <input type="file" accept=".mp3,.wav,.m4a,.aac,audio/*" multiple onChange={function(e){handleFileUpload(e,"beat");}} style={{ display:"none" }} />
           </label>
-          <div style={{ padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer" }} onClick={async function(){
-            // Request mic permission now — only prompts on first-ever tap, silent after that
-            const allowed = await ensureMicPermission();
-            if (!allowed) { setShowAddMenu(false); return; }
+          <div style={{ padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer" }} onClick={function(){
             // Just create the track — recording only starts when user presses record button
             const newId = Date.now() + Math.random();
             const vocalN = tracks.filter(function(t){return t.type==="vocal";}).length + 1;
