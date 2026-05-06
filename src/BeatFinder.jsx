@@ -4918,18 +4918,30 @@ function StudioScreen({ user, onExit }) {
       monitorGainRef.current.gain.setTargetAtTime(0, monitorCtxRef.current.currentTime, 0.02);
     }
     setTimeout(function () {
-      // Disconnect all nodes — leave the stream and AudioContext alive for next toggle
-      try { monitorGainRef.current    && monitorGainRef.current.disconnect(); }    catch(e) {}
-      try { monitorSrcRef.current     && monitorSrcRef.current.disconnect(); }     catch(e) {}
+      // Disconnect all Web Audio nodes
+      try { monitorGainRef.current     && monitorGainRef.current.disconnect(); }     catch(e) {}
+      try { monitorSrcRef.current      && monitorSrcRef.current.disconnect(); }      catch(e) {}
       try { monitorAnalyserRef.current && monitorAnalyserRef.current.disconnect(); } catch(e) {}
-      // Suspend (not close) the AudioContext so it wakes instantly next time
-      if (monitorCtxRef.current && monitorCtxRef.current.state === "running") {
-        monitorCtxRef.current.suspend().catch(function(){});
+
+      // ── Fully stop the mic stream tracks ──────────────────────────────────
+      // On iOS, any live getUserMedia track holds the audio session in "recording mode"
+      // which forces a larger output buffer and adds latency to ALL playback — including
+      // the beat. Stopping the tracks releases the session back to playback-only mode.
+      // Only do this when not actively recording.
+      if (monitorStreamRef.current && !mediaRecRef.current) {
+        monitorStreamRef.current.getTracks().forEach(function(t) { t.stop(); });
+        micStreamRef.current = null; // clear so next toggle opens a fresh stream
       }
+
       monitorStreamRef.current   = null;
       monitorSrcRef.current      = null;
       monitorGainRef.current     = null;
       monitorAnalyserRef.current = null;
+
+      // Suspend (not close) the AudioContext so it wakes instantly on next toggle
+      if (monitorCtxRef.current && monitorCtxRef.current.state === "running") {
+        monitorCtxRef.current.suspend().catch(function(){});
+      }
     }, 60);
     setMonitoringOn(false);
   };
