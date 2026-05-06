@@ -6016,7 +6016,7 @@ function StudioScreen({ user, onExit }) {
         <div ref={scrollRef} style={{ flex:1, position:"relative", overflow:"hidden" }}>
 
           {/* ── CENTRED PLAYHEAD — pinned at 50%, never moves ── */}
-          <div style={{ position:"absolute", top:0, bottom:0, left: "SIDEBAR_W", width:1, zIndex:30, pointerEvents:"none", transform:"translateX(-0.5px)" }}>
+          <div style={{ position:"absolute", top:0, bottom:0, left: PLAYHEAD_X + "px", width:1, zIndex:30, pointerEvents:"none", transform:"translateX(-0.5px)" }}>
             <div style={{ position:"absolute", top:0, left:-5, width:0, height:0, borderLeft:"5px solid transparent", borderRight:"5px solid transparent", borderTop:"8px solid white" }} />
             <div style={{ position:"absolute", top:0, bottom:0, left:0, width:1, background:"rgba(255,255,255,0.9)" }} />
           </div>
@@ -6024,7 +6024,7 @@ function StudioScreen({ user, onExit }) {
           {/* Scrollable content — moved via translateX, NOT scroll */}
           <div
             ref={trackContainerRef}
-            style={{ position:"absolute", top:0, left:0, willChange:"transform", overflowY:"auto", height:"100%" }}
+            style={{ position:"absolute", top:0, left:0, overflow:"auto", height:"100%" }}
             onScroll={handleScroll}
           >
             {/* Width = total timeline + half screen on each side so content never runs out */}
@@ -7005,7 +7005,7 @@ export default function BeatFinder() {
               {/* Active indicator dot */}
               {isActive && (
                 <div style={{
-                  position: "absolute", top: 0, left: "SIDEBAR_W", transform: "translateX(-0.5%)",
+                  position: "absolute", top: 0, left: SIDEBAR_W + "px", transform: "translateX(-0.5%)",
                   width: 20, height: 2, borderRadius: 1,
                   background: activeColor,
                   boxShadow: "0 0 8px " + activeColor,
