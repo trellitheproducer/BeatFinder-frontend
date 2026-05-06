@@ -5682,18 +5682,7 @@ function StudioScreen({ user, onExit }) {
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
-      style={{
-  background:"#080808",
-  flex:1,
-  minHeight:0,
-  display:"flex",
-  flexDirection:"column",
-  fontFamily:"'DM Sans',sans-serif",
-  overflow:"hidden",
-  WebkitUserSelect:"none",
-  userSelect:"none",
-  WebkitTouchCallout:"none"
-}}
+      style={{ background:"#080808", height:"calc(100vh - env(safe-area-inset-bottom))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
     >
       {/* ── Overlays ── */}
@@ -5811,7 +5800,7 @@ function StudioScreen({ user, onExit }) {
             <div style={{ margin:"0 16px 16px",background:"#1a1a1a",borderRadius:14,overflow:"hidden" }}>
               <div style={{ padding:"14px 16px 6px",color:"white",fontWeight:700,fontSize:13 }}>Tempo</div>
               <div style={{ display:"flex",alignItems:"stretch",borderTop:"1px solid #222" }}>
-                <button onClick={function(){ setBpm(function(b){ return Math.max(40,b-1); }); }} style={{ flex:1,background:"none",border:"none",borderRight:"1px solid #222",color:"white",fontSize:28,cursor:"pointer",padding:"14px 0" }}>−</button>
+                <button onClick={function(){ setBpm(function(b){ return Math.max(40,b-1); }); }} style={{ flex:1,background:"none",border:"none",borderRight:"1px solid ",color:"white",fontSize:28,cursor:"pointer",padding:"14px 0" }}>−</button>
                 <div onClick={function(){
                   const taps=(window._bfTaps=window._bfTaps||[]),now=Date.now();
                   if(now-(taps[taps.length-1]||0)>3000)taps.length=0;
@@ -5980,7 +5969,7 @@ function StudioScreen({ user, onExit }) {
         {/* LEFT SIDEBAR — headers locked horizontally */}
         <div
           ref={sidebarRef}
-          style={{ width:SIDEBAR_W,flexShrink:0,overflowY:"auto",overflowX:"hidden",background:"#0a0a0a",borderRight:"1px solid #141414",zIndex:10 }}
+          style={{ width:SIDEBAR_W,flexShrink:0,overflowY:"auto",overflowX:"hidden",background:"#0a0a0a",borderRight:"none",zIndex:10 }}
           onScroll={function(e){ if(scrollRef.current) scrollRef.current.scrollTop=e.target.scrollTop; }}
         >
           {/* Ruler height spacer — must match RULER_H in right column exactly */}
