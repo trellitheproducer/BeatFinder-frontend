@@ -11,12 +11,7 @@ const LOADER_STYLE = `
   @keyframes bf-scale-in  { from { opacity:0; transform:scale(0.96); } to { opacity:1; transform:scale(1); } }
   @keyframes bf-play-pulse { 0%,100% { box-shadow:0 0 0 0 rgba(192,38,211,0.4); } 70% { box-shadow:0 0 0 10px rgba(192,38,211,0); } }
   @keyframes bf-tab-in     { from { opacity:0; transform:translateX(8px); } to { opacity:1; transform:translateX(0); } }
-  .bf-page {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  animation: bf-fadein-up 0.28s cubic-bezier(0.22,1,0.36,1) both;
-}
+  .bf-page    { animation: bf-fadein-up 0.28s cubic-bezier(0.22,1,0.36,1) both; }
   .bf-card    { animation: bf-scale-in  0.22s cubic-bezier(0.22,1,0.36,1) both; }
   .bf-tab-in  { animation: bf-tab-in   0.22s cubic-bezier(0.22,1,0.36,1) both; }
   .bf-btn     { transition: transform 0.12s ease, opacity 0.12s ease; }
@@ -1838,7 +1833,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
   );
 
   return (
-    <div className="bf-page" style={{ overflowX: "hidden" }}>
+    <div className="bf-page" style={{ paddingBottom: 100, overflowX: "hidden" }}>
 
       {/* Logo */}
       <div style={{ padding: "18px 16px 0" }}>
@@ -4409,30 +4404,9 @@ function WheelPicker({ items, value, onChange, onClose, title, inline, label }) 
   if (inline) return wheel;
 
   return (
-    <div
-  style={{
-    position:"absolute",
-    inset:0,
-    zIndex:9999,
-    display:"flex",
-    alignItems:"flex-end",
-    pointerEvents: "box-none"
-  }}
-  onClick={onClose}
->
-<div style={{
-  position:"absolute",
-  inset:0,
-  background:"rgba(0,0,0,0.7)",
-  pointerEvents:"none"
-}} />
-      <div style={{
-  width:"100%",
-  background:"#1c1c1c",
-  borderRadius:"20px 20px 0 0",
-  paddingBottom:"calc(20px + env(safe-area-inset-bottom))",
-  pointerEvents:"auto"
-}}
+    <div style={{ position:"absolute", inset:0, zIndex:9999, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"flex-end" }}
+      onClick={onClose}>
+      <div style={{ width:"100%", background:"#1c1c1c", borderRadius:"20px 20px 0 0", paddingBottom:"calc(20px + env(safe-area-inset-bottom))" }}
         onClick={function(e){ e.stopPropagation(); }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px 12px", borderBottom:"1px solid #2a2a2a" }}>
           <button onClick={onClose} style={{ background:"none", border:"none", color:"#888", fontSize:14, cursor:"pointer" }}>Cancel</button>
@@ -4499,7 +4473,7 @@ function WaveformCanvas({ audioBuffer, color, width, height, playedFraction }) {
 // =============================================================================
 // useHistory — undo/redo for tracks state
 // =============================================================================
-function useCustomHistory(initial) {
+function useHistory(initial) {
   const past    = useRef([]);
   const future  = useRef([]);
   const [state, setStateRaw] = React.useState(initial);
@@ -4555,7 +4529,7 @@ function StudioScreen({ user, onExit }) {
   const SIDEBAR_W   = 140;       // left column: track headers (locked horizontally)
   const TRACK_H     = 68;        // each track row height
   const RULER_H     = 32;        // timeline ruler height
-  const PLAYHEAD_X  = SIDEBAR_W;         // playhead flush with sidebar edge — no gap
+  const PLAYHEAD_X  = 0;         // playhead flush with sidebar edge — no gap
 
   // ── Track array: [{id, name, type, audioBuffer, url, isMuted, isSoloed, startTime, duration}]
   const [tracks, setTracks, undoTracks, redoTracks, canUndo, canRedo] = useHistory([]);
@@ -4645,7 +4619,7 @@ function StudioScreen({ user, onExit }) {
   // Set initial position — Bar1 under centred playhead at t=0
   useEffect(function () {
     if (scrollRef.current && trackContainerRef.current) {
-      setOffsetForTime(0);
+      if(scrollRef.current) scrollRef.current.scrollLeft = 0;
     }
   }, []);
 
@@ -4807,12 +4781,9 @@ function StudioScreen({ user, onExit }) {
   // With paddingLeft=PLAYHEAD_X on inner div, Bar1 (x=0) sits exactly under the playhead.
   // scrollLeft=0 → t=0 (Bar1 under playhead). scrollLeft=t*effectivePPS → t plays through.
   const getTimeFromScroll = function () {
-    // With centred playhead: t = -offsetX / PPS  (offsetX is negative during playback)
-    const el = trackContainerRef.current;
+    const el = scrollRef.current;
     if (!el) return 0;
-    const offsetX = parseFloat(el.style.transform.replace("translateX(","").replace("px)","") || "0");
-    const colW = scrollRef.current ? scrollRef.current.clientWidth : 300;
-    return Math.max(0, (colW / 2 - offsetX) / effectivePPS);
+    return Math.max(0, el.scrollLeft / effectivePPS);
   };
 
   // Set the waveform container's translateX so Bar1 is under the centred playhead
@@ -4820,12 +4791,9 @@ function StudioScreen({ user, onExit }) {
   // At t=0: offsetX = colWidth/2  → Bar1 is at the centre
   // At t=5s: offsetX = colWidth/2 - 500  → content scrolled 500px left
   const setOffsetForTime = function (t) {
+    // Now uses scrollLeft — translateX is gone
     const el = scrollRef.current;
-    const tc = trackContainerRef.current;
-    if (!el || !tc) return;
-    const colW = el.clientWidth;
-    const offsetX = colW / 2 - t * effectivePPS;
-    tc.style.transform = "translateX(" + offsetX + "px)";
+    if (el) el.scrollLeft = Math.max(0, t * effectivePPS);
   };
 
   // ── RAF playback loop ─────────────────────────────────────────
@@ -4838,9 +4806,10 @@ function StudioScreen({ user, onExit }) {
       if (!actx) return;
       const elapsed = actx.currentTime - masterStartRef.current;
       const t       = playheadAtRef.current + elapsed;
-      // Move waveforms directly — bypasses React for animation smoothness
-      setOffsetForTime(t);
-      // Update timer display at ~30fps only (saves CPU)
+      // Drive scroll position — content moves, playhead stays computed
+      const el = scrollRef.current;
+      if (el) el.scrollLeft = Math.max(0, t * zoomRef.current * 100);
+      // Update timer at ~30fps
       if (!lastUIUpdate || ts - lastUIUpdate > 33) {
         setCurrentTime(t);
         lastUIUpdate = ts;
@@ -5064,27 +5033,19 @@ function StudioScreen({ user, onExit }) {
   // With LOOP on: first tap sets loop-in, second tap (to the right) sets loop-out
   const handleRulerTap = function (clientX) {
     const el = scrollRef.current;
-    const tc = trackContainerRef.current;
-    if (!el || !tc) return;
-    const rect    = el.getBoundingClientRect();
-    const colW    = el.clientWidth;
-    const offsetX = parseFloat((tc.style.transform || "").replace("translateX(","").replace("px)","")) || (colW / 2);
-    const tapX    = clientX - rect.left;
-    const t       = Math.max(0, (tapX - offsetX) / effectivePPS);
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    // Ruler lane starts after SIDEBAR_W. Convert tap → timeline time.
+    const laneX = clientX - rect.left - SIDEBAR_W + el.scrollLeft;
+    const t     = Math.max(0, laneX / effectivePPS);
 
     if (loopEnabled) {
-      // Tap sets loop-in, second tap to the right sets loop-out
-      if (t > loopIn + 0.1) {
-        setLoopOut(t);
-      } else {
-        setLoopIn(t);
-        setLoopOut(Math.max(t + 1, loopOut));
-      }
+      if (t > loopIn + 0.1) { setLoopOut(t); }
+      else { setLoopIn(t); setLoopOut(Math.max(t + 1, loopOut)); }
     }
-    // Always seek on tap
     setCurrentTime(t);
     playheadAtRef.current = t;
-    setOffsetForTime(t);
+    el.scrollLeft = Math.max(0, t * effectivePPS);
     if (isPlayingRef.current) { stopAll(); doPlay(t); setIsPlaying(true); }
   };
 
@@ -5751,7 +5712,7 @@ function StudioScreen({ user, onExit }) {
                   setTracks([]); setProjectName("New Project");
                   setBpm(120); setProjectKey("C major"); setTimeSigNum(4);
                   setCurrentTime(0); setIsSaved(true); setSelectedTrackId(null);
-                  setOffsetForTime(0);
+                  if(scrollRef.current) scrollRef.current.scrollLeft = 0;
                 }
               }} style={{ background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:12,color:"#EF4444",fontWeight:700,fontSize:15,padding:"14px",cursor:"pointer" }}>Don't Save</button>
               <button onClick={function(){ setUnsavedAlert(false); }} style={{ background:"none",border:"1px solid #2a2a2a",borderRadius:12,color:"#666",fontSize:14,padding:"12px",cursor:"pointer" }}>Cancel</button>
@@ -5800,7 +5761,7 @@ function StudioScreen({ user, onExit }) {
             <div style={{ margin:"0 16px 16px",background:"#1a1a1a",borderRadius:14,overflow:"hidden" }}>
               <div style={{ padding:"14px 16px 6px",color:"white",fontWeight:700,fontSize:13 }}>Tempo</div>
               <div style={{ display:"flex",alignItems:"stretch",borderTop:"1px solid #222" }}>
-                <button onClick={function(){ setBpm(function(b){ return Math.max(40,b-1); }); }} style={{ flex:1,background:"none",border:"none",borderRight:"1px solid ",color:"white",fontSize:28,cursor:"pointer",padding:"14px 0" }}>−</button>
+                <button onClick={function(){ setBpm(function(b){ return Math.max(40,b-1); }); }} style={{ flex:1,background:"none",border:"none",borderRight:"1px solid #222",color:"white",fontSize:28,cursor:"pointer",padding:"14px 0" }}>−</button>
                 <div onClick={function(){
                   const taps=(window._bfTaps=window._bfTaps||[]),now=Date.now();
                   if(now-(taps[taps.length-1]||0)>3000)taps.length=0;
@@ -5908,7 +5869,7 @@ function StudioScreen({ user, onExit }) {
                   setTracks([]); setProjectName("New Project");
                   setBpm(120); setProjectKey("C major"); setTimeSigNum(4);
                   setCurrentTime(0); setIsSaved(true); setSelectedTrackId(null);
-                  setOffsetForTime(0);
+                  if(scrollRef.current) scrollRef.current.scrollLeft = 0;
                 }
               },50);},sep:true},
             ].map(function(item){
@@ -5959,213 +5920,217 @@ function StudioScreen({ user, onExit }) {
       </div>
       {monitorWarn && <div style={{ background:"rgba(245,158,11,0.1)",borderBottom:"1px solid rgba(245,158,11,0.2)",color:"#F59E0B",fontSize:11,padding:"4px 16px",textAlign:"center",flexShrink:0 }}>{monitorWarn}</div>}
 
-      {/* ══ TWO-COLUMN DAW LAYOUT ════════════════════════════════
-          LEFT:  sidebar — headers locked horizontally, scroll vertically
-          RIGHT: timeline — single horizontal scroll container
-                           ruler + all track lanes share ONE scrollLeft
-      ══════════════════════════════════════════════════════════ */}
-      <div style={{ flex:1,display:"flex",minHeight:0,overflow:"hidden" }}>
+      {/* ══ DAW LAYOUT — sticky track headers + shared horizontal scroll ════
+          Single scrollable div holds ruler + all track rows.
+          Track name column uses position:sticky,left:0 — never scrolls away.
+          Ruler uses position:sticky,top:0 — always visible.
+          One scrollLeft drives everything — zero sync bugs.
+      ══════════════════════════════════════════════════════════════════════ */}
+      <div style={{ flex:1, minHeight:0, overflow:"hidden", position:"relative" }}>
 
-        {/* LEFT SIDEBAR — headers locked horizontally */}
-        <div
-          ref={sidebarRef}
-          style={{ width:SIDEBAR_W,flexShrink:0,overflowY:"auto",overflowX:"hidden",background:"#0a0a0a",borderRight:"1px solid #141414",zIndex:10 }}
-          onScroll={function(e){ if(scrollRef.current) scrollRef.current.scrollTop=e.target.scrollTop; }}
-        >
-          {/* Ruler height spacer — must match RULER_H in right column exactly */}
-          <div style={{ height:RULER_H,background:"#0c0c0c",borderBottom:"1px solid #1a1a1a",display:"flex",alignItems:"center",paddingLeft:8,flexShrink:0 }}>
-            <span style={{ color:"#333",fontSize:9 }}>TRACKS</span>
-          </div>
-
-          {/* One row per track */}
-          {tracks.map(function(track){
-            const isRec = isRecording && recTrackId === track.id;
-            const hasSolo = tracks.some(function(t){return t.isSoloed;});
-            const dimmed = hasSolo && !track.isSoloed;
-            return (
-                <div key={track.id}
-                  onClick={function(){ if(track.type==="vocal") setSelectedTrackId(track.id); }}
-                  style={{ height:TRACK_H,borderBottom:"1px solid #0f0f0f",padding:"5px 7px",display:"flex",flexDirection:"column",justifyContent:"space-between",opacity:dimmed?0.4:1,background:selectedTrackId===track.id?"rgba(192,38,211,0.06)":"transparent",cursor:track.type==="vocal"?"pointer":"default" }}>
-                  <div style={{ display:"flex",alignItems:"center",gap:4 }}>
-                    <div style={{ width:7,height:7,borderRadius:"50%",background:isRec?"#EF4444":track.color,flexShrink:0 }} />
-                    <span style={{ color:"white",fontSize:10,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1 }}>{track.name}</span>
-                    <span style={{ color:"#444",fontSize:9 }}>{track.type==="beat"?"🎵":"🎙"}</span>
-                  </div>
-                  <div style={{ display:"flex",gap:3,alignItems:"center" }}>
-                    <button onClick={function(e){ e.stopPropagation(); toggleMute(track.id); }} style={{ background:track.isMuted?"rgba(245,158,11,0.2)":"#1a1a1a",border:"1px solid "+(track.isMuted?"#F59E0B":"#2a2a2a"),borderRadius:4,color:track.isMuted?"#F59E0B":"#555",fontSize:8,padding:"2px 4px",cursor:"pointer",fontWeight:700 }}>M</button>
-                    <button onClick={function(e){ e.stopPropagation(); toggleSolo(track.id); }} style={{ background:track.isSoloed?"rgba(34,197,94,0.2)":"#1a1a1a",border:"1px solid "+(track.isSoloed?"#22C55E":"#2a2a2a"),borderRadius:4,color:track.isSoloed?"#22C55E":"#555",fontSize:8,padding:"2px 4px",cursor:"pointer",fontWeight:700 }}>S</button>
-                    {/* FX button */}
-                    <button onClick={function(e){ e.stopPropagation(); setFxTrackId(function(v){ return v===track.id?null:track.id; }); }} style={{ background:fxTrackId===track.id?"rgba(139,92,246,0.2)":"#1a1a1a",border:"1px solid "+(fxTrackId===track.id?"#8B5CF6":"#2a2a2a"),borderRadius:4,color:fxTrackId===track.id?"#8B5CF6":"#555",fontSize:7,padding:"2px 4px",cursor:"pointer",fontWeight:700 }}>FX</button>
-                    {/* Takes badge */}
-                    {track.clips&&track.clips.length>1&&(
-                      <button onClick={function(e){ e.stopPropagation(); setShowTakes(function(v){ return v===track.id?null:track.id; }); }} style={{ background:showTakes===track.id?"rgba(59,130,246,0.2)":"#1a1a1a",border:"1px solid "+(showTakes===track.id?"#3B82F6":"#2a2a2a"),borderRadius:4,color:showTakes===track.id?"#3B82F6":"#555",fontSize:7,padding:"2px 4px",cursor:"pointer",fontWeight:700 }}>{track.clips.length}✦</button>
-                    )}
-                    <button onClick={function(e){ e.stopPropagation(); removeTrack(track.id); }} style={{ background:"none",border:"none",color:"#333",fontSize:10,cursor:"pointer",marginLeft:"auto",padding:"0 2px" }}>✕</button>
-                  </div>
-                </div>
-            );
-          })}
-
-          {/* Add track button */}
-          <button onClick={function(e){ e.stopPropagation();setShowAddMenu(function(v){return !v;}); }} style={{ width:"100%",height:52,background:showAddMenu?"rgba(192,38,211,0.1)":"#111",border:"none",borderBottom:"1px solid #1a1a1a",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>
-            <span style={{ color:showAddMenu?"#C026D3":"#555",fontSize:28,fontWeight:300,lineHeight:1 }}>+</span>
-          </button>
+        {/* Playhead — absolute over the whole DAW area, moves with currentTime */}
+        <div style={{
+          position:"absolute",
+          top:0, bottom:0,
+          left: SIDEBAR_W + currentTime * effectivePPS - (scrollRef.current ? scrollRef.current.scrollLeft : 0),
+          width:1, zIndex:40, pointerEvents:"none",
+          transform:"translateX(-0.5px)",
+        }}>
+          <div style={{ position:"absolute", top:RULER_H-8, left:-5, width:0, height:0, borderLeft:"5px solid transparent", borderRight:"5px solid transparent", borderTop:"8px solid white" }} />
+          <div style={{ position:"absolute", top:RULER_H, bottom:0, width:1, background:"rgba(255,255,255,0.88)" }} />
+          <div style={{ position:"absolute", top:0, height:RULER_H, width:1, background:"rgba(255,255,255,0.22)" }} />
         </div>
 
-        {/* RIGHT TIMELINE — fixed viewport, content moves via translateX */}
-        <div ref={scrollRef} style={{ flex:1, position:"relative", overflow:"hidden" }}>
+        {/* THE single scroll container — overflow-x:scroll drives ruler + lanes together */}
+        <div
+          ref={scrollRef}
+          style={{
+            width:"100%", height:"100%",
+            overflowX:"scroll", overflowY:"auto",
+            WebkitOverflowScrolling:"touch",
+            scrollbarWidth:"thin", scrollbarColor:"#2a2a2a #0a0a0a",
+          }}
+          onScroll={function(e){
+            if (!isPlayingRef.current) {
+              const t = Math.max(0, e.target.scrollLeft / effectivePPS);
+              setCurrentTime(t);
+              playheadAtRef.current = t;
+            }
+            // Trigger re-render so playhead left value updates
+            setCurrentTime(function(p){ return p; });
+          }}
+        >
+          {/* Inner content — wide enough for whole project */}
+          <div style={{ minWidth: SIDEBAR_W + totalW + 400, position:"relative" }}>
 
-          {/* ── CENTRED PLAYHEAD — pinned at 50%, never moves ── */}
-          <div style={{ position:"absolute", top:0, bottom:0, left: PLAYHEAD_X + "px", width:1, zIndex:30, pointerEvents:"none", transform:"translateX(-0.5px)" }}>
-            <div style={{ position:"absolute", top:0, left:-5, width:0, height:0, borderLeft:"5px solid transparent", borderRight:"5px solid transparent", borderTop:"8px solid white" }} />
-            <div style={{ position:"absolute", top:0, bottom:0, left:0, width:1, background:"rgba(255,255,255,0.9)" }} />
-          </div>
+            {/* ── RULER ROW — sticky top so it stays visible on vertical scroll ── */}
+            <div style={{ display:"flex", position:"sticky", top:0, zIndex:25, height:RULER_H }}>
 
-          {/* Scrollable content — moved via translateX, NOT scroll */}
-          <div
-            ref={trackContainerRef}
-            style={{ position:"absolute", top:0, left:0, overflow:"auto", height:"100%" }}
-            onScroll={handleScroll}
-          >
-            {/* Width = total timeline + half screen on each side so content never runs out */}
-            <div style={{ minWidth:totalW + 2000, position:"relative" }}>
+              {/* Sticky corner: TRACKS label */}
+              <div style={{
+                width:SIDEBAR_W, flexShrink:0,
+                position:"sticky", left:0, zIndex:26,
+                background:"#0a0a0a", borderRight:"1px solid #141414",
+                borderBottom:"1px solid #1a1a1a",
+                display:"flex", alignItems:"center", paddingLeft:10,
+              }}>
+                <span style={{ color:"#333", fontSize:9, fontWeight:700 }}>TRACKS</span>
+              </div>
 
-              {/* ── RULER ── */}
+              {/* Ruler tick area — tap to seek */}
               <div
-                style={{ height:RULER_H, background:"#0c0c0c", borderBottom:"1px solid #1a1a1a", cursor:"col-resize", touchAction:"none", position:"relative" }}
+                style={{ flex:1, position:"relative", background:"#0c0c0c", borderBottom:"1px solid #1a1a1a", cursor:"col-resize", touchAction:"none" }}
                 onMouseDown={handleRulerMouseDown}
                 onTouchStart={handleRulerTouchStart}
                 onTouchMove={handleRulerTouchMove}
               >
-                {/* Playhead position indicator in ruler */}
-
-                {Array.from({length:numBars},function(_,bi){
-                  const bx=bi*spBar*effectivePPS;
-                  return(
-                    <div key={bi} style={{ position:"absolute",left:bx,top:0,bottom:0 }}>
-                      <div style={{ position:"absolute",left:0,top:0,bottom:0,width:1,background:bi===0?"#555":"#1e1e1e" }} />
-                      <span style={{ position:"absolute",top:5,left:4,color:"#555",fontSize:9,fontFamily:"monospace",fontWeight:700,userSelect:"none" }}>{bi+1}</span>
-                      {Array.from({length:timeSigNum},function(_,di){
-                        if(di===0)return null;
-                        return <div key={di} style={{ position:"absolute",left:di*spb*effectivePPS,top:Math.round(RULER_H*0.55),bottom:0,width:1,background:"#181818" }} />;
+                {Array.from({length:numBars}, function(_,bi){
+                  const bx = bi * spBar * effectivePPS;
+                  return (
+                    <div key={bi} style={{ position:"absolute", left:bx, top:0, bottom:0 }}>
+                      <div style={{ position:"absolute", left:0, top:0, bottom:0, width:1, background:bi===0?"#555":"#1e1e1e" }} />
+                      <span style={{ position:"absolute", top:5, left:4, color:"#555", fontSize:9, fontFamily:"monospace", fontWeight:700, userSelect:"none" }}>{bi+1}</span>
+                      {Array.from({length:timeSigNum}, function(_,di){
+                        if (di===0) return null;
+                        return <div key={di} style={{ position:"absolute", left:di*spb*effectivePPS, top:Math.round(RULER_H*0.55), bottom:0, width:1, background:"#181818" }} />;
                       })}
                     </div>
                   );
                 })}
                 {loopEnabled&&loopOut>loopIn&&(
-                  <div style={{ position:"absolute",left:loopIn*effectivePPS,width:(loopOut-loopIn)*effectivePPS,top:0,bottom:0,background:"rgba(59,130,246,0.1)",borderLeft:"2px solid #3B82F6",borderRight:"2px solid #3B82F6",pointerEvents:"none" }}>
-                    <span style={{ position:"absolute",top:4,left:4,color:"#3B82F6",fontSize:8,fontWeight:700 }}>LOOP</span>
+                  <div style={{ position:"absolute", left:loopIn*effectivePPS, width:(loopOut-loopIn)*effectivePPS, top:0, bottom:0, background:"rgba(59,130,246,0.1)", borderLeft:"2px solid #3B82F6", borderRight:"2px solid #3B82F6", pointerEvents:"none" }}>
+                    <span style={{ position:"absolute", top:4, left:4, color:"#3B82F6", fontSize:8, fontWeight:700 }}>LOOP</span>
                   </div>
                 )}
               </div>
+            </div>
 
-              {/* ── TRACK LANES ── */}
-              {tracks.map(function(track){
-                const isRec  = isRecording && recTrackId === track.id;
-                const hasSolo = tracks.some(function(t){return t.isSoloed;});
-                const dimmed  = hasSolo && !track.isSoloed;
-                const clips   = track.clips || [];
-                return(
-                  <div key={track.id} style={{ height:TRACK_H, borderBottom:"1px solid #0f0f0f", position:"relative", background:"#090909", opacity:dimmed?0.4:1 }} onClick={deselectClip}>
-                    {/* Grid lines */}
-                    {Array.from({length:Math.ceil(totalDur/spb)+1},function(_,i){
-                      return <div key={i} style={{ position:"absolute",left:i*spb*effectivePPS,top:0,bottom:0,width:1,background:i%timeSigNum===0?"#181818":"#111",pointerEvents:"none" }} />;
+            {/* ── TRACK ROWS ── each is a flex row: sticky header | lane ── */}
+            {tracks.map(function(track){
+              const isRec   = isRecording && recTrackId === track.id;
+              const hasSolo = tracks.some(function(t){return t.isSoloed;});
+              const dimmed  = hasSolo && !track.isSoloed;
+              const clips   = track.clips || [];
+              return (
+                <div key={track.id} style={{ display:"flex", height:TRACK_H, borderBottom:"1px solid #0f0f0f", opacity:dimmed?0.4:1 }}>
+
+                  {/* Track header — sticky left, never scrolls away horizontally */}
+                  <div
+                    onClick={function(){ if(track.type==="vocal") setSelectedTrackId(track.id); }}
+                    style={{
+                      width:SIDEBAR_W, flexShrink:0,
+                      position:"sticky", left:0, zIndex:10,
+                      background:selectedTrackId===track.id?"rgba(192,38,211,0.07)":"#0a0a0a",
+                      borderRight:"1px solid #141414",
+                      padding:"5px 7px", display:"flex", flexDirection:"column", justifyContent:"space-between",
+                      cursor:track.type==="vocal"?"pointer":"default",
+                    }}
+                  >
+                    <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                      <div style={{ width:7, height:7, borderRadius:"50%", background:isRec?"#EF4444":track.color, flexShrink:0 }} />
+                      <span style={{ color:"white", fontSize:10, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>{track.name}</span>
+                      <span style={{ color:"#444", fontSize:9 }}>{track.type==="beat"?"🎵":"🎙"}</span>
+                    </div>
+                    <div style={{ display:"flex", gap:3, alignItems:"center" }}>
+                      <button onClick={function(e){ e.stopPropagation(); toggleMute(track.id); }} style={{ background:track.isMuted?"rgba(245,158,11,0.2)":"#1a1a1a", border:"1px solid "+(track.isMuted?"#F59E0B":"#2a2a2a"), borderRadius:4, color:track.isMuted?"#F59E0B":"#555", fontSize:8, padding:"2px 4px", cursor:"pointer", fontWeight:700 }}>M</button>
+                      <button onClick={function(e){ e.stopPropagation(); toggleSolo(track.id); }} style={{ background:track.isSoloed?"rgba(34,197,94,0.2)":"#1a1a1a", border:"1px solid "+(track.isSoloed?"#22C55E":"#2a2a2a"), borderRadius:4, color:track.isSoloed?"#22C55E":"#555", fontSize:8, padding:"2px 4px", cursor:"pointer", fontWeight:700 }}>S</button>
+                      <button onClick={function(e){ e.stopPropagation(); setFxTrackId(function(v){ return v===track.id?null:track.id; }); }} style={{ background:fxTrackId===track.id?"rgba(139,92,246,0.2)":"#1a1a1a", border:"1px solid "+(fxTrackId===track.id?"#8B5CF6":"#2a2a2a"), borderRadius:4, color:fxTrackId===track.id?"#8B5CF6":"#555", fontSize:7, padding:"2px 4px", cursor:"pointer", fontWeight:700 }}>FX</button>
+                      {track.clips&&track.clips.length>1&&(
+                        <button onClick={function(e){ e.stopPropagation(); setShowTakes(function(v){ return v===track.id?null:track.id; }); }} style={{ background:showTakes===track.id?"rgba(59,130,246,0.2)":"#1a1a1a", border:"1px solid "+(showTakes===track.id?"#3B82F6":"#2a2a2a"), borderRadius:4, color:showTakes===track.id?"#3B82F6":"#555", fontSize:7, padding:"2px 4px", cursor:"pointer", fontWeight:700 }}>{track.clips.length}✦</button>
+                      )}
+                      <button onClick={function(e){ e.stopPropagation(); removeTrack(track.id); }} style={{ background:"none", border:"none", color:"#333", fontSize:10, cursor:"pointer", marginLeft:"auto", padding:"0 2px" }}>✕</button>
+                    </div>
+                  </div>
+
+                  {/* Lane — clips at x = startTime * PPS, no offset */}
+                  <div style={{ position:"relative", flex:1, background:"#090909" }} onClick={deselectClip}>
+                    {/* Beat grid */}
+                    {Array.from({length:Math.ceil(totalDur/spb)+1}, function(_,i){
+                      return <div key={i} style={{ position:"absolute", left:i*spb*effectivePPS, top:0, bottom:0, width:1, background:i%timeSigNum===0?"#181818":"#111", pointerEvents:"none" }} />;
                     })}
-                    {/* Recording trail */}
+                    {/* Recording waveform trail */}
                     {isRec&&recTrail.length>0&&(
-                      <div style={{ position:"absolute",left:Math.max(0,currentTime*effectivePPS-recTrail.length*2),top:4,height:TRACK_H-8,display:"flex",alignItems:"center",pointerEvents:"none" }}>
-                        {recTrail.map(function(v,i){ return <div key={i} style={{ width:2,background:"#EF4444",borderRadius:1,height:Math.max(2,v*(TRACK_H-12)),opacity:0.4+0.6*(i/recTrail.length) }} />; })}
+                      <div style={{ position:"absolute", left:Math.max(0,currentTime*effectivePPS-recTrail.length*2), top:4, height:TRACK_H-8, display:"flex", alignItems:"center", pointerEvents:"none" }}>
+                        {recTrail.map(function(v,i){ return <div key={i} style={{ width:2, background:"#EF4444", borderRadius:1, height:Math.max(2,v*(TRACK_H-12)), opacity:0.4+0.6*(i/recTrail.length) }} />; })}
                       </div>
                     )}
-                    {/* Render each clip on this track */}
+                    {/* Clips */}
                     {clips.map(function(clip){
                       if (!clip.audioBuffer) return null;
-                      const trimS    = clip.trimStart || 0;
-                      const trimE    = clip.trimEnd   || clip.duration || clip.audioBuffer.duration;
-                      const visibleW = Math.max(20, (trimE - trimS) * effectivePPS);
-                      const clipL    = (clip.startTime || 0) * effectivePPS;
-                      const playedF  = Math.max(0, Math.min(1, (currentTime - (clip.startTime||0)) / (trimE - trimS || 1)));
-                      const isActive = clip.active;
-                      const isSel    = selectedClipId === clip.id;
-                      const clipKey  = clip.id;
+                      const trimS   = clip.trimStart || 0;
+                      const trimE   = clip.trimEnd   || clip.duration || clip.audioBuffer.duration;
+                      const clipW   = Math.max(20, (trimE-trimS) * effectivePPS);
+                      const clipL   = (clip.startTime||0) * effectivePPS;
+                      const playedF = Math.max(0, Math.min(1, (currentTime-(clip.startTime||0)) / (trimE-trimS||1)));
+                      const isSel   = selectedClipId === clip.id;
+                      const isActv  = clip.active !== false;
                       return (
-                        <div key={clipKey} style={{ position:"absolute", left:clipL, top:3, width:visibleW, height:TRACK_H-6, zIndex: isSel?10:isActive?5:2 }}>
-                          {/* Main clip body */}
+                        <div key={clip.id} style={{ position:"absolute", left:clipL, top:3, width:clipW, height:TRACK_H-6, zIndex:isSel?10:isActv?5:2 }}>
+                          {/* Clip body */}
                           <div
                             onClick={function(e){ e.stopPropagation(); selectClip(clip.id); }}
-                            onMouseDown={function(e){ handleRegionMouseDown(e, {...track, _clipId:clip.id, startTime:clip.startTime, _clip:clip}); }}
-                            onTouchStart={function(e){ handleRegionTouchStart(e, {...track, _clipId:clip.id, startTime:clip.startTime, _clip:clip}); }}
-                            onTouchMove={function(e){ handleRegionTouchMove(e, {...track, _clipId:clip.id, startTime:clip.startTime, _clip:clip}); }}
+                            onMouseDown={function(e){ handleRegionMouseDown(e,{...track,startTime:clip.startTime,_clip:clip}); }}
+                            onTouchStart={function(e){ handleRegionTouchStart(e,{...track,startTime:clip.startTime,_clip:clip}); }}
+                            onTouchMove={function(e){ handleRegionTouchMove(e,{...track,startTime:clip.startTime,_clip:clip}); }}
                             onTouchEnd={handleRegionTouchEnd}
-                            onContextMenu={function(e){ handleRegionRightClick(e, {...track, _clipId:clip.id, _clip:clip}); }}
+                            onContextMenu={function(e){ handleRegionRightClick(e,{...track,_clip:clip}); }}
                             style={{
-                              position:"absolute", inset:0,
-                              borderRadius:7, overflow:"hidden", touchAction:"none",
-                              border:"2px solid "+(isSel?track.color:isActive?track.color+"88":track.color+"33"),
-                              boxShadow:isSel?"0 0 0 2px "+track.color+"55":"none",
-                              background: isSel?track.color+"18":isActive?"#0e0e0e":"#080808",
-                              cursor:"grab", opacity:isActive?1:0.5,
-                              transition:"border 0.1s, box-shadow 0.1s",
+                              position:"absolute", inset:0, borderRadius:7, overflow:"hidden", touchAction:"none",
+                              border:"2px solid "+(isSel?track.color:isActv?track.color+"88":track.color+"33"),
+                              boxShadow:isSel?"0 0 0 2px "+track.color+"44":"none",
+                              background:isSel?track.color+"18":isActv?"#0e0e0e":"#080808",
+                              cursor:"grab", opacity:isActv?1:0.45, transition:"border 0.1s",
                             }}
                           >
-                            <WaveformCanvas audioBuffer={clip.audioBuffer} color={isActive?track.color:track.color+"66"} width={Math.max(1,Math.round(visibleW))} height={TRACK_H-6} playedFraction={playedF} />
+                            <WaveformCanvas audioBuffer={clip.audioBuffer} color={isActv?track.color:track.color+"66"} width={Math.max(1,Math.round(clipW))} height={TRACK_H-6} playedFraction={playedF} />
                             <div style={{ position:"absolute", bottom:2, left:5, right:16, color:isSel?"white":"rgba(255,255,255,0.5)", fontSize:7, fontWeight:700, pointerEvents:"none", textShadow:"0 1px 3px #000", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                              {clip.label}{!isActive?" (inactive)":""}
+                              {clip.label}{!isActv?" (inactive)":""}
                             </div>
                             {isSel&&<div style={{ position:"absolute", top:3, right:3, width:5, height:5, borderRadius:"50%", background:track.color }} />}
                           </div>
-
-                          {/* LEFT trim handle */}
+                          {/* Left trim handle — drag to set trimStart non-destructively */}
                           <div
-                            style={{ position:"absolute", left:0, top:0, bottom:0, width:10, cursor:"col-resize", zIndex:20, display:"flex", alignItems:"center", justifyContent:"center" }}
+                            style={{ position:"absolute", left:0, top:0, bottom:0, width:12, cursor:"col-resize", zIndex:20, display:"flex", alignItems:"center", justifyContent:"center" }}
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
-                              const startX = e.clientX;
-                              const origTrimStart = clip.trimStart || 0;
-                              const origClipStart = clip.startTime || 0;
-                              const onMove = function(me){
-                                const dx = me.clientX - startX;
-                                const dtrim = dx / effectivePPS;
-                                const newTS  = Math.max(0, Math.min(origTrimStart + dtrim, (clip.trimEnd||clip.audioBuffer.duration) - 0.1));
-                                const newCS  = origClipStart + (newTS - origTrimStart);
-                                updateClip(track.id, clip.id, { trimStart:newTS, startTime:Math.max(0,newCS) });
-                              };
-                              const onUp = function(){ document.removeEventListener("mousemove",onMove); document.removeEventListener("mouseup",onUp); };
-                              document.addEventListener("mousemove",onMove); document.addEventListener("mouseup",onUp);
+                              const x0=e.clientX, ts0=clip.trimStart||0, cs0=clip.startTime||0;
+                              const mv=function(me){ const d=(me.clientX-x0)/effectivePPS; const ts=Math.max(0,Math.min(ts0+d,(clip.trimEnd||clip.audioBuffer.duration)-0.05)); updateClip(track.id,clip.id,{trimStart:ts,startTime:Math.max(0,cs0+(ts-ts0))}); };
+                              const up=function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
+                              document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
                             }}
-                          >
-                            <div style={{ width:3, height:20, borderRadius:2, background:track.color+"cc" }} />
-                          </div>
-
-                          {/* RIGHT trim handle */}
+                          ><div style={{ width:3, height:20, borderRadius:2, background:track.color+"bb" }} /></div>
+                          {/* Right trim handle — drag to set trimEnd non-destructively */}
                           <div
-                            style={{ position:"absolute", right:0, top:0, bottom:0, width:10, cursor:"col-resize", zIndex:20, display:"flex", alignItems:"center", justifyContent:"center" }}
+                            style={{ position:"absolute", right:0, top:0, bottom:0, width:12, cursor:"col-resize", zIndex:20, display:"flex", alignItems:"center", justifyContent:"center" }}
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
-                              const startX = e.clientX;
-                              const origTrimEnd = clip.trimEnd || clip.audioBuffer.duration;
-                              const onMove = function(me){
-                                const dx = me.clientX - startX;
-                                const newTE = Math.max((clip.trimStart||0) + 0.1, Math.min(origTrimEnd + dx/effectivePPS, clip.audioBuffer.duration));
-                                updateClip(track.id, clip.id, { trimEnd:newTE });
-                              };
-                              const onUp = function(){ document.removeEventListener("mousemove",onMove); document.removeEventListener("mouseup",onUp); };
-                              document.addEventListener("mousemove",onMove); document.addEventListener("mouseup",onUp);
+                              const x0=e.clientX, te0=clip.trimEnd||clip.audioBuffer.duration;
+                              const mv=function(me){ const te=Math.max((clip.trimStart||0)+0.05,Math.min(te0+(me.clientX-x0)/effectivePPS,clip.audioBuffer.duration)); updateClip(track.id,clip.id,{trimEnd:te}); };
+                              const up=function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
+                              document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
                             }}
-                          >
-                            <div style={{ width:3, height:20, borderRadius:2, background:track.color+"cc" }} />
-                          </div>
+                          ><div style={{ width:3, height:20, borderRadius:2, background:track.color+"bb" }} /></div>
                         </div>
                       );
                     })}
                   </div>
-                );
-              })}
+                </div>
+              );
+            })}
 
+            {/* Add track row */}
+            <div style={{ display:"flex", height:48, borderBottom:"1px solid #111" }}>
+              <div style={{ width:SIDEBAR_W, flexShrink:0, position:"sticky", left:0, zIndex:10, background:"#0a0a0a", borderRight:"1px solid #141414" }}>
+                <button onClick={function(e){ e.stopPropagation(); setShowAddMenu(function(v){return !v;}); }} style={{ width:"100%", height:"100%", background:"transparent", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <span style={{ color:showAddMenu?"#C026D3":"#444", fontSize:24, fontWeight:300 }}>+</span>
+                </button>
+              </div>
+              <div style={{ flex:1, background:"#090909" }} />
             </div>
-          </div>
-        </div>
-      </div>
+
+          </div>{/* end inner */}
+        </div>{/* end scroll container */}
+      </div>{/* end DAW layout */}
 
       {/* Add menu popup */}
       {showAddMenu&&(
@@ -7005,7 +6970,7 @@ export default function BeatFinder() {
               {/* Active indicator dot */}
               {isActive && (
                 <div style={{
-                  position: "absolute", top: 0, left: SIDEBAR_W + "px", transform: "translateX(-0.5%)",
+                  position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
                   width: 20, height: 2, borderRadius: 1,
                   background: activeColor,
                   boxShadow: "0 0 8px " + activeColor,
