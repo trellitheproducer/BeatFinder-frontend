@@ -5082,6 +5082,7 @@ function StudioScreen({ user, onExit }) {
       mediaRecRef.current.stop(); // triggers mr.onstop async which saves the clip
     }
     clearInterval(recIntRef.current);
+    clipIdRef.current = null;
     mediaRecRef.current = null;
     // Stop playback too — user pressed stop
     stopAll();
@@ -5426,8 +5427,9 @@ setRecordingStartTime(startTime);
         setRecTrail(function (prev) { return [...prev.slice(-200), peak]; });
       }, 50);
 
+mediaRecRef.current = mr;
       mr.start(250); // 250ms chunks for reliable ondataavailable on iOS
-      mediaRecRef.current = mr;
+      console.log("STARTED");
       setIsRecording(true);
       setRecTrackId(targetTrackId);
 
@@ -5435,6 +5437,8 @@ setRecordingStartTime(startTime);
       if (!isPlaying) { doPlay(currentTime); setIsPlaying(true); }
 
     } catch (e) {
+  console.log("ERROR:", e);
+  
       if (e.name === "NotAllowedError") {
         setError("Mic access denied. Go to Settings → Safari → Microphone → Allow.");
       } else {
