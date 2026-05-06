@@ -4641,6 +4641,7 @@ function StudioScreen({ user, onExit }) {
   const chunksRef       = useRef([]);
   const recIntRef       = useRef(null);
   const recDurRef       = useRef(0);
+  const recStartTimeRef = useRef(0);  // AudioContext-clock-derived timeline position at rec start
   const clipIdRef = useRef(null);
   const countTimerRef   = useRef(null);
   const metroRef        = useRef(null);
@@ -5582,9 +5583,8 @@ function StudioScreen({ user, onExit }) {
   };
 
   const doRecord = async function (targetTrackId) {
-  const newClipId = Date.now();
-  clipIdRef.current = newClipId;
-  const startTime = currentTime;
+    const newClipId = Date.now();
+    clipIdRef.current = newClipId;
 
     try {
       // Build mic constraints using the same helper as monitoring,
@@ -5599,18 +5599,13 @@ function StudioScreen({ user, onExit }) {
       });
       const stream = await navigator.mediaDevices.getUserMedia({ audio: recConstraints });
 
-      const actx       = getActx();
-      const srcNode    = actx.createMediaStreamSource(stream);
-      const analyser   = actx.createAnalyser(); analyser.fftSize = 256;
-      // Do NOT connect srcNode to destination — that would cause feedback/monitoring
-      // Just route mic → analyser for the waveform trail visualisation only
+      const actx    = getActx();
+      const srcNode = actx.createMediaStreamSource(stream);
+      const analyser = actx.createAnalyser(); analyser.fftSize = 256;
       srcNode.connect(analyser);
 
       setRecTrail([]);
       chunksRef.current = [];
-
-      // Capture exact timeline position BEFORE any async work
-      const recStartTime = currentTime;
 
       const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
@@ -5625,15 +5620,12 @@ function StudioScreen({ user, onExit }) {
       };
 
       mr.onstop = async function () {
-        // Stop mic — release iPhone orange indicator
         stream.getTracks().forEach(function (t) { t.stop(); });
-        
         try { analyser.disconnect(); } catch(e) {}
         try { srcNode.disconnect(); } catch(e) {}
 
-        const dur  = recDurRef.current;
+        const dur = recDurRef.current;
         if (dur < 0.1) {
-          // Nothing recorded
           setIsRecording(false); setRecTrackId(null); setRecTrail([]);
           return;
         }
@@ -5652,14 +5644,15 @@ function StudioScreen({ user, onExit }) {
         const newClip = {
           id: String(Date.now()) + "_rec",
           audioBuffer: buf, url, blob,
-          startTime: recStartTime, duration: dur,
+          startTime: recStartTimeRef.current,
+          duration: dur,
           trimStart: 0, trimEnd: dur,
           label: "Take " + new Date().toLocaleTimeString(),
           active: true,
         };
 
         if (targetTrackId) {
-          addClipToTrack(targetTrackId, newClip); // deactivates old takes, adds new
+          addClipToTrack(targetTrackId, newClip);
         } else {
           addTrackObj({
             id: Date.now() + Math.random(),
@@ -5674,10 +5667,35 @@ function StudioScreen({ user, onExit }) {
       };
 
       recDurRef.current = 0;
+
+      // ── Start playback FIRST so the beat is running before the mic opens ──
+      // This ensures masterStartRef is set before we read actx.currentTime below.
+      if (!isPlaying) { doPlay(currentTime); setIsPlaying(true); }
+
+      // ── Precise timeline sync ─────────────────────────────────────────────
+      // We start the MediaRecorder and immediately read actx.currentTime.
+      // The true timeline position = actx.currentTime - masterStartRef + playheadAtRef.
+      // We then subtract the hardware input latency so the clip sits where the
+      // sound physically entered the mic, not where the buffer was first written.
+      //
+      // actx.inputLatency  — mic hardware buffer delay (typically 5–20ms wired, 0 if unknown)
+      // actx.baseLatency   — output buffer delay (already baked into playback, not needed here)
+      //
+      mr.start(100); // 100ms chunks — smaller than 250ms for tighter timing on iOS
+
+      // Read the AudioContext clock immediately after mr.start() for maximum precision
+      const startActxTime = actx.currentTime;
+      const inputLatency  = actx.inputLatency || 0; // seconds; 0 if browser doesn't expose it
+
+      // Timeline position = how far the playhead has advanced since doPlay() was called
+      const trueStartTime = Math.max(0,
+        playheadAtRef.current + (startActxTime - masterStartRef.current) - inputLatency
+      );
+      recStartTimeRef.current = trueStartTime;
+
       const recStart = Date.now();
       recIntRef.current = setInterval(function () {
         recDurRef.current = (Date.now() - recStart) / 1000;
-        // Waveform trail
         const data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteTimeDomainData(data);
         let peak = 0;
@@ -5688,18 +5706,11 @@ function StudioScreen({ user, onExit }) {
         setRecTrail(function (prev) { return [...prev.slice(-200), peak]; });
       }, 50);
 
-mediaRecRef.current = mr;
-      mr.start(250); // 250ms chunks for reliable ondataavailable on iOS
-      console.log("STARTED");
+      mediaRecRef.current = mr;
       setIsRecording(true);
       setRecTrackId(targetTrackId);
 
-      // Start playback so vocalist hears the beat
-      if (!isPlaying) { doPlay(currentTime); setIsPlaying(true); }
-
     } catch (e) {
-  console.log("ERROR:", e);
-  
       if (e.name === "NotAllowedError") {
         setError("Mic access denied. Go to Settings → Safari → Microphone → Allow.");
       } else {
