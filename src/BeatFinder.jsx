@@ -6187,7 +6187,7 @@ function StudioScreen({ user, onExit }) {
                       const isSel  = selectedClipId === clip.id;
                       const pps    = effectivePPS;
                       return (
-                        <div key={clip.id+"_handles"} style={{ position:"absolute", left:clipL + SIDEBAR_W, top:3, width:clipW, height:TRACK_H-6, pointerEvents:"none", zIndex:3 }}>
+                        <div key={clip.id+"_handles"} style={{ position:"absolute", left:clipL, top:3, width:clipW, height:TRACK_H-6, pointerEvents:"none", zIndex:3 }}>
                           {/* Left */}
                           <div style={{ position:"absolute", left:-10, top:0, bottom:0, width:18, cursor:"ew-resize", display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"all", touchAction:"none" }}
                             onMouseDown={function(e){
