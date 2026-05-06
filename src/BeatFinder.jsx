@@ -4793,6 +4793,52 @@ function StudioScreen({ user, onExit }) {
     prevHeadphonesRef.current = headphonesIn;
   }, [headphonesIn]);
 
+  // ── Shared mic constraint builder ────────────────────────────
+  // Resolves the correct deviceId for "builtin" or "headset" on iOS and returns
+  // a getUserMedia audio constraints object. Used by both monitoring and recording
+  // so they always use the same mic source the user has selected.
+  const buildMicConstraints = async function (wantSource, extraConstraints) {
+    const base = Object.assign({
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl:  false,
+      channelCount:     1,
+    }, extraConstraints || {});
+
+    const wantBuiltIn = wantSource === "builtin" || wantSource === "default";
+
+    if (wantBuiltIn) {
+      // Try to get the real hardware deviceId for the built-in iPhone mic
+      let builtInDeviceId = null;
+      const builtInEntry = availableMics.find(function(m){ return m.isBuiltIn; });
+      if (builtInEntry && builtInEntry.deviceId && builtInEntry.deviceId !== "builtin") {
+        builtInDeviceId = builtInEntry.deviceId;
+      }
+      if (!builtInDeviceId) {
+        // Labels hidden — request permission then re-enumerate to get real IDs
+        try {
+          const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+          tmp.getTracks().forEach(function(t){ t.stop(); });
+          const freshDevices = await navigator.mediaDevices.enumerateDevices();
+          freshDevices.filter(function(d){ return d.kind === "audioinput"; }).forEach(function(d){
+            const l = (d.label||"").toLowerCase();
+            if (!builtInDeviceId && (l.includes("iphone")||l.includes("built-in")||l.includes("internal"))) {
+              builtInDeviceId = d.deviceId;
+            }
+          });
+        } catch(e) {}
+      }
+      base.deviceId = { exact: builtInDeviceId || "default" };
+    } else {
+      // Headset mic — use known deviceId or let iOS auto-route (no constraint = headset when plugged in)
+      const headsetEntry = availableMics.find(function(m){ return !m.isBuiltIn; });
+      const headsetId = headsetEntry && headsetEntry.deviceId !== "headset" ? headsetEntry.deviceId : null;
+      if (headsetId) base.deviceId = { exact: headsetId };
+      // No deviceId → iOS routes to headset automatically when plugged in
+    }
+    return base;
+  };
+
   // ── Input Monitoring ──────────────────────────────────────────
   // Graph: mic → merger (mono→stereo) → gain → destination
   // forceMicSource: pass "builtin" or "headset" (or a real deviceId) directly
@@ -4809,68 +4855,8 @@ function StudioScreen({ user, onExit }) {
 
     const useMicSource = forceMicSource !== undefined ? forceMicSource : micSource;
 
-    // ── iOS mic routing strategy ──────────────────────────────
-    // iOS Safari ignores most audio constraints (facingMode, groupId, etc.)
-    // The only reliable selector is deviceId.
-    // - headset mic: use deviceId from enumeration OR omit deviceId entirely
-    //   (iOS auto-routes to the wired headset when plugged in by default)
-    // - built-in iPhone mic: we MUST use the real deviceId of the built-in mic.
-    //   If we don't have it yet (labels hidden before permission), we request
-    //   permission first, re-enumerate, then open the real stream.
-    // ──────────────────────────────────────────────────────────
-    let audioConstraints = {
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl:  false,
-      channelCount:     1,
-    };
-
-    const wantBuiltIn = useMicSource === "builtin" || useMicSource === "default";
-
-    if (wantBuiltIn) {
-      // Try to find the real built-in deviceId from availableMics
-      let builtInDeviceId = null;
-      const builtInEntry = availableMics.find(function(m){ return m.isBuiltIn; });
-      if (builtInEntry && builtInEntry.deviceId && builtInEntry.deviceId !== "builtin") {
-        builtInDeviceId = builtInEntry.deviceId;
-      }
-
-      if (builtInDeviceId) {
-        // Use exact deviceId — most reliable on iOS
-        audioConstraints.deviceId = { exact: builtInDeviceId };
-      } else {
-        // Permission not yet granted — labels are hidden. Request permission,
-        // re-enumerate to get real IDs, then open with the right deviceId.
-        try {
-          const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          tempStream.getTracks().forEach(function(t){ t.stop(); });
-          const freshDevices = await navigator.mediaDevices.enumerateDevices();
-          const freshInputs  = freshDevices.filter(function(d){ return d.kind === "audioinput"; });
-          freshInputs.forEach(function(d) {
-            const l = (d.label||"").toLowerCase();
-            if (!builtInDeviceId && (l.includes("iphone")||l.includes("built-in")||l.includes("internal"))) {
-              builtInDeviceId = d.deviceId;
-            }
-          });
-        } catch(e) { /* permission denied — fall through to default */ }
-
-        if (builtInDeviceId) {
-          audioConstraints.deviceId = { exact: builtInDeviceId };
-        } else {
-          // Last resort: use "default" — on iOS without headphones this is the built-in mic.
-          // With headphones plugged in this may still route to headset, but we have no other option.
-          audioConstraints.deviceId = { exact: "default" };
-        }
-      }
-    } else {
-      // Headset mic — find deviceId from availableMics, or let iOS auto-route (no deviceId)
-      const headsetEntry = availableMics.find(function(m){ return !m.isBuiltIn; });
-      const headsetId = headsetEntry && headsetEntry.deviceId !== "headset" ? headsetEntry.deviceId : null;
-      if (headsetId) {
-        audioConstraints.deviceId = { exact: headsetId };
-      }
-      // No deviceId → iOS routes to headset mic automatically when one is plugged in
-    }
+    // Build constraints using the shared helper
+    const audioConstraints = await buildMicConstraints(useMicSource);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
@@ -5601,14 +5587,17 @@ function StudioScreen({ user, onExit }) {
   const startTime = currentTime;
 
     try {
-      // Open a dedicated stream for recording — separate from monitoring
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: {
-        echoCancellation: true,   // ON for recording — removes room echo
-        noiseSuppression: true,   // ON for recording — cleaner vocals
+      // Build mic constraints using the same helper as monitoring,
+      // so the selected mic source (iPhone vs headset) is respected during recording.
+      // For recording we turn echo cancellation and noise suppression ON for cleaner vocals.
+      const recConstraints = await buildMicConstraints(micSource, {
+        echoCancellation: true,
+        noiseSuppression: true,
         autoGainControl:  false,
         sampleRate:       44100,
         channelCount:     1,
-      }});
+      });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: recConstraints });
 
       const actx       = getActx();
       const srcNode    = actx.createMediaStreamSource(stream);
