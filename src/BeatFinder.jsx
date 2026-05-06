@@ -5144,7 +5144,9 @@ function StudioScreen({ user, onExit }) {
   };
 
   const addTrackObj = function (obj) {
-    const full = { volume:1, pan:0, effects:defaultEffects(), clips:[], ...obj };
+    // Ensure every track has a color — vocals get VOCAL_COLORS, others get COLORS
+    const fallbackColor = (obj.type === "vocal") ? VOCAL_COLORS[0] : COLORS[0];
+    const full = { volume:1, pan:0, effects:defaultEffects(), clips:[], color:fallbackColor, ...obj };
     // If old flat model passed in, wrap audioBuffer as a clip
     if (full.audioBuffer && full.clips.length === 0) {
       const buf = full.audioBuffer;
@@ -5287,7 +5289,7 @@ function StudioScreen({ user, onExit }) {
       } else {
         // Auto-create vocal track so record works immediately
         const newId = Date.now() + Math.random();
-        addTrackObj({ id:newId, name:"Vocal 1", type:"vocal", isMuted:false, isSoloed:false, clips:[] });
+        addTrackObj({ id:newId, name:"Vocal 1", type:"vocal", isMuted:false, isSoloed:false, clips:[], color:VOCAL_COLORS[0] });
         setSelectedTrackId(newId);
         targetId = newId;
       }
@@ -6155,11 +6157,13 @@ function StudioScreen({ user, onExit }) {
                       // Capture effectivePPS at render time for use in closures
                       const pps     = effectivePPS;
 
+                      // Clamp to lane bounds — negative startTime clips must not bleed into header
+                      const clampedL = Math.max(0, clipL);
+                      const clampedW = Math.max(10, clipW - (clampedL - clipL));
                       return (
                         <div key={clip.id} style={{
-                          position:"absolute", left:clipL, top:3, width:clipW, height:TRACK_H-6,
+                          position:"absolute", left:clampedL, top:3, width:clampedW, height:TRACK_H-6,
                           zIndex: isActv ? 2 : 1,
-                          // NO touchAction here — clip body and trim handles manage their own
                         }}>
 
                           {/* Clip body — waveform strictly inside overflow:hidden container */}
@@ -6189,7 +6193,7 @@ function StudioScreen({ user, onExit }) {
                             <WaveformCanvas
                               audioBuffer={clip.audioBuffer}
                               color={track.color}
-                              width={Math.max(1, Math.round(clipW))}
+                              width={Math.max(1, Math.round(clampedW))}
                               height={TRACK_H - 6}
                               playedFraction={playedF}
                               dim={!isActv}
@@ -6319,7 +6323,7 @@ function StudioScreen({ user, onExit }) {
             // Just create the track — recording only starts when user presses record button
             const newId = Date.now() + Math.random();
             const vocalN = tracks.filter(function(t){return t.type==="vocal";}).length + 1;
-            addTrackObj({ id:newId, name:"Vocal "+vocalN, type:"vocal", isMuted:false, isSoloed:false, clips:[] });
+            addTrackObj({ id:newId, name:"Vocal "+vocalN, type:"vocal", isMuted:false, isSoloed:false, clips:[], color:VOCAL_COLORS[vocalN % VOCAL_COLORS.length] });
             setSelectedTrackId(newId);
             setShowAddMenu(false);
           }}>
