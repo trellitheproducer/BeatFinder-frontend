@@ -4571,9 +4571,9 @@ function StudioScreen({ user, onExit }) {
   const [showAutoPitch,setShowAutoPitch] = useState(false);
   const [autoPitch,    setAutoPitch]     = useState({ on:false, key:"C", scale:"major", speed:0.5 });
   const [lowLatency,   setLowLatency]    = useState(true);
-  // "default" = iPhone mic, "headset" = wired headset mic (when headphones plugged in)
-  const [micSource,    setMicSource]     = useState("default"); // "default" | "headset"
-  const [availableMics, setAvailableMics] = useState([]); // [{deviceId, label}]
+  // "builtin" = iPhone built-in mic, "headset" = wired headset mic
+  const [micSource,    setMicSource]     = useState("builtin");
+  const [availableMics, setAvailableMics] = useState([]);
 
   // ── Refs ──────────────────────────────────────────────────────
   const actxRef         = useRef(null);
@@ -4668,38 +4668,48 @@ function StudioScreen({ user, onExit }) {
     return actxRef.current;
   };
 
-  // ── Headphone detection ───────────────────────────────────────
+  // ── Headphone detection + mic enumeration ────────────────────
+  // Returns { headphonesConnected, mics: [{deviceId, label, isBuiltIn}] }
+  // iOS Safari only reveals real device labels after mic permission is granted.
+  // We identify built-in vs headset by label keywords; fallback to sentinel IDs.
   const checkHeadphones = async function () {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const outputs = devices.filter(function(d){ return d.kind === "audiooutput"; });
       const inputs  = devices.filter(function(d){ return d.kind === "audioinput"; });
+
       const hp = outputs.some(function(d){
         const l = (d.label||"").toLowerCase();
         return l.includes("headphone")||l.includes("earphone")||l.includes("airpods")||l.includes("bluetooth")||l.includes("headset")||l.includes("wired");
       });
-      // If no labels (iOS blocks without permission), allow and trust user
       const ok = hp || outputs.length === 0 || outputs.every(function(d){ return !d.label; });
       setHeadphonesIn(ok);
 
-      // Build mic list for the source selector
-      // Always include the iPhone/built-in mic as "default"
-      const mics = [{ deviceId: "default", label: "📱 iPhone Mic" }];
+      // Classify mic inputs
+      // iOS exposes labels like "iPhone Microphone" and "Headset Microphone" after permission
+      let builtInId   = null; // real deviceId of iPhone built-in mic
+      let headsetId   = null; // real deviceId of wired headset mic
+
       inputs.forEach(function(d) {
-        if (!d.deviceId || d.deviceId === "default" || d.deviceId === "communications") return;
+        if (!d.deviceId) return;
         const l = (d.label||"").toLowerCase();
-        // Only show a headset entry if label hints it's a headset/wired mic
-        if (l.includes("headset")||l.includes("wired")||l.includes("headphone")||l.includes("external")) {
-          mics.push({ deviceId: d.deviceId, label: "🎙 Headset Mic" });
-        }
+        const isHeadset = l.includes("headset")||l.includes("wired")||l.includes("external");
+        const isBuiltIn = l.includes("iphone")||l.includes("built-in")||l.includes("internal")||l.includes("front");
+        if (isHeadset && !headsetId) headsetId = d.deviceId;
+        else if (isBuiltIn && !builtInId) builtInId = d.deviceId;
+        // "default" deviceId = whatever iOS is currently routing (changes with plug/unplug)
       });
-      // If headphones are in but no headset mic found by label, offer the option anyway
-      if (ok && mics.length === 1) {
-        mics.push({ deviceId: "headset_fallback", label: "🎙 Headset Mic" });
-      }
+
+      // Build the two-option list
+      // "builtin" sentinel → we'll resolve to the actual built-in deviceId at stream time
+      // "headset" sentinel → headset mic (or iOS auto-route when no real id found)
+      const mics = [
+        { deviceId: builtInId || "builtin", label: "📱 iPhone Mic", isBuiltIn: true },
+        { deviceId: headsetId || "headset", label: "🎙 Headset Mic", isBuiltIn: false },
+      ];
       setAvailableMics(mics);
-      return ok;
-    } catch(e){ setHeadphonesIn(true); return true; }
+      return { headphonesConnected: ok, mics };
+    } catch(e){ setHeadphonesIn(true); return { headphonesConnected: true, mics: [] }; }
   };
 
   useEffect(function () {
@@ -4708,76 +4718,125 @@ function StudioScreen({ user, onExit }) {
     return function(){ navigator.mediaDevices.removeEventListener("devicechange", checkHeadphones); };
   }, []);
 
-  // Auto-stop if headphones pulled during monitoring
+  // Auto-switch mic source when headphones are plugged in / pulled out
+  // and stop monitoring if headphones pulled while monitoring
+  const prevHeadphonesRef = useRef(false);
   useEffect(function () {
-    if (monitoringOn && !headphonesIn) {
-      stopMonitoring();
-      setMonitorWarn("⚠️ Headphones disconnected — monitoring stopped to prevent feedback.");
+    if (headphonesIn && !prevHeadphonesRef.current) {
+      // Headphones just plugged in → switch to headset mic automatically
+      setMicSource("headset");
+      if (monitoringOn) {
+        stopMonitoring();
+        setTimeout(function(){ startMonitoring(undefined, "headset"); }, 150);
+      }
+    } else if (!headphonesIn && prevHeadphonesRef.current) {
+      // Headphones pulled → switch back to iPhone mic and stop monitoring
+      setMicSource("builtin");
+      if (monitoringOn) {
+        stopMonitoring();
+        setMonitorWarn("⚠️ Headphones disconnected — monitoring stopped to prevent feedback.");
+      }
     }
+    prevHeadphonesRef.current = headphonesIn;
   }, [headphonesIn]);
 
   // ── Input Monitoring ──────────────────────────────────────────
-  // Graph: mic → merger (mono→stereo) → analyser → gainNode → destination
-  // echoCancellation/noiseSuppression MUST be false — they add 40–80ms latency.
-  // Achievable latency: ~5–15ms on wired headphones with latencyHint:"interactive".
-  // forceLowLatency / forceMicSource allow the LL toggle and mic picker to restart
-  // monitoring with the new settings immediately (state update is async so we pass values directly).
+  // Graph: mic → merger (mono→stereo) → gain → destination
+  // forceMicSource: pass "builtin" or "headset" (or a real deviceId) directly
+  // to avoid reading stale state when called from effects/callbacks.
   const startMonitoring = async function (forceLowLatency, forceMicSource) {
     if (monitorStreamRef.current) return;
     setMonitorWarn("");
-    const safe = await checkHeadphones();
+    const check = await checkHeadphones();
+    const safe  = check.headphonesConnected !== undefined ? check.headphonesConnected : check;
     if (!safe) {
       setMonitorWarn("⚠️ Plug in headphones — monitoring disabled to prevent feedback.");
       return;
     }
 
-    // Resolve which values to use — forced (from toggle callbacks) or current state
-    const useLowLatency = forceLowLatency !== undefined ? forceLowLatency : lowLatency;
-    const useMicSource  = forceMicSource  !== undefined ? forceMicSource  : micSource;
+    const useMicSource = forceMicSource !== undefined ? forceMicSource : micSource;
 
-    // Build deviceId constraint
-    // "default" → no deviceId (browser picks default, usually iPhone mic)
-    // "headset_fallback" → no deviceId but we'll try to steer via facingMode/channelCount
-    // otherwise → use the specific deviceId
-    const audioConstraints = {
+    // ── iOS mic routing strategy ──────────────────────────────
+    // iOS Safari ignores most audio constraints (facingMode, groupId, etc.)
+    // The only reliable selector is deviceId.
+    // - headset mic: use deviceId from enumeration OR omit deviceId entirely
+    //   (iOS auto-routes to the wired headset when plugged in by default)
+    // - built-in iPhone mic: we MUST use the real deviceId of the built-in mic.
+    //   If we don't have it yet (labels hidden before permission), we request
+    //   permission first, re-enumerate, then open the real stream.
+    // ──────────────────────────────────────────────────────────
+    let audioConstraints = {
       echoCancellation: false,
       noiseSuppression: false,
       autoGainControl:  false,
       channelCount:     1,
-      latency:          0,
     };
-    if (useMicSource === "default") {
-      // Explicitly request the built-in/front mic on iOS
-      // facingMode:user steers toward front (iPhone mic), away from wired input
-      audioConstraints.facingMode = { ideal: "user" };
-    } else if (useMicSource !== "headset_fallback") {
-      // Use specific hardware deviceId if available
-      audioConstraints.deviceId = { exact: useMicSource };
+
+    const wantBuiltIn = useMicSource === "builtin" || useMicSource === "default";
+
+    if (wantBuiltIn) {
+      // Try to find the real built-in deviceId from availableMics
+      let builtInDeviceId = null;
+      const builtInEntry = availableMics.find(function(m){ return m.isBuiltIn; });
+      if (builtInEntry && builtInEntry.deviceId && builtInEntry.deviceId !== "builtin") {
+        builtInDeviceId = builtInEntry.deviceId;
+      }
+
+      if (builtInDeviceId) {
+        // Use exact deviceId — most reliable on iOS
+        audioConstraints.deviceId = { exact: builtInDeviceId };
+      } else {
+        // Permission not yet granted — labels are hidden. Request permission,
+        // re-enumerate to get real IDs, then open with the right deviceId.
+        try {
+          const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          tempStream.getTracks().forEach(function(t){ t.stop(); });
+          const freshDevices = await navigator.mediaDevices.enumerateDevices();
+          const freshInputs  = freshDevices.filter(function(d){ return d.kind === "audioinput"; });
+          freshInputs.forEach(function(d) {
+            const l = (d.label||"").toLowerCase();
+            if (!builtInDeviceId && (l.includes("iphone")||l.includes("built-in")||l.includes("internal"))) {
+              builtInDeviceId = d.deviceId;
+            }
+          });
+        } catch(e) { /* permission denied — fall through to default */ }
+
+        if (builtInDeviceId) {
+          audioConstraints.deviceId = { exact: builtInDeviceId };
+        } else {
+          // Last resort: use "default" — on iOS without headphones this is the built-in mic.
+          // With headphones plugged in this may still route to headset, but we have no other option.
+          audioConstraints.deviceId = { exact: "default" };
+        }
+      }
+    } else {
+      // Headset mic — find deviceId from availableMics, or let iOS auto-route (no deviceId)
+      const headsetEntry = availableMics.find(function(m){ return !m.isBuiltIn; });
+      const headsetId = headsetEntry && headsetEntry.deviceId !== "headset" ? headsetEntry.deviceId : null;
+      if (headsetId) {
+        audioConstraints.deviceId = { exact: headsetId };
+      }
+      // No deviceId → iOS routes to headset mic automatically when one is plugged in
     }
-    // headset_fallback: no deviceId — iOS will route through wired headset mic automatically
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
       monitorStreamRef.current = stream;
 
-      // latencyHint "interactive" = smallest buffer = lowest latency (~5-15ms wired)
-      // Always use "interactive" — it is already the lowest-latency hint available in Web Audio.
-      // "playback" is actually higher latency (optimised for smooth playback, not live monitoring).
       const mCtx = new (window.AudioContext || window.webkitAudioContext)({
         sampleRate:  48000,
-        latencyHint: "interactive",
+        latencyHint: "interactive", // smallest buffer = lowest latency (~5–15ms wired)
       });
 
       const src      = mCtx.createMediaStreamSource(stream);
       const analyser = mCtx.createAnalyser(); analyser.fftSize = 256;
       const gain     = mCtx.createGain(); gain.gain.value = monitorVol;
 
-      // ── Fix mono→stereo: mic produces 1 channel, which browsers often map
-      // to left channel only. Use a ChannelMerger to duplicate it into both ears. ──
+      // Duplicate mono mic signal into both L and R channels
       const merger = mCtx.createChannelMerger(2);
       src.connect(analyser);
-      src.connect(merger, 0, 0); // mono → left
-      src.connect(merger, 0, 1); // mono → right
+      src.connect(merger, 0, 0);
+      src.connect(merger, 0, 1);
       merger.connect(gain);
       gain.connect(mCtx.destination);
 
@@ -6161,20 +6220,19 @@ mediaRecRef.current = mr;
             style={{ width:50,accentColor:"#22C55E",height:2 }} />
         )}
         {/* Mic source picker — shown when headphones are in */}
-        {headphonesIn && availableMics.length > 1 && (
+        {headphonesIn && (
           <select
             value={micSource}
             onChange={function(e){
               const next = e.target.value;
               setMicSource(next);
-              if (monitoringOn) { stopMonitoring(); setTimeout(function(){ startMonitoring(undefined, next); }, 100); }
+              if (monitoringOn) { stopMonitoring(); setTimeout(function(){ startMonitoring(undefined, next); }, 150); }
             }}
             title="Choose microphone source"
-            style={{ background:"#141414",border:"1px solid #2a2a2a",borderRadius:6,color:"#aaa",fontSize:9,fontWeight:700,padding:"3px 5px",cursor:"pointer",outline:"none",maxWidth:110 }}
+            style={{ background:"#141414",border:"1px solid #2a2a2a",borderRadius:6,color:"#aaa",fontSize:9,fontWeight:700,padding:"3px 5px",cursor:"pointer",outline:"none",maxWidth:115 }}
           >
-            {availableMics.map(function(m){
-              return <option key={m.deviceId} value={m.deviceId}>{m.label}</option>;
-            })}
+            <option value="builtin">📱 iPhone Mic</option>
+            <option value="headset">🎙 Headset Mic</option>
           </select>
         )}
       </div>
