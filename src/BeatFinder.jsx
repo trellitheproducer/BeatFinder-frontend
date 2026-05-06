@@ -4510,6 +4510,59 @@ function useHistory(initial) {
 //    currentTime = (container.scrollLeft + PLAYHEAD_X) / PPS
 //
 // =============================================================================
+
+// ── Error boundary — catches any render crash inside StudioScreen ──────────
+// Without this, a single bad track/clip causes a blank white screen with no
+// way out except force-closing the app.
+class StudioErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { crashed: false, errMsg: "" };
+  }
+  static getDerivedStateFromError(err) {
+    return { crashed: true, errMsg: err && err.message ? err.message : String(err) };
+  }
+  componentDidCatch(err, info) {
+    console.error("[BeatFinder] Studio crash:", err, info);
+  }
+  render() {
+    if (this.state.crashed) {
+      return (
+        <div style={{ background:"#0a0a0a", minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:32, fontFamily:"'DM Sans',sans-serif", gap:20 }}>
+          <div style={{ fontSize:48 }}>⚠️</div>
+          <div style={{ color:"white", fontWeight:800, fontSize:18, textAlign:"center" }}>Studio hit a problem</div>
+          <div style={{ color:"#555", fontSize:13, textAlign:"center", lineHeight:1.6 }}>
+            {this.state.errMsg || "An unexpected error occurred."}
+          </div>
+          <button
+            onClick={function(){
+              // Clear any corrupt project data from the active slot and reload
+              try { localStorage.removeItem("bf_studio_active"); } catch(e){}
+              window.location.reload();
+            }}
+            style={{ background:"#C026D3", border:"none", borderRadius:24, color:"white", fontWeight:800, fontSize:15, padding:"14px 32px", cursor:"pointer" }}
+          >
+            Restart Studio
+          </button>
+          <button
+            onClick={function(){
+              // Nuclear option — wipe saved projects so a corrupt one can't re-crash
+              if (window.confirm("This will delete all saved projects. Continue?")) {
+                try { localStorage.removeItem("bf_studio_projects"); } catch(e){}
+                window.location.reload();
+              }
+            }}
+            style={{ background:"none", border:"none", color:"#555", fontSize:13, cursor:"pointer" }}
+          >
+            Clear saved projects &amp; restart
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function StudioScreen({ user, onExit }) {
 
   // ── Constants ─────────────────────────────────────────────────
@@ -5838,9 +5891,16 @@ mediaRecRef.current = mr;
 
   const saveProject = async function () {
     try {
+      setSaveStatus("Saving...");
       const savedTracks = await Promise.all(tracks.map(async function(t){
-        const b64 = t.audioBuffer ? audioBufferToBase64(t.audioBuffer) : null;
-        return { ...t, audioBuffer:null, url:null, blob:null, audioB64:b64 };
+        // Serialise clips[] — each clip has its own audioBuffer
+        const savedClips = await Promise.all((t.clips||[]).map(async function(cl){
+          const b64 = cl.audioBuffer ? audioBufferToBase64(cl.audioBuffer) : null;
+          return { ...cl, audioBuffer:null, url:null, blob:null, audioB64:b64 };
+        }));
+        // Also serialise the legacy flat audioBuffer if present (beat tracks loaded from URL)
+        const trackB64 = t.audioBuffer ? audioBufferToBase64(t.audioBuffer) : null;
+        return { ...t, audioBuffer:null, url:null, blob:null, audioB64:trackB64, clips:savedClips };
       }));
       const proj = { id:Date.now(), name:projectName, bpm, timeSigNum, projectKey, savedAt:new Date().toISOString(), tracks:savedTracks };
       let list = JSON.parse(localStorage.getItem("bf_studio_projects")||"[]");
@@ -5850,22 +5910,82 @@ mediaRecRef.current = mr;
       localStorage.setItem("bf_studio_projects",JSON.stringify(list));
       setSavedProjects(list); setIsSaved(true);
       setSaveStatus("Saved!"); setTimeout(function(){ setSaveStatus(""); },2000);
-    } catch(e){ setSaveStatus("Save failed — file too large?"); setTimeout(function(){ setSaveStatus(""); },3000); }
+    } catch(e){
+      console.error("[BeatFinder] saveProject error:", e);
+      setSaveStatus("Save failed — project may be too large.");
+      setTimeout(function(){ setSaveStatus(""); },3000);
+    }
   };
 
   const loadProject = async function (p) {
-    setProjectName(p.name); setBpm(p.bpm||120);
-    setShowProjects(false); setIsSaved(true);
-    setSaveStatus("Loading...");
-    // Restore audioBuffers from base64
-    const restored = await Promise.all((p.tracks||[]).map(async function(t){
-      let buf = null;
-      if (t.audioB64) { buf = await base64ToAudioBuffer(t.audioB64); }
-      const url = buf ? URL.createObjectURL(new Blob([new Uint8Array(0)], {type:"audio/wav"})) : null;
-      return { ...t, audioBuffer:buf, url:buf?URL.createObjectURL(new Blob([],{type:"audio/wav"})):null, blob:null };
-    }));
-    setTracks(restored);
-    setSaveStatus("Loaded!"); setTimeout(function(){ setSaveStatus(""); },1500);
+    setShowProjects(false);
+    setSaveStatus("Loading…");
+    setError("");
+    try {
+      // Stop any current playback
+      stopAll(); setIsPlaying(false);
+      setCurrentTime(0); setSelectedClipId(null); setSelectedTrackId(null);
+      if (scrollRef.current) scrollRef.current.scrollLeft = 0;
+
+      // Restore project meta
+      setProjectName(p.name||"Untitled");
+      setBpm(p.bpm||120);
+      setTimeSigNum(p.timeSigNum||4);
+      setProjectKey(p.projectKey||"C major");
+
+      // ── Ensure AudioContext is running before decoding ──
+      // On iOS the context starts suspended until a user gesture — resume it here
+      // (loadProject is always triggered by a tap so this is safe).
+      const actx = getActx();
+      if (actx.state === "suspended") {
+        try { await actx.resume(); } catch(e) {}
+      }
+
+      // Restore tracks — each clip inside t.clips[] has its own audioB64
+      const restored = await Promise.all((p.tracks||[]).map(async function(t){
+        // Restore clips
+        const restoredClips = await Promise.all((t.clips||[]).map(async function(cl){
+          let buf = null;
+          if (cl.audioB64) {
+            buf = await base64ToAudioBuffer(cl.audioB64);
+          }
+          return { ...cl, audioBuffer:buf, url:null, blob:null };
+        }));
+
+        // Restore legacy flat audioBuffer (beat tracks that used the old model)
+        let trackBuf = null;
+        if (t.audioB64) {
+          trackBuf = await base64ToAudioBuffer(t.audioB64);
+        }
+
+        // Only include clips that decoded successfully — skip nulls to prevent render crash
+        const validClips = restoredClips.filter(function(cl){ return cl.audioBuffer !== null; });
+
+        return {
+          ...t,
+          audioBuffer: trackBuf,
+          url: null,
+          blob: null,
+          clips: validClips,
+        };
+      }));
+
+      // Only include tracks that have at least some audio (either flat buffer or clips)
+      // Tracks with no audio at all would just be empty rows — keep them so structure is preserved,
+      // but filter out any track where EVERYTHING failed to decode (avoids blank-screen crash).
+      const validTracks = restored.filter(function(t){
+        return t.audioBuffer || (t.clips && t.clips.length > 0);
+      });
+
+      // Use setTracks directly on the underlying state setter to avoid a history push
+      setTracks(validTracks.length > 0 ? validTracks : []);
+      setIsSaved(true);
+      setSaveStatus("Loaded!"); setTimeout(function(){ setSaveStatus(""); },1500);
+    } catch(e) {
+      console.error("[BeatFinder] loadProject error:", e);
+      setError("Could not load project — " + (e.message||"unknown error"));
+      setSaveStatus(""); 
+    }
   };
 
   const deleteProject = function (id) {
@@ -7388,7 +7508,7 @@ export default function BeatFinder() {
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} />}
-            {t === "studio"    && <StudioScreen user={user} onExit={() => goTab("home")} />}
+            {t === "studio"    && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
             {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
           </div>
         ))}
