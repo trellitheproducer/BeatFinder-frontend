@@ -4570,7 +4570,10 @@ function StudioScreen({ user, onExit }) {
   const [monitorWarn,  setMonitorWarn]  = useState("");
   const [showAutoPitch,setShowAutoPitch] = useState(false);
   const [autoPitch,    setAutoPitch]     = useState({ on:false, key:"C", scale:"major", speed:0.5 });
-  const [lowLatency,   setLowLatency]    = useState(false);
+  const [lowLatency,   setLowLatency]    = useState(true);
+  // "default" = iPhone mic, "headset" = wired headset mic (when headphones plugged in)
+  const [micSource,    setMicSource]     = useState("default"); // "default" | "headset"
+  const [availableMics, setAvailableMics] = useState([]); // [{deviceId, label}]
 
   // ── Refs ──────────────────────────────────────────────────────
   const actxRef         = useRef(null);
@@ -4670,6 +4673,7 @@ function StudioScreen({ user, onExit }) {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const outputs = devices.filter(function(d){ return d.kind === "audiooutput"; });
+      const inputs  = devices.filter(function(d){ return d.kind === "audioinput"; });
       const hp = outputs.some(function(d){
         const l = (d.label||"").toLowerCase();
         return l.includes("headphone")||l.includes("earphone")||l.includes("airpods")||l.includes("bluetooth")||l.includes("headset")||l.includes("wired");
@@ -4677,6 +4681,23 @@ function StudioScreen({ user, onExit }) {
       // If no labels (iOS blocks without permission), allow and trust user
       const ok = hp || outputs.length === 0 || outputs.every(function(d){ return !d.label; });
       setHeadphonesIn(ok);
+
+      // Build mic list for the source selector
+      // Always include the iPhone/built-in mic as "default"
+      const mics = [{ deviceId: "default", label: "📱 iPhone Mic" }];
+      inputs.forEach(function(d) {
+        if (!d.deviceId || d.deviceId === "default" || d.deviceId === "communications") return;
+        const l = (d.label||"").toLowerCase();
+        // Only show a headset entry if label hints it's a headset/wired mic
+        if (l.includes("headset")||l.includes("wired")||l.includes("headphone")||l.includes("external")) {
+          mics.push({ deviceId: d.deviceId, label: "🎙 Headset Mic" });
+        }
+      });
+      // If headphones are in but no headset mic found by label, offer the option anyway
+      if (ok && mics.length === 1) {
+        mics.push({ deviceId: "headset_fallback", label: "🎙 Headset Mic" });
+      }
+      setAvailableMics(mics);
       return ok;
     } catch(e){ setHeadphonesIn(true); return true; }
   };
@@ -4696,10 +4717,12 @@ function StudioScreen({ user, onExit }) {
   }, [headphonesIn]);
 
   // ── Input Monitoring ──────────────────────────────────────────
-  // Graph: mic → analyser → gainNode(volume) → destination (headphones only)
+  // Graph: mic → merger (mono→stereo) → analyser → gainNode → destination
   // echoCancellation/noiseSuppression MUST be false — they add 40–80ms latency.
-  // Achievable latency: ~10–30ms on wired, ~150–300ms on Bluetooth.
-  const startMonitoring = async function () {
+  // Achievable latency: ~5–15ms on wired headphones with latencyHint:"interactive".
+  // forceLowLatency / forceMicSource allow the LL toggle and mic picker to restart
+  // monitoring with the new settings immediately (state update is async so we pass values directly).
+  const startMonitoring = async function (forceLowLatency, forceMicSource) {
     if (monitorStreamRef.current) return;
     setMonitorWarn("");
     const safe = await checkHeadphones();
@@ -4707,35 +4730,64 @@ function StudioScreen({ user, onExit }) {
       setMonitorWarn("⚠️ Plug in headphones — monitoring disabled to prevent feedback.");
       return;
     }
+
+    // Resolve which values to use — forced (from toggle callbacks) or current state
+    const useLowLatency = forceLowLatency !== undefined ? forceLowLatency : lowLatency;
+    const useMicSource  = forceMicSource  !== undefined ? forceMicSource  : micSource;
+
+    // Build deviceId constraint
+    // "default" → no deviceId (browser picks default, usually iPhone mic)
+    // "headset_fallback" → no deviceId but we'll try to steer via facingMode/channelCount
+    // otherwise → use the specific deviceId
+    const audioConstraints = {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl:  false,
+      channelCount:     1,
+      latency:          0,
+    };
+    if (useMicSource === "default") {
+      // Explicitly request the built-in/front mic on iOS
+      // facingMode:user steers toward front (iPhone mic), away from wired input
+      audioConstraints.facingMode = { ideal: "user" };
+    } else if (useMicSource !== "headset_fallback") {
+      // Use specific hardware deviceId if available
+      audioConstraints.deviceId = { exact: useMicSource };
+    }
+    // headset_fallback: no deviceId — iOS will route through wired headset mic automatically
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl:  false,
-        sampleRate:       48000,
-        channelCount:     1,
-        latency:          0,
-      }});
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
       monitorStreamRef.current = stream;
-      // Low-latency mode: "playback" hint gives browser permission to use hardware I/O buffer
-      // "interactive" is smallest software buffer. On wired headphones: ~5-15ms total.
+
+      // latencyHint "interactive" = smallest buffer = lowest latency (~5-15ms wired)
+      // Always use "interactive" — it is already the lowest-latency hint available in Web Audio.
+      // "playback" is actually higher latency (optimised for smooth playback, not live monitoring).
       const mCtx = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate:   48000,
-        latencyHint:  lowLatency ? "playback" : "interactive",
+        sampleRate:  48000,
+        latencyHint: "interactive",
       });
-      const src     = mCtx.createMediaStreamSource(stream);
-      const gain    = mCtx.createGain(); gain.gain.value = monitorVol;
+
+      const src      = mCtx.createMediaStreamSource(stream);
       const analyser = mCtx.createAnalyser(); analyser.fftSize = 256;
+      const gain     = mCtx.createGain(); gain.gain.value = monitorVol;
+
+      // ── Fix mono→stereo: mic produces 1 channel, which browsers often map
+      // to left channel only. Use a ChannelMerger to duplicate it into both ears. ──
+      const merger = mCtx.createChannelMerger(2);
       src.connect(analyser);
-      src.connect(gain);
+      src.connect(merger, 0, 0); // mono → left
+      src.connect(merger, 0, 1); // mono → right
+      merger.connect(gain);
       gain.connect(mCtx.destination);
+
       monitorSrcRef.current      = src;
       monitorGainRef.current     = gain;
       monitorAnalyserRef.current = analyser;
       monitorStreamRef.current._mCtx = mCtx;
       setMonitoringOn(true);
     } catch (e) {
-      setMonitorWarn("Could not start monitoring.");
+      setMonitorWarn("Could not start monitoring: " + (e.message || e.name));
     }
   };
 
@@ -6108,18 +6160,23 @@ mediaRecRef.current = mr;
             onChange={function(e){ setMonitorVol(parseFloat(e.target.value)); }}
             style={{ width:50,accentColor:"#22C55E",height:2 }} />
         )}
-        {/* Low-latency mode toggle */}
-        <button
-          onClick={function(){
-            setLowLatency(function(v){
-              const next = !v;
-              if (monitoringOn) { stopMonitoring(); setTimeout(function(){ startMonitoring(); }, 100); }
-              return next;
-            });
-          }}
-          title="Low Latency Mode — uses smallest audio buffer for minimum monitoring delay"
-          style={{ background:lowLatency?"rgba(251,191,36,0.15)":"#141414",border:"1px solid "+(lowLatency?"#F59E0B":"#2a2a2a"),borderRadius:6,color:lowLatency?"#F59E0B":"#444",fontSize:8,fontWeight:700,padding:"3px 7px",cursor:"pointer" }}
-        >⚡ LL</button>
+        {/* Mic source picker — shown when headphones are in */}
+        {headphonesIn && availableMics.length > 1 && (
+          <select
+            value={micSource}
+            onChange={function(e){
+              const next = e.target.value;
+              setMicSource(next);
+              if (monitoringOn) { stopMonitoring(); setTimeout(function(){ startMonitoring(undefined, next); }, 100); }
+            }}
+            title="Choose microphone source"
+            style={{ background:"#141414",border:"1px solid #2a2a2a",borderRadius:6,color:"#aaa",fontSize:9,fontWeight:700,padding:"3px 5px",cursor:"pointer",outline:"none",maxWidth:110 }}
+          >
+            {availableMics.map(function(m){
+              return <option key={m.deviceId} value={m.deviceId}>{m.label}</option>;
+            })}
+          </select>
+        )}
       </div>
       {monitorWarn && <div style={{ background:"rgba(245,158,11,0.1)",borderBottom:"1px solid rgba(245,158,11,0.2)",color:"#F59E0B",fontSize:11,padding:"4px 16px",textAlign:"center",flexShrink:0 }}>{monitorWarn}</div>}
 
