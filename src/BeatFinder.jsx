@@ -5943,44 +5943,50 @@ mediaRecRef.current = mr;
 
       // Restore tracks — each clip inside t.clips[] has its own audioB64
       const restored = await Promise.all((p.tracks||[]).map(async function(t){
-        // Restore clips
+
+        // Restore clips — old saves (pre-fix) have no audioB64 on clips, so buf will be null.
+        // We keep ALL clips regardless; clips with null audioBuffer simply won't play/render waveform.
         const restoredClips = await Promise.all((t.clips||[]).map(async function(cl){
           let buf = null;
           if (cl.audioB64) {
             buf = await base64ToAudioBuffer(cl.audioB64);
           }
-          return { ...cl, audioBuffer:buf, url:null, blob:null };
+          return { ...cl, audioBuffer: buf, url: null, blob: null };
         }));
 
-        // Restore legacy flat audioBuffer (beat tracks that used the old model)
+        // Restore legacy flat audioBuffer (beat tracks saved with old single-buffer model)
         let trackBuf = null;
         if (t.audioB64) {
           trackBuf = await base64ToAudioBuffer(t.audioB64);
         }
-
-        // Only include clips that decoded successfully — skip nulls to prevent render crash
-        const validClips = restoredClips.filter(function(cl){ return cl.audioBuffer !== null; });
 
         return {
           ...t,
           audioBuffer: trackBuf,
           url: null,
           blob: null,
-          clips: validClips,
+          clips: restoredClips,
         };
       }));
 
-      // Only include tracks that have at least some audio (either flat buffer or clips)
-      // Tracks with no audio at all would just be empty rows — keep them so structure is preserved,
-      // but filter out any track where EVERYTHING failed to decode (avoids blank-screen crash).
-      const validTracks = restored.filter(function(t){
-        return t.audioBuffer || (t.clips && t.clips.length > 0);
+      // Check if any audio failed to restore — warn the user
+      const missingAudio = restored.some(function(t){
+        const clipsLostAudio = (t.clips||[]).some(function(cl){ return !cl.audioBuffer && !cl.audioB64; });
+        return clipsLostAudio || (!t.audioBuffer && t.audioB64 === undefined && (t.clips||[]).length > 0);
       });
 
-      // Use setTracks directly on the underlying state setter to avoid a history push
-      setTracks(validTracks.length > 0 ? validTracks : []);
+      // Keep ALL tracks — even ones with no audio. The user's track names, colors,
+      // FX settings etc. are still valuable. Empty tracks just show as empty rows.
+      setTracks(restored);
       setIsSaved(true);
-      setSaveStatus("Loaded!"); setTimeout(function(){ setSaveStatus(""); },1500);
+
+      if (missingAudio) {
+        setSaveStatus("");
+        setError("⚠️ This project was saved before audio serialisation was supported. Track structure restored, but audio clips need to be re-uploaded.");
+        setTimeout(function(){ setError(""); }, 8000);
+      } else {
+        setSaveStatus("Loaded!"); setTimeout(function(){ setSaveStatus(""); }, 1500);
+      }
     } catch(e) {
       console.error("[BeatFinder] loadProject error:", e);
       setError("Could not load project — " + (e.message||"unknown error"));
