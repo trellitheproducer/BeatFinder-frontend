@@ -5682,7 +5682,18 @@ function StudioScreen({ user, onExit }) {
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
-      style={{ background:"#080808", height:"calc(100vh - env(safe-area-inset-bottom))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
+      style={{
+  background:"#080808",
+  flex:1,
+  minHeight:0,
+  display:"flex",
+  flexDirection:"column",
+  fontFamily:"'DM Sans',sans-serif",
+  overflow:"hidden",
+  WebkitUserSelect:"none",
+  userSelect:"none",
+  WebkitTouchCallout:"none"
+}}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
     >
       {/* ── Overlays ── */}
