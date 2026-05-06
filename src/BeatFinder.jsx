@@ -4629,6 +4629,11 @@ function StudioScreen({ user, onExit }) {
 
   // ── UI ────────────────────────────────────────────────────────
   const [contextMenu,  setContextMenu]  = useState(null); // {region, x, y}
+  // ── Multi-select lasso ───────────────────────────────────────
+  const [selBox,       setSelBox]       = useState(null);  // {x,y,w,h} in px relative to scroll container
+  const [selClipIds,   setSelClipIds]   = useState(new Set()); // selected clip ids
+  const selBoxRef      = useRef(null);   // live drag state {startX,startY,scrollX}
+  const longPressRef   = useRef(null);   // setTimeout handle for long-press detection
   const [showSettings, setShowSettings] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [showProjMenu, setShowProjMenu] = useState(false);
@@ -4735,6 +4740,7 @@ function StudioScreen({ user, onExit }) {
 
   // ── Computed ──────────────────────────────────────────────────
   const effectivePPS = PPS * zoom;
+  effectivePPSRef.current = effectivePPS; // keep ref in sync for lasso closure
   const spb          = 60 / bpm;
   const spBar        = spb * timeSigNum;
   const totalDur = Math.max(60, currentTime + 30, ...tracks.map(function(t){
@@ -5530,9 +5536,9 @@ function StudioScreen({ user, onExit }) {
     setTracks(function (prev) {
       return prev.map(function(t) {
         if (t.id !== trackId) return t;
-        // Deactivate old clips (new take becomes active)
-        const deactivated = t.clips.map(function(cl){ return {...cl, active:false}; });
-        return { ...t, clips:[...deactivated, {...clip, active:true}] };
+        // All clips remain active — users can record multiple takes on the same track
+        // and they all play back together. Use the track's Takes panel to manage them.
+        return { ...t, clips:[...t.clips, {...clip, active:true}] };
       });
     });
     setIsSaved(false);
@@ -5899,6 +5905,143 @@ function StudioScreen({ user, onExit }) {
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   };
+
+  // ── Multi-select lasso handlers ─────────────────────────────────────────
+  // Long-press (1.5s) on blank lane space activates a drag-to-select box.
+  // Any clip whose rendered rect overlaps the box gets added to selClipIds.
+  // An action bar then appears with Delete and Duplicate for all selected clips.
+
+  const laneScrollRef = scrollRef; // reuse existing scroll container ref
+
+  const getLaneScrollX = function() {
+    return laneScrollRef.current ? laneScrollRef.current.scrollLeft : 0;
+  };
+
+  const startLassoFromTouch = function(clientX, clientY, laneTop) {
+    // clientX/Y are viewport coords; convert to scroll-container coords
+    const scrollX = getLaneScrollX();
+    const containerRect = laneScrollRef.current ? laneScrollRef.current.getBoundingClientRect() : {left:0,top:0};
+    const absX = clientX - containerRect.left + scrollX;
+    const absY = clientY - containerRect.top;
+    selBoxRef.current = { startX: absX, startY: absY, scrollX };
+    setSelBox({ x: absX, y: absY, w: 0, h: 0 });
+    setSelClipIds(new Set());
+
+    const onMove = function(te) {
+      if (!selBoxRef.current) return;
+      te.preventDefault();
+      const tx = te.touches[0].clientX;
+      const ty = te.touches[0].clientY;
+      const sx = getLaneScrollX();
+      const ax = tx - containerRect.left + sx;
+      const ay = ty - containerRect.top;
+      const x = Math.min(ax, selBoxRef.current.startX);
+      const y = Math.min(ay, selBoxRef.current.startY);
+      const w = Math.abs(ax - selBoxRef.current.startX);
+      const h = Math.abs(ay - selBoxRef.current.startY);
+      setSelBox({ x, y, w, h });
+
+      // Hit-test all clips against the lasso box
+      const hit = new Set();
+      tracksRef.current.forEach(function(t) {
+        (t.clips||[]).forEach(function(cl) {
+          if (!cl.audioBuffer || cl.active === false) return;
+          const trimS  = cl.trimStart || 0;
+          const trimE  = cl.trimEnd !== undefined ? cl.trimEnd : cl.audioBuffer.duration;
+          const clipL  = (cl.startTime || 0) * effectivePPSRef.current;
+          const clipR  = clipL + Math.max(20, (trimE - trimS) * effectivePPSRef.current);
+          // We can't know the exact Y of each track here without DOM lookups,
+          // so we match by X overlap only and refine on commit
+          if (clipR >= x && clipL <= x + w) {
+            hit.add(cl.id);
+          }
+        });
+      });
+      setSelClipIds(hit);
+    };
+
+    const onEnd = function() {
+      selBoxRef.current = null;
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onEnd);
+      // Keep selBox visible with the selection — it becomes the action bar trigger
+      // Box disappears when user taps away or takes an action
+    };
+
+    document.addEventListener("touchmove", onMove, { passive: false });
+    document.addEventListener("touchend", onEnd, { passive: true });
+  };
+
+  const handleLaneLongPress = function(e, track) {
+    // Called from onTouchStart on blank lane space.
+    // We start a 1.5s timer; if the finger doesn't move much, activate lasso.
+    const touch = e.touches[0];
+    const startX = touch.clientX;
+    const startY = touch.clientY;
+
+    longPressRef.current = setTimeout(function() {
+      longPressRef.current = null;
+      // Haptic-style visual pulse then start lasso
+      startLassoFromTouch(startX, startY);
+    }, 1500);
+
+    const cancelLP = function(te) {
+      if (!longPressRef.current) return;
+      // Cancel if finger moved more than 8px
+      const dx = te.touches[0].clientX - startX;
+      const dy = te.touches[0].clientY - startY;
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+        clearTimeout(longPressRef.current);
+        longPressRef.current = null;
+      }
+    };
+    const cancelOnEnd = function() {
+      if (longPressRef.current) { clearTimeout(longPressRef.current); longPressRef.current = null; }
+      document.removeEventListener("touchmove", cancelLP);
+      document.removeEventListener("touchend", cancelOnEnd);
+    };
+    document.addEventListener("touchmove", cancelLP, { passive: true });
+    document.addEventListener("touchend", cancelOnEnd, { passive: true });
+  };
+
+  const deleteSelectedClips = function() {
+    setTracks(function(prev) {
+      return prev.map(function(t) {
+        return { ...t, clips: (t.clips||[]).filter(function(cl){ return !selClipIds.has(cl.id); }) };
+      });
+    });
+    setSelClipIds(new Set());
+    setSelBox(null);
+    setIsSaved(false);
+  };
+
+  const duplicateSelectedClips = function() {
+    setTracks(function(prev) {
+      return prev.map(function(t) {
+        const newClips = [];
+        (t.clips||[]).forEach(function(cl) {
+          newClips.push(cl);
+          if (selClipIds.has(cl.id)) {
+            const trimS = cl.trimStart || 0;
+            const trimE = cl.trimEnd !== undefined ? cl.trimEnd : cl.audioBuffer.duration;
+            newClips.push({
+              ...cl,
+              id: cl.id + "_dup" + Date.now(),
+              startTime: (cl.startTime || 0) + (trimE - trimS) + 0.1,
+              label: (cl.label || "Take") + " (copy)",
+            });
+          }
+        });
+        return { ...t, clips: newClips };
+      });
+    });
+    setSelClipIds(new Set());
+    setSelBox(null);
+    setIsSaved(false);
+  };
+
+  // effectivePPS changes with zoom — keep a ref so lasso onMove closure can read it
+  const effectivePPSRef = useRef(100);
 
   const handleRegionRightClick = function (e, track, clip) {
     e.preventDefault();
@@ -6634,7 +6777,10 @@ function StudioScreen({ user, onExit }) {
                     position:"relative", flex:1,
                     overflow:"visible",
                     isolation:"isolate",
-                  }} onClick={deselectClip}>
+                  }}
+                    onClick={function(e){ deselectClip(e); setSelBox(null); setSelClipIds(new Set()); }}
+                    onTouchStart={function(e){ handleLaneLongPress(e, track); }}
+                  >
 
                     {/* ── INNER MASK — hard overflow:hidden, everything inside is clipped ── */}
                     <div style={{ position:"absolute", inset:0, overflow:"hidden", background:"#0a0a0a" }}>
@@ -6656,8 +6802,9 @@ function StudioScreen({ user, onExit }) {
                         const clipW   = Math.max(20, (trimE - trimS) * effectivePPS);
                         const clipL   = Math.max(0, (clip.startTime || 0) * effectivePPS);
                         const playedF = Math.max(0, Math.min(1, (currentTime - (clip.startTime||0)) / (trimE - trimS || 1)));
-                        const isSel   = selectedClipId === clip.id;
-                        const isActv  = clip.active !== false;
+                        const isSel      = selectedClipId === clip.id;
+                        const isActv     = clip.active !== false;
+                        const isMultiSel = selClipIds.has(clip.id);
                         return (
                           <div
                             key={clip.id + "_body"}
@@ -6669,10 +6816,10 @@ function StudioScreen({ user, onExit }) {
                               position:"absolute", left:clipL, top:3, width:clipW, height:TRACK_H-6,
                               borderRadius:6, overflow:"hidden", touchAction:"none",
                               background: isActv ? "#111" : "#0a0a0a",
-                              border: isSel ? "2px solid "+track.color : "1.5px solid "+(isActv?track.color+"66":track.color+"22"),
-                              boxShadow: isSel ? "inset 0 0 0 1px "+track.color+"33" : "none",
+                              border: isMultiSel ? "2px solid #FACC15" : isSel ? "2px solid "+track.color : "1.5px solid "+(isActv?track.color+"66":track.color+"22"),
+                              boxShadow: isMultiSel ? "0 0 10px rgba(250,204,21,0.4)" : isSel ? "inset 0 0 0 1px "+track.color+"33" : "none",
                               opacity: isActv ? 1 : 0.3,
-                              cursor:"grab", zIndex: isActv ? 2 : 1,
+                              cursor:"grab", zIndex: isMultiSel ? 3 : isActv ? 2 : 1,
                               transition:"border 0.12s, box-shadow 0.12s",
                             }}
                           >
@@ -6756,6 +6903,51 @@ function StudioScreen({ user, onExit }) {
           </div>{/* end inner */}
         </div>{/* end scroll container */}
       </div>{/* end DAW layout */}
+
+      {/* ── Lasso selection box overlay ─────────────────────────────────────── */}
+      {selBox && selBox.w > 4 && selBox.h > 4 && (
+        <div style={{
+          position:"absolute",
+          left: selBox.x - (scrollRef.current ? scrollRef.current.scrollLeft : 0),
+          top:  selBox.y,
+          width: selBox.w,
+          height: selBox.h,
+          border: "2px solid #FACC15",
+          background: "rgba(250,204,21,0.08)",
+          borderRadius: 4,
+          pointerEvents: "none",
+          zIndex: 500,
+        }} />
+      )}
+
+      {/* ── Multi-select action bar ──────────────────────────────────────────── */}
+      {selClipIds.size > 0 && (
+        <div style={{
+          position:"absolute", bottom: 90, left:"50%", transform:"translateX(-50%)",
+          zIndex: 600,
+          background:"#1c1c1c", border:"1px solid #333",
+          borderRadius:20, padding:"10px 18px",
+          display:"flex", alignItems:"center", gap:12,
+          boxShadow:"0 8px 32px rgba(0,0,0,0.9)",
+        }}>
+          <span style={{ color:"#FACC15", fontSize:12, fontWeight:700 }}>
+            {selClipIds.size} clip{selClipIds.size > 1 ? "s" : ""} selected
+          </span>
+          <div style={{ width:1, height:20, background:"#333" }} />
+          <button
+            onClick={duplicateSelectedClips}
+            style={{ background:"rgba(250,204,21,0.1)", border:"1px solid rgba(250,204,21,0.3)", borderRadius:10, color:"#FACC15", fontSize:13, fontWeight:700, padding:"8px 14px", cursor:"pointer" }}
+          >⧉ Duplicate</button>
+          <button
+            onClick={deleteSelectedClips}
+            style={{ background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", borderRadius:10, color:"#EF4444", fontSize:13, fontWeight:700, padding:"8px 14px", cursor:"pointer" }}
+          >🗑 Delete</button>
+          <button
+            onClick={function(){ setSelClipIds(new Set()); setSelBox(null); }}
+            style={{ background:"none", border:"none", color:"#555", fontSize:18, cursor:"pointer", padding:"0 4px", lineHeight:1 }}
+          >✕</button>
+        </div>
+      )}
 
       {/* Add menu popup */}
       {showAddMenu&&(
