@@ -3309,7 +3309,7 @@ function LyricCard({ lyric, lyricIndex, onDelete, onEditLyric }) {
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          <span style={{ color: "#444", fontSize: 18 }}>></span>
+          <span style={{ color: "#444", fontSize: 18 }}>{'>'}</span>
           <button
             onClick={e => { e.stopPropagation(); onDelete(); }}
             style={{ background: "none", border: "none", color: "#555", fontSize: 16, cursor: "pointer", padding: 4 }}>
@@ -4689,6 +4689,148 @@ class StudioErrorBoundary extends React.Component {
   }
 }
 
+// ── Plugin chain panel — extracted from IIFE so useState is a valid hook call ──
+function PluginChainPanel({ fx, upd, eq5, EQPlugin, CompPlugin, ReverbPlugin, PitchPlugin, Knob, EQGraph, CompGraph, ReverbViz }) {
+  const [showPluginPicker, setShowPluginPicker] = React.useState(false);
+  const chain = fx.pluginChain || [];
+
+  const ALL_PLUGINS = [
+    { key:"eq",         label:"Parametric EQ",      sub:"5-Band · Drag handles",    icon:"📊", color:"#2563EB" },
+    { key:"compressor", label:"Compressor",          sub:"Dynamics processor",        icon:"🎚", color:"#7C3AED" },
+    { key:"reverb",     label:"Convolution Reverb",  sub:"Room simulation",           icon:"🌊", color:"#C026D3" },
+    { key:"pitch",      label:"Auto-Tune / Pitch",   sub:"Pitch processor v2",        icon:"🎵", color:"#9333EA" },
+  ];
+
+  const addPlugin = function(key) {
+    if (chain.includes(key)) return;
+    upd("pluginChain", null, [...chain, key]);
+    setShowPluginPicker(false);
+  };
+
+  const removePlugin = function(key) {
+    upd("pluginChain", null, chain.filter(function(k){ return k !== key; }));
+  };
+
+  const movePlugin = function(idx, dir) {
+    const next = [...chain];
+    const swap = idx + dir;
+    if (swap < 0 || swap >= next.length) return;
+    const tmp = next[idx]; next[idx] = next[swap]; next[swap] = tmp;
+    upd("pluginChain", null, next);
+  };
+
+  return (
+    <div style={{ flex:1, padding:"14px", display:"flex", flexDirection:"column", gap:12 }}>
+
+    {/* ── Plugin picker bottom sheet ── */}
+    {showPluginPicker && (
+      <div style={{ position:"fixed", inset:0, zIndex:9999, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"flex-end" }}
+        onClick={function(){ setShowPluginPicker(false); }}>
+        <div style={{ width:"100%", background:"#111", borderRadius:"20px 20px 0 0", paddingBottom:"calc(20px + env(safe-area-inset-bottom))", border:"1px solid #222", borderBottom:"none" }}
+          onClick={function(e){ e.stopPropagation(); }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px 12px", borderBottom:"1px solid #1e1e1e" }}>
+            <span style={{ color:"white", fontWeight:800, fontSize:16 }}>Add Plugin</span>
+            <button onClick={function(){ setShowPluginPicker(false); }} style={{ background:"none", border:"none", color:"#555", fontSize:22, cursor:"pointer", lineHeight:1 }}>✕</button>
+          </div>
+          <div style={{ padding:"12px 16px", display:"flex", flexDirection:"column", gap:8 }}>
+            {ALL_PLUGINS.map(function(p){
+              const already = chain.includes(p.key);
+              return (
+                <button key={p.key} onClick={function(){ if(!already) addPlugin(p.key); }}
+                  disabled={already}
+                  style={{ display:"flex", alignItems:"center", gap:14, padding:"14px 16px",
+                    background: already ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.05)",
+                    border:"1px solid " + (already ? "#1e1e1e" : p.color + "44"),
+                    borderRadius:14, cursor: already ? "default" : "pointer",
+                    opacity: already ? 0.45 : 1, textAlign:"left", width:"100%" }}>
+                  <div style={{ width:40, height:40, borderRadius:10, background: p.color + "22",
+                    border:"1px solid " + p.color + "44", display:"flex", alignItems:"center", justifyContent:"center",
+                    fontSize:20, flexShrink:0 }}>{p.icon}</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ color: already ? "#555" : "white", fontWeight:700, fontSize:15 }}>{p.label}</div>
+                    <div style={{ color: already ? "#333" : "#555", fontSize:12, marginTop:2 }}>{p.sub}</div>
+                  </div>
+                  {already
+                    ? <span style={{ color:"#333", fontSize:11, fontWeight:700 }}>ADDED</span>
+                    : <div style={{ width:28, height:28, borderRadius:8, background: p.color + "22",
+                        border:"1px solid " + p.color + "55", display:"flex", alignItems:"center", justifyContent:"center",
+                        color: p.color, fontSize:20, fontWeight:300, lineHeight:1 }}>+</div>
+                  }
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Empty state ── */}
+    {chain.length === 0 && (
+      <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"48px 20px", gap:16, textAlign:"center" }}>
+        <div style={{ width:64, height:64, borderRadius:20, background:"#111", border:"1px dashed #2a2a2a",
+          display:"flex", alignItems:"center", justifyContent:"center", fontSize:28 }}>🎛</div>
+        <div style={{ color:"white", fontWeight:700, fontSize:17 }}>No plugins on this chain</div>
+        <div style={{ color:"#555", fontSize:13, lineHeight:1.6, maxWidth:240 }}>
+          Tap <span style={{ color:"#C026D3", fontWeight:700 }}>+ Add Plugin</span> below to build your vocal effects chain
+        </div>
+      </div>
+    )}
+
+    {/* ── Active plugin slots ── */}
+    {chain.map(function(key, idx){
+      return (
+        <div key={key} style={{ marginBottom:4 }}>
+          {/* Slot header */}
+          <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4, paddingLeft:2 }}>
+            <div style={{ display:"flex", gap:1 }}>
+              <button onClick={function(){ movePlugin(idx, -1); }}
+                style={{ background:"none", border:"none", color: idx===0 ? "#252525" : "#555", fontSize:13, cursor: idx===0 ? "default" : "pointer", padding:"2px 5px", lineHeight:1 }}>↑</button>
+              <button onClick={function(){ movePlugin(idx, 1); }}
+                style={{ background:"none", border:"none", color: idx===chain.length-1 ? "#252525" : "#555", fontSize:13, cursor: idx===chain.length-1 ? "default" : "pointer", padding:"2px 5px", lineHeight:1 }}>↓</button>
+            </div>
+            <span style={{ color:"#2a2a2a", fontSize:9, fontWeight:700, letterSpacing:1.5, flex:1, fontFamily:"monospace" }}>SLOT {idx+1}</span>
+            <button onClick={function(){ removePlugin(key); }}
+              style={{ background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.18)", borderRadius:6, color:"#EF4444", fontSize:9, fontWeight:800, padding:"3px 10px", cursor:"pointer", letterSpacing:0.5 }}>REMOVE</button>
+          </div>
+
+          {/* EQ plugin */}
+          {key === "eq" && <EQPlugin fx={fx} upd={upd} eq5={eq5} EQGraph={EQGraph} Knob={Knob} />}
+
+          {/* Compressor plugin */}
+          {key === "compressor" && <CompPlugin fx={fx} upd={upd} CompGraph={CompGraph} Knob={Knob} />}
+
+          {/* Reverb plugin */}
+          {key === "reverb" && <ReverbPlugin fx={fx} upd={upd} ReverbViz={ReverbViz} Knob={Knob} />}
+
+          {/* Pitch / Autotune plugin */}
+          {key === "pitch" && <PitchPlugin fx={fx} upd={upd} Knob={Knob} />}
+
+        </div>
+      );
+    })}
+
+    {/* ── Add Plugin button ── */}
+    {chain.length < 4 && (
+      <button onClick={function(e){ e.stopPropagation(); setShowPluginPicker(true); }}
+        style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:10,
+          width:"100%", padding:"16px", marginTop:4,
+          background:"rgba(192,38,211,0.06)",
+          border:"1.5px dashed rgba(192,38,211,0.3)",
+          borderRadius:16, cursor:"pointer", color:"#C026D3",
+          fontWeight:800, fontSize:14, letterSpacing:0.5,
+          transition:"background 0.15s" }}>
+        <span style={{ fontSize:20, lineHeight:1, fontWeight:300 }}>+</span>
+        Add Plugin
+      </button>
+    )}
+
+    {/* spacer */}
+    <div style={{ height:8 }} />
+
+  </div>
+  );
+}
+
 function StudioScreen({ user, onExit }) {
 
   // ── Constants ─────────────────────────────────────────────────
@@ -4797,6 +4939,20 @@ function StudioScreen({ user, onExit }) {
   // MUST be declared here (before line 4743 uses it) to avoid "uninitialized variable" crash
   const effectivePPSRef = useRef(100);
   const lassoContainerRef = useRef(null); // ref to the DAW wrapper — lasso overlay is positioned inside this
+  const pitchWorkletReadyRef = useRef(false); // true once the phase-vocoder worklet is registered
+
+  // ── Audio engine gain/FX refs (declared here to follow Rules of Hooks) ──
+  const gainNodesRef  = useRef({});   // trackId → GainNode
+  const masterGainRef = useRef(null); // single master output
+  const fxNodesRef    = useRef({});   // trackId → live audio node references
+
+  // ── Ruler drag ref ───────────────────────────────────────────────────────
+  const rulerDragRef = useRef(null); // { mode: "in"|"out"|"new", startX, startT }
+
+  // ── Clip/track selection state ───────────────────────────────────────────
+  const [selectedTrackId, setSelectedTrackId] = useState(null); // which vocal track records into
+  const [selectedClipId, setSelectedClipId] = useState(null);
+  const dragRef = useRef(null);
 
   useEffect(function () { zoomRef.current = zoom; }, [zoom]);
   useEffect(function () { isPlayingRef.current = isPlaying; }, [isPlaying]);
@@ -5153,11 +5309,160 @@ function StudioScreen({ user, onExit }) {
   }, [isPlaying, effectivePPS, loopEnabled, loopIn, loopOut]);
 
   // ── Audio engine — gain nodes persist so mute/solo works in real-time ──
-  const gainNodesRef  = useRef({});   // trackId → GainNode
-  const masterGainRef = useRef(null); // single master output
-  // ── Live FX nodes — updated in real-time without restarting playback ──
-  // fxNodesRef.current[trackId] = { eq:{hpf,low,mid,high,lpf}, comp, reverbDry, reverbWet, preDelay, makeupGain }
-  const fxNodesRef    = useRef({});   // trackId → live audio node references
+  // gainNodesRef, masterGainRef, fxNodesRef declared at top of component (Rules of Hooks)
+
+  // ── Phase-vocoder pitch-shift worklet ────────────────────────────────────
+  // Registered once per AudioContext via a Blob URL. Implements OLA (overlap-add)
+  // pitch shifting that preserves tempo — unlike playbackRate which stretches time.
+  // The worklet exposes a single AudioParam: "pitch" (ratio, 1.0 = no shift).
+  // To shift by N semitones: ratio = 2^(N/12).
+  // =============================================================================
+  const PITCH_WORKLET_CODE = `
+class PitchShiftProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [{ name:'pitch', defaultValue:1, minValue:0.25, maxValue:4, automationRate:'k-rate' }];
+  }
+  constructor() {
+    super();
+    this._frameSize  = 2048;
+    this._hopSize    = 512;
+    this._overlapFac = this._frameSize / this._hopSize;
+    this._inBuf      = new Float32Array(this._frameSize);
+    this._outBuf     = new Float32Array(this._frameSize * 2);
+    this._window     = new Float32Array(this._frameSize);
+    this._lastPhase  = new Float32Array(this._frameSize / 2 + 1);
+    this._sumPhase   = new Float32Array(this._frameSize / 2 + 1);
+    this._inFill     = 0;
+    this._outRead    = 0;
+    this._outWrite   = 0;
+    // Hann window
+    for (let i = 0; i < this._frameSize; i++)
+      this._window[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / this._frameSize);
+    // Real FFT tables
+    this._fftSize = this._frameSize;
+    this._re = new Float32Array(this._fftSize);
+    this._im = new Float32Array(this._fftSize);
+    this._mag    = new Float32Array(this._fftSize / 2 + 1);
+    this._phase  = new Float32Array(this._fftSize / 2 + 1);
+    this._outMag = new Float32Array(this._fftSize / 2 + 1);
+    this._outPhs = new Float32Array(this._fftSize / 2 + 1);
+  }
+
+  _fft(re, im, inv) {
+    const n = re.length;
+    // bit-reverse
+    for (let i=1,j=0; i<n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) { let t=re[i]; re[i]=re[j]; re[j]=t; t=im[i]; im[i]=im[j]; im[j]=t; }
+    }
+    for (let len=2; len<=n; len<<=1) {
+      const ang = 2 * Math.PI / len * (inv ? -1 : 1);
+      const wRe = Math.cos(ang), wIm = Math.sin(ang);
+      for (let i=0; i<n; i+=len) {
+        let urRe=1, urIm=0;
+        for (let j=0; j<len/2; j++) {
+          const uRe=re[i+j], uIm=im[i+j];
+          const vRe=re[i+j+len/2]*urRe - im[i+j+len/2]*urIm;
+          const vIm=re[i+j+len/2]*urIm + im[i+j+len/2]*urRe;
+          re[i+j]=uRe+vRe; im[i+j]=uIm+vIm;
+          re[i+j+len/2]=uRe-vRe; im[i+j+len/2]=uIm-vIm;
+          const nRe=urRe*wRe-urIm*wIm; urIm=urRe*wIm+urIm*wRe; urRe=nRe;
+        }
+      }
+    }
+    if (inv) { for (let i=0;i<n;i++){re[i]/=n;im[i]/=n;} }
+  }
+
+  process(inputs, outputs, params) {
+    const input  = inputs[0]?.[0];
+    const output = outputs[0]?.[0];
+    if (!input || !output) return true;
+    const pitch = params.pitch[0];
+    const fs = this._frameSize, hs = this._hopSize;
+    const expct = 2 * Math.PI * hs / fs;
+
+    // Feed input into circular input buffer
+    for (let i = 0; i < input.length; i++) {
+      this._inBuf[this._inFill % fs] = input[i];
+      this._inFill++;
+
+      if (this._inFill % hs === 0 && this._inFill >= fs) {
+        // Pull a frame
+        const frame = new Float32Array(fs);
+        for (let k=0;k<fs;k++) frame[k] = this._inBuf[(this._inFill - fs + k) % fs] * this._window[k];
+
+        // FFT
+        this._re.set(frame); this._im.fill(0);
+        this._fft(this._re, this._im, false);
+        const bins = fs / 2 + 1;
+        for (let k=0;k<bins;k++) {
+          this._mag[k] = Math.sqrt(this._re[k]*this._re[k]+this._im[k]*this._im[k]);
+          this._phase[k] = Math.atan2(this._im[k], this._re[k]);
+        }
+
+        // Phase vocoder — frequency deviation
+        for (let k=0;k<bins;k++) {
+          let delta = this._phase[k] - this._lastPhase[k] - k * expct;
+          delta -= Math.round(delta / (2*Math.PI)) * 2*Math.PI;
+          const trueFreq = k * expct + delta;
+          this._sumPhase[k] += pitch * trueFreq;
+          this._lastPhase[k] = this._phase[k];
+          this._outMag[k] = 0;
+        }
+
+        // Spectral shifting — bin remapping
+        for (let k=0;k<bins;k++) {
+          const tk = Math.round(k * pitch);
+          if (tk < bins) this._outMag[tk] += this._mag[k];
+        }
+
+        // IFFT synthesis
+        for (let k=0;k<bins;k++) {
+          this._re[k] = this._outMag[k] * Math.cos(this._sumPhase[k]);
+          this._im[k] = this._outMag[k] * Math.sin(this._sumPhase[k]);
+        }
+        // Mirror
+        for (let k=1;k<bins-1;k++) { this._re[fs-k]=this._re[k]; this._im[fs-k]=-this._im[k]; }
+        this._fft(this._re, this._im, true);
+
+        // Overlap-add to output buffer
+        const norm = fs / (hs * 2);
+        for (let k=0;k<fs;k++) {
+          const idx = (this._outWrite + k) % (this._outBuf.length);
+          this._outBuf[idx] += this._re[k] * this._window[k] / norm;
+        }
+        this._outWrite = (this._outWrite + hs) % this._outBuf.length;
+      }
+    }
+
+    // Drain output buffer
+    for (let i=0;i<output.length;i++) {
+      output[i] = this._outBuf[this._outRead % this._outBuf.length];
+      this._outBuf[this._outRead % this._outBuf.length] = 0;
+      this._outRead++;
+    }
+    return true;
+  }
+}
+registerProcessor('pitch-shift-processor', PitchShiftProcessor);
+`;
+
+  const registerPitchWorklet = async function (actx) {
+    if (pitchWorkletReadyRef.current) return true;
+    try {
+      const blob = new Blob([PITCH_WORKLET_CODE], { type: 'application/javascript' });
+      const url  = URL.createObjectURL(blob);
+      await actx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      pitchWorkletReadyRef.current = true;
+      return true;
+    } catch(e) {
+      console.warn('[BeatFinder] AudioWorklet pitch shift unavailable:', e);
+      return false;
+    }
+  };
 
   const getOrCreateMaster = function () {
     const actx = getActx();
@@ -5169,15 +5474,22 @@ function StudioScreen({ user, onExit }) {
     return masterGainRef.current;
   };
 
-  // Apply mute/solo to all live gain nodes without restarting playback
+  // Apply mute/solo/volume/pan to all live gain nodes without restarting playback
   const applyGains = function (updatedTracks) {
     const tList = updatedTracks || tracks;
     const hasSolo = tList.some(function(t){ return t.isSoloed; });
+    const actx = getActx();
     tList.forEach(function(t){
       const g = gainNodesRef.current[t.id];
       if (!g) return;
       const shouldPlay = !t.isMuted && (!hasSolo || t.isSoloed);
-      g.gain.setTargetAtTime(shouldPlay ? 1 : 0, getActx().currentTime, 0.01);
+      const vol = shouldPlay ? (t.volume ?? 1) : 0;
+      g.gain.setTargetAtTime(vol, actx.currentTime, 0.01);
+      // Also update pan live if a panner node exists for this track
+      const live = fxNodesRef.current[t.id];
+      if (live && live.panner) {
+        live.panner.pan.setTargetAtTime(t.pan || 0, actx.currentTime, 0.01);
+      }
     });
   };
 
@@ -5224,6 +5536,21 @@ function StudioScreen({ user, onExit }) {
       const mgOn = !!(fx.compressor && fx.compressor.on && fx.compressor.makeupGain);
       const mgVal = mgOn ? Math.pow(10, (fx.compressor.makeupGain || 0) / 20) : 1;
       live.makeupGain.gain.setTargetAtTime(mgVal, now, T);
+    }
+
+    // ── Pitch worklet — update ratio + formant live ──
+    if (live.pitchNode) {
+      const pitchOn   = !!(fx.pitch && fx.pitch.on);
+      const semitones = pitchOn ? (fx.pitch.semitones || 0) : 0;
+      const formant   = pitchOn ? (fx.pitch.formant   || 0) : 0;
+      // Speed controls the ramp time — fast = instant, slow = smooth portamento
+      const rampT     = pitchOn ? Math.max(0.005, (fx.pitch.speed ?? 0.5) * 0.3) : T;
+      live.pitchNode.parameters.get('pitch').setTargetAtTime(
+        Math.pow(2, semitones / 12), now, rampT
+      );
+      // Formant: slight playbackRate offset on all connected sources — applied via a second gain-less node trick
+      // Stored on liveNodes for scheduleClip to read when restarted
+      live.pitchFormant = formant;
     }
 
     // ── Reverb wet/dry ──
@@ -5283,10 +5610,12 @@ function StudioScreen({ user, onExit }) {
   };
 
   // ── Play from a given time — all tracks share master destination ──
-  const doPlay = function (fromTime) {
+  const doPlay = async function (fromTime) {
     stopAll();
     const actx   = getActx();
     const master = getOrCreateMaster();
+    // Register pitch worklet if not done yet (async, required before AudioWorkletNode)
+    await registerPitchWorklet(actx);
     // Schedule audio 50ms ahead so all tracks start at exactly the same moment.
     // masterStartRef MUST equal `now` (the scheduled start), NOT actx.currentTime.
     // Recording timing: playheadAtRef + (startActxTime - masterStartRef).
@@ -5400,9 +5729,30 @@ function StudioScreen({ user, onExit }) {
         liveNodes.comp = comp;
       }
 
-      // Auto-Pitch — per-track pitch shift using playback rate scaling
-      if (fx.pitch && fx.pitch.on) {
+      // ── Pitch shift via phase-vocoder AudioWorklet ─────────────────────
+      // The worklet preserves tempo unlike playbackRate (tape effect).
+      // "autotune" mode: snap detected pitch to nearest scale note (handled
+      // by the per-clip playbackRate being set in scheduleClip using the
+      // per-clip detectedNote → target note ratio).
+      if (fx.pitch && fx.pitch.on && pitchWorkletReadyRef.current) {
+        try {
+          const pitchNode = new AudioWorkletNode(actx, 'pitch-shift-processor');
+          const semitones = fx.pitch.semitones || 0;
+          pitchNode.parameters.get('pitch').value = Math.pow(2, semitones / 12);
+          pitchNode.connect(node);
+          node = pitchNode;
+          liveNodes.pitchNode = pitchNode;
+        } catch(e) {
+          // Worklet not ready yet — fall back to playbackRate (applied in scheduleClip)
+          node._pitchSemitones = fx.pitch.semitones || 0;
+        }
+      } else if (fx.pitch && fx.pitch.on) {
+        // Fallback: tag the entry node so scheduleClip uses playbackRate
         node._pitchSemitones = fx.pitch.semitones || 0;
+      }
+      // Store formant setting for scheduleClip
+      if (fx.pitch && fx.pitch.on) {
+        liveNodes.pitchFormant = fx.pitch.formant || 0;
       }
 
       // Store live nodes for this track
@@ -5426,12 +5776,23 @@ function StudioScreen({ user, onExit }) {
         const src = actx.createBufferSource();
         src.buffer = buf;
 
-        // Apply pitch shift via playbackRate — 2^(semitones/12) maps semitones to rate
-        // This shifts pitch but also changes tempo proportionally (tape-style).
-        // For vocals: keep semitones small (±2-3) to stay natural.
-        const semitones = entryNode._pitchSemitones || 0;
-        if (semitones !== 0) {
-          src.playbackRate.value = Math.pow(2, semitones / 12);
+        // Pitch: if worklet is handling it, only apply formant via playbackRate.
+        // Formant shift = subtle playbackRate factor on top of the vocoder's ratio.
+        // This keeps vocal character (chest resonance) while the vocoder corrects pitch.
+        // If no worklet (fallback), full semitone shift via playbackRate (tape-style).
+        const live = fxNodesRef.current[track.id];
+        const hasWorklet = !!(live && live.pitchNode);
+        if (hasWorklet) {
+          // Formant-only playback rate — very subtle, just for timbre
+          const formantSt = (live.pitchFormant || 0);
+          if (formantSt !== 0) {
+            src.playbackRate.value = Math.pow(2, formantSt / 48); // 1/4 effect on rate
+          }
+        } else {
+          const semitones = entryNode._pitchSemitones || 0;
+          if (semitones !== 0) {
+            src.playbackRate.value = Math.pow(2, semitones / 12);
+          }
         }
 
         src.connect(entryNode);
@@ -5500,8 +5861,7 @@ function StudioScreen({ user, onExit }) {
   // Dragging: if tap lands within 0.3s of loopIn → drag loopIn,
   //           if tap lands within 0.3s of loopOut → drag loopOut,
   //           otherwise start a new loop region from that point.
-  const rulerDragRef = useRef(null); // { mode: "in"|"out"|"new", startX, startT }
-
+  // rulerDragRef declared at top of component (Rules of Hooks)
   const rulerTimeFromClientX = function (clientX) {
     const el = scrollRef.current;
     if (!el) return 0;
@@ -5610,7 +5970,14 @@ function StudioScreen({ user, onExit }) {
   };
 
   const updateTrack = function (id, patch) {
-    setTracks(function (prev) { return prev.map(function(t){ return t.id===id?{...t,...patch}:t; }); });
+    setTracks(function (prev) {
+      const next = prev.map(function(t){ return t.id===id?{...t,...patch}:t; });
+      // Apply volume/pan changes to live audio nodes immediately (no restart needed)
+      if (isPlayingRef.current && ("volume" in patch || "pan" in patch || "isMuted" in patch || "isSoloed" in patch)) {
+        applyGains(next);
+      }
+      return next;
+    });
     setIsSaved(false);
   };
 
@@ -5728,7 +6095,7 @@ function StudioScreen({ user, onExit }) {
     };
   }, []);
 
-  const [selectedTrackId, setSelectedTrackId] = useState(null); // which vocal track records into
+  // selectedTrackId declared at top of component (Rules of Hooks)
 
   const startCountIn = async function (trackId) {
     // Request mic permission here (lazy) — only fires on first use, browser caches grant
@@ -5954,9 +6321,7 @@ function StudioScreen({ user, onExit }) {
 
   // ── Region gestures ───────────────────────────────────────────
   // ── Clip selection & drag state ───────────────────────────────
-  // selectedClipId stores clip.id (the actual clip, not the track)
-  const [selectedClipId, setSelectedClipId] = useState(null);
-  const dragRef = useRef(null);
+  // selectedClipId and dragRef declared at top of component (Rules of Hooks)
 
   const selectClip = function (clipId) {
     setSelectedClipId(clipId);
@@ -7156,8 +7521,10 @@ function StudioScreen({ user, onExit }) {
         const t = tracks.find(function(tr){ return tr.id===fxTrackId; });
         if (!t) return null;
         const fx = t.effects || {};
-        const upd = function(section, patch){
-          const newEffects = { ...t.effects, [section]:{ ...(t.effects[section]||{}), ...patch } };
+        const upd = function(section, patch, rawValue){
+          const newEffects = section === "pluginChain"
+            ? { ...t.effects, pluginChain: rawValue }
+            : { ...t.effects, [section]:{ ...(t.effects[section]||{}), ...patch } };
           updateTrack(t.id, { effects: newEffects });
           // Apply changes to live audio nodes immediately — no playback restart needed
           applyFxLive(t.id, newEffects);
@@ -7481,6 +7848,215 @@ function StudioScreen({ user, onExit }) {
           ...fx.eq,
         };
 
+        // ── Plugin sub-components ── defined here so they close over fx/upd/Knob/graphs
+        const EQPlugin = function({ fx, upd, eq5, EQGraph, Knob }) {
+          return (
+            <div style={{ background:"linear-gradient(180deg,#1a1a1a 0%,#111 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (fx.eq?.on ? "#2563EB" : "#2a2a2a"), boxShadow: fx.eq?.on ? "0 0 20px rgba(37,99,235,0.15), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.04)" }}>
+              <div style={{ background:"linear-gradient(180deg,#232323 0%,#1a1a1a 100%)", padding:"8px 14px", borderBottom:"1px solid #2a2a2a", display:"flex", alignItems:"center", gap:8 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, flex:1 }}>
+                  <div style={{ display:"flex", gap:2 }}>
+                    {["#EF4444","#3B82F6","#22C55E","#F59E0B","#EF4444"].map(function(c,i){ return <div key={i} style={{ width:3, height:14, borderRadius:1.5, background:c, opacity:0.8 }} />; })}
+                  </div>
+                  <div>
+                    <div style={{ color:"#e0e0e0", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>PARAMETRIC EQ</div>
+                    <div style={{ color:"#555", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>5-BAND · DRAG HANDLES</div>
+                  </div>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <div style={{ width:8, height:8, borderRadius:"50%", background: fx.eq?.on ? "#3B82F6" : "#1a1a1a", boxShadow: fx.eq?.on ? "0 0 6px #3B82F6, 0 0 12px rgba(59,130,246,0.5)" : "none", transition:"all 0.2s" }} />
+                  <button onClick={function(){ upd("eq",{on:!fx.eq?.on}); }} style={{ background: fx.eq?.on ? "linear-gradient(180deg,#2563EB,#1d4ed8)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (fx.eq?.on ? "#3B82F6" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1, boxShadow: fx.eq?.on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>{fx.eq?.on ? "ON" : "OFF"}</button>
+                </div>
+              </div>
+              <div style={{ padding:"12px 14px 10px", opacity:fx.eq?.on?1:0.4, transition:"opacity 0.2s" }}>
+                <div style={{ background:"#070707", borderRadius:8, padding:2, border:"1px solid #1e1e1e", boxShadow:"inset 0 2px 6px rgba(0,0,0,0.6)" }}>
+                  <EQGraph eq={eq5} onDrag={function(patch){ upd("eq", patch); }} />
+                </div>
+                <div style={{ display:"flex", marginTop:10, background:"#0d0d0d", borderRadius:10, border:"1px solid #1e1e1e", overflow:"hidden" }}>
+                  {[
+                    { key:"hpf",  label:"HPF",  color:"#EF4444", knobs:[{lbl:"FREQ",v:eq5.hpfFreq,min:20,max:2000,step:1,unit:"Hz",cb:function(v){upd("eq",{hpfFreq:v});}}] },
+                    { key:"low",  label:"LOW",  color:"#3B82F6", knobs:[{lbl:"FREQ",v:eq5.lowFreq,min:20,max:2000,step:1,unit:"Hz",cb:function(v){upd("eq",{lowFreq:v});}},{lbl:"GAIN",v:eq5.low,min:-15,max:15,step:0.5,unit:"dB",cb:function(v){upd("eq",{low:v});}}] },
+                    { key:"mid",  label:"MID",  color:"#22C55E", knobs:[{lbl:"FREQ",v:eq5.midFreq,min:100,max:10000,step:10,unit:"Hz",cb:function(v){upd("eq",{midFreq:v});}},{lbl:"GAIN",v:eq5.mid,min:-15,max:15,step:0.5,unit:"dB",cb:function(v){upd("eq",{mid:v});}},{lbl:"Q",v:eq5.midQ,min:0.1,max:10,step:0.1,unit:"",cb:function(v){upd("eq",{midQ:v});}}] },
+                    { key:"high", label:"HIGH", color:"#F59E0B", knobs:[{lbl:"FREQ",v:eq5.highFreq,min:500,max:20000,step:100,unit:"Hz",cb:function(v){upd("eq",{highFreq:v});}},{lbl:"GAIN",v:eq5.high,min:-15,max:15,step:0.5,unit:"dB",cb:function(v){upd("eq",{high:v});}}] },
+                    { key:"lpf",  label:"LPF",  color:"#EF4444", knobs:[{lbl:"FREQ",v:eq5.lpfFreq,min:1000,max:20000,step:100,unit:"Hz",cb:function(v){upd("eq",{lpfFreq:v});}}] },
+                  ].map(function(band, bi, arr){
+                    return (
+                      <div key={band.key} style={{ flex:1, borderRight: bi < arr.length-1 ? "1px solid #1e1e1e" : "none", display:"flex", flexDirection:"column", alignItems:"center", padding:"6px 2px 8px" }}>
+                        <div style={{ width:"100%", background: band.color + "22", borderBottom:"1px solid " + band.color + "33", padding:"3px 0", textAlign:"center", marginBottom:6 }}>
+                          <span style={{ color:band.color, fontSize:7, fontWeight:900, letterSpacing:1.5, fontFamily:"monospace" }}>{band.label}</span>
+                        </div>
+                        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, overflow:"visible" }}>
+                          {band.knobs.map(function(k){ return <Knob key={k.lbl} label={k.lbl} value={k.v} min={k.min} max={k.max} step={k.step} unit={k.unit} color={band.color} onChange={k.cb} />; })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        const CompPlugin = function({ fx, upd, CompGraph, Knob }) {
+          return (
+            <div style={{ background:"linear-gradient(180deg,#1c1a22 0%,#130f1a 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (fx.compressor?.on ? "#8B5CF6" : "#2a2a2a"), boxShadow: fx.compressor?.on ? "0 0 20px rgba(139,92,246,0.15), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+              <div style={{ background:"linear-gradient(180deg,#1e1c25 0%,#181620 100%)", padding:"8px 14px", borderBottom:"1px solid #2a2535", display:"flex", alignItems:"center", gap:8 }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ color:"#c4b5fd", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>COMPRESSOR</div>
+                  <div style={{ color:"#4a3f5c", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>DYNAMICS PROCESSOR</div>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <div style={{ display:"flex", gap:1.5, alignItems:"flex-end" }}>
+                    {[0,1,2,3,4].map(function(i){ const active = fx.compressor?.on; const colors = ["#22C55E","#22C55E","#F59E0B","#EF4444","#EF4444"]; return <div key={i} style={{ width:3, height: 6 + i * 2, borderRadius:1, background: active ? colors[i] : "#1e1e1e", boxShadow: active ? "0 0 4px " + colors[i] + "88" : "none", transition:"all 0.15s" }} />; })}
+                  </div>
+                  <div style={{ width:8, height:8, borderRadius:"50%", background: fx.compressor?.on ? "#8B5CF6" : "#1a1a1a", boxShadow: fx.compressor?.on ? "0 0 6px #8B5CF6, 0 0 12px rgba(139,92,246,0.5)" : "none", transition:"all 0.2s" }} />
+                  <button onClick={function(){ upd("compressor",{on:!fx.compressor?.on}); }} style={{ background: fx.compressor?.on ? "linear-gradient(180deg,#7C3AED,#6d28d9)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (fx.compressor?.on ? "#8B5CF6" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1, boxShadow: fx.compressor?.on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>{fx.compressor?.on ? "ON" : "OFF"}</button>
+                </div>
+              </div>
+              <div style={{ padding:"12px 14px", opacity:fx.compressor?.on?1:0.4, transition:"opacity 0.2s" }}>
+                <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
+                  <div style={{ background:"#050505", borderRadius:8, padding:2, border:"1px solid #1a1a1a", boxShadow:"inset 0 2px 6px rgba(0,0,0,0.8)", flexShrink:0 }}>
+                    <CompGraph threshold={fx.compressor?.threshold??-24} ratio={fx.compressor?.ratio??4} />
+                  </div>
+                  <div style={{ flex:1, display:"flex", flexDirection:"column", gap:8, overflow:"visible" }}>
+                    <div style={{ display:"flex", justifyContent:"space-around", overflow:"visible" }}>
+                      <Knob label="THRESH" value={fx.compressor?.threshold??-24} min={-60} max={0} step={1} unit="dB" color="#8B5CF6" onChange={function(v){ upd("compressor",{threshold:v}); }} />
+                      <Knob label="RATIO" value={fx.compressor?.ratio??4} min={1} max={20} step={0.5} unit=":1" color="#8B5CF6" onChange={function(v){ upd("compressor",{ratio:v}); }} />
+                    </div>
+                    <div style={{ height:1, background:"#1e1e1e", borderRadius:1 }} />
+                    <div style={{ display:"flex", justifyContent:"space-around", overflow:"visible" }}>
+                      <Knob label="ATTACK" value={Math.round((fx.compressor?.attack??0.003)*1000)} min={1} max={200} step={1} unit="ms" color="#a78bfa" onChange={function(v){ upd("compressor",{attack:v/1000}); }} />
+                      <Knob label="RELEASE" value={Math.round((fx.compressor?.release??0.25)*1000)} min={10} max={2000} step={10} unit="ms" color="#a78bfa" onChange={function(v){ upd("compressor",{release:v/1000}); }} />
+                      <Knob label="MAKEUP" value={fx.compressor?.makeupGain??0} min={0} max={24} step={0.5} unit="dB" color="#22C55E" onChange={function(v){ upd("compressor",{makeupGain:v}); }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        const ReverbPlugin = function({ fx, upd, ReverbViz, Knob }) {
+          return (
+            <div style={{ background:"linear-gradient(180deg,#1a1220 0%,#110d19 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (fx.reverb?.on ? "#C026D3" : "#2a2a2a"), boxShadow: fx.reverb?.on ? "0 0 20px rgba(192,38,211,0.15), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+              <div style={{ backgroundImage:"linear-gradient(180deg,#1e1629,#17101e)", padding:"8px 14px", borderBottom:"1px solid #2a1e35", display:"flex", alignItems:"center", gap:8 }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ color:"#e879f9", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>CONVOLUTION REVERB</div>
+                  <div style={{ color:"#4a2f55", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>ROOM SIMULATION</div>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <div style={{ width:8, height:8, borderRadius:"50%", background: fx.reverb?.on ? "#C026D3" : "#1a1a1a", boxShadow: fx.reverb?.on ? "0 0 6px #C026D3, 0 0 14px rgba(192,38,211,0.5)" : "none", transition:"all 0.2s" }} />
+                  <button onClick={function(){ upd("reverb",{on:!fx.reverb?.on}); }} style={{ background: fx.reverb?.on ? "linear-gradient(180deg,#be185d,#9d174d)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (fx.reverb?.on ? "#C026D3" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1, boxShadow: fx.reverb?.on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>{fx.reverb?.on ? "ON" : "OFF"}</button>
+                </div>
+              </div>
+              <div style={{ padding:"12px 14px", opacity:fx.reverb?.on?1:0.4, transition:"opacity 0.2s" }}>
+                <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                  <div style={{ background:"#050505", borderRadius:8, padding:2, border:"1px solid #1a1a1a", boxShadow:"inset 0 2px 6px rgba(0,0,0,0.8)", flexShrink:0 }}>
+                    <ReverbViz wet={fx.reverb?.wet??0.25} roomSize={fx.reverb?.roomSize??0.8} />
+                  </div>
+                  <div style={{ flex:1, display:"flex", justifyContent:"space-around", overflow:"visible", padding:"4px 0" }}>
+                    <Knob label="WET" value={fx.reverb?.wet??0.25} min={0} max={1} step={0.01} unit="%" color="#C026D3" onChange={function(v){ upd("reverb",{wet:v}); }} />
+                    <Knob label="ROOM" value={fx.reverb?.roomSize??0.8} min={0.1} max={1} step={0.01} unit="%" color="#C026D3" onChange={function(v){ upd("reverb",{roomSize:v}); }} />
+                    <Knob label="PRE-DLY" value={fx.reverb?.preDelay??0} min={0} max={100} step={1} unit="ms" color="#8B5CF6" onChange={function(v){ upd("reverb",{preDelay:v}); }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        const PitchPlugin = function({ fx, upd, Knob }) {
+          const pOn       = !!fx.pitch?.on;
+          const semitones = fx.pitch?.semitones ?? 0;
+          const speed     = fx.pitch?.speed ?? 0.5;
+          const formant   = fx.pitch?.formant ?? 0;
+          const pitchKey  = fx.pitch?.key ?? "C";
+          const scale     = fx.pitch?.scale ?? "chromatic";
+          const mode      = fx.pitch?.mode ?? "shift";
+          const stLabel   = semitones === 0 ? "0 st" : (semitones > 0 ? "+" + semitones : semitones) + " st";
+          const speedMs   = speed < 0.05 ? "INSTANT" : speed < 0.3 ? Math.round(speed * 200) + " ms" : Math.round(speed * 500) + " ms";
+          const NOTES     = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+          const IS_BLACK  = [false,true,false,true,false,false,true,false,true,false,true,false];
+          const SCALE_INTERVALS = { chromatic:[0,1,2,3,4,5,6,7,8,9,10,11], major:[0,2,4,5,7,9,11], minor:[0,2,3,5,7,8,10], pentatonic:[0,2,4,7,9], blues:[0,3,5,6,7,10] };
+          const rootIdx   = NOTES.indexOf(pitchKey);
+          const intervals = SCALE_INTERVALS[scale] || SCALE_INTERVALS.chromatic;
+          const activeNotes = new Set(intervals.map(function(i){ return NOTES[(rootIdx + i) % 12]; }));
+          return (
+            <div style={{ background:"linear-gradient(160deg,#0f0f14 0%,#12101a 100%)", borderRadius:16, overflow:"hidden", border:"1px solid " + (pOn ? "#9333ea" : "#1e1e1e"), boxShadow: pOn ? "0 0 24px rgba(147,51,234,0.2)" : "none" }}>
+              <div style={{ display:"flex", alignItems:"center", padding:"8px 14px", background:"#0a0a0f", borderBottom:"1px solid #1a1a24" }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ color:"#7c3aed", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace" }}>AUTO·TUNE</div>
+                  <div style={{ color:"#333", fontSize:8, letterSpacing:1 }}>PITCH PROCESSOR v2</div>
+                </div>
+                <div style={{ display:"flex", background:"#111", borderRadius:8, border:"1px solid #222", overflow:"hidden", marginRight:10 }}>
+                  {["shift","autotune"].map(function(m){ return <button key={m} onClick={function(){ upd("pitch",{mode:m}); }} style={{ padding:"4px 10px", background:mode===m?"#7c3aed":"transparent", border:"none", color:mode===m?"white":"#444", fontSize:8, fontWeight:800, cursor:"pointer", letterSpacing:0.5, textTransform:"uppercase" }}>{m==="shift"?"SHIFT":"A-TUNE"}</button>; })}
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <div style={{ width:8, height:8, borderRadius:"50%", background: pOn ? "#a855f7" : "#1a1a1a", boxShadow: pOn ? "0 0 8px #a855f7, 0 0 16px #7c3aed44" : "none", transition:"all 0.2s" }} />
+                  <button onClick={function(){ upd("pitch",{on:!pOn}); }} style={{ background:pOn?"#7c3aed":"#1a1a1a", border:"1px solid "+(pOn?"#9333ea":"#2a2a2a"), borderRadius:6, color:"white", fontSize:9, fontWeight:800, padding:"4px 10px", cursor:"pointer", letterSpacing:1 }}>{pOn ? "ON" : "OFF"}</button>
+                </div>
+              </div>
+              <div style={{ padding:"12px 14px", opacity: pOn ? 1 : 0.3, pointerEvents: pOn ? "auto" : "none", transition:"opacity 0.2s" }}>
+                <div style={{ background:"#060810", border:"1px solid #1a1a2e", borderRadius:8, padding:"8px 12px", marginBottom:14, fontFamily:"monospace", boxShadow:"inset 0 2px 8px rgba(0,0,0,0.6)" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div>
+                      <div style={{ color:"#6d28d9", fontSize:8, letterSpacing:2, marginBottom:2 }}>{mode==="autotune"?"AUTO-TUNE":"PITCH SHIFT"}</div>
+                      <div style={{ color:"#a855f7", fontSize:20, fontWeight:900, letterSpacing:1, lineHeight:1 }}>{mode==="autotune" ? pitchKey + " " + scale.toUpperCase() : stLabel}</div>
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ color:"#4c1d95", fontSize:8, letterSpacing:1, marginBottom:2 }}>SPEED</div>
+                      <div style={{ color:"#7c3aed", fontSize:13, fontWeight:800, fontFamily:"monospace" }}>{speedMs}</div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop:8, height:3, background:"#0f0f1a", borderRadius:2, overflow:"hidden" }}>
+                    <div style={{ height:"100%", width: (Math.abs(semitones)/12*100)+"%", background: semitones > 0 ? "linear-gradient(90deg,#6d28d9,#a855f7)" : "linear-gradient(90deg,#a855f7,#6d28d9)", marginLeft: semitones < 0 ? "auto" : "0", transition:"width 0.1s", borderRadius:2 }} />
+                  </div>
+                </div>
+                <div style={{ display:"flex", justifyContent:"space-around", alignItems:"flex-end", marginBottom:14, gap:4 }}>
+                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+                    <Knob label="PITCH" value={semitones} min={-12} max={12} step={1} unit=" st" color="#a855f7" onChange={function(v){ upd("pitch",{semitones:v}); }} />
+                    <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{stLabel}</div>
+                  </div>
+                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+                    <Knob label="SPEED" value={speed} min={0} max={1} step={0.01} unit="%" color="#7c3aed" onChange={function(v){ upd("pitch",{speed:v}); }} />
+                    <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{speedMs}</div>
+                  </div>
+                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+                    <Knob label="FORMANT" value={formant} min={-6} max={6} step={0.5} unit=" st" color="#9333ea" onChange={function(v){ upd("pitch",{formant:v}); }} />
+                    <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{formant >= 0 ? "+" : ""}{formant} st</div>
+                  </div>
+                </div>
+                {mode === "autotune" && (
+                  <div style={{ marginBottom:12 }}>
+                    <div style={{ color:"#4c1d95", fontSize:8, letterSpacing:2, fontFamily:"monospace", marginBottom:6 }}>SCALE</div>
+                    <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+                      {Object.keys(SCALE_INTERVALS).map(function(s){ const isA = scale === s; return <button key={s} onClick={function(){ upd("pitch",{scale:s}); }} style={{ padding:"4px 10px", background:isA?"#7c3aed":"#0f0f18", border:"1px solid "+(isA?"#9333ea":"#1e1e2a"), borderRadius:6, color:isA?"white":"#4c1d95", fontSize:8, fontWeight:800, cursor:"pointer", textTransform:"capitalize", letterSpacing:0.5 }}>{s}</button>; })}
+                    </div>
+                  </div>
+                )}
+                {mode === "autotune" && (
+                  <div style={{ marginBottom:4 }}>
+                    <div style={{ color:"#4c1d95", fontSize:8, letterSpacing:2, fontFamily:"monospace", marginBottom:6 }}>ROOT KEY</div>
+                    <div style={{ position:"relative", height:48, display:"flex" }}>
+                      {NOTES.filter(function(_,i){ return !IS_BLACK[i]; }).map(function(n, wi){
+                        const isRoot = n === pitchKey;
+                        const inScale = activeNotes.has(n);
+                        return <button key={n} onClick={function(){ upd("pitch",{key:n}); }} style={{ flex:1, height:"100%", background: isRoot ? "#a855f7" : inScale ? "#2d1b4e" : "#e8e8e8", border:"1px solid #111", borderRadius:"0 0 4px 4px", cursor:"pointer", display:"flex", alignItems:"flex-end", justifyContent:"center", paddingBottom:3, boxShadow: isRoot ? "0 0 8px #a855f744" : "none", transition:"background 0.1s" }}><span style={{ fontSize:6, fontWeight:800, color: isRoot ? "white" : inScale ? "#a855f7" : "#333" }}>{n}</span></button>;
+                      })}
+                      <div style={{ position:"absolute", top:0, left:0, right:0, height:"58%", pointerEvents:"none", display:"flex" }}>
+                        {[{note:"C#",left:"12.3%"},{note:"D#",left:"26%"},{note:"F#",left:"53.2%"},{note:"G#",left:"67%"},{note:"A#",left:"80.7%"}].map(function(bk){
+                          const isRoot = bk.note === pitchKey;
+                          const inScale = activeNotes.has(bk.note);
+                          return <button key={bk.note} onClick={function(){ upd("pitch",{key:bk.note}); }} style={{ position:"absolute", left:bk.left, width:"9%", height:"100%", background: isRoot ? "#a855f7" : inScale ? "#3b0d6b" : "#111", border:"1px solid "+(isRoot?"#9333ea":"#000"), borderRadius:"0 0 4px 4px", cursor:"pointer", pointerEvents:"auto", boxShadow: isRoot ? "0 0 8px #a855f7" : "none", zIndex:2 }} />;
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        };
+
         return (
           <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto" }} onClick={function(e){ e.stopPropagation(); }}>
             {/* Header */}
@@ -7490,184 +8066,21 @@ function StudioScreen({ user, onExit }) {
               <button onClick={function(){ setFxTrackId(null); }} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:13, padding:"5px 14px", cursor:"pointer" }}>Done</button>
             </div>
 
-            <div style={{ flex:1, padding:"14px", display:"flex", flexDirection:"column", gap:12 }}>
+            {/* ── Plugin chain — rendered as proper component (no IIFE) to keep useState valid ── */}
+            <PluginChainPanel
+              fx={fx}
+              upd={upd}
+              eq5={eq5}
+              EQPlugin={EQPlugin}
+              CompPlugin={CompPlugin}
+              ReverbPlugin={ReverbPlugin}
+              PitchPlugin={PitchPlugin}
+              Knob={Knob}
+              EQGraph={EQGraph}
+              CompGraph={CompGraph}
+              ReverbViz={ReverbViz}
+            />
 
-              {/* ── 5-BAND EQ ── */}
-              <div style={{ background:"#111", borderRadius:14, overflow:"hidden", border:"1px solid "+(eq5.on?"#3B82F6":"#1e1e1e") }}>
-                <div style={{ display:"flex", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #1e1e1e", gap:8 }}>
-                  <span style={{ color:"#3B82F6", fontWeight:800, fontSize:12, letterSpacing:2 }}>EQ</span>
-                  <span style={{ color:"#333", fontSize:10, flex:1 }}>5-Band Parametric</span>
-                  <span style={{ color:"#444", fontSize:9 }}>Drag handles</span>
-                  <button onClick={function(){ upd("eq",{on:!fx.eq?.on}); }}
-                    style={{ background:fx.eq?.on?"#3B82F6":"#222", border:"none", borderRadius:6, color:"white", fontSize:10, fontWeight:700, padding:"4px 10px", cursor:"pointer" }}>
-                    {fx.eq?.on ? "ON" : "OFF"}
-                  </button>
-                </div>
-                <div style={{ padding:"12px 14px", opacity:fx.eq?.on?1:0.35 }}>
-                  <EQGraph eq={eq5} onDrag={function(patch){ upd("eq", patch); }} />
-                  {/* Stacked freq+gain pairs — fits mobile width without scrolling */}
-                  <div style={{ display:"flex", justifyContent:"space-between", marginTop:12, gap:2 }}>
-                    {/* HPF — only frequency */}
-                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-                      <div style={{ color:"#EF4444", fontSize:7, fontWeight:800, letterSpacing:1 }}>HPF</div>
-                      <Knob label="Hz" value={eq5.hpfFreq} min={20} max={2000} step={1} unit="Hz" color="#EF4444"
-                        onChange={function(v){ upd("eq",{hpfFreq:v}); }} />
-                    </div>
-                    <div style={{ width:1, background:"#1a1a1a", alignSelf:"stretch", margin:"0 1px" }} />
-                    {/* LOW — freq + gain stacked */}
-                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-                      <div style={{ color:"#3B82F6", fontSize:7, fontWeight:800, letterSpacing:1 }}>LOW</div>
-                      <Knob label="Hz" value={eq5.lowFreq} min={20} max={2000} step={1} unit="Hz" color="#3B82F6"
-                        onChange={function(v){ upd("eq",{lowFreq:v}); }} />
-                      <Knob label="dB" value={eq5.low} min={-15} max={15} step={0.5} unit="dB" color="#3B82F6"
-                        onChange={function(v){ upd("eq",{low:v}); }} />
-                    </div>
-                    <div style={{ width:1, background:"#1a1a1a", alignSelf:"stretch", margin:"0 1px" }} />
-                    {/* MID — freq + gain + Q stacked */}
-                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-                      <div style={{ color:"#22C55E", fontSize:7, fontWeight:800, letterSpacing:1 }}>MID</div>
-                      <Knob label="Hz" value={eq5.midFreq} min={100} max={10000} step={10} unit="Hz" color="#22C55E"
-                        onChange={function(v){ upd("eq",{midFreq:v}); }} />
-                      <Knob label="dB" value={eq5.mid} min={-15} max={15} step={0.5} unit="dB" color="#22C55E"
-                        onChange={function(v){ upd("eq",{mid:v}); }} />
-                      <Knob label="Q" value={eq5.midQ} min={0.1} max={10} step={0.1} unit="Q" color="#22C55E"
-                        onChange={function(v){ upd("eq",{midQ:v}); }} />
-                    </div>
-                    <div style={{ width:1, background:"#1a1a1a", alignSelf:"stretch", margin:"0 1px" }} />
-                    {/* HIGH — freq + gain stacked */}
-                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-                      <div style={{ color:"#F59E0B", fontSize:7, fontWeight:800, letterSpacing:1 }}>HIGH</div>
-                      <Knob label="Hz" value={eq5.highFreq} min={500} max={20000} step={100} unit="Hz" color="#F59E0B"
-                        onChange={function(v){ upd("eq",{highFreq:v}); }} />
-                      <Knob label="dB" value={eq5.high} min={-15} max={15} step={0.5} unit="dB" color="#F59E0B"
-                        onChange={function(v){ upd("eq",{high:v}); }} />
-                    </div>
-                    <div style={{ width:1, background:"#1a1a1a", alignSelf:"stretch", margin:"0 1px" }} />
-                    {/* LPF — only frequency */}
-                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-                      <div style={{ color:"#EF4444", fontSize:7, fontWeight:800, letterSpacing:1 }}>LPF</div>
-                      <Knob label="Hz" value={eq5.lpfFreq} min={1000} max={20000} step={100} unit="Hz" color="#EF4444"
-                        onChange={function(v){ upd("eq",{lpfFreq:v}); }} />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── COMPRESSOR ── */}
-              <div style={{ background:"#111", borderRadius:14, overflow:"hidden", border:"1px solid "+(fx.compressor?.on?"#8B5CF6":"#1e1e1e") }}>
-                <div style={{ display:"flex", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #1e1e1e", gap:8 }}>
-                  <span style={{ color:"#8B5CF6", fontWeight:800, fontSize:12, letterSpacing:2 }}>COMP</span>
-                  <span style={{ color:"#333", fontSize:10, flex:1 }}>Dynamics Compressor</span>
-                  <button onClick={function(){ upd("compressor",{on:!fx.compressor?.on}); }}
-                    style={{ background:fx.compressor?.on?"#8B5CF6":"#222", border:"none", borderRadius:6, color:"white", fontSize:10, fontWeight:700, padding:"4px 10px", cursor:"pointer" }}>
-                    {fx.compressor?.on ? "ON" : "OFF"}
-                  </button>
-                </div>
-                <div style={{ padding:"12px 14px", opacity:fx.compressor?.on?1:0.35 }}>
-                  <div style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
-                    <CompGraph threshold={fx.compressor?.threshold??-24} ratio={fx.compressor?.ratio??4} />
-                    {/* overflow:visible so knob arcs don't clip at edges */}
-                    <div style={{ display:"flex", flexWrap:"wrap", gap:10, justifyContent:"center", flex:1, overflow:"visible", padding:"4px" }}>
-                      {[
-                        { key:"threshold",  label:"THRESH",    val:fx.compressor?.threshold??-24,                           min:-60,  max:0,    step:1,   unit:"dB" },
-                        { key:"ratio",      label:"RATIO",     val:fx.compressor?.ratio??4,                                 min:1,    max:20,   step:0.5, unit:":1" },
-                        { key:"attack",     label:"ATTACK",    val:Math.round((fx.compressor?.attack??0.003)*1000),          min:1,    max:200,  step:1,   unit:"ms",
-                          onChange:function(v){ upd("compressor",{attack:v/1000}); } },
-                        { key:"release",    label:"RELEASE",   val:Math.round((fx.compressor?.release??0.25)*1000),          min:10,   max:2000, step:10,  unit:"ms",
-                          onChange:function(v){ upd("compressor",{release:v/1000}); } },
-                        { key:"makeupGain", label:"MAKEUP",    val:fx.compressor?.makeupGain??0,                            min:0,    max:24,   step:0.5, unit:"dB",
-                          color:"#22C55E" },
-                      ].map(function(p){
-                        return <Knob key={p.key} label={p.label} value={p.val} min={p.min} max={p.max} step={p.step} unit={p.unit} color={p.color}
-                          onChange={p.onChange||function(v){ upd("compressor",{[p.key]:v}); }} />;
-                      })}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── REVERB ── */}
-              <div style={{ background:"#111", borderRadius:14, overflow:"hidden", border:"1px solid "+(fx.reverb?.on?"#C026D3":"#1e1e1e") }}>
-                <div style={{ display:"flex", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #1e1e1e", gap:8 }}>
-                  <span style={{ color:"#C026D3", fontWeight:800, fontSize:12, letterSpacing:2 }}>REVERB</span>
-                  <span style={{ color:"#333", fontSize:10, flex:1 }}>Convolution Room</span>
-                  <button onClick={function(){ upd("reverb",{on:!fx.reverb?.on}); }}
-                    style={{ background:fx.reverb?.on?"#C026D3":"#222", border:"none", borderRadius:6, color:"white", fontSize:10, fontWeight:700, padding:"4px 10px", cursor:"pointer" }}>
-                    {fx.reverb?.on ? "ON" : "OFF"}
-                  </button>
-                </div>
-                <div style={{ padding:"12px 14px", opacity:fx.reverb?.on?1:0.35 }}>
-                  <div style={{ display:"flex", gap:12, alignItems:"center" }}>
-                    <ReverbViz wet={fx.reverb?.wet??0.25} roomSize={fx.reverb?.roomSize??0.8} />
-                    {/* overflow:visible prevents knob stroke clipping */}
-                    <div style={{ display:"flex", flexWrap:"wrap", gap:12, flex:1, justifyContent:"center", overflow:"visible", padding:"4px" }}>
-                      <Knob label="WET"       value={fx.reverb?.wet??0.25}          min={0}   max={1}   step={0.01} unit="%" color="#C026D3"
-                        onChange={function(v){ upd("reverb",{wet:v}); }} />
-                      <Knob label="ROOM"      value={fx.reverb?.roomSize??0.8}       min={0.1} max={1}   step={0.01} unit="%" color="#C026D3"
-                        onChange={function(v){ upd("reverb",{roomSize:v}); }} />
-                      <Knob label="PRE-DELAY" value={fx.reverb?.preDelay??0}         min={0}   max={100} step={1}    unit="ms" color="#8B5CF6"
-                        onChange={function(v){ upd("reverb",{preDelay:v}); }} />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* ── PITCH / AUTO-TUNE ── per-track, fully functional ── */}
-              <div style={{ background:"#111", borderRadius:14, overflow:"hidden", border:"1px solid "+(fx.pitch?.on?"#C026D3":"#1e1e1e") }}>
-                <div style={{ display:"flex", alignItems:"center", padding:"10px 14px", borderBottom:"1px solid #1e1e1e", gap:8 }}>
-                  <span style={{ color:"#C026D3", fontWeight:800, fontSize:12, letterSpacing:2 }}>♪ PITCH</span>
-                  <span style={{ color:"#333", fontSize:10, flex:1 }}>Auto-Tune / Pitch Shift</span>
-                  <button onClick={function(){ upd("pitch",{on:!fx.pitch?.on}); }}
-                    style={{ background:fx.pitch?.on?"#C026D3":"#222", border:"none", borderRadius:6, color:"white", fontSize:10, fontWeight:700, padding:"4px 10px", cursor:"pointer" }}>
-                    {fx.pitch?.on ? "ON" : "OFF"}
-                  </button>
-                </div>
-                <div style={{ padding:"12px 14px", opacity:fx.pitch?.on?1:0.35 }}>
-                  {/* Semitone pitch shift knob */}
-                  <div style={{ display:"flex", gap:16, alignItems:"flex-start", flexWrap:"wrap" }}>
-                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-                      <Knob label="PITCH SHIFT" value={fx.pitch?.semitones??0} min={-12} max={12} step={1} unit=" st" color="#C026D3"
-                        onChange={function(v){ upd("pitch",{semitones:v}); }} />
-                      <div style={{ color:"#444", fontSize:8, textAlign:"center" }}>
-                        {(fx.pitch?.semitones||0)>0?"↑ "+(fx.pitch?.semitones)+" semitones up":(fx.pitch?.semitones||0)<0?"↓ "+Math.abs(fx.pitch?.semitones)+" semitones down":"No shift"}
-                      </div>
-                    </div>
-                    {/* Key snap */}
-                    <div style={{ flex:1 }}>
-                      <div style={{ color:"#555", fontSize:9, fontWeight:700, marginBottom:6 }}>SNAP KEY</div>
-                      <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:8 }}>
-                        {["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"].map(function(k){
-                          const isActive = fx.pitch?.key===k;
-                          return <button key={k} onClick={function(){ upd("pitch",{key:k}); }}
-                            style={{ background:isActive?"#C026D3":"#1a1a1a", border:"1px solid "+(isActive?"#C026D3":"#222"), borderRadius:5, color:isActive?"white":"#555", fontSize:9, fontWeight:700, padding:"3px 6px", cursor:"pointer", minWidth:28 }}>{k}</button>;
-                        })}
-                      </div>
-                      <div style={{ display:"flex", gap:6 }}>
-                        {["major","minor","chromatic"].map(function(s){
-                          const isA = fx.pitch?.scale===s;
-                          return <button key={s} onClick={function(){ upd("pitch",{scale:s}); }}
-                            style={{ background:isA?"rgba(192,38,211,0.2)":"#141414", border:"1px solid "+(isA?"#C026D3":"#222"), borderRadius:5, color:isA?"#C026D3":"#555", fontSize:8, fontWeight:700, padding:"3px 8px", cursor:"pointer", textTransform:"capitalize" }}>{s}</button>;
-                        })}
-                      </div>
-                    </div>
-                    {/* Retune speed */}
-                    <div style={{ display:"flex", flexDirection:"column", gap:4, minWidth:100 }}>
-                      <div style={{ color:"#555", fontSize:9, fontWeight:700 }}>RETUNE SPEED</div>
-                      <input type="range" min={0} max={1} step={0.01} value={fx.pitch?.speed??0.5}
-                        onChange={function(e){ upd("pitch",{speed:+e.target.value}); }}
-                        style={{ accentColor:"#C026D3", width:"100%" }} />
-                      <div style={{ display:"flex", justifyContent:"space-between" }}>
-                        <span style={{ color:"#444", fontSize:7 }}>Natural</span>
-                        <span style={{ color:"#C026D3", fontSize:8, fontWeight:700 }}>{Math.round((fx.pitch?.speed??0.5)*100)}%</span>
-                        <span style={{ color:"#444", fontSize:7 }}>Robotic</span>
-                      </div>
-                      <div style={{ color:"#2a2a2a", fontSize:7, marginTop:2 }}>Pitch shift uses playback rate scaling. For natural vocals keep shift within ±3 semitones.</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-            </div>
           </div>
         );
       })()}
@@ -7699,28 +8112,91 @@ function StudioScreen({ user, onExit }) {
 
       {/* ══ MIXER ═══════════════════════════════════════════════ */}
       {showMixer && (
-        <div style={{ background:"#0c0c0c",borderTop:"1px solid #1e1e1e",padding:"10px 8px",flexShrink:0,overflowX:"auto" }} onClick={function(e){ e.stopPropagation(); }}>
-          <div style={{ display:"flex",gap:6,minWidth:"max-content" }}>
-            {tracks.map(function(t){
-              return (
-                <div key={t.id} style={{ width:64,background:"#141414",borderRadius:10,padding:"8px 6px",display:"flex",flexDirection:"column",alignItems:"center",gap:6,border:"1px solid #1e1e1e" }}>
-                  <div style={{ width:8,height:8,borderRadius:"50%",background:t.color }} />
-                  <span style={{ color:"#888",fontSize:8,fontWeight:700,textAlign:"center",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",width:"100%" }}>{t.name}</span>
-                  {/* Pan knob — simple slider */}
-                  <div style={{ width:"100%" }}>
-                    <div style={{ color:"#555",fontSize:7,textAlign:"center" }}>PAN {t.pan>0?"+":""}{Math.round((t.pan||0)*100)}</div>
-                    <input type="range" min={-1} max={1} step={0.05} value={t.pan||0} onChange={function(e){ updateTrack(t.id,{pan:+e.target.value}); }} style={{ width:"100%",accentColor:t.color,height:2 }} />
+        <div style={{ background:"#0c0c0c",borderTop:"1px solid #222",flexShrink:0 }} onClick={function(e){ e.stopPropagation(); }}>
+          {/* ── Mixer header ── */}
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 16px 4px" }}>
+            <span style={{ color:"#555",fontSize:10,fontWeight:800,letterSpacing:2 }}>MIXER</span>
+            <button onClick={function(){ setShowMixer(false); }} style={{ background:"none",border:"none",color:"#444",fontSize:18,cursor:"pointer",lineHeight:1,padding:0 }}>×</button>
+          </div>
+
+          {/* ── Channel strips ── */}
+          <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
+            <div style={{ display:"flex",gap:0,minWidth:"max-content",padding:"0 8px 10px" }}>
+              {tracks.map(function(t, ti){
+                const vol = t.volume ?? 1;
+                const pan = t.pan || 0;
+                const panPct = Math.round(pan * 100);
+                const volPct = Math.round(vol * 100);
+                const trackW = Math.max(72, Math.floor((window.innerWidth - 16) / Math.min(tracks.length, 5)));
+                return (
+                  <div key={t.id} style={{ width:trackW,display:"flex",flexDirection:"column",alignItems:"center",gap:0,borderRight:"1px solid #1a1a1a",padding:"0 4px" }}>
+                    {/* Track colour + name */}
+                    <div style={{ display:"flex",alignItems:"center",gap:4,padding:"4px 0 6px",width:"100%" }}>
+                      <div style={{ width:8,height:8,borderRadius:"50%",background:t.color,flexShrink:0 }} />
+                      <span style={{ color:"#aaa",fontSize:9,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1 }}>{t.name}</span>
+                    </div>
+
+                    {/* ── PAN ── large touch-friendly horizontal slider */}
+                    <div style={{ width:"100%",marginBottom:8 }}>
+                      <div style={{ display:"flex",justifyContent:"space-between",marginBottom:3 }}>
+                        <span style={{ color:"#555",fontSize:8,fontWeight:600 }}>PAN</span>
+                        <span style={{ color:pan===0?"#555":t.color,fontSize:8,fontWeight:700 }}>
+                          {pan===0?"C":pan>0?("R"+panPct):("L"+Math.abs(panPct))}
+                        </span>
+                      </div>
+                      {/* Centre tick */}
+                      <div style={{ position:"relative" }}>
+                        <div style={{ position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:1,height:10,background:"#333",pointerEvents:"none",zIndex:1 }} />
+                        <input type="range" min={-100} max={100} step={1}
+                          value={Math.round(pan*100)}
+                          onChange={function(e){ updateTrack(t.id,{pan:+(+e.target.value/100).toFixed(2)}); }}
+                          style={{ width:"100%",accentColor:t.color,height:6,cursor:"pointer",WebkitAppearance:"none",appearance:"none" }} />
+                      </div>
+                      {/* Reset to centre on double-tap */}
+                      <button onDoubleClick={function(){ updateTrack(t.id,{pan:0}); }}
+                        style={{ display:"block",width:"100%",background:"none",border:"none",color:"#333",fontSize:7,cursor:"pointer",padding:"1px 0",textAlign:"center" }}>
+                        ↺ ctr
+                      </button>
+                    </div>
+
+                    {/* ── VOLUME vertical fader ── */}
+                    <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:3,width:"100%",flex:1 }}>
+                      <span style={{ color:t.isMuted?"#F59E0B":vol>1?"#C026D3":vol===0?"#EF4444":"#aaa",fontSize:9,fontWeight:800 }}>
+                        {t.isMuted?"M":volPct}
+                      </span>
+                      {/* Vertical fader — rotate a horizontal range */}
+                      <div style={{ width:36,height:100,display:"flex",alignItems:"center",justifyContent:"center",position:"relative" }}>
+                        {/* Fader track visual */}
+                        <div style={{ position:"absolute",left:"50%",top:0,bottom:0,width:2,transform:"translateX(-50%)",background:"#222",borderRadius:1 }} />
+                        <div style={{ position:"absolute",left:"50%",bottom:0,width:2,transform:"translateX(-50%)",
+                          height:(vol/1.5*100)+"%",background:t.isMuted?"#F59E0B44":t.color+"88",borderRadius:1,transition:"height 0.05s" }} />
+                        <input type="range" min={0} max={150} step={1}
+                          value={Math.round(vol*100)}
+                          onChange={function(e){ updateTrack(t.id,{volume:+(+e.target.value/100).toFixed(2)}); }}
+                          style={{
+                            width:100, height:36,
+                            transform:"rotate(-90deg)",
+                            accentColor:t.isMuted?"#F59E0B":t.color,
+                            cursor:"pointer",
+                            position:"absolute",
+                          }} />
+                      </div>
+                      {/* Unity mark */}
+                      <span style={{ color:"#333",fontSize:7 }}>0dB=100</span>
+                    </div>
+
+                    {/* ── Mute button ── */}
+                    <button onClick={function(){ toggleMute(t.id); }}
+                      style={{ marginTop:6,width:"100%",background:t.isMuted?"rgba(245,158,11,0.15)":"#161616",
+                        border:"1px solid "+(t.isMuted?"#F59E0B":"#2a2a2a"),
+                        borderRadius:6,color:t.isMuted?"#F59E0B":"#555",
+                        fontSize:10,padding:"5px 0",cursor:"pointer",fontWeight:800 }}>
+                      M
+                    </button>
                   </div>
-                  {/* Volume fader */}
-                  <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:2,width:"100%" }}>
-                    <div style={{ color:"#555",fontSize:7 }}>{Math.round((t.volume??1)*100)}</div>
-                    <input type="range" min={0} max={1.5} step={0.01} value={t.volume??1} onChange={function(e){ updateTrack(t.id,{volume:+e.target.value}); }} style={{ width:"100%",accentColor:t.color,height:3 }} />
-                  </div>
-                  {/* Mute */}
-                  <button onClick={function(){ toggleMute(t.id); }} style={{ background:t.isMuted?"rgba(245,158,11,0.2)":"#1a1a1a",border:"1px solid "+(t.isMuted?"#F59E0B":"#2a2a2a"),borderRadius:4,color:t.isMuted?"#F59E0B":"#555",fontSize:8,padding:"2px 0",cursor:"pointer",fontWeight:700,width:"100%" }}>M</button>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
