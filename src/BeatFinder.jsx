@@ -5956,9 +5956,14 @@ function StudioScreen({ user, onExit }) {
       const h = Math.abs(ay - selBoxRef.current.startY);
       setSelBox({ x, y, w, h });
 
-      // Hit-test all clips against the lasso box
+      // Hit-test all clips against the lasso box — check both X and Y
       const hit = new Set();
-      tracksRef.current.forEach(function(t) {
+      tracksRef.current.forEach(function(t, trackIndex) {
+        // Each track row sits at: RULER_H + trackIndex * TRACK_H (relative to DAW wrapper top)
+        const trackTop    = RULER_H + trackIndex * TRACK_H;
+        const trackBottom = trackTop + TRACK_H;
+        // Only consider this track if it overlaps the lasso vertically
+        if (trackBottom < y || trackTop > y + h) return;
         (t.clips||[]).forEach(function(cl) {
           if (!cl.audioBuffer || cl.active === false) return;
           const trimS  = cl.trimStart || 0;
@@ -5985,6 +5990,8 @@ function StudioScreen({ user, onExit }) {
   };
 
   const handleLaneLongPress = function(e, track) {
+    // Only activate lasso if the touch landed on empty lane space, not on a clip
+    if (e.target !== e.currentTarget) return;
     // Called from onTouchStart on blank lane space.
     // We start a 1.5s timer; if the finger doesn't move much, activate lasso.
     const touch = e.touches[0];
@@ -6823,7 +6830,7 @@ function StudioScreen({ user, onExit }) {
                     isolation:"isolate",
                   }}
                     onClick={function(e){ deselectClip(e); if (e.target === e.currentTarget) { setSelBox(null); setSelClipIds(new Set()); } }}
-                    onTouchStart={function(e){ if (e.target === e.currentTarget) { handleLaneLongPress(e, track); } }}
+                    onTouchStart={function(e){ handleLaneLongPress(e, track); }}
                   >
 
                     {/* ── INNER MASK — hard overflow:hidden, everything inside is clipped ── */}
@@ -6942,18 +6949,6 @@ function StudioScreen({ user, onExit }) {
                 </button>
               </div>
               <div style={{ flex:1, background:"#090909" }} />
-            </div>
-
-            {/* ── Empty zone below tracks — catches long-press for lasso in blank area ── */}
-            <div style={{ display:"flex", minHeight: 300 }}>
-              <div style={{ width:SIDEBAR_W, flexShrink:0, position:"sticky", left:0, zIndex:10, background:"#0a0a0a", borderRight:"1px solid #141414" }} />
-              <div
-                style={{ flex:1, background:"#090909", touchAction:"none" }}
-                onClick={function(e){
-                  if (e.target === e.currentTarget) { setSelBox(null); setSelClipIds(new Set()); }
-                }}
-                onTouchStart={function(e){ handleLaneLongPress(e, null); }}
-              />
             </div>
 
           </div>{/* end inner */}
