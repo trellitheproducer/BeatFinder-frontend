@@ -5318,39 +5318,76 @@ function StudioScreen({ user, onExit }) {
   // To shift by N semitones: ratio = 2^(N/12).
   // =============================================================================
   const PITCH_WORKLET_CODE = `
+// ── BeatFinder Autotune Worklet ─────────────────────────────────────────────
+// Parameters:
+//   pitch  – manual shift ratio (1.0 = no shift). Used in SHIFT mode.
+//   speed  – correction speed 0..1. 0 = instant T-Pain snap, 1 = slow 400ms glide.
+//   mode   – 0 = SHIFT (use pitch param directly), 1 = AUTOTUNE (detect + correct)
+//   root   – root note 0..11 (C=0, C#=1 … B=11)
+//   scale  – bitmask of 12 bits: which semitones above root are active
+//            e.g. major = 0b101011010101 = 2741
+//   formant– formant shift semitones (applied as subtle playbackRate-equivalent via
+//            a separate post-gain, –12..+12)
+//
+// AUTOTUNE algorithm:
+//   1. Collect 2048 samples into a detection buffer (pitch detection window).
+//   2. Detect fundamental via autocorrelation (fast, mono-only, works 80Hz–1200Hz).
+//   3. Find nearest active scale note.
+//   4. Smooth currentRatio toward targetRatio at speed-controlled rate.
+//   5. Feed the smoothed ratio into the phase-vocoder (OLA pitch shift).
+//
+// This gives the classic T-Pain "robotic" effect at speed=0 and natural
+// pitch correction at speed=0.8..1.
+
 class PitchShiftProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
-    return [{ name:'pitch', defaultValue:1, minValue:0.25, maxValue:4, automationRate:'k-rate' }];
+    return [
+      { name:'pitch',   defaultValue:1,    minValue:0.25, maxValue:4,   automationRate:'k-rate' },
+      { name:'speed',   defaultValue:0.5,  minValue:0,    maxValue:1,   automationRate:'k-rate' },
+      { name:'mode',    defaultValue:0,    minValue:0,    maxValue:1,   automationRate:'k-rate' },
+      { name:'root',    defaultValue:0,    minValue:0,    maxValue:11,  automationRate:'k-rate' },
+      { name:'scale',   defaultValue:2741, minValue:0,    maxValue:4095,automationRate:'k-rate' },
+      { name:'formant', defaultValue:0,    minValue:-12,  maxValue:12,  automationRate:'k-rate' },
+    ];
   }
+
   constructor() {
     super();
+    // ── OLA phase-vocoder ────────────────────────────────────────
     this._frameSize  = 2048;
     this._hopSize    = 512;
-    this._overlapFac = this._frameSize / this._hopSize;
     this._inBuf      = new Float32Array(this._frameSize);
-    this._outBuf     = new Float32Array(this._frameSize * 2);
+    this._outBuf     = new Float32Array(this._frameSize * 4);
     this._window     = new Float32Array(this._frameSize);
     this._lastPhase  = new Float32Array(this._frameSize / 2 + 1);
     this._sumPhase   = new Float32Array(this._frameSize / 2 + 1);
     this._inFill     = 0;
     this._outRead    = 0;
     this._outWrite   = 0;
+    this._re = new Float32Array(this._frameSize);
+    this._im = new Float32Array(this._frameSize);
+    this._mag    = new Float32Array(this._frameSize / 2 + 1);
+    this._phase  = new Float32Array(this._frameSize / 2 + 1);
+    this._outMag = new Float32Array(this._frameSize / 2 + 1);
     // Hann window
     for (let i = 0; i < this._frameSize; i++)
       this._window[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / this._frameSize);
-    // Real FFT tables
-    this._fftSize = this._frameSize;
-    this._re = new Float32Array(this._fftSize);
-    this._im = new Float32Array(this._fftSize);
-    this._mag    = new Float32Array(this._fftSize / 2 + 1);
-    this._phase  = new Float32Array(this._fftSize / 2 + 1);
-    this._outMag = new Float32Array(this._fftSize / 2 + 1);
-    this._outPhs = new Float32Array(this._fftSize / 2 + 1);
+
+    // ── Pitch detection ──────────────────────────────────────────
+    this._detBuf     = new Float32Array(2048); // autocorrelation window
+    this._detFill    = 0;
+    this._detPeriod  = 128; // refresh detection every N samples
+
+    // ── Autotune state ───────────────────────────────────────────
+    this._currentRatio  = 1.0;  // smoothed current ratio fed into vocoder
+    this._targetRatio   = 1.0;  // ratio computed from pitch detection
+    this._detectedFreq  = 0;    // last detected fundamental Hz
+    this._sampleRate    = sampleRate; // AudioWorkletGlobalScope
   }
 
+  // ── In-place Cooley-Tukey FFT ────────────────────────────────
   _fft(re, im, inv) {
     const n = re.length;
-    // bit-reverse
     for (let i=1,j=0; i<n; i++) {
       let bit = n >> 1;
       for (; j & bit; bit >>= 1) j ^= bit;
@@ -5375,34 +5412,149 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
     if (inv) { for (let i=0;i<n;i++){re[i]/=n;im[i]/=n;} }
   }
 
+  // ── Autocorrelation pitch detector (MPM-style) ──────────────
+  // Returns fundamental frequency in Hz, or 0 if not detected.
+  _detectPitch(buf, sr) {
+    const N    = buf.length;
+    const half = N >> 1;
+    // Compute normalised square difference function (NSDF)
+    // Faster path: just autocorrelation, normalised by energy
+    let rms = 0;
+    for (let i = 0; i < N; i++) rms += buf[i] * buf[i];
+    rms = Math.sqrt(rms / N);
+    if (rms < 0.01) return 0; // silence — no pitch
+
+    // Search range: 80Hz..1200Hz  →  lags sr/1200 .. sr/80
+    const minLag = Math.floor(sr / 1200);
+    const maxLag = Math.floor(sr / 80);
+    let bestLag = -1, bestCorr = -Infinity;
+
+    for (let lag = minLag; lag <= maxLag && lag < half; lag++) {
+      let corr = 0;
+      for (let i = 0; i < half; i++) corr += buf[i] * buf[i + lag];
+      if (corr > bestCorr) { bestCorr = corr; bestLag = lag; }
+    }
+    if (bestLag < 1) return 0;
+
+    // Parabolic interpolation for sub-sample accuracy
+    const y0 = bestLag > 0         ? this._autocorr(buf, half, bestLag - 1) : bestCorr;
+    const y1 = bestCorr;
+    const y2 = bestLag < half - 1  ? this._autocorr(buf, half, bestLag + 1) : bestCorr;
+    const denom = 2 * (y0 - 2*y1 + y2);
+    const refinedLag = denom !== 0 ? bestLag - (y2 - y0) / (2 * denom) : bestLag;
+
+    return sr / refinedLag;
+  }
+
+  _autocorr(buf, half, lag) {
+    let s = 0;
+    for (let i = 0; i < half; i++) s += buf[i] * buf[i + lag];
+    return s;
+  }
+
+  // ── Find nearest active note frequency ───────────────────────
+  // Given detected Hz, target scale bitmask, and root semitone,
+  // returns the Hz of the nearest in-scale note.
+  _snapFreq(freq, root, scaleMask) {
+    if (freq <= 0) return freq;
+    // Convert freq to MIDI note number (float)
+    const midi = 12 * Math.log2(freq / 440) + 69;
+    const noteClass = ((Math.round(midi) % 12) + 12) % 12;
+
+    // Find nearest active semitone above root
+    let bestDist = Infinity, bestOffset = 0;
+    for (let s = 0; s < 12; s++) {
+      if (scaleMask & (1 << s)) {
+        const candidate = (root + s) % 12;
+        let dist = ((noteClass - candidate + 12) % 12);
+        if (dist > 6) dist = 12 - dist; // wrap to nearest
+        if (dist < bestDist) { bestDist = dist; bestOffset = candidate - noteClass; }
+      }
+    }
+    // Adjust MIDI by the offset (chromatic semitones)
+    const targetMidi = Math.round(midi) + bestOffset;
+    const targetFreq = 440 * Math.pow(2, (targetMidi - 69) / 12);
+    return targetFreq;
+  }
+
   process(inputs, outputs, params) {
     const input  = inputs[0]?.[0];
     const output = outputs[0]?.[0];
     if (!input || !output) return true;
-    const pitch = params.pitch[0];
+
+    const manualPitch = params.pitch[0];   // ratio for SHIFT mode
+    const speed       = params.speed[0];   // 0=instant, 1=slow (400ms)
+    const mode        = Math.round(params.mode[0]);   // 0=SHIFT, 1=AUTOTUNE
+    const root        = Math.round(params.root[0]);   // 0..11
+    const scaleMask   = Math.round(params.scale[0]);  // 12-bit bitmask
+    const formant     = params.formant[0]; // semitones
+
+    const sr = this._sampleRate;
     const fs = this._frameSize, hs = this._hopSize;
     const expct = 2 * Math.PI * hs / fs;
 
-    // Feed input into circular input buffer
+    // ── Step 1: Pitch detection (autotune mode only) ─────────────
+    // Fill detection buffer and refresh every _detPeriod samples
+    for (let i = 0; i < input.length; i++) {
+      this._detBuf[this._detFill % this._detBuf.length] = input[i];
+      this._detFill++;
+    }
+
+    if (mode === 1) {
+      // Detect every hopSize samples for efficiency
+      if (this._detFill % hs === 0) {
+        // Copy the most recent 2048 samples into a detection frame
+        const detFrame = new Float32Array(this._detBuf.length);
+        for (let k = 0; k < detFrame.length; k++)
+          detFrame[k] = this._detBuf[(this._detFill - detFrame.length + k + this._detBuf.length) % this._detBuf.length];
+
+        const detectedHz = this._detectPitch(detFrame, sr);
+        if (detectedHz > 0) {
+          const snappedHz  = this._snapFreq(detectedHz, root, scaleMask);
+          this._targetRatio = snappedHz / detectedHz;
+          this._detectedFreq = detectedHz;
+        }
+      }
+
+      // ── Step 2: Smooth currentRatio → targetRatio at speed-controlled rate ──
+      // speed=0 → instant (T-Pain robotic snap, α≈1)
+      // speed=1 → slow glide ~400ms at 44100Hz / 128 block ≈ 345 blocks
+      // α = smoothing factor per block (128 samples)
+      // At speed=0: α=1 (instant). At speed=1: α≈0.02 (slow).
+      const blocksPerSec = sr / 128;
+      // correctionMs: 0ms at speed=0, 400ms at speed=1
+      const correctionMs  = speed * 400;
+      const blocksToSnap  = Math.max(1, (correctionMs / 1000) * blocksPerSec);
+      const alpha = 1 - Math.pow(0.001, 1 / blocksToSnap); // decays to 0.1% in blocksToSnap
+      this._currentRatio += alpha * (this._targetRatio - this._currentRatio);
+    } else {
+      // SHIFT mode: use manual pitch param directly
+      this._currentRatio  = manualPitch;
+      this._targetRatio   = manualPitch;
+    }
+
+    // Apply formant offset on top (slight additional ratio for vocal character)
+    const formantRatio = Math.pow(2, formant / 48); // subtle: 1/4 semitone per semitone
+    const pitch = this._currentRatio * formantRatio;
+
+    // ── Step 3: OLA phase-vocoder pitch shift ────────────────────
     for (let i = 0; i < input.length; i++) {
       this._inBuf[this._inFill % fs] = input[i];
       this._inFill++;
 
       if (this._inFill % hs === 0 && this._inFill >= fs) {
-        // Pull a frame
         const frame = new Float32Array(fs);
         for (let k=0;k<fs;k++) frame[k] = this._inBuf[(this._inFill - fs + k) % fs] * this._window[k];
 
-        // FFT
         this._re.set(frame); this._im.fill(0);
         this._fft(this._re, this._im, false);
         const bins = fs / 2 + 1;
         for (let k=0;k<bins;k++) {
-          this._mag[k] = Math.sqrt(this._re[k]*this._re[k]+this._im[k]*this._im[k]);
+          this._mag[k]   = Math.sqrt(this._re[k]*this._re[k]+this._im[k]*this._im[k]);
           this._phase[k] = Math.atan2(this._im[k], this._re[k]);
         }
 
-        // Phase vocoder — frequency deviation
+        // Phase vocoder
         for (let k=0;k<bins;k++) {
           let delta = this._phase[k] - this._lastPhase[k] - k * expct;
           delta -= Math.round(delta / (2*Math.PI)) * 2*Math.PI;
@@ -5412,32 +5564,30 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
           this._outMag[k] = 0;
         }
 
-        // Spectral shifting — bin remapping
+        // Bin remapping (spectral shift)
         for (let k=0;k<bins;k++) {
           const tk = Math.round(k * pitch);
           if (tk < bins) this._outMag[tk] += this._mag[k];
         }
 
-        // IFFT synthesis
+        // IFFT → overlap-add
         for (let k=0;k<bins;k++) {
           this._re[k] = this._outMag[k] * Math.cos(this._sumPhase[k]);
           this._im[k] = this._outMag[k] * Math.sin(this._sumPhase[k]);
         }
-        // Mirror
         for (let k=1;k<bins-1;k++) { this._re[fs-k]=this._re[k]; this._im[fs-k]=-this._im[k]; }
         this._fft(this._re, this._im, true);
 
-        // Overlap-add to output buffer
         const norm = fs / (hs * 2);
         for (let k=0;k<fs;k++) {
-          const idx = (this._outWrite + k) % (this._outBuf.length);
+          const idx = (this._outWrite + k) % this._outBuf.length;
           this._outBuf[idx] += this._re[k] * this._window[k] / norm;
         }
         this._outWrite = (this._outWrite + hs) % this._outBuf.length;
       }
     }
 
-    // Drain output buffer
+    // Drain output
     for (let i=0;i<output.length;i++) {
       output[i] = this._outBuf[this._outRead % this._outBuf.length];
       this._outBuf[this._outRead % this._outBuf.length] = 0;
@@ -5538,18 +5688,24 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       live.makeupGain.gain.setTargetAtTime(mgVal, now, T);
     }
 
-    // ── Pitch worklet — update ratio + formant live ──
+    // ── Pitch/Autotune worklet — update all params live ──
     if (live.pitchNode) {
       const pitchOn   = !!(fx.pitch && fx.pitch.on);
       const semitones = pitchOn ? (fx.pitch.semitones || 0) : 0;
       const formant   = pitchOn ? (fx.pitch.formant   || 0) : 0;
-      // Speed controls the ramp time — fast = instant, slow = smooth portamento
-      const rampT     = pitchOn ? Math.max(0.005, (fx.pitch.speed ?? 0.5) * 0.3) : T;
-      live.pitchNode.parameters.get('pitch').setTargetAtTime(
-        Math.pow(2, semitones / 12), now, rampT
-      );
-      // Formant: slight playbackRate offset on all connected sources — applied via a second gain-less node trick
-      // Stored on liveNodes for scheduleClip to read when restarted
+      const speed     = pitchOn ? (fx.pitch.speed ?? 0.5)   : 0.5;
+      const pitchMode = pitchOn && fx.pitch.mode === 'autotune' ? 1 : 0;
+      const NOTE_MAP  = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
+      const SCALE_MASKS={chromatic:4095,major:2741,minor:1453,pentatonic:661,blues:1193};
+      const rootNote  = pitchOn ? (NOTE_MAP[fx.pitch.key || 'C'] || 0) : 0;
+      const scaleMask = pitchOn ? (SCALE_MASKS[fx.pitch.scale || 'chromatic'] ?? 4095) : 4095;
+
+      live.pitchNode.parameters.get('pitch').setTargetAtTime(Math.pow(2, semitones / 12), now, T);
+      live.pitchNode.parameters.get('speed').value   = speed;
+      live.pitchNode.parameters.get('mode').value    = pitchMode;
+      live.pitchNode.parameters.get('root').value    = rootNote;
+      live.pitchNode.parameters.get('scale').value   = scaleMask;
+      live.pitchNode.parameters.get('formant').value = formant;
       live.pitchFormant = formant;
     }
 
@@ -5729,28 +5885,39 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         liveNodes.comp = comp;
       }
 
-      // ── Pitch shift via phase-vocoder AudioWorklet ─────────────────────
-      // The worklet preserves tempo unlike playbackRate (tape effect).
-      // "autotune" mode: snap detected pitch to nearest scale note (handled
-      // by the per-clip playbackRate being set in scheduleClip using the
-      // per-clip detectedNote → target note ratio).
+      // ── Pitch/Autotune via phase-vocoder AudioWorklet ──────────────────────
+      // SHIFT mode (mode=0): uses pitch param (semitone ratio) directly.
+      // AUTOTUNE mode (mode=1): worklet detects live pitch and snaps to scale at speed rate.
       if (fx.pitch && fx.pitch.on && pitchWorkletReadyRef.current) {
         try {
           const pitchNode = new AudioWorkletNode(actx, 'pitch-shift-processor');
-          const semitones = fx.pitch.semitones || 0;
-          pitchNode.parameters.get('pitch').value = Math.pow(2, semitones / 12);
+          const semitones  = fx.pitch.semitones || 0;
+          const pitchMode  = fx.pitch.mode === 'autotune' ? 1 : 0;
+          const speed      = fx.pitch.speed ?? 0.5;
+          const formant    = fx.pitch.formant || 0;
+          // Root note: C=0..B=11
+          const NOTE_MAP   = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
+          const SCALE_MASKS= { chromatic:4095, major:2741, minor:1453, pentatonic:661, blues:1193 };
+          const rootNote   = NOTE_MAP[fx.pitch.key || 'C'] || 0;
+          const scaleKey   = fx.pitch.scale || 'chromatic';
+          const scaleMask  = SCALE_MASKS[scaleKey] ?? 4095;
+
+          pitchNode.parameters.get('pitch').value   = Math.pow(2, semitones / 12);
+          pitchNode.parameters.get('speed').value   = speed;
+          pitchNode.parameters.get('mode').value    = pitchMode;
+          pitchNode.parameters.get('root').value    = rootNote;
+          pitchNode.parameters.get('scale').value   = scaleMask;
+          pitchNode.parameters.get('formant').value = formant;
           pitchNode.connect(node);
           node = pitchNode;
           liveNodes.pitchNode = pitchNode;
         } catch(e) {
-          // Worklet not ready yet — fall back to playbackRate (applied in scheduleClip)
           node._pitchSemitones = fx.pitch.semitones || 0;
         }
       } else if (fx.pitch && fx.pitch.on) {
-        // Fallback: tag the entry node so scheduleClip uses playbackRate
         node._pitchSemitones = fx.pitch.semitones || 0;
       }
-      // Store formant setting for scheduleClip
+      // Formant stored for scheduleClip fallback (no worklet path)
       if (fx.pitch && fx.pitch.on) {
         liveNodes.pitchFormant = fx.pitch.formant || 0;
       }
@@ -6268,35 +6435,29 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
       recDurRef.current = 0;
 
-      // ── Start playback FIRST so masterStartRef is stamped before we read the clock ──
-      // MUST use playheadAtRef.current (live ref), NOT currentTime (stale React state).
-      // currentTime lags by at least one render cycle; using it shifts each take's
-      // clipStartTime by whatever the state lag is — making successive takes drift off-beat.
-      if (!isPlaying) { doPlay(playheadAtRef.current); setIsPlaying(true); }
+      // ── MUST await doPlay() before starting the recorder ──────────────────
+      // doPlay() is async — it calls await registerPitchWorklet() which can take
+      // 50–200ms on first use. If we don't await it, masterStartRef.current is
+      // still 0 when mr.start() fires, making trueStartTime wildly wrong and
+      // causing the clip to jump to the wrong position on the timeline.
+      if (!isPlaying) {
+        await doPlay(playheadAtRef.current);
+        setIsPlaying(true);
+      }
 
-      // ── Precise timeline sync ─────────────────────────────────────────────
-      // CRITICAL ORDER: read actx.currentTime AFTER doPlay() so masterStartRef.current
-      // is already set. Then start the MediaRecorder and take a second clock reading
-      // immediately after mr.start() — this is the tightest timestamp we can get for
-      // when audio actually started being captured.
-      //
-      // actx.inputLatency = mic hardware buffer (5–20ms wired). Subtracting it shifts
-      // the clip earlier so it aligns with when sound entered the mic, not when the
-      // first buffer was handed to the browser.
-      //
-      // We do NOT use the stop-anchor approach for start because getUserMedia and
-      // doPlay() both stamp their clocks before mr.start(), so the start-anchor is
-      // the most accurate reference point.
+      // Snapshot both refs immediately after doPlay() resolves —
+      // these are the ground-truth values we use for clip placement.
+      const masterStart   = masterStartRef.current;   // actx time when playback started
+      const headPos       = playheadAtRef.current;    // timeline position at that moment
 
-      mr.start(50); // 50ms chunks — tighter than 100ms, reduces end-of-clip timing error
-
-      // Read clock the instant after mr.start() fires — this is our ground truth
+      // ── Start the recorder and stamp the clock as tightly as possible ──────
+      mr.start(50); // 50ms chunks
       const startActxTime = actx.currentTime;
       const inputLatency  = actx.inputLatency || 0;
 
-      // Timeline position when recording actually started
+      // Timeline position = where the playhead was + how far actx has advanced since masterStart
       const trueStartTime = Math.max(0,
-        playheadAtRef.current + (startActxTime - masterStartRef.current) - inputLatency
+        headPos + (startActxTime - masterStart) - inputLatency
       );
       recStartTimeRef.current = trueStartTime;
 
