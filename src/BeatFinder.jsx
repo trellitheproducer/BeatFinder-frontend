@@ -4708,6 +4708,7 @@ function StudioScreen({ user, onExit }) {
   // effectivePPS changes with zoom — keep a ref so lasso onMove closure can read it
   // MUST be declared here (before line 4743 uses it) to avoid "uninitialized variable" crash
   const effectivePPSRef = useRef(100);
+  const lassoContainerRef = useRef(null); // ref to the DAW wrapper — lasso overlay is positioned inside this
 
   useEffect(function () { zoomRef.current = zoom; }, [zoom]);
   useEffect(function () { isPlayingRef.current = isPlaying; }, [isPlaying]);
@@ -5921,11 +5922,22 @@ function StudioScreen({ user, onExit }) {
   };
 
   const startLassoFromTouch = function(clientX, clientY, laneTop) {
-    // clientX/Y are viewport coords; convert to scroll-container coords
+    // Use the DAW wrapper (lassoContainerRef) as the coordinate space —
+    // the lasso overlay div is position:absolute inside it, so x/y must be
+    // relative to that element, not the scroll container.
     const scrollX = getLaneScrollX();
-    const containerRect = laneScrollRef.current ? laneScrollRef.current.getBoundingClientRect() : {left:0,top:0};
+    const wrapRect = lassoContainerRef.current
+      ? lassoContainerRef.current.getBoundingClientRect()
+      : { left: 0, top: 0 };
+    const containerRect = laneScrollRef.current
+      ? laneScrollRef.current.getBoundingClientRect()
+      : { left: 0, top: 0 };
+
+    // X is in scroll-content space (accounts for horizontal scroll)
     const absX = clientX - containerRect.left + scrollX;
-    const absY = clientY - containerRect.top;
+    // Y is relative to the DAW wrapper (where position:absolute is anchored)
+    const absY = clientY - wrapRect.top;
+
     selBoxRef.current = { startX: absX, startY: absY, scrollX };
     setSelBox({ x: absX, y: absY, w: 0, h: 0 });
     setSelClipIds(new Set());
@@ -5937,7 +5949,7 @@ function StudioScreen({ user, onExit }) {
       const ty = te.touches[0].clientY;
       const sx = getLaneScrollX();
       const ax = tx - containerRect.left + sx;
-      const ay = ty - containerRect.top;
+      const ay = ty - wrapRect.top;
       const x = Math.min(ax, selBoxRef.current.startX);
       const y = Math.min(ay, selBoxRef.current.startY);
       const w = Math.abs(ax - selBoxRef.current.startX);
@@ -5953,8 +5965,6 @@ function StudioScreen({ user, onExit }) {
           const trimE  = cl.trimEnd !== undefined ? cl.trimEnd : cl.audioBuffer.duration;
           const clipL  = (cl.startTime || 0) * effectivePPSRef.current;
           const clipR  = clipL + Math.max(20, (trimE - trimS) * effectivePPSRef.current);
-          // We can't know the exact Y of each track here without DOM lookups,
-          // so we match by X overlap only and refine on commit
           if (clipR >= x && clipL <= x + w) {
             hit.add(cl.id);
           }
@@ -5965,10 +5975,9 @@ function StudioScreen({ user, onExit }) {
 
     const onEnd = function() {
       selBoxRef.current = null;
+      setSelBox(null);
       document.removeEventListener("touchmove", onMove);
       document.removeEventListener("touchend", onEnd);
-      // Keep selBox visible with the selection — it becomes the action bar trigger
-      // Box disappears when user taps away or takes an action
     };
 
     document.addEventListener("touchmove", onMove, { passive: false });
@@ -6683,7 +6692,7 @@ function StudioScreen({ user, onExit }) {
           Ruler uses position:sticky,top:0 — always visible.
           One scrollLeft drives everything — zero sync bugs.
       ══════════════════════════════════════════════════════════════════════ */}
-      <div style={{ flex:1, minHeight:0, overflow:"hidden", position:"relative" }}>
+      <div ref={lassoContainerRef} style={{ flex:1, minHeight:0, overflow:"hidden", position:"relative" }}>
 
         {/* Playhead — position updated directly via DOM ref, no React re-render = smooth */}
         <div
@@ -6935,11 +6944,21 @@ function StudioScreen({ user, onExit }) {
               <div style={{ flex:1, background:"#090909" }} />
             </div>
 
+            {/* ── Empty zone below tracks — catches long-press for lasso in blank area ── */}
+            <div style={{ display:"flex", minHeight: 300 }}>
+              <div style={{ width:SIDEBAR_W, flexShrink:0, position:"sticky", left:0, zIndex:10, background:"#0a0a0a", borderRight:"1px solid #141414" }} />
+              <div
+                style={{ flex:1, background:"#090909", touchAction:"none" }}
+                onClick={function(e){
+                  if (e.target === e.currentTarget) { setSelBox(null); setSelClipIds(new Set()); }
+                }}
+                onTouchStart={function(e){ handleLaneLongPress(e, null); }}
+              />
+            </div>
+
           </div>{/* end inner */}
         </div>{/* end scroll container */}
-      </div>{/* end DAW layout */}
-
-      {/* ── Lasso selection box overlay ─────────────────────────────────────── */}
+      {/* ── Lasso selection box overlay — inside DAW wrapper so coords match ── */}
       {selBox && selBox.w > 4 && selBox.h > 4 && (
         <div style={{
           position:"absolute",
@@ -6954,6 +6973,7 @@ function StudioScreen({ user, onExit }) {
           zIndex: 500,
         }} />
       )}
+      </div>{/* end DAW layout */}
 
       {/* ── Multi-select action bar ──────────────────────────────────────────── */}
       {selClipIds.size > 0 && (
