@@ -5753,19 +5753,14 @@ function StudioScreen({ user, onExit }) {
 
         // ── Strip leading silence from the decoded buffer ──────────────────
         // On iOS, getUserMedia + MediaRecorder always produce a silent warmup
-        // period at the start of the buffer (~50–250ms). If we don't account for
-        // this, the clip plays back late — the vocal content starts after a gap.
+        // period at the start of the buffer (~50–250ms).
         //
-        // Strategy: scan the buffer from the front, find the first sample that
-        // exceeds a noise floor threshold (-60 dBFS = 0.001 linear), treat
-        // everything before that as silence.
-        //
-        // We then:
-        //   1. Set trimStart = silence duration (skip the silent front on playback)
-        //   2. Move clipStartTime FORWARD by the same amount (the clip still
-        //      starts at the right wall-clock moment — we just skip the silence)
-        //
-        // This makes the vocal hit exactly where it was performed, every time.
+        // trimStart = how far into the buffer audio content begins (skips silent warmup on playback).
+        // startTime = clipStartTime — the wall-clock moment mr.start() fired. This is already
+        // the correct timeline position. We do NOT shift it forward by leadingSilenceSec because
+        // clipStartTime was stamped at mr.start(), not at the first sample — so the silence was
+        // captured starting at that exact moment. Shifting startTime forward would place the vocal
+        // later than where it was actually performed.
         const SILENCE_THRESHOLD = 0.001; // -60 dBFS
         const MAX_SILENCE_SCAN  = 0.5;   // never strip more than 500ms
         let leadingSilenceSec   = 0;
@@ -5784,9 +5779,9 @@ function StudioScreen({ user, onExit }) {
         const newClip = {
           id: String(Date.now()) + "_rec",
           audioBuffer: buf, url, blob,
-          startTime: clipStartTime + leadingSilenceSec, // shift clip forward past the silence
+          startTime: clipStartTime,       // wall-clock anchor — do NOT adjust for silence
           duration:  buf.duration,
-          trimStart: leadingSilenceSec,  // skip silent warmup during playback
+          trimStart: leadingSilenceSec,   // skip silent warmup during playback only
           trimEnd:   buf.duration,
           label: "Take " + new Date().toLocaleTimeString(),
           active: true,
@@ -5810,7 +5805,10 @@ function StudioScreen({ user, onExit }) {
       recDurRef.current = 0;
 
       // ── Start playback FIRST so masterStartRef is stamped before we read the clock ──
-      if (!isPlaying) { doPlay(currentTime); setIsPlaying(true); }
+      // MUST use playheadAtRef.current (live ref), NOT currentTime (stale React state).
+      // currentTime lags by at least one render cycle; using it shifts each take's
+      // clipStartTime by whatever the state lag is — making successive takes drift off-beat.
+      if (!isPlaying) { doPlay(playheadAtRef.current); setIsPlaying(true); }
 
       // ── Precise timeline sync ─────────────────────────────────────────────
       // CRITICAL ORDER: read actx.currentTime AFTER doPlay() so masterStartRef.current
