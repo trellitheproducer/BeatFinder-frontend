@@ -4705,6 +4705,9 @@ function StudioScreen({ user, onExit }) {
   const micStreamRef        = useRef(null);
   const [micReady,      setMicReady]      = useState(false);
   const [micDenied,     setMicDenied]     = useState(false);
+  // effectivePPS changes with zoom — keep a ref so lasso onMove closure can read it
+  // MUST be declared here (before line 4743 uses it) to avoid "uninitialized variable" crash
+  const effectivePPSRef = useRef(100);
 
   useEffect(function () { zoomRef.current = zoom; }, [zoom]);
   useEffect(function () { isPlayingRef.current = isPlaying; }, [isPlaying]);
@@ -6016,6 +6019,8 @@ function StudioScreen({ user, onExit }) {
   };
 
   const duplicateSelectedClips = function() {
+    const newIds = new Set();
+    const ts = Date.now();
     setTracks(function(prev) {
       return prev.map(function(t) {
         const newClips = [];
@@ -6024,9 +6029,11 @@ function StudioScreen({ user, onExit }) {
           if (selClipIds.has(cl.id)) {
             const trimS = cl.trimStart || 0;
             const trimE = cl.trimEnd !== undefined ? cl.trimEnd : cl.audioBuffer.duration;
+            const dupId = cl.id + "_dup" + ts;
+            newIds.add(dupId);
             newClips.push({
               ...cl,
-              id: cl.id + "_dup" + Date.now(),
+              id: dupId,
               startTime: (cl.startTime || 0) + (trimE - trimS) + 0.1,
               label: (cl.label || "Take") + " (copy)",
             });
@@ -6035,13 +6042,10 @@ function StudioScreen({ user, onExit }) {
         return { ...t, clips: newClips };
       });
     });
-    setSelClipIds(new Set());
+    setSelClipIds(newIds);
     setSelBox(null);
     setIsSaved(false);
   };
-
-  // effectivePPS changes with zoom — keep a ref so lasso onMove closure can read it
-  const effectivePPSRef = useRef(100);
 
   const handleRegionRightClick = function (e, track, clip) {
     e.preventDefault();
@@ -6058,6 +6062,20 @@ function StudioScreen({ user, onExit }) {
     const startT = clip.startTime || 0;
     const menuX  = e.touches[0].clientX;
     const menuY  = e.touches[0].clientY - 60;
+
+    // If this clip is part of a multi-selection, snapshot all selected clips' start times
+    // so we can shift them all by the same delta during drag.
+    const isMultiDrag = selClipIds.size > 1 && selClipIds.has(clip.id);
+    const multiStartTimes = {}; // { clipId: startTime }
+    if (isMultiDrag) {
+      tracksRef.current.forEach(function(t) {
+        (t.clips || []).forEach(function(cl) {
+          if (selClipIds.has(cl.id)) {
+            multiStartTimes[cl.id] = cl.startTime || 0;
+          }
+        });
+      });
+    }
 
     // Long-press timer — fires if no drag occurs within 500ms
     const lp = setTimeout(function () {
@@ -6078,8 +6096,25 @@ function StudioScreen({ user, onExit }) {
       if (Math.abs(dx) > 6) {
         clearTimeout(dragRef.current.lp);
         dragRef.current.moved = true;
-        const newT = snapSecs(dragRef.current.startT + dx / effectivePPS);
-        updateClip(dragRef.current.trackId, dragRef.current.clipId, { startTime: newT });
+        if (isMultiDrag) {
+          // Shift every selected clip by the same delta, keeping their relative positions
+          const deltaSecs = dx / effectivePPSRef.current;
+          setTracks(function(prev) {
+            return prev.map(function(t) {
+              return {
+                ...t,
+                clips: (t.clips || []).map(function(cl) {
+                  if (!selClipIds.has(cl.id)) return cl;
+                  const newT = snapSecs(Math.max(0, multiStartTimes[cl.id] + deltaSecs));
+                  return { ...cl, startTime: newT };
+                }),
+              };
+            });
+          });
+        } else {
+          const newT = snapSecs(dragRef.current.startT + dx / effectivePPS);
+          updateClip(dragRef.current.trackId, dragRef.current.clipId, { startTime: newT });
+        }
       }
     };
     const onEnd = function () {
@@ -6778,8 +6813,8 @@ function StudioScreen({ user, onExit }) {
                     overflow:"visible",
                     isolation:"isolate",
                   }}
-                    onClick={function(e){ deselectClip(e); setSelBox(null); setSelClipIds(new Set()); }}
-                    onTouchStart={function(e){ handleLaneLongPress(e, track); }}
+                    onClick={function(e){ deselectClip(e); if (e.target === e.currentTarget) { setSelBox(null); setSelClipIds(new Set()); } }}
+                    onTouchStart={function(e){ if (e.target === e.currentTarget) { handleLaneLongPress(e, track); } }}
                   >
 
                     {/* ── INNER MASK — hard overflow:hidden, everything inside is clipped ── */}
