@@ -4348,6 +4348,89 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 // =============================================================================
 
 // =============================================================================
+// INDEXEDDB AUDIO STORE
+// Stores raw WAV ArrayBuffers keyed by clipId — no size limit unlike localStorage.
+// DB: "BeatFinderAudio"  |  Store: "clips"  |  key: clipId (string)
+// =============================================================================
+const AudioDB = (function () {
+  const DB_NAME    = "BeatFinderAudio";
+  const STORE_NAME = "clips";
+  const DB_VERSION = 1;
+  let _db = null;
+
+  function openDB() {
+    if (_db) return Promise.resolve(_db);
+    return new Promise(function (resolve, reject) {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = function (e) {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME); // key = clipId
+        }
+      };
+      req.onsuccess  = function (e) { _db = e.target.result; resolve(_db); };
+      req.onerror    = function (e) { reject(e.target.error); };
+    });
+  }
+
+  // Save a WAV ArrayBuffer under a clip key
+  async function saveClip(clipId, wavArrayBuffer) {
+    const db = await openDB();
+    return new Promise(function (resolve, reject) {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      tx.objectStore(STORE_NAME).put(wavArrayBuffer, clipId);
+      tx.oncomplete = resolve;
+      tx.onerror    = function (e) { reject(e.target.error); };
+    });
+  }
+
+  // Retrieve a WAV ArrayBuffer by clip key (returns null if not found)
+  async function getClip(clipId) {
+    const db = await openDB();
+    return new Promise(function (resolve) {
+      const tx  = db.transaction(STORE_NAME, "readonly");
+      const req = tx.objectStore(STORE_NAME).get(clipId);
+      req.onsuccess = function (e) { resolve(e.target.result || null); };
+      req.onerror   = function ()  { resolve(null); };
+    });
+  }
+
+  // Delete one or more clip keys (pass an array of clipIds)
+  async function deleteClips(clipIds) {
+    if (!clipIds || clipIds.length === 0) return;
+    const db = await openDB();
+    return new Promise(function (resolve) {
+      const tx    = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      clipIds.forEach(function (id) { store.delete(id); });
+      tx.oncomplete = resolve;
+      tx.onerror    = resolve; // swallow — best effort
+    });
+  }
+
+  // Delete ALL clips whose key starts with a project prefix  e.g. "proj_<id>_"
+  async function deleteProjectClips(projectId) {
+    const db = await openDB();
+    return new Promise(function (resolve) {
+      const tx    = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      const req   = store.openCursor();
+      req.onsuccess = function (e) {
+        const cursor = e.target.result;
+        if (!cursor) { resolve(); return; }
+        if (String(cursor.key).startsWith("proj_" + projectId + "_")) {
+          cursor.delete();
+        }
+        cursor.continue();
+      };
+      req.onerror = resolve;
+    });
+  }
+
+  return { saveClip, getClip, deleteClips, deleteProjectClips };
+})();
+
+// =============================================================================
 // STUDIO SCREEN
 // =============================================================================
 // iOS-style wheel picker
@@ -4431,7 +4514,7 @@ function WheelPicker({ items, value, onChange, onClose, title, inline, label }) 
 // =============================================================================
 // WAVEFORM CANVAS — real PCM rendering
 // =============================================================================
-function WaveformCanvas({ audioBuffer, color, width, height, playedFraction, dim }) {
+function WaveformCanvas({ audioBuffer, color, width, height, playedFraction, dim, trimStart, trimEnd }) {
   const ref = useRef(null);
   useEffect(function () {
     const cv = ref.current;
@@ -4452,12 +4535,19 @@ function WaveformCanvas({ audioBuffer, color, width, height, playedFraction, dim
     }
 
     const raw = audioBuffer.getChannelData(0);
-    const spp = raw.length / W;
+    const sr  = audioBuffer.sampleRate;
 
-    // Pre-compute peaks once
+    // Only draw the trimmed region of the buffer
+    const tS = Math.max(0, (trimStart || 0) * sr);
+    const tE = Math.min(raw.length, ((trimEnd !== undefined && trimEnd !== null) ? trimEnd : audioBuffer.duration) * sr);
+    const regionLen = Math.max(1, tE - tS);
+    const spp = regionLen / W;
+
+    // Pre-compute peaks from the trimmed region only
     const peaks = new Float32Array(W);
     for (let px = 0; px < W; px++) {
-      const s = Math.floor(px * spp), e = Math.min(Math.floor((px+1)*spp)+1, raw.length);
+      const s = Math.floor(tS + px * spp);
+      const e = Math.min(Math.floor(tS + (px + 1) * spp) + 1, tE);
       let pk = 0;
       for (let i = s; i < e; i++) { const v = Math.abs(raw[i]); if (v > pk) pk = v; }
       peaks[px] = pk;
@@ -4465,10 +4555,8 @@ function WaveformCanvas({ audioBuffer, color, width, height, playedFraction, dim
 
     const playedPx = Math.floor(W * Math.min(1, Math.max(0, playedFraction)));
 
-    // dim = inactive take — use very low opacity
-    // active = full brightness
-    const unplayedAlpha = dim ? "28" : "88"; // hex alpha: 16% dim, 53% normal
-    const playedAlpha   = dim ? "44" : "ee"; // hex alpha: 27% dim, 93% played
+    const unplayedAlpha = dim ? "28" : "88";
+    const playedAlpha   = dim ? "44" : "ee";
 
     // Unplayed portion
     ctx.fillStyle = color + unplayedAlpha;
@@ -4477,7 +4565,7 @@ function WaveformCanvas({ audioBuffer, color, width, height, playedFraction, dim
       ctx.fillRect(px, mid - h, 1, h * 2);
     }
 
-    // Played portion — brighter, progress indicator
+    // Played portion — brighter
     if (playedPx > 0) {
       ctx.fillStyle = color + playedAlpha;
       for (let px = 0; px < playedPx; px++) {
@@ -4485,7 +4573,7 @@ function WaveformCanvas({ audioBuffer, color, width, height, playedFraction, dim
         ctx.fillRect(px, mid - h, 1, h * 2);
       }
     }
-  }, [audioBuffer, width, height, color, playedFraction, dim]);
+  }, [audioBuffer, width, height, color, playedFraction, dim, trimStart, trimEnd]);
 
   return (
     <canvas
@@ -6220,28 +6308,54 @@ function StudioScreen({ user, onExit }) {
   const saveProject = async function () {
     try {
       setSaveStatus("Saving...");
-      const savedTracks = await Promise.all(tracks.map(async function(t){
-        // Serialise clips[] — each clip has its own audioBuffer
-        const savedClips = await Promise.all((t.clips||[]).map(async function(cl){
-          const b64 = cl.audioBuffer ? audioBufferToBase64(cl.audioBuffer) : null;
-          return { ...cl, audioBuffer:null, url:null, blob:null, audioB64:b64 };
-        }));
-        // Also serialise the legacy flat audioBuffer if present (beat tracks loaded from URL)
-        const trackB64 = t.audioBuffer ? audioBufferToBase64(t.audioBuffer) : null;
-        return { ...t, audioBuffer:null, url:null, blob:null, audioB64:trackB64, clips:savedClips };
-      }));
-      const proj = { id:Date.now(), name:projectName, bpm, timeSigNum, projectKey, savedAt:new Date().toISOString(), tracks:savedTracks };
+
+      // Generate a stable project id — reuse existing one if this project was already saved
       let list = JSON.parse(localStorage.getItem("bf_studio_projects")||"[]");
-      const idx = list.findIndex(function(p){ return p.name===projectName; });
-      if (idx>=0) list[idx]=proj; else list.unshift(proj);
-      list=list.slice(0,10);
-      localStorage.setItem("bf_studio_projects",JSON.stringify(list));
+      const existingIdx = list.findIndex(function(p){ return p.name===projectName; });
+      const projId = (existingIdx >= 0 && list[existingIdx].id) ? list[existingIdx].id : Date.now();
+
+      // ── 1. Save each clip's audio into IndexedDB (no size limit) ──────────
+      const savedTracks = await Promise.all(tracks.map(async function(t){
+        const savedClips = await Promise.all((t.clips||[]).map(async function(cl){
+          // Key: "proj_<projId>_<clipId>"
+          const idbKey = "proj_" + projId + "_" + cl.id;
+          if (cl.audioBuffer) {
+            // Convert AudioBuffer → WAV ArrayBuffer and store in IndexedDB
+            const wavBuf = audioBufferToWav(cl.audioBuffer);
+            try { await AudioDB.saveClip(idbKey, wavBuf); } catch(e) { console.warn("IDB save clip failed", e); }
+          }
+          // Return clip metadata only — no audio blobs in localStorage
+          return { ...cl, audioBuffer:null, url:null, blob:null, audioB64:null, idbKey };
+        }));
+
+        // Legacy flat audioBuffer (beat tracks)
+        const trackIdbKey = "proj_" + projId + "_track_" + t.id;
+        if (t.audioBuffer) {
+          const wavBuf = audioBufferToWav(t.audioBuffer);
+          try { await AudioDB.saveClip(trackIdbKey, wavBuf); } catch(e) {}
+        }
+
+        return { ...t, audioBuffer:null, url:null, blob:null, audioB64:null, trackIdbKey, clips:savedClips };
+      }));
+
+      // ── 2. Save metadata to localStorage (tiny — just names/timing/FX) ───
+      const proj = { id:projId, name:projectName, bpm, timeSigNum, projectKey, savedAt:new Date().toISOString(), tracks:savedTracks };
+      if (existingIdx >= 0) list[existingIdx] = proj; else list.unshift(proj);
+      list = list.slice(0, 10);
+      try {
+        localStorage.setItem("bf_studio_projects", JSON.stringify(list));
+      } catch(quotaErr) {
+        list = list.slice(0, 3);
+        localStorage.setItem("bf_studio_projects", JSON.stringify(list));
+      }
+
       setSavedProjects(list); setIsSaved(true);
-      setSaveStatus("Saved!"); setTimeout(function(){ setSaveStatus(""); },2000);
+      setSaveStatus("Saved! ✓");
+      setTimeout(function(){ setSaveStatus(""); }, 2500);
     } catch(e){
       console.error("[BeatFinder] saveProject error:", e);
-      setSaveStatus("Save failed — project may be too large.");
-      setTimeout(function(){ setSaveStatus(""); },3000);
+      setSaveStatus("Save failed — " + (e.message || "unknown error"));
+      setTimeout(function(){ setSaveStatus(""); }, 4000);
     }
   };
 
@@ -6250,81 +6364,86 @@ function StudioScreen({ user, onExit }) {
     setSaveStatus("Loading…");
     setError("");
     try {
-      // Stop any current playback
       stopAll(); setIsPlaying(false);
       setCurrentTime(0); setSelectedClipId(null); setSelectedTrackId(null);
       if (scrollRef.current) scrollRef.current.scrollLeft = 0;
 
-      // Restore project meta
       setProjectName(p.name||"Untitled");
       setBpm(p.bpm||120);
       setTimeSigNum(p.timeSigNum||4);
       setProjectKey(p.projectKey||"C major");
 
-      // ── Ensure AudioContext is running before decoding ──
-      // On iOS the context starts suspended until a user gesture — resume it here
-      // (loadProject is always triggered by a tap so this is safe).
       const actx = getActx();
       if (actx.state === "suspended") {
         try { await actx.resume(); } catch(e) {}
       }
 
-      // Restore tracks — each clip inside t.clips[] has its own audioB64
+      let missingAudio = false;
+
+      // Restore tracks — pull audio from IndexedDB using the idbKey saved per clip
       const restored = await Promise.all((p.tracks||[]).map(async function(t){
 
-        // Restore clips — old saves (pre-fix) have no audioB64 on clips, so buf will be null.
-        // We keep ALL clips regardless; clips with null audioBuffer simply won't play/render waveform.
         const restoredClips = await Promise.all((t.clips||[]).map(async function(cl){
           let buf = null;
-          if (cl.audioB64) {
+
+          // ── New path: audio stored in IndexedDB ──────────────────────────
+          if (cl.idbKey) {
+            try {
+              const wavBuf = await AudioDB.getClip(cl.idbKey);
+              if (wavBuf) {
+                buf = await actx.decodeAudioData(wavBuf.slice(0)); // slice so buffer isn't detached
+              }
+            } catch(e) { console.warn("IDB load clip failed", cl.idbKey, e); }
+          }
+
+          // ── Legacy path: audio was base64 in the save object ─────────────
+          if (!buf && cl.audioB64) {
             buf = await base64ToAudioBuffer(cl.audioB64);
           }
+
+          if (!buf) missingAudio = true;
           return { ...cl, audioBuffer: buf, url: null, blob: null };
         }));
 
-        // Restore legacy flat audioBuffer (beat tracks saved with old single-buffer model)
+        // Legacy flat audioBuffer (beat tracks)
         let trackBuf = null;
-        if (t.audioB64) {
+        if (t.trackIdbKey) {
+          try {
+            const wavBuf = await AudioDB.getClip(t.trackIdbKey);
+            if (wavBuf) trackBuf = await actx.decodeAudioData(wavBuf.slice(0));
+          } catch(e) {}
+        }
+        if (!trackBuf && t.audioB64) {
           trackBuf = await base64ToAudioBuffer(t.audioB64);
         }
 
-        return {
-          ...t,
-          audioBuffer: trackBuf,
-          url: null,
-          blob: null,
-          clips: restoredClips,
-        };
+        return { ...t, audioBuffer: trackBuf, url: null, blob: null, clips: restoredClips };
       }));
 
-      // Check if any audio failed to restore — warn the user
-      const missingAudio = restored.some(function(t){
-        const clipsLostAudio = (t.clips||[]).some(function(cl){ return !cl.audioBuffer && !cl.audioB64; });
-        return clipsLostAudio || (!t.audioBuffer && t.audioB64 === undefined && (t.clips||[]).length > 0);
-      });
-
-      // Keep ALL tracks — even ones with no audio. The user's track names, colors,
-      // FX settings etc. are still valuable. Empty tracks just show as empty rows.
       setTracks(restored);
       setIsSaved(true);
 
       if (missingAudio) {
         setSaveStatus("");
-        setError("⚠️ This project was saved before audio serialisation was supported. Track structure restored, but audio clips need to be re-uploaded.");
+        setError("⚠️ Some audio clips couldn't be restored — they may have been recorded in a different browser/app session.");
         setTimeout(function(){ setError(""); }, 8000);
       } else {
-        setSaveStatus("Loaded!"); setTimeout(function(){ setSaveStatus(""); }, 1500);
+        setSaveStatus("Loaded! ✓");
+        setTimeout(function(){ setSaveStatus(""); }, 1500);
       }
     } catch(e) {
       console.error("[BeatFinder] loadProject error:", e);
       setError("Could not load project — " + (e.message||"unknown error"));
-      setSaveStatus(""); 
+      setSaveStatus("");
     }
   };
 
   const deleteProject = function (id) {
-    const u=savedProjects.filter(function(p){ return p.id!==id; });
-    setSavedProjects(u); localStorage.setItem("bf_studio_projects",JSON.stringify(u));
+    // Remove audio clips from IndexedDB (best-effort, async — no need to await)
+    AudioDB.deleteProjectClips(id).catch(function(){});
+    const u = savedProjects.filter(function(p){ return p.id!==id; });
+    setSavedProjects(u);
+    localStorage.setItem("bf_studio_projects", JSON.stringify(u));
   };
 
   // ── BPM detect ────────────────────────────────────────────────
@@ -6796,14 +6915,14 @@ function StudioScreen({ user, onExit }) {
 
                   {/* Track header — sticky left, never scrolls away horizontally */}
                   <div
-                    onClick={function(){ if(track.type==="vocal") setSelectedTrackId(track.id); }}
+                    onClick={function(){ setSelectedTrackId(track.id); }}
                     style={{
                       width:SIDEBAR_W, flexShrink:0,
                       position:"sticky", left:0, zIndex:10,
                       background:selectedTrackId===track.id?"rgba(192,38,211)":"#0a0a0a",
                       borderRight:"1px solid #141414",
                       padding:"5px 7px", display:"flex", flexDirection:"column", justifyContent:"space-between",
-                      cursor:track.type==="vocal"?"pointer":"default",
+                      cursor:"pointer",
                     }}
                   >
                     <div style={{ display:"flex", alignItems:"center", gap:4 }}>
@@ -6828,7 +6947,14 @@ function StudioScreen({ user, onExit }) {
                     overflow:"visible",
                     isolation:"isolate",
                   }}
-                    onClick={function(e){ deselectClip(e); if (e.target === e.currentTarget) { setSelBox(null); setSelClipIds(new Set()); } }}
+                    onClick={function(e){
+                      deselectClip(e);
+                      // Clear multi-selection when clicking empty space —
+                      // check both the outer lane and the inner mask (which covers the full area)
+                      const t = e.target;
+                      const isClip = t && t.closest && t.closest("[data-clipid]");
+                      if (!isClip) { setSelBox(null); setSelClipIds(new Set()); }
+                    }}
                     onTouchStart={function(e){ handleLaneLongPress(e, track); }}
                   >
 
@@ -6876,7 +7002,8 @@ function StudioScreen({ user, onExit }) {
                           >
                             <WaveformCanvas audioBuffer={clip.audioBuffer} color={track.color}
                               width={Math.max(1,Math.round(clipW))} height={TRACK_H-6}
-                              playedFraction={playedF} dim={!isActv} />
+                              playedFraction={playedF} dim={!isActv}
+                              trimStart={trimS} trimEnd={trimE} />
                             <div style={{ position:"absolute", bottom:2, left:6, right:isSel?14:6, color:"rgba(255,255,255,0.85)", fontSize:7, fontWeight:700, pointerEvents:"none", textShadow:"0 1px 3px rgba(0,0,0,0.95)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                               {clip.label}{!isActv?" (inactive)":""}
                             </div>
