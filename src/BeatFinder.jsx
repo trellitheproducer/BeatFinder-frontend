@@ -5840,18 +5840,22 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   };
 
   const stopRecording = function () {
+    clearInterval(recIntRef.current);
+    clipIdRef.current = null;
     if (mediaRecRef.current && mediaRecRef.current.state !== "inactive") {
-      // Capture the AudioContext clock the instant stop is called —
-      // this is used in mr.onstop to derive the true clip end time.
+      // Stamp the actx clock NOW — onstop uses it for clip timing.
+      // Do NOT call stopAll() here: onstop runs async and needs actx + masterStartRef
+      // intact to decode audio and compute clipStartTime correctly.
+      // stopAll + setIsPlaying(false) are called at the END of the onstop handler instead.
       const actx = actxRef.current;
       recStopActxTimeRef.current = actx ? actx.currentTime : null;
       mediaRecRef.current.stop();
+      mediaRecRef.current = null;
+    } else {
+      mediaRecRef.current = null;
+      stopAll();
+      setIsPlaying(false);
     }
-    clearInterval(recIntRef.current);
-    clipIdRef.current = null;
-    mediaRecRef.current = null;
-    stopAll();
-    setIsPlaying(false);
   };
 
   // ── Ruler tap/drag → set loop in/out points ONLY ─────────────
@@ -6173,11 +6177,13 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
           buf = await getActx().decodeAudioData(ab.slice(0));
         } catch (decErr) {
           setError("Could not decode recording. Try again.");
+          stopAll(); setIsPlaying(false);
           setIsRecording(false); setRecTrackId(null); setRecTrail([]);
           return;
         }
 
         if (!buf || buf.duration < 0.05) {
+          stopAll(); setIsPlaying(false);
           setIsRecording(false); setRecTrackId(null); setRecTrail([]);
           return;
         }
@@ -6254,6 +6260,9 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
             clips: [newClip],
           });
         }
+        // Stop playback now that decoding is done — safe to tear down audio graph here
+        stopAll();
+        setIsPlaying(false);
         setRecTrail([]); setIsRecording(false); setRecTrackId(null);
       };
 
@@ -6314,6 +6323,8 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       } else {
         setError("Could not start recording: " + e.message);
       }
+      stopAll(); setIsPlaying(false);
+      setIsRecording(false); setRecTrackId(null);
       setCountIn(0);
     }
   };
