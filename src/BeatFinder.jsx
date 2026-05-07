@@ -5990,8 +5990,9 @@ function StudioScreen({ user, onExit }) {
   };
 
   const handleLaneLongPress = function(e, track) {
-    // Only activate lasso if the touch landed on empty lane space, not on a clip
-    if (e.target !== e.currentTarget) return;
+    // Cancel if the touch landed directly on a clip (has data-clipid attribute)
+    // The inner mask div always covers the lane so we can't use e.target === e.currentTarget
+    if (e.target && e.target.closest && e.target.closest("[data-clipid]")) return;
     // Called from onTouchStart on blank lane space.
     // We start a 1.5s timer; if the finger doesn't move much, activate lasso.
     const touch = e.touches[0];
@@ -6859,6 +6860,7 @@ function StudioScreen({ user, onExit }) {
                         return (
                           <div
                             key={clip.id + "_body"}
+                            data-clipid={clip.id}
                             onClick={function(e){ e.stopPropagation(); selectClip(clip.id); }}
                             onMouseDown={function(e){ handleRegionMouseDown(e, track, clip); }}
                             onTouchStart={function(e){ handleRegionTouchStart(e, track, clip); }}
