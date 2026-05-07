@@ -5318,163 +5318,173 @@ function StudioScreen({ user, onExit }) {
   // To shift by N semitones: ratio = 2^(N/12).
   // =============================================================================
   const PITCH_WORKLET_CODE = `
-// ── BeatFinder Autotune Worklet ─────────────────────────────────────────────
-// Parameters:
-//   pitch  – manual shift ratio (1.0 = no shift). Used in SHIFT mode.
-//   speed  – correction speed 0..1. 0 = instant T-Pain snap, 1 = slow 400ms glide.
-//   mode   – 0 = SHIFT (use pitch param directly), 1 = AUTOTUNE (detect + correct)
-//   root   – root note 0..11 (C=0, C#=1 … B=11)
-//   scale  – bitmask of 12 bits: which semitones above root are active
-//            e.g. major = 0b101011010101 = 2741
-//   formant– formant shift semitones (applied as subtle playbackRate-equivalent via
-//            a separate post-gain, –12..+12)
+// ── BeatFinder PSOLA Autotune Worklet ───────────────────────────────────────
+// Uses TD-PSOLA (Time-Domain Pitch Synchronous Overlap-Add).
+// PSOLA works on individual pitch periods detected by YIN, so it avoids the
+// phase smearing / metallic artifacts of FFT-based vocoders.
 //
-// AUTOTUNE algorithm:
-//   1. Collect 2048 samples into a detection buffer (pitch detection window).
-//   2. Detect fundamental via autocorrelation (fast, mono-only, works 80Hz–1200Hz).
-//   3. Find nearest active scale note.
-//   4. Smooth currentRatio toward targetRatio at speed-controlled rate.
-//   5. Feed the smoothed ratio into the phase-vocoder (OLA pitch shift).
-//
-// This gives the classic T-Pain "robotic" effect at speed=0 and natural
-// pitch correction at speed=0.8..1.
+// Parameters (all k-rate):
+//   pitch   – semitone shift ratio in SHIFT mode (default 1.0 = no shift)
+//   speed   – correction speed 0..1. 0 = instant T-Pain, 1 = ~300ms glide
+//   mode    – 0 = SHIFT, 1 = AUTOTUNE
+//   root    – root note 0..11 (C=0 … B=11)
+//   scale   – 12-bit bitmask of active scale degrees
+//   formant – formant preservation factor 0..1 (1 = fully preserved, 0 = shifted)
 
 class PitchShiftProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
     return [
-      { name:'pitch',   defaultValue:1,    minValue:0.25, maxValue:4,   automationRate:'k-rate' },
-      { name:'speed',   defaultValue:0.5,  minValue:0,    maxValue:1,   automationRate:'k-rate' },
-      { name:'mode',    defaultValue:0,    minValue:0,    maxValue:1,   automationRate:'k-rate' },
-      { name:'root',    defaultValue:0,    minValue:0,    maxValue:11,  automationRate:'k-rate' },
-      { name:'scale',   defaultValue:2741, minValue:0,    maxValue:4095,automationRate:'k-rate' },
-      { name:'formant', defaultValue:0,    minValue:-12,  maxValue:12,  automationRate:'k-rate' },
+      { name:'pitch',   defaultValue:1,    minValue:0.125, maxValue:8,    automationRate:'k-rate' },
+      { name:'speed',   defaultValue:0.5,  minValue:0,     maxValue:1,    automationRate:'k-rate' },
+      { name:'mode',    defaultValue:0,    minValue:0,     maxValue:1,    automationRate:'k-rate' },
+      { name:'root',    defaultValue:0,    minValue:0,     maxValue:11,   automationRate:'k-rate' },
+      { name:'scale',   defaultValue:2741, minValue:0,     maxValue:4095, automationRate:'k-rate' },
+      { name:'formant', defaultValue:0.8,  minValue:0,     maxValue:1,    automationRate:'k-rate' },
     ];
   }
 
   constructor() {
     super();
-    // ── OLA phase-vocoder ────────────────────────────────────────
-    this._frameSize  = 2048;
-    this._hopSize    = 512;
-    this._inBuf      = new Float32Array(this._frameSize);
-    this._outBuf     = new Float32Array(this._frameSize * 4);
-    this._window     = new Float32Array(this._frameSize);
-    this._lastPhase  = new Float32Array(this._frameSize / 2 + 1);
-    this._sumPhase   = new Float32Array(this._frameSize / 2 + 1);
-    this._inFill     = 0;
-    this._outRead    = 0;
-    this._outWrite   = 0;
-    this._re = new Float32Array(this._frameSize);
-    this._im = new Float32Array(this._frameSize);
-    this._mag    = new Float32Array(this._frameSize / 2 + 1);
-    this._phase  = new Float32Array(this._frameSize / 2 + 1);
-    this._outMag = new Float32Array(this._frameSize / 2 + 1);
-    // Hann window
-    for (let i = 0; i < this._frameSize; i++)
-      this._window[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / this._frameSize);
+    const sr = sampleRate;
+    // ── Input ring buffer (2 seconds) ────────────────────────────
+    this._bufLen  = sr * 2;
+    this._inBuf   = new Float32Array(this._bufLen);
+    this._inWrite = 0;
 
-    // ── Pitch detection ──────────────────────────────────────────
-    this._detBuf     = new Float32Array(2048); // autocorrelation window
-    this._detFill    = 0;
-    this._detPeriod  = 128; // refresh detection every N samples
+    // ── Output queue ─────────────────────────────────────────────
+    this._outBuf   = new Float32Array(sr); // 1-second output queue
+    this._outWrite = 0;
+    this._outRead  = 0;
+    this._outFill  = 0;
 
-    // ── Autotune state ───────────────────────────────────────────
-    this._currentRatio  = 1.0;  // smoothed current ratio fed into vocoder
-    this._targetRatio   = 1.0;  // ratio computed from pitch detection
-    this._detectedFreq  = 0;    // last detected fundamental Hz
-    this._sampleRate    = sampleRate; // AudioWorkletGlobalScope
+    // ── YIN pitch detection state ─────────────────────────────────
+    this._yinBufLen = 2048;
+    this._yinBuf    = new Float32Array(this._yinBufLen);
+    this._yinFill   = 0;
+    this._yinPeriod = 0;      // detected pitch period in samples, 0 = unvoiced
+    this._yinTimer  = 0;      // samples since last detection
+    this._yinRate   = 512;    // re-run YIN every N samples
+
+    // ── PSOLA state ───────────────────────────────────────────────
+    this._synthPos  = 0;      // current synthesis position in input buffer
+    this._synthInit = false;
+
+    // ── Pitch correction state ────────────────────────────────────
+    this._currentCents = 0;   // smoothed correction in cents
+    this._targetCents  = 0;
+
+    // ── Formant envelope (LPC-style, simplified cepstral smoothing) ──
+    this._formantLen = 64;
+    this._formantEnv = new Float32Array(this._formantLen);
+
+    this._sr = sr;
   }
 
-  // ── In-place Cooley-Tukey FFT ────────────────────────────────
-  _fft(re, im, inv) {
-    const n = re.length;
-    for (let i=1,j=0; i<n; i++) {
-      let bit = n >> 1;
-      for (; j & bit; bit >>= 1) j ^= bit;
-      j ^= bit;
-      if (i < j) { let t=re[i]; re[i]=re[j]; re[j]=t; t=im[i]; im[i]=im[j]; im[j]=t; }
-    }
-    for (let len=2; len<=n; len<<=1) {
-      const ang = 2 * Math.PI / len * (inv ? -1 : 1);
-      const wRe = Math.cos(ang), wIm = Math.sin(ang);
-      for (let i=0; i<n; i+=len) {
-        let urRe=1, urIm=0;
-        for (let j=0; j<len/2; j++) {
-          const uRe=re[i+j], uIm=im[i+j];
-          const vRe=re[i+j+len/2]*urRe - im[i+j+len/2]*urIm;
-          const vIm=re[i+j+len/2]*urIm + im[i+j+len/2]*urRe;
-          re[i+j]=uRe+vRe; im[i+j]=uIm+vIm;
-          re[i+j+len/2]=uRe-vRe; im[i+j+len/2]=uIm-vIm;
-          const nRe=urRe*wRe-urIm*wIm; urIm=urRe*wIm+urIm*wRe; urRe=nRe;
-        }
-      }
-    }
-    if (inv) { for (let i=0;i<n;i++){re[i]/=n;im[i]/=n;} }
-  }
+  // ── YIN pitch detector ───────────────────────────────────────────────────
+  // Returns pitch period in samples (0 = unvoiced / silence).
+  // YIN gives much cleaner results than autocorrelation for vocal material.
+  _yin(buf, sr) {
+    const N      = buf.length;
+    const half   = N >> 1;
+    const thresh = 0.15;       // YIN threshold — lower = stricter
 
-  // ── Autocorrelation pitch detector (MPM-style) ──────────────
-  // Returns fundamental frequency in Hz, or 0 if not detected.
-  _detectPitch(buf, sr) {
-    const N    = buf.length;
-    const half = N >> 1;
-    // Compute normalised square difference function (NSDF)
-    // Faster path: just autocorrelation, normalised by energy
+    // Energy check — skip silence
     let rms = 0;
     for (let i = 0; i < N; i++) rms += buf[i] * buf[i];
-    rms = Math.sqrt(rms / N);
-    if (rms < 0.01) return 0; // silence — no pitch
+    if (rms / N < 0.0004) return 0;
 
-    // Search range: 80Hz..1200Hz  →  lags sr/1200 .. sr/80
-    const minLag = Math.floor(sr / 1200);
-    const maxLag = Math.floor(sr / 80);
-    let bestLag = -1, bestCorr = -Infinity;
-
-    for (let lag = minLag; lag <= maxLag && lag < half; lag++) {
-      let corr = 0;
-      for (let i = 0; i < half; i++) corr += buf[i] * buf[i + lag];
-      if (corr > bestCorr) { bestCorr = corr; bestLag = lag; }
+    // Step 1 & 2: difference function d(τ)
+    // d(τ) = Σ (x[j] - x[j+τ])²  for j=0..half
+    const d = new Float32Array(half);
+    for (let tau = 1; tau < half; tau++) {
+      let s = 0;
+      for (let j = 0; j < half; j++) {
+        const diff = buf[j] - buf[j + tau];
+        s += diff * diff;
+      }
+      d[tau] = s;
     }
-    if (bestLag < 1) return 0;
 
-    // Parabolic interpolation for sub-sample accuracy
-    const y0 = bestLag > 0         ? this._autocorr(buf, half, bestLag - 1) : bestCorr;
-    const y1 = bestCorr;
-    const y2 = bestLag < half - 1  ? this._autocorr(buf, half, bestLag + 1) : bestCorr;
-    const denom = 2 * (y0 - 2*y1 + y2);
-    const refinedLag = denom !== 0 ? bestLag - (y2 - y0) / (2 * denom) : bestLag;
+    // Step 3: cumulative mean normalised difference function
+    const cmnd = new Float32Array(half);
+    cmnd[0] = 1;
+    let runSum = 0;
+    for (let tau = 1; tau < half; tau++) {
+      runSum += d[tau];
+      cmnd[tau] = runSum > 0 ? d[tau] * tau / runSum : 1;
+    }
 
-    return sr / refinedLag;
-  }
-
-  _autocorr(buf, half, lag) {
-    let s = 0;
-    for (let i = 0; i < half; i++) s += buf[i] * buf[i + lag];
-    return s;
-  }
-
-  // ── Find nearest active note frequency ───────────────────────
-  // Given detected Hz, target scale bitmask, and root semitone,
-  // returns the Hz of the nearest in-scale note.
-  _snapFreq(freq, root, scaleMask) {
-    if (freq <= 0) return freq;
-    // Convert freq to MIDI note number (float)
-    const midi = 12 * Math.log2(freq / 440) + 69;
-    const noteClass = ((Math.round(midi) % 12) + 12) % 12;
-
-    // Find nearest active semitone above root
-    let bestDist = Infinity, bestOffset = 0;
-    for (let s = 0; s < 12; s++) {
-      if (scaleMask & (1 << s)) {
-        const candidate = (root + s) % 12;
-        let dist = ((noteClass - candidate + 12) % 12);
-        if (dist > 6) dist = 12 - dist; // wrap to nearest
-        if (dist < bestDist) { bestDist = dist; bestOffset = candidate - noteClass; }
+    // Step 4: absolute threshold — find first dip below thresh
+    // Vocal range: 70Hz–800Hz → period 55..630 samples at 44100Hz
+    const minPeriod = Math.floor(sr / 800);
+    const maxPeriod = Math.floor(sr / 70);
+    let period = 0;
+    for (let tau = minPeriod; tau < Math.min(maxPeriod, half); tau++) {
+      if (cmnd[tau] < thresh) {
+        // Step 5: parabolic interpolation for sub-sample accuracy
+        let best = tau;
+        while (best + 1 < half && cmnd[best + 1] < cmnd[best]) best++;
+        const y0 = best > 0     ? cmnd[best - 1] : cmnd[best];
+        const y1 = cmnd[best];
+        const y2 = best < half-1 ? cmnd[best + 1] : cmnd[best];
+        const denom = 2 * (y0 - 2*y1 + y2);
+        period = denom !== 0 ? best - (y2 - y0) / (2 * denom) : best;
+        break;
       }
     }
-    // Adjust MIDI by the offset (chromatic semitones)
-    const targetMidi = Math.round(midi) + bestOffset;
-    const targetFreq = 440 * Math.pow(2, (targetMidi - 69) / 12);
-    return targetFreq;
+
+    // Step 6: fallback — best minimum if no threshold crossing
+    if (period === 0) {
+      let best = minPeriod, bestVal = cmnd[minPeriod];
+      for (let tau = minPeriod+1; tau < Math.min(maxPeriod, half); tau++) {
+        if (cmnd[tau] < bestVal) { bestVal = cmnd[tau]; best = tau; }
+      }
+      if (bestVal < 0.35) period = best;
+    }
+
+    return period;
+  }
+
+  // ── Snap frequency to nearest in-scale note ──────────────────────────────
+  _snapCents(freqHz, root, scaleMask) {
+    if (freqHz <= 0) return 0;
+    const midi     = 12 * Math.log2(freqHz / 440) + 69;
+    const midiRound= Math.round(midi);
+    const noteClass= ((midiRound % 12) + 12) % 12;
+
+    let bestDist = Infinity, bestDelta = 0;
+    for (let s = 0; s < 12; s++) {
+      if (!(scaleMask & (1 << s))) continue;
+      const candidate = (root + s) % 12;
+      let dist = (noteClass - candidate + 12) % 12;
+      if (dist > 6) dist = 12 - dist;
+      if (dist < bestDist) { bestDist = dist; bestDelta = candidate - noteClass; }
+    }
+    // Exact cents correction: how far in cents from detected pitch to target note
+    const targetMidi = midiRound + bestDelta;
+    return (targetMidi - midi) * 100; // cents
+  }
+
+  // ── PSOLA grain synthesis ──────────────────────────────────────────────────
+  // Grabs one pitch period from the input buffer at srcPos,
+  // applies a Hann window of size periodSamples*2, and adds to output.
+  _addGrain(srcPos, periodSamples) {
+    const grainSize = Math.round(periodSamples * 2);
+    const half      = Math.round(periodSamples);
+    const outLen    = this._outBuf.length;
+    const inLen     = this._inLen | 0; // written samples available
+
+    for (let i = 0; i < grainSize; i++) {
+      // Hann window
+      const w   = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (grainSize - 1));
+      const src = Math.round(srcPos - half + i);
+      if (src < 0 || src >= inLen) continue;
+      const sample = this._inBuf[src % this._bufLen];
+      const dst    = (this._outWrite + i) % outLen;
+      this._outBuf[dst] += sample * w;
+    }
+    this._outWrite  = (this._outWrite + Math.round(periodSamples)) % outLen;
+    this._outFill  += Math.round(periodSamples);
   }
 
   process(inputs, outputs, params) {
@@ -5482,117 +5492,112 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
     const output = outputs[0]?.[0];
     if (!input || !output) return true;
 
-    const manualPitch = params.pitch[0];   // ratio for SHIFT mode
-    const speed       = params.speed[0];   // 0=instant, 1=slow (400ms)
-    const mode        = Math.round(params.mode[0]);   // 0=SHIFT, 1=AUTOTUNE
-    const root        = Math.round(params.root[0]);   // 0..11
-    const scaleMask   = Math.round(params.scale[0]);  // 12-bit bitmask
-    const formant     = params.formant[0]; // semitones
+    const sr         = this._sr;
+    const shiftRatio = params.pitch[0];   // semitone ratio (SHIFT mode)
+    const speed      = params.speed[0];   // 0=instant, 1=slow
+    const mode       = Math.round(params.mode[0]);
+    const root       = Math.round(params.root[0]);
+    const scaleMask  = Math.round(params.scale[0]);
+    const formant    = params.formant[0]; // 0..1
 
-    const sr = this._sampleRate;
-    const fs = this._frameSize, hs = this._hopSize;
-    const expct = 2 * Math.PI * hs / fs;
+    const blockSize = input.length; // 128
 
-    // ── Step 1: Pitch detection (autotune mode only) ─────────────
-    // Fill detection buffer and refresh every _detPeriod samples
-    for (let i = 0; i < input.length; i++) {
-      this._detBuf[this._detFill % this._detBuf.length] = input[i];
-      this._detFill++;
+    // ── 1. Write input to ring buffer ────────────────────────────
+    for (let i = 0; i < blockSize; i++) {
+      this._inBuf[this._inWrite % this._bufLen] = input[i];
+      this._inWrite++;
+    }
+    this._inLen = this._inWrite; // total samples ever written
+
+    // ── 2. Run YIN pitch detection periodically ──────────────────
+    this._yinTimer += blockSize;
+    if (this._yinTimer >= this._yinRate) {
+      this._yinTimer = 0;
+      // Copy most recent yinBufLen samples
+      for (let i = 0; i < this._yinBufLen; i++) {
+        this._yinBuf[i] = this._inBuf[(this._inWrite - this._yinBufLen + i + this._bufLen) % this._bufLen];
+      }
+      const period = this._yin(this._yinBuf, sr);
+      if (period > 0) {
+        this._yinPeriod = period;
+
+        // ── 3. Compute target correction ────────────────────────
+        if (mode === 1) {
+          const detectedHz = sr / period;
+          const snapCents  = this._snapCents(detectedHz, root, scaleMask);
+          this._targetCents = snapCents;
+        } else {
+          // SHIFT mode: convert ratio to cents
+          this._targetCents = 1200 * Math.log2(shiftRatio);
+        }
+      } else {
+        // Unvoiced — decay correction toward 0
+        this._targetCents *= 0.8;
+      }
     }
 
-    if (mode === 1) {
-      // Detect every hopSize samples for efficiency
-      if (this._detFill % hs === 0) {
-        // Copy the most recent 2048 samples into a detection frame
-        const detFrame = new Float32Array(this._detBuf.length);
-        for (let k = 0; k < detFrame.length; k++)
-          detFrame[k] = this._detBuf[(this._detFill - detFrame.length + k + this._detBuf.length) % this._detBuf.length];
+    // ── 4. Smooth current cents toward target (speed controls rate) ──
+    // speed=0 → instant (α=1), speed=1 → ~300ms decay
+    const blocksPerSec  = sr / blockSize;
+    const decayMs       = speed * 300;
+    const decayBlocks   = Math.max(1, decayMs / 1000 * blocksPerSec);
+    const alpha         = 1 - Math.pow(0.001, 1 / decayBlocks);
+    this._currentCents += alpha * (this._targetCents - this._currentCents);
 
-        const detectedHz = this._detectPitch(detFrame, sr);
-        if (detectedHz > 0) {
-          const snappedHz  = this._snapFreq(detectedHz, root, scaleMask);
-          this._targetRatio = snappedHz / detectedHz;
-          this._detectedFreq = detectedHz;
-        }
+    // ── 5. PSOLA re-synthesis ─────────────────────────────────────
+    const period = this._yinPeriod;
+    if (period > 4 && this._inWrite > this._yinBufLen) {
+      // Pitch ratio: how many input periods to consume per output period
+      const corrRatio     = Math.pow(2, this._currentCents / 1200);
+      const inputPeriod   = period;         // source period
+      const outputPeriod  = inputPeriod / corrRatio; // output period
+
+      // Formant preservation: re-scale synthesis period back toward input period
+      // Formant=1 → output grains are same window size as input period (preserved)
+      // Formant=0 → output grains scale with pitch (shifted)
+      const grainPeriod = inputPeriod * formant + outputPeriod * (1 - formant);
+
+      // Init synthesis pointer to current write head
+      if (!this._synthInit) {
+        this._synthPos  = this._inWrite - this._yinBufLen;
+        this._synthInit = true;
       }
 
-      // ── Step 2: Smooth currentRatio → targetRatio at speed-controlled rate ──
-      // speed=0 → instant (T-Pain robotic snap, α≈1)
-      // speed=1 → slow glide ~400ms at 44100Hz / 128 block ≈ 345 blocks
-      // α = smoothing factor per block (128 samples)
-      // At speed=0: α=1 (instant). At speed=1: α≈0.02 (slow).
-      const blocksPerSec = sr / 128;
-      // correctionMs: 0ms at speed=0, 400ms at speed=1
-      const correctionMs  = speed * 400;
-      const blocksToSnap  = Math.max(1, (correctionMs / 1000) * blocksPerSec);
-      const alpha = 1 - Math.pow(0.001, 1 / blocksToSnap); // decays to 0.1% in blocksToSnap
-      this._currentRatio += alpha * (this._targetRatio - this._currentRatio);
+      // Generate grains until output queue has enough for this block
+      const needed = this._outFill < blockSize ? blockSize - this._outFill : 0;
+      let generated = 0;
+      const maxGrains = 32; // safety cap per block
+      let iters = 0;
+      while (generated < needed + Math.round(outputPeriod) && iters++ < maxGrains) {
+        // Advance source by one input period
+        this._synthPos += inputPeriod;
+        // Clamp to what we've actually written
+        const safePos = Math.min(this._synthPos, this._inWrite - 2);
+        this._addGrain(safePos, grainPeriod);
+        generated += Math.round(outputPeriod);
+      }
     } else {
-      // SHIFT mode: use manual pitch param directly
-      this._currentRatio  = manualPitch;
-      this._targetRatio   = manualPitch;
+      // Unvoiced / no pitch — pass through (dry copy to output queue)
+      for (let i = 0; i < blockSize; i++) {
+        const s = this._inBuf[(this._inWrite - blockSize + i + this._bufLen) % this._bufLen];
+        this._outBuf[(this._outWrite + i) % this._outBuf.length] = s;
+      }
+      this._outWrite = (this._outWrite + blockSize) % this._outBuf.length;
+      this._outFill += blockSize;
     }
 
-    // Apply formant offset on top (slight additional ratio for vocal character)
-    const formantRatio = Math.pow(2, formant / 48); // subtle: 1/4 semitone per semitone
-    const pitch = this._currentRatio * formantRatio;
-
-    // ── Step 3: OLA phase-vocoder pitch shift ────────────────────
-    for (let i = 0; i < input.length; i++) {
-      this._inBuf[this._inFill % fs] = input[i];
-      this._inFill++;
-
-      if (this._inFill % hs === 0 && this._inFill >= fs) {
-        const frame = new Float32Array(fs);
-        for (let k=0;k<fs;k++) frame[k] = this._inBuf[(this._inFill - fs + k) % fs] * this._window[k];
-
-        this._re.set(frame); this._im.fill(0);
-        this._fft(this._re, this._im, false);
-        const bins = fs / 2 + 1;
-        for (let k=0;k<bins;k++) {
-          this._mag[k]   = Math.sqrt(this._re[k]*this._re[k]+this._im[k]*this._im[k]);
-          this._phase[k] = Math.atan2(this._im[k], this._re[k]);
-        }
-
-        // Phase vocoder
-        for (let k=0;k<bins;k++) {
-          let delta = this._phase[k] - this._lastPhase[k] - k * expct;
-          delta -= Math.round(delta / (2*Math.PI)) * 2*Math.PI;
-          const trueFreq = k * expct + delta;
-          this._sumPhase[k] += pitch * trueFreq;
-          this._lastPhase[k] = this._phase[k];
-          this._outMag[k] = 0;
-        }
-
-        // Bin remapping (spectral shift)
-        for (let k=0;k<bins;k++) {
-          const tk = Math.round(k * pitch);
-          if (tk < bins) this._outMag[tk] += this._mag[k];
-        }
-
-        // IFFT → overlap-add
-        for (let k=0;k<bins;k++) {
-          this._re[k] = this._outMag[k] * Math.cos(this._sumPhase[k]);
-          this._im[k] = this._outMag[k] * Math.sin(this._sumPhase[k]);
-        }
-        for (let k=1;k<bins-1;k++) { this._re[fs-k]=this._re[k]; this._im[fs-k]=-this._im[k]; }
-        this._fft(this._re, this._im, true);
-
-        const norm = fs / (hs * 2);
-        for (let k=0;k<fs;k++) {
-          const idx = (this._outWrite + k) % this._outBuf.length;
-          this._outBuf[idx] += this._re[k] * this._window[k] / norm;
-        }
-        this._outWrite = (this._outWrite + hs) % this._outBuf.length;
+    // ── 6. Drain output queue ─────────────────────────────────────
+    for (let i = 0; i < blockSize; i++) {
+      if (this._outFill > 0) {
+        output[i] = this._outBuf[this._outRead % this._outBuf.length];
+        this._outBuf[this._outRead % this._outBuf.length] = 0;
+        this._outRead = (this._outRead + 1) % this._outBuf.length;
+        this._outFill--;
+      } else {
+        output[i] = 0;
       }
     }
 
-    // Drain output
-    for (let i=0;i<output.length;i++) {
-      output[i] = this._outBuf[this._outRead % this._outBuf.length];
-      this._outBuf[this._outRead % this._outBuf.length] = 0;
-      this._outRead++;
-    }
     return true;
   }
 }
@@ -5692,7 +5697,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     if (live.pitchNode) {
       const pitchOn   = !!(fx.pitch && fx.pitch.on);
       const semitones = pitchOn ? (fx.pitch.semitones || 0) : 0;
-      const formant   = pitchOn ? (fx.pitch.formant   || 0) : 0;
+      const formant   = pitchOn ? (fx.pitch.formant ?? 0.8) : 0.8;
       const speed     = pitchOn ? (fx.pitch.speed ?? 0.5)   : 0.5;
       const pitchMode = pitchOn && fx.pitch.mode === 'autotune' ? 1 : 0;
       const NOTE_MAP  = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
@@ -5894,7 +5899,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
           const semitones  = fx.pitch.semitones || 0;
           const pitchMode  = fx.pitch.mode === 'autotune' ? 1 : 0;
           const speed      = fx.pitch.speed ?? 0.5;
-          const formant    = fx.pitch.formant || 0;
+          const formant    = fx.pitch.formant ?? 0.8;
           // Root note: C=0..B=11
           const NOTE_MAP   = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
           const SCALE_MASKS= { chromatic:4095, major:2741, minor:1453, pentatonic:661, blues:1193 };
@@ -5949,18 +5954,12 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         // If no worklet (fallback), full semitone shift via playbackRate (tape-style).
         const live = fxNodesRef.current[track.id];
         const hasWorklet = !!(live && live.pitchNode);
-        if (hasWorklet) {
-          // Formant-only playback rate — very subtle, just for timbre
-          const formantSt = (live.pitchFormant || 0);
-          if (formantSt !== 0) {
-            src.playbackRate.value = Math.pow(2, formantSt / 48); // 1/4 effect on rate
-          }
-        } else {
+        if (!hasWorklet) {
+          // Fallback (no worklet): tape-style pitch via playbackRate
           const semitones = entryNode._pitchSemitones || 0;
-          if (semitones !== 0) {
-            src.playbackRate.value = Math.pow(2, semitones / 12);
-          }
+          if (semitones !== 0) src.playbackRate.value = Math.pow(2, semitones / 12);
         }
+        // Formant is now handled entirely inside the PSOLA worklet — no playbackRate needed
 
         src.connect(entryNode);
 
@@ -8193,8 +8192,8 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
                     <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{speedMs}</div>
                   </div>
                   <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-                    <Knob label="FORMANT" value={formant} min={-6} max={6} step={0.5} unit=" st" color="#9333ea" onChange={function(v){ upd("pitch",{formant:v}); }} />
-                    <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{formant >= 0 ? "+" : ""}{formant} st</div>
+                    <Knob label="FORMANT" value={formant} min={0} max={1} step={0.05} unit="" color="#9333ea" onChange={function(v){ upd("pitch",{formant:v}); }} />
+                    <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{Math.round(formant*100)}% PRES</div>
                   </div>
                 </div>
                 {mode === "autotune" && (
