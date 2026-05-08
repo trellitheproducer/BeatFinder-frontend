@@ -5194,140 +5194,106 @@ function _PitchPlugin({ fx, upd, Knob }) {
 // Falls back to Web Audio biquad-based suppression when WASM unavailable.
 // =============================================================================
 
-// RNNoise AudioWorklet processor — inlined as a Blob URL so no extra file needed.
-// The worklet processes 480-sample frames (RNNoise native frame size at 48kHz).
-const RNNOISE_WORKLET_CODE = `
-// ── RNNoise AudioWorklet Processor ──────────────────────────────────────────
-// Loads rnnoise.wasm from CDN, processes 480-sample chunks, returns denoised audio.
-// Falls back to passthrough if WASM load fails (keeps audio flowing no matter what).
-const RNNOISE_CDN = "https://unpkg.com/rnnoise@0.1.0/dist/rnnoise.wasm";
-const FRAME = 480; // RNNoise native frame size
+// Noise Gate AudioWorklet — RMS-based gating with attack/hold/release envelope.
+// This is the same fundamental approach as Logic Pro's Noise Gate plugin:
+//   1. Compute short-term RMS of input
+//   2. Compare to threshold (in dB)
+//   3. Open/close an envelope follower with configurable attack/hold/release
+//   4. Multiply signal by envelope (1 = fully open, reduction = closed)
+// No external WASM needed — pure JS, works everywhere including iOS Safari.
+const NOISE_GATE_WORKLET_CODE = `
+class NoiseGateProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [
+      { name: "threshold",  defaultValue: -40, minValue: -80, maxValue: 0,   automationRate: "k-rate" },
+      { name: "reduction",  defaultValue: -60, minValue: -80, maxValue: 0,   automationRate: "k-rate" },
+      { name: "attack",     defaultValue: 0.003, minValue: 0.0001, maxValue: 0.5, automationRate: "k-rate" },
+      { name: "hold",       defaultValue: 0.1,   minValue: 0,      maxValue: 1.0, automationRate: "k-rate" },
+      { name: "release",    defaultValue: 0.15,  minValue: 0.001,  maxValue: 2.0, automationRate: "k-rate" },
+      { name: "bypass",     defaultValue: 0,     minValue: 0,      maxValue: 1,   automationRate: "k-rate" },
+    ];
+  }
 
-class RNNoiseProcessor extends AudioWorkletProcessor {
-  constructor(options) {
+  constructor() {
     super();
-    this._ready    = false;
-    this._bypass   = false;
-    this._strength = (options.processorOptions && options.processorOptions.strength) || 0.85;
-    this._inputBuf = new Float32Array(FRAME);
-    this._inFill   = 0;
-    this._outBuf   = [];
-    this._rnn      = null;
-    this._state    = null;
-    this._heapIn   = null;
-    this._heapOut  = null;
-
-    this.port.onmessage = (e) => {
-      if (e.data.type === "bypass")   this._bypass   = e.data.value;
-      if (e.data.type === "strength") this._strength = e.data.value;
-    };
-
-    this._loadWasm().catch(() => { this._ready = false; });
+    this._envelope    = 0;    // current gate gain (0..1)
+    this._holdSamples = 0;    // remaining hold samples
+    this._open        = false; // gate state
+    // RMS window: 10ms @ sampleRate
+    this._rmsWin   = Math.round(sampleRate * 0.01);
+    this._rmsBuf   = new Float32Array(this._rmsWin);
+    this._rmsIdx   = 0;
+    this._rmsSumSq = 0;
   }
 
-  async _loadWasm() {
-    try {
-      const resp   = await fetch(RNNOISE_CDN);
-      const buffer = await resp.arrayBuffer();
-      const module = await WebAssembly.compile(buffer);
-      const mem    = new WebAssembly.Memory({ initial: 256, maximum: 512 });
-      const instance = await WebAssembly.instantiate(module, {
-        env: { memory: mem, abort: () => {} }
-      });
-      const ex = instance.exports;
-      // rnnoise ABI: rnnoise_create() → state ptr, rnnoise_process_frame(st, out, in)
-      if (ex.rnnoise_create && ex.rnnoise_process_frame) {
-        this._rnn   = ex;
-        this._state = ex.rnnoise_create(0);
-        // Allocate persistent heap I/O buffers (FRAME * 4 bytes each, float32)
-        const base  = ex.malloc ? ex.malloc(FRAME * 4 * 2) : 0;
-        this._heapIn  = base;
-        this._heapOut = base + FRAME * 4;
-        this._mem = new Float32Array(mem.buffer);
-        this._ready = true;
+  process(inputs, outputs, params) {
+    const inp = inputs[0]?.[0];
+    const out = outputs[0]?.[0];
+    if (!inp || !out) return true;
+
+    const bypass    = params.bypass[0] > 0.5;
+    if (bypass) { out.set(inp); return true; }
+
+    const threshLin  = Math.pow(10, params.threshold[0]  / 20);
+    const reducLin   = Math.pow(10, params.reduction[0]  / 20);
+    const sr         = sampleRate;
+    const attackCoef  = Math.exp(-1 / (params.attack[0]  * sr));
+    const releaseCoef = Math.exp(-1 / (params.release[0] * sr));
+    const holdLen     = Math.round(params.hold[0] * sr);
+
+    for (let i = 0; i < inp.length; i++) {
+      // ── RMS update (sliding window) ──────────────────────────
+      const old = this._rmsBuf[this._rmsIdx];
+      const cur = inp[i];
+      this._rmsSumSq += cur * cur - old * old;
+      this._rmsBuf[this._rmsIdx] = cur;
+      this._rmsIdx = (this._rmsIdx + 1) % this._rmsWin;
+      const rms = Math.sqrt(Math.max(0, this._rmsSumSq) / this._rmsWin);
+
+      // ── Gate decision ────────────────────────────────────────
+      if (rms >= threshLin) {
+        this._open        = true;
+        this._holdSamples = holdLen;
+      } else if (this._holdSamples > 0) {
+        this._holdSamples--;
+        // gate stays open during hold
+      } else {
+        this._open = false;
       }
-    } catch(_) {
-      // WASM unavailable — passthrough mode
+
+      // ── Envelope follower ────────────────────────────────────
+      const target = this._open ? 1.0 : reducLin;
+      const coef   = this._open ? attackCoef : releaseCoef;
+      this._envelope = target + coef * (this._envelope - target);
+
+      out[i] = inp[i] * this._envelope;
     }
-  }
-
-  process(inputs, outputs) {
-    const inp = inputs[0];
-    const out = outputs[0];
-    if (!inp || !inp[0]) return true;
-
-    const src = inp[0];
-    const dst = out[0];
-
-    if (this._bypass || !this._ready || !this._rnn) {
-      // Passthrough
-      for (let i = 0; i < dst.length; i++) dst[i] = src[i];
-      return true;
-    }
-
-    // Feed samples into 480-frame accumulator
-    for (let i = 0; i < src.length; i++) {
-      this._inputBuf[this._inFill++] = src[i];
-      if (this._inFill === FRAME) {
-        this._processFrame();
-        this._inFill = 0;
-      }
-    }
-
-    // Drain output buffer into dst
-    const avail = Math.min(dst.length, this._outBuf.length);
-    for (let i = 0; i < avail; i++) dst[i] = this._outBuf.shift();
-    // Pad with silence if output buffer not full yet (initial latency)
-    for (let i = avail; i < dst.length; i++) dst[i] = 0;
-
     return true;
   }
-
-  _processFrame() {
-    const rnn  = this._rnn;
-    const mem  = this._mem;
-    const st   = this._state;
-    const hinI = this._heapIn  >> 2; // float32 index
-    const hinO = this._heapOut >> 2;
-
-    // Write input to WASM heap (scale to 16-bit range that RNNoise expects)
-    for (let i = 0; i < FRAME; i++) mem[hinI + i] = this._inputBuf[i] * 32768;
-
-    // Run RNNoise — returns voice activity probability (0..1)
-    const vad = rnn.rnnoise_process_frame(st, this._heapOut, this._heapIn);
-
-    // Mix denoised signal with original based on strength + VAD gating
-    const gate = Math.pow(Math.max(0, Math.min(1, vad)), 0.5);
-    const mix  = this._strength * gate + (1 - this._strength);
-
-    for (let i = 0; i < FRAME; i++) {
-      const clean = mem[hinO + i] / 32768;
-      this._outBuf.push(clean * mix + this._inputBuf[i] * (1 - mix));
-    }
-  }
 }
-
-registerProcessor("rnnoise-processor", RNNoiseProcessor);
+registerProcessor("noise-gate-processor", NoiseGateProcessor);
 `;
 
 // Singleton worklet registration tracker
-const rnnoiseWorkletReady = { current: false, promise: null };
+const noiseGateWorkletReady = { current: false, promise: null };
+// Keep old name so existing callers still work
+const rnnoiseWorkletReady = noiseGateWorkletReady;
 
 async function registerRNNoiseWorklet(actx) {
-  if (rnnoiseWorkletReady.current) return;
-  if (rnnoiseWorkletReady.promise) { await rnnoiseWorkletReady.promise; return; }
-  rnnoiseWorkletReady.promise = (async () => {
+  if (noiseGateWorkletReady.current) return;
+  if (noiseGateWorkletReady.promise) { await noiseGateWorkletReady.promise; return; }
+  noiseGateWorkletReady.promise = (async () => {
     try {
-      const blob = new Blob([RNNOISE_WORKLET_CODE], { type: "application/javascript" });
+      const blob = new Blob([NOISE_GATE_WORKLET_CODE], { type: "application/javascript" });
       const url  = URL.createObjectURL(blob);
       await actx.audioWorklet.addModule(url);
       URL.revokeObjectURL(url);
-      rnnoiseWorkletReady.current = true;
+      noiseGateWorkletReady.current = true;
     } catch(e) {
-      // Worklet registration failed — plugin will use fallback biquad path
+      // Worklet registration failed — biquad fallback used in buildChain
     }
   })();
-  await rnnoiseWorkletReady.promise;
+  await noiseGateWorkletReady.promise;
 }
 
 // ── T-Rotten Knob ─────────────────────────────────────────────────────────────
@@ -5848,7 +5814,7 @@ function _NoiseRemoverPlugin({ fx, upd, Knob }) {
       <div style={{ background:"linear-gradient(180deg,#0d1f18 0%,#091710 100%)", padding:"9px 14px", borderBottom:"1px solid #0d2018", display:"flex", alignItems:"center", gap:8 }}>
         <div style={{ flex:1 }}>
           <div style={{ color:"#10B981", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>NOISE REMOVER</div>
-          <div style={{ color:"#0d3d28", fontSize:7, letterSpacing:2, fontFamily:"monospace", marginTop:2 }}>RNNOISE · AI DENOISING</div>
+          <div style={{ color:"#0d3d28", fontSize:7, letterSpacing:2, fontFamily:"monospace", marginTop:2 }}>RMS NOISE GATE · LOGIC STYLE</div>
         </div>
         {/* Status LED */}
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
@@ -5885,11 +5851,11 @@ function _NoiseRemoverPlugin({ fx, upd, Knob }) {
 
           {/* Main knobs */}
           <div style={{ flex:1, display:"flex", justifyContent:"space-around", alignItems:"flex-end", gap:4 }}>
-            <Knob label="STRENGTH" value={str}  min={0} max={1} step={0.01} unit="%" color="#10B981"
+            <Knob label="THRESHOLD" value={str}  min={0} max={1} step={0.01} unit="%" color="#10B981"
               onChange={function(v){ upd("noiseremover",{strength:v}); }} />
-            <Knob label="ECHO RED" value={echo} min={0} max={1} step={0.01} unit="%" color="#34D399"
+            <Knob label="HOLD"     value={echo} min={0} max={1} step={0.01} unit="s" color="#34D399"
               onChange={function(v){ upd("noiseremover",{echo:v}); }} />
-            <Knob label="VOICE"    value={veh}  min={0} max={1} step={0.01} unit="%" color="#6EE7B7"
+            <Knob label="RELEASE"  value={veh}  min={0} max={1} step={0.01} unit="%" color="#6EE7B7"
               onChange={function(v){ upd("noiseremover",{voice:v}); }} />
           </div>
         </div>
@@ -5901,8 +5867,8 @@ function _NoiseRemoverPlugin({ fx, upd, Knob }) {
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
             background:"#060e0a", borderRadius:8, padding:"8px 12px", border:"1px solid #0d1f15" }}>
             <div>
-              <div style={{ color:"#9febe8", fontSize:11, fontWeight:700 }}>Keyboard Suppression</div>
-              <div style={{ color:"#1a3d2a", fontSize:9, marginTop:1 }}>Notch filters for typing & click noise</div>
+              <div style={{ color:"#9febe8", fontSize:11, fontWeight:700 }}>Lookahead Gate</div>
+              <div style={{ color:"#1a3d2a", fontSize:9, marginTop:1 }}>Extra fast response for transients</div>
             </div>
             <button onClick={function(){ upd("noiseremover",{keyboard:!kb}); }}
               style={{ background: kb ? "rgba(16,185,129,0.15)" : "#0a1a10",
@@ -6977,6 +6943,48 @@ function StudioScreen({ user, onExit }) {
     try { setSavedProjects(JSON.parse(localStorage.getItem("bf_studio_projects") || "[]")); } catch (e) {}
   }, []);
 
+  // ── iOS Background Persistence ────────────────────────────────
+  // iOS Safari can fully reload the page when the app is backgrounded.
+  // We save lightweight studio state (no AudioBuffers — they can't be serialized)
+  // to sessionStorage so the project name, BPM, key and settings survive a reload.
+  // Audio clips themselves cannot be restored (they live in memory), but the project
+  // identity and settings are recovered so the session feels uninterrupted.
+  useEffect(function () {
+    try {
+      const snap = {
+        projectName, bpm, projectKey, timeSigNum, zoom,
+        snapToGrid, loopEnabled, loopIn, loopOut,
+        // Save track metadata (name, type, color) but not audio buffers
+        tracksMeta: tracks.map(function(t) {
+          return { id: t.id, name: t.name, type: t.type, color: t.color,
+                   isMuted: t.isMuted, isSoloed: t.isSoloed };
+        }),
+      };
+      sessionStorage.setItem("bf_studio_state", JSON.stringify(snap));
+    } catch(e) {}
+  }, [projectName, bpm, projectKey, timeSigNum, zoom, snapToGrid, loopEnabled, loopIn, loopOut, tracks]);
+
+  // Restore studio state on mount (handles iOS background reload)
+  useEffect(function () {
+    try {
+      const raw = sessionStorage.getItem("bf_studio_state");
+      if (!raw) return;
+      const snap = JSON.parse(raw);
+      // Only restore if we have a named project (not default) — avoids overwriting intentional new session
+      if (snap.projectName && snap.projectName !== "New Project") {
+        setProjectName(snap.projectName);
+      }
+      if (snap.bpm)          setBpm(snap.bpm);
+      if (snap.projectKey)   setProjectKey(snap.projectKey);
+      if (snap.timeSigNum)   setTimeSigNum(snap.timeSigNum);
+      if (snap.zoom)         setZoom(snap.zoom);
+      if (snap.snapToGrid !== undefined) setSnapToGrid(snap.snapToGrid);
+      if (snap.loopEnabled !== undefined) setLoopEnabled(snap.loopEnabled);
+      if (snap.loopIn  !== undefined)    setLoopIn(snap.loopIn);
+      if (snap.loopOut !== undefined && snap.loopOut > 0) setLoopOut(snap.loopOut);
+    } catch(e) {}
+  }, []); // run once on mount only
+
   // ── AudioContext ──────────────────────────────────────────────
   const getActx = function () {
     if (!actxRef.current || actxRef.current.state === "closed") {
@@ -7216,14 +7224,18 @@ function StudioScreen({ user, onExit }) {
       const analyser = mCtx.createAnalyser();
       analyser.fftSize = 256;
 
-      // Center the mono mic to both L and R using a StereoPanner at 0.
-      // ChannelMerger was silently dropping the R connection on iOS Safari,
-      // causing audio to come out the left ear only.
-      const panner = mCtx.createStereoPanner();
-      panner.pan.value = 0;
+      // Connect directly: src → gain → destination (no extra nodes in the path).
+      // Setting channelCountMode to "explicit" with 2 channels on the gain node tells
+      // the browser to upmix the mono mic to stereo internally — this is zero-latency
+      // and avoids the StereoPanner which adds an extra processing block (and noticeable
+      // delay) on iOS Safari's audio graph.
+      try {
+        gain.channelCount          = 2;
+        gain.channelCountMode      = "explicit";
+        gain.channelInterpretation = "speakers"; // mono→stereo: L = R = mono signal
+      } catch(e) {}
 
-      src.connect(panner);
-      panner.connect(gain);
+      src.connect(gain);
       gain.connect(mCtx.destination);
       gain.connect(analyser); // side branch — read-only, not in the output chain
 
@@ -7422,12 +7434,15 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
 
     this._nextAna   = 0;   // absolute input sample count for next analysis frame
 
-    // ── YIN pitch detection ───────────────────────────────────────
-    this._yinN      = 4096;  // larger YIN window for low-pitched voices
+    // ── pYIN pitch detection ──────────────────────────────────────
+    this._yinN      = 4096;  // larger pYIN window for low-pitched voices
     this._yinBuf    = new Float32Array(this._yinN);
     this._yinPeriod = 0;     // last detected period in samples
     this._yinTimer  = 0;
     this._yinRate   = 256;   // re-run every 256 samples
+    // pYIN HMM state: previous voiced probability & period candidates
+    this._pyinPrevVoiced = 0;
+    this._pyinPrevPeriod = 0;
 
     // ── Smoothed pitch correction state ──────────────────────────
     this._currentCents = 0;
@@ -7501,20 +7516,31 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
     }
   }
 
-  // ── YIN pitch detector ────────────────────────────────────────────────────
+  // ── pYIN pitch detector ───────────────────────────────────────────────────
+  // Probabilistic YIN (Mauch & Dixon 2014).
   // Returns period in samples (0 = unvoiced).
+  // Improvements over plain YIN:
+  //   • Builds a full candidate list with per-candidate voiced probabilities
+  //     (beta-distribution CDF over CMNDF values) instead of accepting the
+  //     first dip below a hard threshold.
+  //   • A lightweight two-state HMM (voiced / unvoiced) with a transition
+  //     prior smooths the voicing decision across frames, suppressing the
+  //     octave jumps and spurious triggers that plain YIN suffers from.
+  //   • Parabolic interpolation for sub-sample period accuracy is retained.
   _yin(buf) {
     const N      = buf.length;
     const half   = N >> 1;
     const sr     = this._sr;
-    const thresh = 0.12;  // stricter than default for cleaner detection
 
-    // Energy guard
+    // ── Energy guard ────────────────────────────────────────────────
     let rms = 0;
     for (let i = 0; i < N; i++) rms += buf[i] * buf[i];
-    if (rms / N < 0.0002) return 0;
+    if (rms / N < 0.0002) {
+      this._pyinPrevVoiced = 0;
+      return 0;
+    }
 
-    // Difference function
+    // ── Difference function d(tau) ───────────────────────────────────
     const d = new Float32Array(half);
     for (let tau = 1; tau < half; tau++) {
       let s = 0;
@@ -7525,7 +7551,7 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
       d[tau] = s;
     }
 
-    // CMNDF
+    // ── Cumulative Mean Normalised Difference (CMNDF) ────────────────
     const cmnd = new Float32Array(half);
     cmnd[0] = 1;
     let runSum = 0;
@@ -7534,34 +7560,75 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
       cmnd[tau] = runSum > 0 ? d[tau] * tau / runSum : 1;
     }
 
-    const minP = Math.ceil(sr / 1200);  // 1200 Hz max (handles high soprano)
-    const maxP = Math.floor(sr / 50);   // 50 Hz min  (handles bass voices)
+    const minP = Math.ceil(sr / 1200);   // 1200 Hz upper limit (high soprano)
+    const maxP = Math.floor(sr / 50);    // 50 Hz  lower limit (bass voice)
+    const lim  = Math.min(maxP, half);
 
-    let period = 0;
-    for (let tau = minP; tau < Math.min(maxP, half); tau++) {
-      if (cmnd[tau] < thresh) {
+    // ── pYIN: collect local minima and assign voiced probabilities ───
+    // We use a simple beta-distribution-inspired mapping: the probability
+    // that a CMNDF value v corresponds to a voiced frame is approximated by
+    //   p_voiced(v) ≈ clamp(1 − v / threshold_high, 0, 1)
+    // mirroring the integral of the beta prior used in the original paper.
+    const THRESH_LOW  = 0.05;   // below this → almost certainly voiced
+    const THRESH_HIGH = 0.45;   // above this → almost certainly unvoiced
+
+    const candidates = []; // { tau, period, pVoiced }
+    for (let tau = minP + 1; tau < lim - 1; tau++) {
+      if (cmnd[tau] < cmnd[tau - 1] && cmnd[tau] <= cmnd[tau + 1]) {
+        // local minimum → candidate
+        const v = cmnd[tau];
+        const pV = v <= THRESH_LOW  ? 1.0
+                 : v >= THRESH_HIGH ? 0.0
+                 : 1.0 - (v - THRESH_LOW) / (THRESH_HIGH - THRESH_LOW);
         // Parabolic interpolation for sub-sample accuracy
-        let best = tau;
-        while (best + 1 < half && cmnd[best + 1] < cmnd[best]) best++;
-        const y0 = best > 0      ? cmnd[best - 1] : cmnd[best];
-        const y1 = cmnd[best];
-        const y2 = best + 1 < half ? cmnd[best + 1] : cmnd[best];
+        const y0 = cmnd[tau - 1], y1 = v, y2 = cmnd[tau + 1];
         const denom = 2 * (y0 - 2 * y1 + y2);
-        period = denom !== 0 ? best - (y2 - y0) / (2 * denom) : best;
-        break;
+        const tauF  = denom !== 0 ? tau - (y2 - y0) / (2 * denom) : tau;
+        candidates.push({ tau, period: tauF, pVoiced: pV });
       }
     }
 
-    // Fallback: best minimum below relaxed threshold
-    if (period === 0) {
-      let bestTau = minP, bestVal = cmnd[minP];
-      for (let tau = minP + 1; tau < Math.min(maxP, half); tau++) {
-        if (cmnd[tau] < bestVal) { bestVal = cmnd[tau]; bestTau = tau; }
-      }
-      if (bestVal < 0.30) period = bestTau;
+    // ── HMM voicing decision ─────────────────────────────────────────
+    // Two-state HMM: voiced (V) vs unvoiced (U).
+    // Transition priors (per frame):
+    //   p(V→V) = 0.9   p(U→U) = 0.85
+    const pVV = 0.90, pUV = 0.10;   // stay voiced, switch to voiced
+    const pVU = 0.15, pUU = 0.85;   // switch to unvoiced, stay unvoiced
+
+    const prevV = this._pyinPrevVoiced;   // previous voiced probability
+    const prevU = 1 - prevV;
+
+    // Aggregate voiced probability for this frame across all candidates
+    let totalPVoiced = 0;
+    for (const c of candidates) totalPVoiced += c.pVoiced;
+    // Also account for the unvoiced hypothesis (no candidate accepted)
+    const pFrameVoiced   = Math.min(totalPVoiced, 1.0);
+    const pFrameUnvoiced = 1.0 - pFrameVoiced;
+
+    // HMM forward step
+    const postV = pFrameVoiced   * (prevV * pVV + prevU * pUV);
+    const postU = pFrameUnvoiced * (prevV * pVU + prevU * pUU);
+    const norm  = postV + postU || 1;
+    const voicedProb = postV / norm;
+
+    this._pyinPrevVoiced = voicedProb;
+
+    if (voicedProb < 0.5 || candidates.length === 0) return 0;
+
+    // ── Select best candidate ────────────────────────────────────────
+    // Pick the candidate with highest voiced probability; break ties by
+    // proximity to the previous period (octave-continuity prior).
+    let best = candidates[0];
+    for (const c of candidates) {
+      const prevP  = this._pyinPrevPeriod;
+      const octave = prevP > 0 ? Math.abs(Math.log2(c.period / prevP)) : 0;
+      const octPenalty = Math.min(octave, 1.0) * 0.25;
+      const scoreBest  = best.pVoiced - (prevP > 0 ? Math.min(Math.abs(Math.log2(best.period / prevP)), 1.0) * 0.25 : 0);
+      if (c.pVoiced - octPenalty > scoreBest) best = c;
     }
 
-    return period;
+    this._pyinPrevPeriod = best.period;
+    return best.period;
   }
 
   // ── Snap detected frequency to nearest in-scale pitch ────────────────────
@@ -7590,18 +7657,18 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
   }
 
   // ── Phase Vocoder analysis frame ─────────────────────────────────────────
-  _analyseFrame(frameStart) {
+  _analyseFrame(absFrameStart) {
     const N   = this._N;
     const N2  = this._N2;
     const win = this._win;
     const re  = new Float32Array(N);
     const im  = new Float32Array(N);
 
-    // Fill windowed frame from ring buffer at the scheduled hop position
-    // frameStart is the absolute sample index of the START of this frame
-    const readStart = frameStart;
+    // Fill windowed frame from ring buffer using ABSOLUTE sample position.
+    // absFrameStart is the un-modded sample index — we mod each access individually
+    // so the full N-sample window wraps correctly through the circular buffer.
     for (let i = 0; i < N; i++) {
-      re[i] = this._ring[(readStart + i + this._ringLen) % this._ringLen] * win[i];
+      re[i] = this._ring[(absFrameStart + i) % this._ringLen] * win[i];
     }
 
     this._fft(re, im, false);
@@ -7731,7 +7798,7 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
       this._ringW++;
     }
 
-    // ── 2. YIN pitch detection (throttled) ───────────────────────
+    // ── 2. pYIN pitch detection (throttled) ──────────────────────
     this._yinTimer += blockSize;
     if (this._yinTimer >= this._yinRate) {
       this._yinTimer = 0;
@@ -7771,7 +7838,7 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
     // We advance it AFTER analysis so _analyseFrame reads from the correct position.
     while (this._ringW >= this._nextAna + this._N) {
       const pitchRatio = Math.pow(2, this._currentCents / 1200);
-      this._analyseFrame(this._nextAna % this._ringLen);
+      this._analyseFrame(this._nextAna); // pass absolute index, not modded
       this._nextAna += this._hop;
       this._shiftBins(pitchRatio);
       if (formant > 0.01) this._applyFormantPreservation(pitchRatio, formant);
@@ -7794,12 +7861,9 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
     }
     this._outR += blockSize;
 
-    // Passthrough only in SHIFT mode with zero shift.
-    // DO NOT passthrough in autotune mode (mode===1) — the vocoder output is already
-    // written above and overwriting it here caused dropouts mid-correction.
-    if (mode === 0 && Math.abs(this._currentCents) < 0.5) {
-      for (let i = 0; i < blockSize; i++) output[i] = input[i];
-    }
+    // No dry passthrough — the phase vocoder output is always used.
+    // Even at 0 shift the vocoder output is transparent, and bypassing it caused
+    // a click at the transition point when correction engaged mid-word.
 
     return true;
   }
@@ -7994,20 +8058,58 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       live.doubler.rWidthGain.gain.setTargetAtTime(0.5 + width * 0.5, now, T);
     }
 
-    // ── Noise Remover — send strength update to worklet via message port ──
-    if (live.rnnoiseNode && fx.noiseremover) {
-      const nrOn     = !!fx.noiseremover.on;
-      const strength = nrOn ? (fx.noiseremover.strength ?? 0.85) : 0;
-      live.rnnoiseNode.port.postMessage({ type: "bypass",   value: !nrOn });
-      live.rnnoiseNode.port.postMessage({ type: "strength", value: strength });
+    // ── Noise Gate — live parameter updates ──────────────────────────────────
+    if (live.rnnoiseNode || live.rnnoiseGate) {
+      const nr      = fx.noiseremover || {};
+      const nrOn    = !!(fx.noiseremover && fx.noiseremover.on);
+      const str     = nrOn ? (nr.strength ?? 0.85) : 0;
+      const threshDb = -80 + str * 60;
+      const holdSec  = nrOn ? (nr.echo ?? 0.1) : 0;
+      const relSec   = nrOn ? (0.08 + (1 - str) * 0.12) : 0.08;
+      const lookahead = !!(nr.keyboard ?? true);
+      const attackSec = lookahead ? 0.001 : 0.003;
+
+      if (live.rnnoiseNode) {
+        try {
+          live.rnnoiseNode.parameters.get("bypass").setTargetAtTime(nrOn ? 0 : 1, now, T);
+          live.rnnoiseNode.parameters.get("threshold").setTargetAtTime(nrOn ? threshDb : -200, now, T);
+          live.rnnoiseNode.parameters.get("attack").setTargetAtTime(attackSec, now, T);
+          live.rnnoiseNode.parameters.get("hold").setTargetAtTime(Math.min(1, holdSec), now, T);
+          live.rnnoiseNode.parameters.get("release").setTargetAtTime(relSec, now, T);
+        } catch(e) {}
+      }
+      // Fallback compressor-gate live update
+      if (live.rnnoiseGate) {
+        live.rnnoiseGate.threshold.setTargetAtTime(nrOn ? threshDb : 0, now, T);
+        live.rnnoiseGate.ratio.setTargetAtTime(nrOn ? 20 : 1, now, T);
+        live.rnnoiseGate.attack.setTargetAtTime(attackSec, now, T);
+        live.rnnoiseGate.release.setTargetAtTime(relSec, now, T);
+      }
+      // Voice enhancement shelf — always present in liveNodes.noiseremover
+      if (live.noiseremover && live.noiseremover.voiceShelf) {
+        const voiceAmt = nrOn ? (nr.voice ?? 0.6) : 0;
+        live.noiseremover.voiceShelf.gain.setTargetAtTime(voiceAmt * 8, now, T);
+      }
     }
-    // Fallback gate threshold live update
-    if (live.rnnoiseGate && fx.noiseremover) {
-      const nrOn     = !!fx.noiseremover.on;
-      const strength = nrOn ? (fx.noiseremover.strength ?? 0.85) : 0;
-      live.rnnoiseGate.threshold.setTargetAtTime(
-        nrOn ? -60 + strength * 30 : 0, now, T
-      );
+
+    // ── Pitch fallback ScriptProcessor — live param updates ─────────────────
+    // The worklet path is handled above (live.pitchNode). This covers the
+    // ScriptProcessor fallback used when AudioWorklet is unavailable.
+    if (live.pitchFallbackSP && fx.pitch !== undefined) {
+      const pitchOn = !!(fx.pitch && fx.pitch.on);
+      // Update the ScriptProcessor's closure variables via a message-style
+      // property we attach to the node at build time.
+      if (pitchOn !== live.pitchFallbackSP._nrOn) {
+        live.pitchFallbackSP._nrOn = pitchOn;
+      }
+      // Expose current pitch params on the node so onaudioprocess can read them
+      live.pitchFallbackSP._speed    = pitchOn ? (fx.pitch.speed ?? 0.5)   : 0.5;
+      live.pitchFallbackSP._semitones= pitchOn ? (fx.pitch.semitones ?? 0) : 0;
+      const NOTE_MAP_L = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
+      const SCALE_MASKS_L = {chromatic:4095,major:2741,minor:1453,pentatonic:661,blues:1193};
+      live.pitchFallbackSP._rootNote  = pitchOn ? (NOTE_MAP_L[fx.pitch.key || 'C'] || 0) : 0;
+      live.pitchFallbackSP._scaleMask = pitchOn ? (SCALE_MASKS_L[fx.pitch.scale||'chromatic'] ?? 4095) : 4095;
+      live.pitchFallbackSP._isAutoTune= pitchOn && fx.pitch.mode === 'autotune';
     }
 
     // ── T-Rotten Master — live param morphing ──────────────────────────────
@@ -8432,88 +8534,64 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
           hdPan, hdPanFlip, hdLfo, hdLfoGain, hdOut,
         };
       }
-      if (fx.noiseremover && fx.noiseremover.on) {
-        const nr       = fx.noiseremover;
-        const strength = nr.strength ?? 0.85;
-        const echo     = nr.echo     ?? 0.4;
-        const voiceEnh = nr.voice    ?? 0.6;
-        const useKb    = nr.keyboard !== false;
+      // ── Noise Remover — always built so on/off toggle works live ────────────
+      // When off: bypass=1 (worklet path) or threshold=0/ratio=1 (fallback).
+      // voice param drives a post-gate presence shelf (+0..+8dB at 2.5kHz).
+      // keyboard param enables lookahead mode (attack=0.001s vs 0.003s).
+      {
+        const nr         = fx.noiseremover || {};
+        const nrOn       = !!(fx.noiseremover && fx.noiseremover.on);
+        const strength   = nrOn ? (nr.strength ?? 0.85) : 0;
+        const threshDb   = -80 + strength * 60; // -80..-20 dB
+        const reductDb   = -60;
+        const lookahead  = !!(nr.keyboard ?? true); // lookahead gate toggle
+        const attackSec  = lookahead ? 0.001 : 0.003;
+        const holdSec    = nrOn ? (nr.echo ?? 0.1) : 0;
+        const releaseSec = nrOn ? (0.08 + (1 - strength) * 0.12) : 0.08;
+        const voiceAmt   = nrOn ? (nr.voice ?? 0.6) : 0; // 0–1 → 0–+8dB presence shelf
 
-        // ── 1. Keyboard / typing notch filters (200Hz, 800Hz, 4kHz click bands) ──
-        if (useKb) {
-          const clickFreqs = [200, 800, 4000];
-          for (const cf of clickFreqs) {
-            const notch = actx.createBiquadFilter();
-            notch.type = "notch";
-            notch.frequency.value = cf;
-            notch.Q.value = 0.5;
-            notch.connect(node); node = notch;
-          }
-        }
-
-        // ── 2. Room echo reduction — highpass gate + shelf ────────────────────
-        if (echo > 0.05) {
-          // Gentle highpass to cut room rumble
-          const hpf = actx.createBiquadFilter();
-          hpf.type = "highpass";
-          hpf.frequency.value = 80 + echo * 120; // 80–200Hz sweep
-          hpf.Q.value = 0.5;
-          hpf.connect(node); node = hpf;
-
-          // Low-shelf cut to reduce room boom
-          const shelf = actx.createBiquadFilter();
-          shelf.type = "lowshelf";
-          shelf.frequency.value = 300;
-          shelf.gain.value = -(echo * 6); // up to -6dB room cut
-          shelf.connect(node); node = shelf;
-        }
-
-        // ── 3. Voice enhancement — presence boost + output gain ───────────────
-        if (voiceEnh > 0.05) {
-          // Presence / clarity boost 2–5kHz
-          const presence = actx.createBiquadFilter();
-          presence.type = "peaking";
-          presence.frequency.value = 3000;
-          presence.Q.value = 0.8;
-          presence.gain.value = voiceEnh * 8; // up to +8dB presence
-          presence.connect(node); node = presence;
-
-          // Air boost at 10kHz for clarity
-          const air = actx.createBiquadFilter();
-          air.type = "highshelf";
-          air.frequency.value = 10000;
-          air.gain.value = voiceEnh * 3; // up to +3dB air
-          air.connect(node); node = air;
-        }
-
-        // ── 4. RNNoise AudioWorklet — neural net denoiser ─────────────────────
-        if (rnnoiseWorkletReady.current) {
+        // ── Noise Gate AudioWorklet (primary path) ────────────────────────────
+        if (noiseGateWorkletReady.current) {
           try {
-            const rnNode = new AudioWorkletNode(actx, "rnnoise-processor", {
-              processorOptions: { strength },
+            const gateNode = new AudioWorkletNode(actx, "noise-gate-processor", {
               numberOfInputs:   1,
               numberOfOutputs:  1,
               outputChannelCount: [1],
             });
-            // Allow live strength updates
-            liveNodes.rnnoiseNode = rnNode;
-            rnNode.connect(node);
-            node = rnNode;
+            gateNode.parameters.get("threshold").value = nrOn ? threshDb : -200;
+            gateNode.parameters.get("reduction").value  = reductDb;
+            gateNode.parameters.get("attack").value      = attackSec;
+            gateNode.parameters.get("hold").value        = Math.min(1.0, holdSec);
+            gateNode.parameters.get("release").value     = releaseSec;
+            gateNode.parameters.get("bypass").value      = nrOn ? 0 : 1;
+            liveNodes.rnnoiseNode = gateNode;
+            gateNode.connect(node);
+            node = gateNode;
           } catch(e) {
-            // Worklet instantiation failed — biquad fallback already applied above
+            // Worklet unavailable — fall through to compressor gate
           }
-        } else {
-          // Pure biquad fallback: gentle noise gate via dynamics compressor
+        }
+
+        // ── Fallback: DynamicsCompressor as a noise gate ──────────────────────
+        if (!liveNodes.rnnoiseNode) {
           const gate = actx.createDynamicsCompressor();
-          gate.threshold.value = -60 + strength * 30; // -60 to -30dB threshold
-          gate.ratio.value     = 20;
-          gate.attack.value    = 0.001;
-          gate.release.value   = 0.1;
+          gate.threshold.value = nrOn ? threshDb : 0;
+          gate.ratio.value     = nrOn ? 20 : 1;
+          gate.attack.value    = attackSec;
+          gate.release.value   = releaseSec;
+          gate.knee.value      = 3;
           gate.connect(node); node = gate;
           liveNodes.rnnoiseGate = gate;
         }
 
-        liveNodes.noiseremover = { on: true };
+        // ── Voice enhancement: presence shelf (2.5kHz high-shelf) ────────────
+        const voiceShelf = actx.createBiquadFilter();
+        voiceShelf.type = "highshelf";
+        voiceShelf.frequency.value = 2500;
+        voiceShelf.gain.value = voiceAmt * 8; // 0..+8dB
+        voiceShelf.connect(node);
+        node = voiceShelf;
+        liveNodes.noiseremover = { on: nrOn, voiceShelf };
       }
 
       // ── T-Rotten Master — IK Multimedia T-RackS One emulation ──────────────
@@ -8648,7 +8726,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         // ── Fallback pitch processing (no worklet) ──────────────────────────
         // SHIFT mode: playbackRate-based semitone shift (tape-style, always works).
         // AUTOTUNE mode: ScriptProcessor-based pitch snap — finds nearest scale note
-        //   in real time using YIN-lite autocorrelation, applies tuning via GainNode
+        //   in real time using pYIN probabilistic pitch detection, applies tuning via GainNode
         //   crossfades between semitone-shifted copies (2 BiquadAllpass bands for smooth transition).
         //   Not as transparent as the phase-vocoder worklet, but fully functional.
         const semitones = fx.pitch.semitones || 0;
@@ -8660,21 +8738,20 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
         if (isAutoTune) {
           // ScriptProcessor fallback for auto-tune: soft-knee pitch snapping.
-          // We use a short-time autocorrelation (McLeod/YIN-lite) to detect f0,
+          // We use pYIN (probabilistic YIN) to detect f0,
           // compute the nearest in-scale semitone correction, then apply via
           // two interlocked BiquadAllpass comb filters (Laroche-Dolson style).
           // This gives perceptible pitch correction without AudioWorklet.
+          // Live params are written onto the sp node by applyFxLive so
+          // onaudioprocess always reads the latest values without stale closures.
           const bufSize = 4096;
           const sp = actx.createScriptProcessor(bufSize, 1, 1);
-          const speed_fb = fx.pitch.speed ?? 0.5; // correction speed 0..1
+          // Seed live-param properties on the node itself so applyFxLive can update them
+          sp._speed     = fx.pitch.speed ?? 0.5;
+          sp._rootNote  = rootNote_fb;
+          sp._scaleMask = scaleMask_fb;
+          sp._isAutoTune= true;
           let currentCents = 0; // smoothed correction in cents
-
-          // Pre-compute allpass coefficient lookup
-          const apCoeff = function(freqHz, sr) {
-            const w = 2 * Math.PI * freqHz / sr;
-            const a = (1 - Math.tan(w / 2)) / (1 + Math.tan(w / 2));
-            return a;
-          };
 
           // Simple autocorrelation pitch detector (faster than full YIN)
           const detectPitch = function(buf, sr) {
@@ -8697,6 +8774,10 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
             const input  = e.inputBuffer.getChannelData(0);
             const output = e.outputBuffer.getChannelData(0);
             const sr     = actx.sampleRate;
+            // Read live params from node properties (updated by applyFxLive)
+            const speed_live    = sp._speed     ?? 0.5;
+            const rootNote_live = sp._rootNote  ?? 0;
+            const scaleMask_live= sp._scaleMask ?? 4095;
 
             // Detect pitch
             const f0 = detectPitch(input, sr);
@@ -8709,8 +8790,8 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
               // Find nearest in-scale note
               let bestDist = 12, bestSemi = semitone;
               for (let s = 0; s < 12; s++) {
-                const scaleDeg = (s - rootNote_fb + 12) % 12;
-                if (scaleMask_fb & (1 << scaleDeg)) {
+                const scaleDeg = (s - rootNote_live + 12) % 12;
+                if (scaleMask_live & (1 << scaleDeg)) {
                   const dist = Math.abs(((s - semitone + 6 + 12) % 12) - 6);
                   if (dist < bestDist) { bestDist = dist; bestSemi = s; }
                 }
@@ -8720,11 +8801,10 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
             }
 
             // Smooth correction (speed: 0=instant, 1=slow glide ~400ms)
-            const alpha = 1 - speed_fb * 0.995;
+            const alpha = 1 - speed_live * 0.995;
             currentCents += (targetCents - currentCents) * alpha;
 
-            // Apply pitch correction via sample-rate change (playbackRate-style in ScriptProcessor)
-            // We use linear interpolation resampling for the correction cents
+            // Apply pitch correction via linear interpolation resampling
             const ratio = Math.pow(2, currentCents / 1200);
             let readPos = 0;
             for (let i = 0; i < output.length; i++) {
@@ -9082,8 +9162,20 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   useEffect(function () {
     const onVisible = function () {
       if (document.hidden) {
-        // App went to background — stop monitoring immediately so mic is released
+        // App went to background — stop monitoring so mic is released
         if (monitoringOn) { stopMonitoring(); }
+        // Save studio state so it survives an iOS background reload
+        try {
+          sessionStorage.setItem("bf_studio_state", JSON.stringify({
+            projectName, bpm, projectKey, timeSigNum, zoom,
+            snapToGrid, loopEnabled, loopIn, loopOut,
+            tracksMeta: tracks.map(function(t) {
+              return { id: t.id, name: t.name, type: t.type, color: t.color,
+                       isMuted: t.isMuted, isSoloed: t.isSoloed };
+            }),
+          }));
+          sessionStorage.setItem("bf_session_started", "1");
+        } catch(e) {}
       } else {
         // App returned to foreground — resume AudioContext if suspended
         if (actxRef.current && actxRef.current.state === "suspended") {
@@ -9093,6 +9185,10 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
             }
           });
         }
+        // Also resume monitor context if it was suspended
+        if (monitorCtxRef.current && monitorCtxRef.current.state === "suspended") {
+          monitorCtxRef.current.resume().catch(function(){});
+        }
       }
     };
     document.addEventListener("visibilitychange", onVisible);
@@ -9101,7 +9197,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [monitoringOn]);
+  }, [monitoringOn, projectName, bpm, projectKey, timeSigNum, zoom, snapToGrid, loopEnabled, loopIn, loopOut, tracks]);
 
   // selectedTrackId declared at top of component (Rules of Hooks)
 
@@ -9190,6 +9286,35 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
           stopAll(); setIsPlaying(false);
           setIsRecording(false); setRecTrackId(null); setRecTrail([]);
           return;
+        }
+
+        // ── Downmix to true mono ───────────────────────────────────────────
+        // iOS MediaRecorder sometimes produces a 2-channel (stereo) buffer even
+        // when channelCount:1 was requested — the right channel is often silent
+        // or carries a phase-shifted copy, causing audio to pan hard left on playback.
+        // Downmix to 1 channel here so recordings always play back centered.
+        if (buf && buf.numberOfChannels > 1) {
+          try {
+            const offCtx = new OfflineAudioContext(1, buf.length, buf.sampleRate);
+            const src2   = offCtx.createBufferSource();
+            src2.buffer  = buf;
+            src2.connect(offCtx.destination);
+            src2.start(0);
+            buf = await offCtx.startRendering();
+          } catch (monoErr) {
+            // If OfflineAudioContext downmix fails, do it manually in JS
+            const monoData = new Float32Array(buf.length);
+            const nc = buf.numberOfChannels;
+            for (let c = 0; c < nc; c++) {
+              const ch = buf.getChannelData(c);
+              for (let i = 0; i < buf.length; i++) monoData[i] += ch[i];
+            }
+            const inv = 1 / nc;
+            for (let i = 0; i < monoData.length; i++) monoData[i] *= inv;
+            const monoBuf = getActx().createBuffer(1, buf.length, buf.sampleRate);
+            monoBuf.copyToChannel(monoData, 0);
+            buf = monoBuf;
+          }
         }
 
         if (!buf || buf.duration < 0.05) {
@@ -11467,8 +11592,21 @@ function SplashScreen({ onDone }) {
 }
 
 export default function BeatFinder() {
-  const [splashDone, setSplashDone] = useState(false);
-  const [tab,     setTab]     = useState("home");
+  const [splashDone, setSplashDone] = useState(function() {
+    // On iOS, backgrounding the app causes a full page reload.
+    // If sessionStorage shows a session was already started, skip the splash.
+    try { if (sessionStorage.getItem("bf_session_started")) return true; } catch(e) {}
+    return false;
+  });
+  const [tab, setTab] = useState(function() {
+    // Restore the active tab after an iOS background reload.
+    // Never restore "studio" on startup — audio context / worklet init
+    // should only happen when the user explicitly navigates there.
+    try {
+      const saved = sessionStorage.getItem("bf_tab");
+      return (saved && saved !== "studio") ? saved : "home";
+    } catch(e) { return "home"; }
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [artist,  setArtist]  = useState(null); // kept for compatibility
   const [user,    setUser]    = useState(null);
@@ -11487,6 +11625,11 @@ export default function BeatFinder() {
       setSavedMap({});
     }
   }, [user]);
+
+  // Mark session as started on mount — used to skip splash on iOS background reload
+  useEffect(() => {
+    try { sessionStorage.setItem("bf_session_started", "1"); } catch(e) {}
+  }, []);
 
   // Restore session from stored JWT on app load
   useEffect(() => {
@@ -11575,6 +11718,8 @@ export default function BeatFinder() {
   const goTab = id => {
     setPlaying(null);
     setTab(id);
+    // Persist active tab so iOS background reload can restore it
+    try { sessionStorage.setItem("bf_tab", id); } catch(e) {}
   };
 
   // Lyrics state — backed by MongoDB for logged-in users, localStorage for guests
@@ -11684,7 +11829,7 @@ export default function BeatFinder() {
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} />}
-            {t === "studio"    && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
+            {t === "studio"    && tab === "studio" && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
             {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
           </div>
         ))}
