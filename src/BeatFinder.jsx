@@ -1855,20 +1855,6 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
         )}
         {/* Gradient overlay */}
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top,rgba(0,0,0,0.75) 0%,rgba(0,0,0,0.15) 50%,rgba(0,0,0,0.05) 100%)" }} />
-        {/* Blot out YouTube's baked-in play button */}
-        <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 72, height: 52, background: "rgba(0,0,0,0.85)", borderRadius: 8, backdropFilter: "blur(6px)" }} />
-        {/* Premium play button */}
-        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div className="bf-play" style={{
-            width: 56, height: 56, borderRadius: "50%",
-            background: "linear-gradient(135deg," + accentClr + ",rgba(124,58,237,0.9))",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: "0 0 0 3px rgba(255,255,255,0.12), 0 8px 32px " + glowClr,
-            backdropFilter: "blur(4px)",
-          }}>
-            <span style={{ fontSize: 20, marginLeft: 4, color: "white" }}></span>
-          </div>
-        </div>
         {/* Badges */}
         {(featured || exclusive) && (
           <div style={{ position: "absolute", top: 10, left: 12 }}>
@@ -2726,19 +2712,6 @@ function FeaturedCarousel({ savedIds, onSave, onPlay }) {
                 />
                 <div style={{ position: "absolute", inset: 0,
                   background: "linear-gradient(to top,rgba(0,0,0,0.7),transparent 55%)" }} />
-                {/* Blot out YouTube's baked-in play button */}
-                <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 60, height: 42, background: "rgba(0,0,0,0.85)", borderRadius: 6, backdropFilter: "blur(6px)" }} />
-                <div style={{ position: "absolute", inset: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <div className="bf-play" style={{
-                    width: 42, height: 42, borderRadius: "50%",
-                    background: "linear-gradient(135deg,#C026D3,#7C3AED)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    boxShadow: "0 0 0 3px rgba(255,255,255,0.12),0 6px 20px rgba(192,38,211,0.5)",
-                  }}>
-                    <span style={{ fontSize: 16, marginLeft: 3, color: "white" }}></span>
-                  </div>
-                </div>
                 <button className="bf-save" onClick={e => { e.stopPropagation(); onSave(beat); }} style={{
                   position: "absolute", top: 7, right: 7,
                   width: 30, height: 30, borderRadius: "50%", border: "none",
@@ -2806,8 +2779,6 @@ function TrendingStrip({ savedIds, onSave, onPlay }) {
                   style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                 />
                 <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.3)" }} />
-                {/* Blot out YouTube's baked-in play button */}
-                <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 56, height: 38, background: "rgba(0,0,0,0.85)", borderRadius: 5, backdropFilter: "blur(6px)" }} />
                 {/* Rank badge */}
                 <div style={{
                   position: "absolute", top: 7, left: 8,
@@ -2816,17 +2787,6 @@ function TrendingStrip({ savedIds, onSave, onPlay }) {
                   borderRadius: 20, padding: "2px 9px",
                   fontSize: 10, color: "#F59E0B", fontWeight: 900,
                 }}>#{i + 1}</div>
-                <div style={{ position: "absolute", inset: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <div style={{
-                    width: 36, height: 36, borderRadius: "50%",
-                    background: "linear-gradient(135deg,#F59E0B,#EF4444)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    boxShadow: "0 0 16px rgba(245,158,11,0.5)",
-                  }}>
-                    <span style={{ fontSize: 14, marginLeft: 3, color: "white" }}></span>
-                  </div>
-                </div>
                 <button className="bf-save" onClick={e => { e.stopPropagation(); onSave(beat); }} style={{
                   position: "absolute", top: 5, right: 6,
                   width: 26, height: 26, borderRadius: "50%", border: "none",
