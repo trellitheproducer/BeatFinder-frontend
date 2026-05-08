@@ -1864,7 +1864,7 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
             boxShadow: "0 0 0 3px rgba(255,255,255,0.12), 0 8px 32px " + glowClr,
             backdropFilter: "blur(4px)",
           }}>
-            <span style={{ fontSize: 20, marginLeft: 4, color: "white" }}>▶</span>
+            <span style={{ fontSize: 20, marginLeft: 4, color: "white" }}></span>
           </div>
         </div>
         {/* Badges */}
@@ -2732,7 +2732,7 @@ function FeaturedCarousel({ savedIds, onSave, onPlay }) {
                     display: "flex", alignItems: "center", justifyContent: "center",
                     boxShadow: "0 0 0 3px rgba(255,255,255,0.12),0 6px 20px rgba(192,38,211,0.5)",
                   }}>
-                    <span style={{ fontSize: 16, marginLeft: 3, color: "white" }}>▶</span>
+                    <span style={{ fontSize: 16, marginLeft: 3, color: "white" }}></span>
                   </div>
                 </div>
                 <button className="bf-save" onClick={e => { e.stopPropagation(); onSave(beat); }} style={{
@@ -2818,7 +2818,7 @@ function TrendingStrip({ savedIds, onSave, onPlay }) {
                     display: "flex", alignItems: "center", justifyContent: "center",
                     boxShadow: "0 0 16px rgba(245,158,11,0.5)",
                   }}>
-                    <span style={{ fontSize: 14, marginLeft: 3, color: "white" }}>▶</span>
+                    <span style={{ fontSize: 14, marginLeft: 3, color: "white" }}></span>
                   </div>
                 </div>
                 <button className="bf-save" onClick={e => { e.stopPropagation(); onSave(beat); }} style={{
@@ -7972,7 +7972,6 @@ function StudioScreen({ user, onExit }) {
   const recStopActxTimeRef = useRef(null); // actx.currentTime snapshot at the moment stop is pressed
   const clipIdRef = useRef(null);
   const countTimerRef   = useRef(null);
-  const scrollResumeTimerRef = useRef(null);
   const metroRef        = useRef(null);
   const pinchRef        = useRef(null);
   const zoomRef         = useRef(zoom);
@@ -8074,11 +8073,6 @@ function StudioScreen({ user, onExit }) {
   useEffect(function () { zoomRef.current = zoom; }, [zoom]);
   useEffect(function () { isPlayingRef.current = isPlaying; }, [isPlaying]);
   useEffect(function () { tracksRef.current = tracks; }, [tracks]);
-
-  // Clear scroll-resume timer on unmount
-  useEffect(function () {
-    return function () { if (scrollResumeTimerRef.current) clearTimeout(scrollResumeTimerRef.current); };
-  }, []);
 
   // Set initial position — Bar1 under centred playhead at t=0
   useEffect(function () {
@@ -12834,31 +12828,16 @@ userPickedMicRef.current = true;
           }}
           onScroll={function(e){
             const sl = e.target.scrollLeft;
-            const t = Math.max(0, sl / effectivePPS);
-
             if (!isPlayingRef.current) {
-              // Not playing — just move the playhead
+              const t = Math.max(0, sl / effectivePPS);
               setCurrentTime(t);
               playheadAtRef.current = t;
               updatePlayheadDOM(t, sl);
             } else {
-              // Playing — pause immediately, seek to scroll position, resume after scroll settles
-              stopAll();
-              setIsPlaying(false);
-              setCurrentTime(t);
-              playheadAtRef.current = t;
+              // During playback: playhead is driven by RAF, just update DOM position
+              const actx = actxRef.current;
+              const t = actx ? playheadAtRef.current + (actx.currentTime - masterStartRef.current) : playheadAtRef.current;
               updatePlayheadDOM(t, sl);
-
-              // Resume playback once the user stops scrolling (300ms debounce)
-              if (scrollResumeTimerRef.current) clearTimeout(scrollResumeTimerRef.current);
-              scrollResumeTimerRef.current = setTimeout(function () {
-                scrollResumeTimerRef.current = null;
-                if (!isPlayingRef.current) {
-                  setCurrentTime(t);
-                  playheadAtRef.current = t;
-                  setIsPlaying(true);
-                }
-              }, 300);
             }
           }}
         >
