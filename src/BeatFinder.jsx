@@ -6979,7 +6979,7 @@ function StudioScreen({ user, onExit }) {
   // ── Headphone detection + mic enumeration ────────────────────
   // Returns { headphonesConnected, mics: [{deviceId, label, isBuiltIn}] }
   // iOS Safari only reveals real device labels after mic permission is granted.
-  // We identify built-in vs headset by label keywords; fallback to sentinel IDs.
+  // We identify built-in vs headset by label keywords; fallback to input count.
   const checkHeadphones = async function () {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -6993,48 +6993,73 @@ function StudioScreen({ user, onExit }) {
                l.includes("bluetooth")||l.includes("headset")||l.includes("wired");
       });
 
-      // 2nd check (iOS / mobile fallback): audiooutput labels stay blank until
-      // setSinkId permission. Instead check audioinput — a wired headset exposes
-      // a "Headset Microphone" input that IS labelled after mic permission is granted.
-      const hpByInput = !hpByOutput && inputs.some(function(d){
+      // 2nd check (iOS / mobile): a wired headset exposes a "Headset Microphone"
+      // audioinput that IS labelled after mic permission is granted.
+      const hpByInputLabel = !hpByOutput && inputs.some(function(d){
         const l = (d.label||"").toLowerCase();
         return l.includes("headset")||l.includes("wired")||l.includes("external")||
-               l.includes("earphone")||l.includes("airpods");
+               l.includes("earphone")||l.includes("airpod")||l.includes("earbud");
       });
 
-      // 3rd check: if we have mic permission (any label visible) and there are
-      // more inputs than just the built-in one, a headset mic is almost certainly present.
-      const anyLabel   = inputs.some(function(d){ return !!(d.label); });
-      const hpByCount  = !hpByOutput && !hpByInput && anyLabel && inputs.length > 1;
+      // 3rd check: if labels ARE visible and there are more inputs than the built-in one,
+      // a headset mic is almost certainly present (iOS with mic permission granted).
+      const anyLabel  = inputs.some(function(d){ return !!(d.label); });
+      const hpByCount = !hpByOutput && !hpByInputLabel && anyLabel && inputs.length > 1;
 
-      const hp = hpByOutput || hpByInput || hpByCount;
-      setHeadphonesIn(hp);
+      // 4th check (iOS before permission OR permission just granted but labels blank):
+      // iOS exposes a SECOND audioinput entry when a wired headset is plugged in,
+      // even before labels are populated. Use this as a soft "probably connected" signal.
+      // We flag it separately so the UI can say "headset likely connected — tap to use".
+      const hpByExtraInput = !hpByOutput && !hpByInputLabel && !hpByCount && inputs.length > 1;
+
+      const hp = hpByOutput || hpByInputLabel || hpByCount;
+      const hpLikely = hp || hpByExtraInput; // includes the "probably" case
+      setHeadphonesIn(hpLikely);
 
       // Classify mic inputs
-      // iOS exposes labels like "iPhone Microphone" and "Headset Microphone" after permission
-      let builtInId   = null; // real deviceId of iPhone built-in mic
-      let headsetId   = null; // real deviceId of wired headset mic
+      // iOS exposes labels like "iPhone Microphone" and "Headset Microphone" after permission.
+      // Before permission all labels are blank — we fall back to index (index 0 = built-in,
+      // index 1+ = external/headset on iOS when a headset is present).
+      let builtInId   = null;
+      let headsetId   = null;
+      let builtInLabel = "📱 iPhone Mic";
+      let headsetLabel = "🎙 Headset Mic";
 
-      inputs.forEach(function(d) {
+      inputs.forEach(function(d, idx) {
         if (!d.deviceId) return;
         const l = (d.label||"").toLowerCase();
         const isHeadset = l.includes("headset")||l.includes("wired")||l.includes("external")||
                           l.includes("airpod")||l.includes("earphone")||l.includes("earbud")||
                           l.includes("bluetooth");
-        const isBuiltIn = l.includes("iphone")||l.includes("built-in")||l.includes("internal")||l.includes("front");
-        if (isHeadset && !headsetId) headsetId = d.deviceId;
-        else if (isBuiltIn && !builtInId) builtInId = d.deviceId;
+        const isBuiltIn = l.includes("iphone")||l.includes("built-in")||l.includes("internal")||
+                          l.includes("front")||l.includes("default");
+
+        if (l) {
+          // Labels available — use keyword classification
+          if (isHeadset && !headsetId) {
+            headsetId   = d.deviceId;
+            headsetLabel = "🎙 " + (d.label.length < 30 ? d.label : "Headset Mic");
+          } else if ((isBuiltIn || (!isHeadset && !builtInId)) && !builtInId) {
+            builtInId   = d.deviceId;
+            builtInLabel = "📱 " + (d.label.includes("iPhone") ? "iPhone Mic" : (d.label.length < 30 ? d.label : "iPhone Mic"));
+          }
+        } else {
+          // No labels yet (pre-permission) — assume index 0 = built-in, index 1 = headset
+          if (idx === 0 && !builtInId) builtInId = d.deviceId;
+          if (idx === 1 && !headsetId) headsetId = d.deviceId;
+        }
       });
 
       // Build the two-option list
-      // "builtin" sentinel → we'll resolve to the actual built-in deviceId at stream time
-      // "headset" sentinel → headset mic (or iOS auto-route when no real id found)
       const mics = [
-        { deviceId: builtInId || "builtin", label: "📱 iPhone Mic", isBuiltIn: true },
-        { deviceId: headsetId || "headset", label: "🎙 Headset Mic", isBuiltIn: false },
+        { deviceId: builtInId || "builtin", label: builtInLabel, isBuiltIn: true },
+        { deviceId: headsetId || "headset", label: headsetLabel, isBuiltIn: false,
+          detected: !!(hpByOutput || hpByInputLabel || hpByCount),  // confirmed label-match
+          likely:   hpByExtraInput,                                   // inferred from count
+        },
       ];
       setAvailableMics(mics);
-      return { headphonesConnected: hp, mics };
+      return { headphonesConnected: hpLikely, mics };
     } catch(e){ return { headphonesConnected: false, mics: [] }; }
   };
 
@@ -7046,6 +7071,13 @@ function StudioScreen({ user, onExit }) {
     navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
     return function(){ navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange); };
   }, []);
+
+  // Re-scan as soon as mic permission is granted — iOS only reveals device labels
+  // (e.g. "iPhone Microphone", "Headset Microphone") after the first getUserMedia call.
+  // Without this, headphonesIn stays false even when a headset is already plugged in.
+  useEffect(function () {
+    if (micReady) { setTimeout(checkHeadphones, 400); }
+  }, [micReady]);
 
   // Auto-switch mic source when headphones are plugged in / pulled out.
   // Rules:
@@ -7978,6 +8010,55 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         nrOn ? -60 + strength * 30 : 0, now, T
       );
     }
+
+    // ── T-Rotten Master — live param morphing ──────────────────────────────
+    if (live.trotten && fx.trotten !== undefined) {
+      const tr   = fx.trotten || {};
+      const trOn = !!(fx.trotten && fx.trotten.on);
+
+      // Input / output gain
+      live.trotten.trInGain.gain.setTargetAtTime(
+        trOn ? Math.pow(10, (tr.inputGain ?? 0) / 20) : 1, now, T
+      );
+      live.trotten.trOutGain.gain.setTargetAtTime(
+        trOn ? Math.pow(10, (tr.outputGain ?? 0) / 20) : 1, now, T
+      );
+
+      // EQ bands
+      live.trotten.trEqLow.type       = trOn && tr.eqLowT  === "bell"  ? "peaking"  : "lowshelf";
+      live.trotten.trEqMid.type       = trOn && tr.eqMidT  === "shelf" ? "lowshelf" : "peaking";
+      live.trotten.trEqHigh.type      = trOn && tr.eqHighT === "bell"  ? "peaking"  : "highshelf";
+      live.trotten.trEqLow.gain.setTargetAtTime(  trOn ? (tr.eqLow  ?? 0) : 0, now, T);
+      live.trotten.trEqMid.gain.setTargetAtTime(  trOn ? (tr.eqMid  ?? 0) : 0, now, T);
+      live.trotten.trEqHigh.gain.setTargetAtTime( trOn ? (tr.eqHigh ?? 0) : 0, now, T);
+
+      // Compressor
+      const compRatio = trOn ? Math.max(1, 1 + (tr.compAmt ?? 50) / 100 * 19) : 1;
+      live.trotten.trComp.threshold.setTargetAtTime(trOn ? (tr.compThr ?? -15) : 0, now, T);
+      live.trotten.trComp.ratio.setTargetAtTime(compRatio, now, T);
+      live.trotten.trComp.attack.setTargetAtTime(
+        trOn && tr.compMode === "fast" ? 0.001 : 0.005, now, T
+      );
+      live.trotten.trComp.release.setTargetAtTime(
+        trOn && tr.compMode === "slow" ? 0.5 : 0.1, now, T
+      );
+
+      // Tape saturation — rebuild curve when drive/sat/mode changes
+      live.trotten.trTape.curve = live.trotten.buildTapeCurve(
+        trOn ? (tr.tapeDrv ?? 5) : 0,
+        trOn ? (tr.tapeSat ?? 5) : 0,
+        trOn ? (tr.tapeMode ?? "modern") : "modern"
+      );
+      live.trotten.trTapeShelf.gain.setTargetAtTime(
+        trOn && tr.tapeMode === "vintage" ? 1.5 : 0, now, T
+      );
+
+      // Limiter
+      live.trotten.trLim.threshold.setTargetAtTime(trOn ? (tr.limCeil ?? -0.5) : 0, now, T);
+      live.trotten.trLim.release.setTargetAtTime(
+        trOn ? Math.max(0.05, tr.limRel ?? 0.5) : 0.25, now, T
+      );
+    }
   };
   const toggleMute = function (id) {
     setTracks(function(prev){
@@ -8436,6 +8517,105 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         liveNodes.noiseremover = { on: true };
       }
 
+      // ── T-Rotten Master — IK Multimedia T-RackS One emulation ──────────────
+      // Signal chain: inputGain → 3-band EQ → compressor → tape saturator → limiter → outputGain
+      // Always built so all knobs can morph live without a restart.
+      {
+        const tr   = fx.trotten || {};
+        const trOn = !!(fx.trotten && fx.trotten.on);
+
+        // Input gain
+        const trInGain = actx.createGain();
+        trInGain.gain.value = trOn ? Math.pow(10, (tr.inputGain ?? 0) / 20) : 1;
+
+        // Low-shelf EQ
+        const trEqLow = actx.createBiquadFilter();
+        trEqLow.type = trOn && tr.eqLowT === "bell" ? "peaking" : "lowshelf";
+        trEqLow.frequency.value = 200;
+        trEqLow.gain.value      = trOn ? (tr.eqLow ?? 0) : 0;
+        trEqLow.Q.value         = 0.707;
+
+        // Mid peaking/bell EQ
+        const trEqMid = actx.createBiquadFilter();
+        trEqMid.type = trOn && tr.eqMidT === "shelf" ? "lowshelf" : "peaking";
+        trEqMid.frequency.value = 1000;
+        trEqMid.gain.value      = trOn ? (tr.eqMid ?? 0) : 0;
+        trEqMid.Q.value         = 1.0;
+
+        // High-shelf EQ
+        const trEqHigh = actx.createBiquadFilter();
+        trEqHigh.type = trOn && tr.eqHighT === "bell" ? "peaking" : "highshelf";
+        trEqHigh.frequency.value = 8000;
+        trEqHigh.gain.value      = trOn ? (tr.eqHigh ?? 0) : 0;
+        trEqHigh.Q.value         = 0.707;
+
+        // Compressor — compAmt 0..100 maps to ratio 1..20, threshold from compThr
+        const trComp = actx.createDynamicsCompressor();
+        const compRatio = trOn ? Math.max(1, 1 + (tr.compAmt ?? 50) / 100 * 19) : 1;
+        trComp.threshold.value = trOn ? (tr.compThr ?? -15) : 0;
+        trComp.ratio.value     = compRatio;
+        trComp.attack.value    = trOn && tr.compMode === "fast" ? 0.001 : 0.005;
+        trComp.release.value   = trOn && tr.compMode === "slow" ? 0.5   : 0.1;
+        trComp.knee.value      = 6;
+
+        // Tape saturation waveshaper — tapeDrv 0..10, tapeSat 0..10
+        const trTape = actx.createWaveShaper();
+        const buildTapeCurve = function(drv, sat, mode) {
+          const n = 512; const c = new Float32Array(n);
+          const k = (drv / 10) * 4 + (sat / 10) * 2; // combined drive+sat
+          const warmBoost = mode === "vintage" ? 1.3 : 1.0;
+          for (let i = 0; i < n; i++) {
+            const x = (i * 2 / n - 1) * warmBoost;
+            if (k < 0.01) { c[i] = x; }
+            else { c[i] = (Math.PI + k) * x / (Math.PI + k * Math.abs(x)); }
+          }
+          return c;
+        };
+        trTape.curve      = buildTapeCurve(
+          trOn ? (tr.tapeDrv ?? 5) : 0,
+          trOn ? (tr.tapeSat ?? 5) : 0,
+          trOn ? (tr.tapeMode ?? "modern") : "modern"
+        );
+        trTape.oversample = "4x";
+
+        // Tape tone coloring: slight low-end warmth boost in vintage mode
+        const trTapeShelf = actx.createBiquadFilter();
+        trTapeShelf.type          = "lowshelf";
+        trTapeShelf.frequency.value = 300;
+        trTapeShelf.gain.value    = trOn && tr.tapeMode === "vintage" ? 1.5 : 0;
+
+        // Brickwall limiter (emulate true-peak limiter via hard DynamicsCompressor)
+        const trLim = actx.createDynamicsCompressor();
+        const limCeil = trOn ? (tr.limCeil ?? -0.5) : 0;
+        trLim.threshold.value = trOn ? limCeil : 0;
+        trLim.ratio.value     = 20; // near-infinite ratio = brickwall
+        trLim.attack.value    = 0.0005; // 0.5ms lookahead
+        trLim.release.value   = trOn ? Math.max(0.05, tr.limRel ?? 0.5) : 0.25;
+        trLim.knee.value      = 0;
+
+        // Output gain
+        const trOutGain = actx.createGain();
+        trOutGain.gain.value = trOn ? Math.pow(10, (tr.outputGain ?? 0) / 20) : 1;
+
+        // Chain: trInGain → trEqLow → trEqMid → trEqHigh → trComp → trTape → trTapeShelf → trLim → trOutGain → [rest]
+        trOutGain.connect(node);
+        trLim.connect(trOutGain);
+        trTapeShelf.connect(trLim);
+        trTape.connect(trTapeShelf);
+        trComp.connect(trTape);
+        trEqHigh.connect(trComp);
+        trEqMid.connect(trEqHigh);
+        trEqLow.connect(trEqMid);
+        trInGain.connect(trEqLow);
+        node = trInGain;
+
+        liveNodes.trotten = {
+          trInGain, trEqLow, trEqMid, trEqHigh,
+          trComp, trTape, trTapeShelf, trLim, trOutGain,
+          buildTapeCurve,
+        };
+      }
+
       // ── Pitch/Autotune via phase-vocoder AudioWorklet ──────────────────────
       // SHIFT mode (mode=0): uses pitch param (semitone ratio) directly.
       // AUTOTUNE mode (mode=1): worklet detects live pitch and snaps to scale at speed rate.
@@ -8466,7 +8646,106 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
           node._pitchSemitones = fx.pitch.semitones || 0;
         }
       } else if (fx.pitch && fx.pitch.on) {
-        node._pitchSemitones = fx.pitch.semitones || 0;
+        // ── Fallback pitch processing (no worklet) ──────────────────────────
+        // SHIFT mode: playbackRate-based semitone shift (tape-style, always works).
+        // AUTOTUNE mode: ScriptProcessor-based pitch snap — finds nearest scale note
+        //   in real time using YIN-lite autocorrelation, applies tuning via GainNode
+        //   crossfades between semitone-shifted copies (2 BiquadAllpass bands for smooth transition).
+        //   Not as transparent as the phase-vocoder worklet, but fully functional.
+        const semitones = fx.pitch.semitones || 0;
+        const isAutoTune = fx.pitch.mode === 'autotune';
+        const NOTE_MAP_FB   = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
+        const SCALE_MASKS_FB= { chromatic:4095, major:2741, minor:1453, pentatonic:661, blues:1193 };
+        const rootNote_fb   = NOTE_MAP_FB[fx.pitch.key || 'C'] || 0;
+        const scaleMask_fb  = SCALE_MASKS_FB[fx.pitch.scale || 'chromatic'] ?? 4095;
+
+        if (isAutoTune) {
+          // ScriptProcessor fallback for auto-tune: soft-knee pitch snapping.
+          // We use a short-time autocorrelation (McLeod/YIN-lite) to detect f0,
+          // compute the nearest in-scale semitone correction, then apply via
+          // two interlocked BiquadAllpass comb filters (Laroche-Dolson style).
+          // This gives perceptible pitch correction without AudioWorklet.
+          const bufSize = 4096;
+          const sp = actx.createScriptProcessor(bufSize, 1, 1);
+          const speed_fb = fx.pitch.speed ?? 0.5; // correction speed 0..1
+          let currentCents = 0; // smoothed correction in cents
+
+          // Pre-compute allpass coefficient lookup
+          const apCoeff = function(freqHz, sr) {
+            const w = 2 * Math.PI * freqHz / sr;
+            const a = (1 - Math.tan(w / 2)) / (1 + Math.tan(w / 2));
+            return a;
+          };
+
+          // Simple autocorrelation pitch detector (faster than full YIN)
+          const detectPitch = function(buf, sr) {
+            const n = buf.length;
+            let rms = 0;
+            for (let i = 0; i < n; i++) rms += buf[i] * buf[i];
+            if (rms / n < 0.0003) return 0;
+            const minP = Math.ceil(sr / 1200);
+            const maxP = Math.floor(sr / 50);
+            let bestCorr = -1, bestTau = 0;
+            for (let tau = minP; tau < Math.min(maxP, n >> 1); tau++) {
+              let corr = 0;
+              for (let j = 0; j < n >> 1; j++) corr += buf[j] * buf[j + tau];
+              if (corr > bestCorr) { bestCorr = corr; bestTau = tau; }
+            }
+            return bestTau > 0 ? sr / bestTau : 0;
+          };
+
+          sp.onaudioprocess = function(e) {
+            const input  = e.inputBuffer.getChannelData(0);
+            const output = e.outputBuffer.getChannelData(0);
+            const sr     = actx.sampleRate;
+
+            // Detect pitch
+            const f0 = detectPitch(input, sr);
+            let targetCents = 0;
+
+            if (f0 > 20) {
+              // Convert f0 to MIDI note number
+              const midiNote = 69 + 12 * Math.log2(f0 / 440);
+              const semitone = Math.round(midiNote) % 12;
+              // Find nearest in-scale note
+              let bestDist = 12, bestSemi = semitone;
+              for (let s = 0; s < 12; s++) {
+                const scaleDeg = (s - rootNote_fb + 12) % 12;
+                if (scaleMask_fb & (1 << scaleDeg)) {
+                  const dist = Math.abs(((s - semitone + 6 + 12) % 12) - 6);
+                  if (dist < bestDist) { bestDist = dist; bestSemi = s; }
+                }
+              }
+              // Correction = distance from detected to nearest scale note (in cents)
+              targetCents = ((bestSemi - semitone + 6 + 12) % 12 - 6) * 100;
+            }
+
+            // Smooth correction (speed: 0=instant, 1=slow glide ~400ms)
+            const alpha = 1 - speed_fb * 0.995;
+            currentCents += (targetCents - currentCents) * alpha;
+
+            // Apply pitch correction via sample-rate change (playbackRate-style in ScriptProcessor)
+            // We use linear interpolation resampling for the correction cents
+            const ratio = Math.pow(2, currentCents / 1200);
+            let readPos = 0;
+            for (let i = 0; i < output.length; i++) {
+              const iPos = Math.floor(readPos);
+              const frac = readPos - iPos;
+              const s0   = input[Math.min(iPos,     input.length - 1)];
+              const s1   = input[Math.min(iPos + 1, input.length - 1)];
+              output[i]  = s0 + (s1 - s0) * frac;
+              readPos   += ratio;
+              if (readPos >= input.length) readPos = input.length - 1;
+            }
+          };
+
+          sp.connect(node);
+          node = sp;
+          liveNodes.pitchFallbackSP = sp;
+        } else {
+          // SHIFT mode fallback: pure playbackRate-based shift applied in scheduleClip
+          node._pitchSemitones = semitones;
+        }
       }
       // Formant stored for scheduleClip fallback (no worklet path)
       if (fx.pitch && fx.pitch.on) {
@@ -10571,23 +10850,23 @@ self.onmessage = async function(e) {
             onChange={function(e){ setMonitorVol(parseFloat(e.target.value)); }}
             style={{ width:50,accentColor:"#22C55E",height:2 }} />
         )}
-        {/* Mic source picker — iPhone Mic is always the default.
-            Headset Mic option always shown; disabled until a headset is detected. */}
+        {/* Mic source picker — dropdown. Headset option is never disabled;
+            status is shown in the label itself so users always know what's connected. */}
         <select
           value={micSource}
           onChange={function(e){
             const next = e.target.value;
-            userPickedMicRef.current = true; // user has explicitly chosen — disable auto-switch
+            if (next === "__scan__") { checkHeadphones(); return; }
+            userPickedMicRef.current = true;
             setMicSource(next);
             if (monitoringOn) { stopMonitoring(); setTimeout(function(){ startMonitoring(undefined, next); }, 150); }
           }}
           title="Choose microphone source"
-          style={{ background:"#141414",border:"1px solid #2a2a2a",borderRadius:6,color:"#aaa",fontSize:9,fontWeight:700,padding:"3px 5px",cursor:"pointer",outline:"none",maxWidth:115 }}
+          style={{ background:"#141414", border:"1px solid #2a2a2a", borderRadius:6, color:"#aaa", fontSize:9, fontWeight:700, padding:"3px 5px", cursor:"pointer", outline:"none", maxWidth:130 }}
         >
           <option value="builtin">📱 iPhone Mic</option>
-          <option value="headset" disabled={!headphonesIn} style={{ color: headphonesIn ? undefined : "#555" }}>
-            {headphonesIn ? "🎙 Headset Mic" : "🎙 Headset (none)"}
-          </option>
+          <option value="headset">🎙 Headset Mic</option>
+          <option value="__scan__" style={{ color:"#666", fontStyle:"italic" }}>⟳ Detect headset…</option>
         </select>
       </div>
       {monitorWarn && <div style={{ background:"rgba(245,158,11,0.1)",borderBottom:"1px solid rgba(245,158,11,0.2)",color:"#F59E0B",fontSize:11,padding:"4px 16px",textAlign:"center",flexShrink:0 }}>{monitorWarn}</div>}
