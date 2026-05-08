@@ -1855,6 +1855,8 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
         )}
         {/* Gradient overlay */}
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top,rgba(0,0,0,0.75) 0%,rgba(0,0,0,0.15) 50%,rgba(0,0,0,0.05) 100%)" }} />
+        {/* Blot out YouTube's baked-in play button */}
+        <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 72, height: 52, background: "rgba(0,0,0,0.85)", borderRadius: 8, backdropFilter: "blur(6px)" }} />
         {/* Premium play button */}
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div className="bf-play" style={{
@@ -2724,6 +2726,8 @@ function FeaturedCarousel({ savedIds, onSave, onPlay }) {
                 />
                 <div style={{ position: "absolute", inset: 0,
                   background: "linear-gradient(to top,rgba(0,0,0,0.7),transparent 55%)" }} />
+                {/* Blot out YouTube's baked-in play button */}
+                <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 60, height: 42, background: "rgba(0,0,0,0.85)", borderRadius: 6, backdropFilter: "blur(6px)" }} />
                 <div style={{ position: "absolute", inset: 0,
                   display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <div className="bf-play" style={{
@@ -2802,6 +2806,8 @@ function TrendingStrip({ savedIds, onSave, onPlay }) {
                   style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                 />
                 <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.3)" }} />
+                {/* Blot out YouTube's baked-in play button */}
+                <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 56, height: 38, background: "rgba(0,0,0,0.85)", borderRadius: 5, backdropFilter: "blur(6px)" }} />
                 {/* Rank badge */}
                 <div style={{
                   position: "absolute", top: 7, left: 8,
