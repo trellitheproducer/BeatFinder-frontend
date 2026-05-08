@@ -102,6 +102,649 @@ function BFLoader({ text, type }) {
 
 
 // =============================================================================
+// VU METER COMPONENTS
+// =============================================================================
+
+// Shared hook: drives a real AnalyserNode and returns {level, peak, clipping}
+function useAnalyser(analyserNode, isActive) {
+  const [level,    setLevel]    = React.useState(0);
+  const [peak,     setPeak]     = React.useState(0);
+  const [clipping, setClipping] = React.useState(false);
+  const peakHold   = React.useRef(0);
+  const peakTimer  = React.useRef(null);
+  const rafRef     = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!analyserNode || !isActive) {
+      setLevel(0); setPeak(0); setClipping(false);
+      return;
+    }
+    const bufLen = analyserNode.frequencyBinCount;
+    const data   = new Float32Array(bufLen);
+    const tick   = () => {
+      analyserNode.getFloatTimeDomainData(data);
+      let rms = 0;
+      let pk  = 0;
+      for (let i = 0; i < bufLen; i++) {
+        const v = Math.abs(data[i]);
+        rms += v * v;
+        if (v > pk) pk = v;
+      }
+      rms = Math.sqrt(rms / bufLen);
+      const rmsDb = rms > 0 ? 20 * Math.log10(rms) : -100;
+      const pkDb  = pk  > 0 ? 20 * Math.log10(pk)  : -100;
+      // Normalise -60..0 dB → 0..1
+      const normRms = Math.max(0, Math.min(1, (rmsDb + 60) / 60));
+      const normPk  = Math.max(0, Math.min(1, (pkDb  + 60) / 60));
+      setLevel(normRms);
+      setClipping(pk >= 0.999);
+      // Peak hold: 2 s decay
+      if (normPk > peakHold.current) {
+        peakHold.current = normPk;
+        clearTimeout(peakTimer.current);
+        peakTimer.current = setTimeout(() => { peakHold.current = 0; setPeak(0); }, 2000);
+      }
+      setPeak(peakHold.current);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      clearTimeout(peakTimer.current);
+    };
+  }, [analyserNode, isActive]);
+
+  return { level, peak, clipping };
+}
+
+// Animated VU meter for the YouTube Player (no direct audio access – driven by animation)
+function PlayerVUMeter({ isPlaying }) {
+  const [bars, setBars] = React.useState(() => Array(12).fill(0));
+  const rafRef = React.useRef(null);
+  const tRef   = React.useRef(0);
+
+  React.useEffect(() => {
+    if (!isPlaying) {
+      cancelAnimationFrame(rafRef.current);
+      setBars(Array(12).fill(0));
+      return;
+    }
+    const animate = (ts) => {
+      tRef.current = ts;
+      setBars(prev => prev.map((_, i) => {
+        // Each bar oscillates at a different frequency with some randomness
+        const base  = 0.35 + 0.45 * Math.abs(Math.sin(ts * 0.001 * (0.7 + i * 0.13) + i));
+        const noise = (Math.random() - 0.5) * 0.18;
+        return Math.max(0, Math.min(1, base + noise));
+      }));
+      rafRef.current = requestAnimationFrame(animate);
+    };
+    rafRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [isPlaying]);
+
+  const clipping = bars.some(b => b > 0.92);
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "flex-end", gap: 3,
+      height: 40, padding: "6px 10px",
+      background: "rgba(0,0,0,0.5)",
+      borderRadius: 8,
+      border: "1px solid " + (clipping ? "rgba(239,68,68,0.5)" : "rgba(255,255,255,0.08)"),
+    }}>
+      {bars.map((v, i) => {
+        const isClip = v > 0.92;
+        const color  = isClip ? "#EF4444" : v > 0.75 ? "#F59E0B" : "#22C55E";
+        return (
+          <div key={i} style={{
+            flex: 1, borderRadius: 2,
+            background: isPlaying ? color : "#1a1a1a",
+            height: isPlaying ? Math.max(3, v * 28) : 3,
+            transition: "height 0.05s ease, background 0.1s",
+            boxShadow: isPlaying ? "0 0 4px " + color + "88" : "none",
+          }} />
+        );
+      })}
+    </div>
+  );
+}
+
+// Real VU meter driven by a Web Audio AnalyserNode – used in Studio
+function VUMeter({ analyserNode, isActive, compact, label, showLabel }) {
+  const { level, peak, clipping } = useAnalyser(analyserNode, isActive);
+  const BAR_COUNT = compact ? 8 : 14;
+  const HEIGHT    = compact ? 28 : 36;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {showLabel && (
+        <div style={{ color: clipping ? "#EF4444" : "#444", fontSize: 8, fontWeight: 700, letterSpacing: 1, textAlign: "center", fontFamily: "monospace" }}>
+          {label || "LEVEL"}{clipping ? " ◆ CLIP" : ""}
+        </div>
+      )}
+      <div style={{
+        display: "flex", alignItems: "flex-end", gap: compact ? 1.5 : 2,
+        height: HEIGHT,
+        background: "rgba(0,0,0,0.6)",
+        borderRadius: 6,
+        padding: compact ? "4px 6px" : "5px 8px",
+        border: "1px solid " + (clipping ? "rgba(239,68,68,0.6)" : "rgba(255,255,255,0.06)"),
+        boxShadow: clipping ? "0 0 8px rgba(239,68,68,0.3)" : "none",
+        transition: "box-shadow 0.1s, border-color 0.1s",
+        position: "relative",
+      }}>
+        {Array.from({ length: BAR_COUNT }, (_, i) => {
+          const thresh   = i / BAR_COUNT;
+          const active   = level >= thresh;
+          const isPeak   = peak  >= thresh && peak < thresh + (1 / BAR_COUNT) * 1.5;
+          const isClipZone = i >= BAR_COUNT - 2;
+          const color    = isClipZone ? "#EF4444" : i >= BAR_COUNT * 0.72 ? "#F59E0B" : "#22C55E";
+          return (
+            <div key={i} style={{
+              flex: 1, borderRadius: 1.5,
+              background: active ? color : isPeak ? color : "#1a1a1a",
+              height: active ? "100%" : isPeak ? "100%" : "30%",
+              opacity: active ? 1 : isPeak ? 0.9 : 0.2,
+              boxShadow: active && isClipZone ? "0 0 6px rgba(239,68,68,0.8)" : active ? "0 0 3px " + color + "55" : "none",
+              transition: active ? "none" : "opacity 0.15s, height 0.15s",
+            }} />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOGIC PRO-STYLE STEREO VU METER  (horizontal, L above R, green/yellow/red)
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// LOGIC PRO-STYLE STEREO VU METER  (horizontal L/R bars, embedded in fader row)
+// ─────────────────────────────────────────────────────────────────────────────
+function StereoVUMeter({ analyserNode, isActive }) {
+  const { level, peak, clipping } = useAnalyser(analyserNode, isActive);
+  const rOff   = React.useRef(0.90 + Math.random() * 0.10);
+  const rLevel = Math.min(1, level * rOff.current);
+  const rPeak  = Math.min(1, peak  * rOff.current);
+  const SEGS   = 16;
+
+  const renderBar = (v, pk) => (
+    <div style={{ display:"flex", gap:1, height:3, alignItems:"stretch", width:"100%" }}>
+      {Array.from({ length: SEGS }, (_, i) => {
+        const frac      = i / SEGS;
+        const lit       = v >= frac;
+        const isPeak    = pk > 0 && Math.abs(pk - frac) < (1.2 / SEGS);
+        const baseColor = frac >= 0.875 ? "#FF3B30" : frac >= 0.688 ? "#FFD60A" : "#30D158";
+        const dimColor  = frac >= 0.875 ? "#2a0a08" : frac >= 0.688 ? "#2a2500" : "#082014";
+        return (
+          <div key={i} style={{
+            flex:1, borderRadius:1,
+            background: isPeak ? "#fff" : lit ? baseColor : dimColor,
+            boxShadow: lit && frac >= 0.875 ? "0 0 2px rgba(255,59,48,0.6)" : "none",
+          }} />
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:1.5, width:"100%" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:2 }}>
+        <span style={{ color:"#404040", fontSize:6, fontWeight:700, width:5, flexShrink:0 }}>L</span>
+        <div style={{ flex:1 }}>{renderBar(level, peak)}</div>
+        <div style={{ width:4, height:4, borderRadius:1, background: clipping ? "#FF3B30" : "#1a1a1a", flexShrink:0 }} />
+      </div>
+      <div style={{ display:"flex", alignItems:"center", gap:2 }}>
+        <span style={{ color:"#404040", fontSize:6, fontWeight:700, width:5, flexShrink:0 }}>R</span>
+        <div style={{ flex:1 }}>{renderBar(rLevel, rPeak)}</div>
+        <div style={{ width:4, height:4, borderRadius:1, background:"transparent", flexShrink:0 }} />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOGIC PRO VOLUME FADER  — horizontal slider with thumb, 0→1.5 range
+// Sits below the VU meters exactly like Logic's channel strip fader
+// ─────────────────────────────────────────────────────────────────────────────
+function LogicVolumeFader({ value = 1, onChange }) {
+  const trackRef  = React.useRef(null);
+  const dragging  = React.useRef(false);
+  const startX    = React.useRef(null);
+  const startVal  = React.useRef(null);
+
+  // value 0..1.5 → pct 0..100 along fader
+  const pct = Math.max(0, Math.min(100, (value / 1.5) * 100));
+  // Unity (1.0) mark position
+  const unityPct = (1 / 1.5) * 100;
+
+  const calcVal = (clientX) => {
+    const rect = trackRef.current.getBoundingClientRect();
+    const raw  = (clientX - rect.left) / rect.width;
+    return Math.max(0, Math.min(1.5, raw * 1.5));
+  };
+
+  const onPointerDown = (e) => {
+    e.stopPropagation();
+    dragging.current = true;
+    startX.current   = e.clientX;
+    startVal.current = value;
+    trackRef.current.setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e) => {
+    if (!dragging.current) return;
+    onChange(+calcVal(e.clientX).toFixed(3));
+  };
+  const onPointerUp = (e) => {
+    dragging.current = false;
+  };
+  const onDoubleClick = (e) => { e.stopPropagation(); onChange(1); };
+  const onTrackClick = (e) => {
+    e.stopPropagation();
+    onChange(+calcVal(e.clientX).toFixed(3));
+  };
+
+  const dbLabel = value <= 0.001 ? "-∞" : `${value >= 1 ? "+" : ""}${(20*Math.log10(value)).toFixed(1)}`;
+
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:3, width:"100%" }}>
+      {/* Fader track */}
+      <div
+        ref={trackRef}
+        onClick={onTrackClick}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onDoubleClick={onDoubleClick}
+        title={`Volume: ${dbLabel} dB  (double-tap = unity)`}
+        style={{
+          flex:1, height:14, position:"relative",
+          cursor:"pointer", userSelect:"none", touchAction:"none",
+        }}
+      >
+        {/* Track groove */}
+        <div style={{
+          position:"absolute", top:"50%", left:0, right:0,
+          height:3, borderRadius:2, transform:"translateY(-50%)",
+          background:"#1a1a1a",
+          border:"1px solid #111",
+        }}>
+          {/* Filled portion (left of thumb) */}
+          <div style={{
+            position:"absolute", left:0, top:0, bottom:0,
+            width:`${pct}%`,
+            borderRadius:2,
+            background: value > 1.4 ? "linear-gradient(90deg,#30D158,#FF3B30)" : "linear-gradient(90deg,#2a2a2a,#30D158)",
+          }} />
+          {/* Unity marker */}
+          <div style={{
+            position:"absolute", left:`${unityPct}%`,
+            top:-2, bottom:-2, width:1,
+            background:"#555", borderRadius:1,
+          }} />
+        </div>
+        {/* Thumb */}
+        <div style={{
+          position:"absolute", top:"50%", left:`${pct}%`,
+          transform:"translate(-50%,-50%)",
+          width:10, height:14, borderRadius:2,
+          background:"linear-gradient(180deg,#6a6a6a,#3a3a3a)",
+          border:"1px solid #222",
+          boxShadow:"0 1px 3px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.15)",
+          cursor:"ew-resize",
+          // Center grip line
+          display:"flex", alignItems:"center", justifyContent:"center",
+        }}>
+          <div style={{ width:1, height:7, background:"rgba(255,255,255,0.25)", borderRadius:1 }} />
+        </div>
+      </div>
+      {/* dB readout */}
+      <span style={{ color:"#555", fontSize:7, fontWeight:700, width:22, textAlign:"right", flexShrink:0, fontFamily:"monospace" }}>{dbLabel}</span>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOGIC PRO PAN SLIDER  — horizontal slider -1..+1, center-notched
+// ─────────────────────────────────────────────────────────────────────────────
+function LogicPanSlider({ value = 0, onChange }) {
+  const trackRef = React.useRef(null);
+  const dragging = React.useRef(false);
+
+  // value -1..+1 → pct 0..100
+  const pct = (value + 1) / 2 * 100;
+
+  const calcVal = (clientX) => {
+    const rect = trackRef.current.getBoundingClientRect();
+    const raw  = (clientX - rect.left) / rect.width;
+    let v = raw * 2 - 1;
+    // Snap to center within ±5%
+    if (Math.abs(v) < 0.07) v = 0;
+    return Math.max(-1, Math.min(1, v));
+  };
+
+  const onPointerDown = (e) => {
+    e.stopPropagation();
+    dragging.current = true;
+    trackRef.current.setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e) => {
+    if (!dragging.current) return;
+    onChange(+calcVal(e.clientX).toFixed(3));
+  };
+  const onPointerUp   = () => { dragging.current = false; };
+  const onDoubleClick = (e) => { e.stopPropagation(); onChange(0); };
+  const onTrackClick  = (e) => { e.stopPropagation(); onChange(+calcVal(e.clientX).toFixed(3)); };
+
+  const panLabel = Math.abs(value) < 0.03 ? "C" : value < 0 ? `L${Math.round(Math.abs(value)*100)}` : `R${Math.round(value*100)}`;
+
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:3, width:"100%" }}>
+      <span style={{ color:"#404040", fontSize:7, fontWeight:700, width:14, flexShrink:0 }}>PAN</span>
+      <div
+        ref={trackRef}
+        onClick={onTrackClick}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onDoubleClick={onDoubleClick}
+        title={`Pan: ${panLabel}  (double-tap = center)`}
+        style={{
+          flex:1, height:12, position:"relative",
+          cursor:"pointer", userSelect:"none", touchAction:"none",
+        }}
+      >
+        {/* Track groove */}
+        <div style={{
+          position:"absolute", top:"50%", left:0, right:0,
+          height:3, borderRadius:2, transform:"translateY(-50%)",
+          background:"#1a1a1a", border:"1px solid #111",
+        }}>
+          {/* Filled region from center to thumb */}
+          <div style={{
+            position:"absolute",
+            left:  value < 0 ? `${pct}%`   : "50%",
+            right: value > 0 ? `${100-pct}%` : "50%",
+            top:0, bottom:0,
+            background: value === 0 ? "transparent" : "#4a9eff",
+            borderRadius:2,
+          }} />
+          {/* Center mark */}
+          <div style={{
+            position:"absolute", left:"50%",
+            top:-2, bottom:-2, width:1,
+            background:"#555",
+          }} />
+        </div>
+        {/* Thumb */}
+        <div style={{
+          position:"absolute", top:"50%", left:`${pct}%`,
+          transform:"translate(-50%,-50%)",
+          width:10, height:12, borderRadius:2,
+          background:"linear-gradient(180deg,#6a6a6a,#3a3a3a)",
+          border:"1px solid #222",
+          boxShadow:"0 1px 3px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.15)",
+          cursor:"ew-resize",
+          display:"flex", alignItems:"center", justifyContent:"center",
+        }}>
+          <div style={{ width:1, height:6, background:"rgba(255,255,255,0.25)", borderRadius:1 }} />
+        </div>
+      </div>
+      <span style={{ color:"#4a9eff", fontSize:7, fontWeight:700, width:18, textAlign:"right", flexShrink:0, fontFamily:"monospace" }}>{panLabel}</span>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOGIC PRO TRACK HEADER  — solid black, no R button, fader+pan sliders
+// ─────────────────────────────────────────────────────────────────────────────
+function LogicTrackHeader({
+  track, isRec, isSelected, fxOpen, showTakes,
+  onSelect, onMute, onSolo, onFx, onTakes, onRemove,
+  updateTrack, analyserNode, isPlaying,
+  isDragging, isDropTarget,
+  onLongPressStart, onLongPressCancel, onDragMove, onDragEnd,
+}) {
+  const [renaming, setRenaming] = React.useState(false);
+  const [nameVal,  setNameVal]  = React.useState(track.name);
+  const [holdProgress, setHoldProgress] = React.useState(0); // 0–1 fill while holding
+  const inputRef    = React.useRef(null);
+  const holdRafRef  = React.useRef(null);
+  const holdStartRef = React.useRef(null);
+  const HOLD_MS = 1500;
+
+  React.useEffect(() => { setNameVal(track.name); }, [track.name]);
+  React.useEffect(() => { if (renaming && inputRef.current) inputRef.current.focus(); }, [renaming]);
+
+  // Cancel hold animation when drag starts from outside
+  React.useEffect(() => {
+    if (!isDragging) { setHoldProgress(0); }
+  }, [isDragging]);
+
+  const commitRename = () => {
+    const n = nameVal.trim() || track.name;
+    updateTrack(track.id, { name: n });
+    setRenaming(false);
+  };
+
+  const startHoldAnim = () => {
+    holdStartRef.current = performance.now();
+    const tick = () => {
+      const elapsed = performance.now() - holdStartRef.current;
+      const p = Math.min(1, elapsed / HOLD_MS);
+      setHoldProgress(p);
+      if (p < 1) holdRafRef.current = requestAnimationFrame(tick);
+    };
+    holdRafRef.current = requestAnimationFrame(tick);
+  };
+
+  const cancelHoldAnim = () => {
+    cancelAnimationFrame(holdRafRef.current);
+    holdStartRef.current = null;
+    setHoldProgress(0);
+  };
+
+  const accentColor = isRec ? "#FF3B30" : track.color || "#30D158";
+  const trackIcon   = track.type === "beat" ? "♩" : "●";
+
+  return (
+    <div
+      onClick={onSelect}
+      onPointerDown={function(e) {
+        if (renaming) return;
+        // Don't start long-press when the touch lands on an interactive control
+        // (volume fader, pan slider, M/S/FX buttons). Those are nested inside
+        // this wrapper so their own stopPropagation hasn't run yet — we check
+        // the event target directly to bail out early.
+        const isInteractive = e.target.closest('button, input, [data-nolongpress]');
+        const hasTitleAttr  = e.target.closest('[title]'); // fader & pan tracks carry title attrs
+        if (isInteractive || hasTitleAttr) return;
+        startHoldAnim();
+        onLongPressStart && onLongPressStart(e);
+      }}
+      onPointerUp={function(e) {
+        cancelHoldAnim();
+        onLongPressCancel && onLongPressCancel();
+        onDragEnd && onDragEnd();
+      }}
+      onPointerCancel={function() {
+        cancelHoldAnim();
+        onLongPressCancel && onLongPressCancel();
+      }}
+      onPointerMove={function(e) {
+        if (isDragging) onDragMove && onDragMove(e);
+      }}
+      style={{
+        width:"100%", height:"100%",
+        display:"flex", flexDirection:"column",
+        background: isDragging ? "#1a0a1a" : isDropTarget ? "#0d1a0d" : isSelected ? "#111111" : "#000000",
+        borderRight: isSelected ? "1px solid #303030" : "1px solid #1a1a1a",
+        borderLeft: `3px solid ${isDragging ? "#C026D3" : isDropTarget ? "#30D158" : accentColor}`,
+        cursor: isDragging ? "grabbing" : "pointer",
+        overflow:"hidden",
+        padding:"4px 5px 4px 4px",
+        boxSizing:"border-box",
+        gap:3,
+        touchAction:"none",
+        userSelect:"none",
+        opacity: isDragging ? 0.75 : 1,
+        boxShadow: isDragging ? "0 0 0 2px #C026D3, 0 4px 24px rgba(192,38,211,0.35)" : isDropTarget ? "0 0 0 2px #30D158 inset" : "none",
+        transition: "background 0.1s, box-shadow 0.1s, opacity 0.1s",
+        position: "relative",
+      }}
+    >
+      {/* Hold-to-select progress ring */}
+      {holdProgress > 0 && holdProgress < 1 && !isDragging && (
+        <div style={{
+          position:"absolute", inset:0, pointerEvents:"none", zIndex:20,
+          background:`linear-gradient(90deg, rgba(192,38,211,${holdProgress * 0.18}) 0%, transparent 100%)`,
+          borderRadius:0,
+        }}>
+          <div style={{
+            position:"absolute", bottom:0, left:0,
+            height:2, borderRadius:1,
+            width:`${holdProgress * 100}%`,
+            background:"linear-gradient(90deg,#C026D3,#7C3AED)",
+            boxShadow:"0 0 6px rgba(192,38,211,0.8)",
+            transition:"none",
+          }} />
+        </div>
+      )}
+      {/* Drag grab handle — appears when dragging */}
+      {isDragging && (
+        <div style={{
+          position:"absolute", top:"50%", right:4,
+          transform:"translateY(-50%)",
+          display:"flex", flexDirection:"column", gap:2,
+          pointerEvents:"none", opacity:0.6,
+        }}>
+          {[0,1,2].map(function(i){ return <div key={i} style={{ width:14, height:1.5, borderRadius:1, background:"#C026D3" }} />; })}
+        </div>
+      )}
+      {/* ── Row 1: Icon badge + name + M + S + FX ── */}
+      <div style={{ display:"flex", alignItems:"center", gap:3, minWidth:0 }}>
+        {/* Icon badge */}
+        <div style={{
+          width:13, height:13, borderRadius:3, flexShrink:0,
+          background: isSelected ? accentColor : "#1e1e1e",
+          border:`1px solid ${isSelected ? accentColor : "#2a2a2a"}`,
+          display:"flex", alignItems:"center", justifyContent:"center",
+        }}>
+          <span style={{ color: isSelected ? "#fff" : "#555", fontSize:7, fontWeight:900, lineHeight:1 }}>
+            {trackIcon}
+          </span>
+        </div>
+
+        {/* Track name — double-tap to rename */}
+        {renaming ? (
+          <input
+            ref={inputRef}
+            value={nameVal}
+            onChange={e => setNameVal(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={e => {
+              if (e.key === "Enter")   commitRename();
+              if (e.key === "Escape") { setRenaming(false); setNameVal(track.name); }
+            }}
+            onClick={e => e.stopPropagation()}
+            style={{
+              flex:1, minWidth:0,
+              background:"#0d0d0d", border:`1px solid ${accentColor}`,
+              borderRadius:3, color:"#fff", fontSize:9, fontWeight:600,
+              padding:"1px 3px", outline:"none",
+            }}
+          />
+        ) : (
+          <span
+            onDoubleClick={e => { e.stopPropagation(); setRenaming(true); }}
+            style={{
+              flex:1, minWidth:0,
+              color:"#d0d0d0", fontSize:9, fontWeight:700,
+              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+              lineHeight:1,
+            }}
+          >{track.name}</span>
+        )}
+
+        {/* M */}
+        <button onClick={e => { e.stopPropagation(); onMute(); }}
+          style={{
+            width:16, height:13, borderRadius:3, flexShrink:0, padding:0,
+            background: track.isMuted ? "#FFD60A" : "#1e1e1e",
+            border:`1px solid ${track.isMuted ? "#FFD60A" : "#2a2a2a"}`,
+            color: track.isMuted ? "#000" : "#666",
+            fontSize:8, fontWeight:900, cursor:"pointer",
+            display:"flex", alignItems:"center", justifyContent:"center",
+            boxShadow: track.isMuted ? "0 0 4px rgba(255,214,10,0.5)" : "none",
+          }}>M</button>
+
+        {/* S */}
+        <button onClick={e => { e.stopPropagation(); onSolo(); }}
+          style={{
+            width:16, height:13, borderRadius:3, flexShrink:0, padding:0,
+            background: track.isSoloed ? "#30D158" : "#1e1e1e",
+            border:`1px solid ${track.isSoloed ? "#30D158" : "#2a2a2a"}`,
+            color: track.isSoloed ? "#000" : "#666",
+            fontSize:8, fontWeight:900, cursor:"pointer",
+            display:"flex", alignItems:"center", justifyContent:"center",
+            boxShadow: track.isSoloed ? "0 0 4px rgba(48,209,88,0.5)" : "none",
+          }}>S</button>
+
+        {/* FX */}
+        <button onClick={e => { e.stopPropagation(); onFx(); }}
+          style={{
+            width:20, height:13, borderRadius:3, flexShrink:0, padding:0,
+            background: fxOpen ? "rgba(139,92,246,0.22)" : "#1e1e1e",
+            border:`1px solid ${fxOpen ? "#8B5CF6" : "#2a2a2a"}`,
+            color: fxOpen ? "#a78bfa" : "#555",
+            fontSize:7, fontWeight:900, cursor:"pointer",
+            display:"flex", alignItems:"center", justifyContent:"center",
+          }}>FX</button>
+
+        {/* Takes (only if >1 clips) */}
+        {track.clips && track.clips.length > 1 && (
+          <button onClick={e => { e.stopPropagation(); onTakes(); }}
+            style={{
+              width:20, height:13, borderRadius:3, flexShrink:0, padding:0,
+              background: showTakes ? "rgba(59,130,246,0.22)" : "#1e1e1e",
+              border:`1px solid ${showTakes ? "#3B82F6" : "#2a2a2a"}`,
+              color: showTakes ? "#60a5fa" : "#555",
+              fontSize:7, fontWeight:900, cursor:"pointer",
+              display:"flex", alignItems:"center", justifyContent:"center",
+            }}>{track.clips.length}▾</button>
+        )}
+
+        {/* Delete */}
+        <button onClick={e => { e.stopPropagation(); onRemove(); }}
+          style={{
+            background:"none", border:"none", color:"#2a2a2a",
+            fontSize:10, cursor:"pointer", padding:"0 1px", lineHeight:1, flexShrink:0,
+          }}
+          onPointerEnter={e => e.currentTarget.style.color="#FF3B30"}
+          onPointerLeave={e => e.currentTarget.style.color="#2a2a2a"}
+        >✕</button>
+      </div>
+
+      {/* ── Row 2: VU meters ── */}
+      <StereoVUMeter analyserNode={analyserNode} isActive={isPlaying && !track.isMuted} />
+
+      {/* ── Row 3: Volume fader (with dB label) ── */}
+      <LogicVolumeFader
+        value={track.volume ?? 1}
+        onChange={v => updateTrack(track.id, { volume: v })}
+      />
+
+      {/* ── Row 4: Pan slider ── */}
+      <LogicPanSlider
+        value={track.pan || 0}
+        onChange={v => updateTrack(track.id, { pan: v })}
+      />
+    </div>
+  );
+}
+
+// =============================================================================
 // CONFIG
 // =============================================================================
 
@@ -1051,6 +1694,16 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
         allowFullScreen
         title={beat.title}
       />
+      {/* ── Audio Level Meter (YouTube iframe – driven by animation) ── */}
+      <div style={{ padding: "8px 16px", background: "#060606", borderBottom: "1px solid #111", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ color: "#333", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, fontFamily: "monospace", whiteSpace: "nowrap" }}>OUTPUT</div>
+          <div style={{ flex: 1 }}>
+            <PlayerVUMeter isPlaying={true} />
+          </div>
+          <div style={{ color: "#22C55E", fontSize: 8, fontWeight: 700, letterSpacing: 1, fontFamily: "monospace" }}>0dB</div>
+        </div>
+      </div>
       <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
         <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4, lineHeight: 1.4 }}>
           {beat.title}
@@ -4725,7 +5378,7 @@ class StudioErrorBoundary extends React.Component {
 }
 
 // ── Plugin chain panel — extracted from IIFE so useState is a valid hook call ──
-function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob }) {
+function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, analyserNode, isPlaying }) {
   // EQPlugin / CompPlugin / ReverbPlugin / PitchPlugin are pure render helpers
   // defined here so they always have the correct fx/upd/Knob/graph refs.
   const EQPlugin     = function(p){ return _EQPlugin(p); };
@@ -4736,6 +5389,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob }) {
   const DoublerPlugin = function(p){ return _DoublerPlugin(p); };
   const HDelayPlugin  = function(p){ return _HDelayPlugin(p); };
   const TRottenPlugin = function(p){ return _TRottenMasterPlugin(p); };
+  const BandpassPlugin = function(p){ return _BandpassPlugin(p); };
   const [showPluginPicker, setShowPluginPicker] = React.useState(false);
   const chain = fx.pluginChain || [];
 
@@ -4748,6 +5402,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob }) {
     { key:"doubler",      label:"Vocal Doubler",        sub:"Stereo width · Haas effect",     icon:"🔊", color:"#F59E0B" },
     { key:"hdelay",       label:"H-Delay",              sub:"Tape · BPM sync · Analog",       icon:"⏱", color:"#E85D04" },
     { key:"trotten",      label:"T-Rotten Master",      sub:"Mastering · Analog warmth",       icon:"🎛", color:"#C8762A" },
+    { key:"bandpass",     label:"GRM Bandpass",         sub:"Dual 6th-order · Resonance",      icon:"🎛", color:"#00b4d8" },
   ];
 
   const addPlugin = function(key) {
@@ -4757,7 +5412,9 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob }) {
   };
 
   const removePlugin = function(key) {
-    upd("pluginChain", null, chain.filter(function(k){ return k !== key; }));
+    // Single atomic update: removes from chain + forces on:false so the
+    // always-built audio node bypasses immediately (no lingering effect).
+    upd("__remove", null, key);
   };
 
   const movePlugin = function(idx, dir) {
@@ -4768,65 +5425,232 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob }) {
     upd("pluginChain", null, next);
   };
 
+  // FL Studio category filter
+  const FL_CATS = ["ALL", "DYNAMICS", "EQ", "REVERB", "PITCH", "UTILITY"];
+  const [flCat, setFlCat] = React.useState("ALL");
+
+  const FL_PLUGINS = [
+    { key:"eq",           label:"Parametric EQ",      sub:"5-Band",          icon:"📈", color:"#00b4d8", cat:"EQ",       tag:"MIXER" },
+    { key:"compressor",   label:"Compressor",          sub:"Dynamics",        icon:"⚡", color:"#7c3aed", cat:"DYNAMICS", tag:"EFFECT" },
+    { key:"reverb",       label:"Reverb",              sub:"Room sim",        icon:"🌀", color:"#0891b2", cat:"REVERB",   tag:"EFFECT" },
+    { key:"pitch",        label:"Newtone / Pitch",     sub:"Pitch v2",        icon:"🎙", color:"#db2777", cat:"PITCH",    tag:"EFFECT" },
+    { key:"noiseremover", label:"Noise Gate AI",       sub:"RNNoise",         icon:"🔇", color:"#059669", cat:"DYNAMICS", tag:"UTILITY" },
+    { key:"doubler",      label:"Doubler",             sub:"Haas / Width",    icon:"↔️", color:"#d97706", cat:"UTILITY",  tag:"MIXER"  },
+    { key:"hdelay",       label:"T-Delay",             sub:"Tape · BPM sync", icon:"⏱", color:"#ea580c", cat:"UTILITY",  tag:"EFFECT" },
+    { key:"trotten",      label:"T-Rotten Master 19",  sub:"Analog warmth",   icon:"🎛", color:"#854d0e", cat:"DYNAMICS", tag:"MASTER" },
+    { key:"bandpass",     label:"GRM Bandpass",        sub:"Dual 6th-order",  icon:"🎛", color:"#0e7490", cat:"EQ",       tag:"FILTER" },
+  ];
+
+  const visiblePlugins = FL_PLUGINS.filter(function(p){
+    return flCat === "ALL" || p.cat === flCat;
+  });
+
   return (
     <div style={{ flex:1, padding:"14px", display:"flex", flexDirection:"column", gap:12 }}>
 
-    {/* ── Plugin picker bottom sheet ── */}
+    {/* ── FL Studio-style Plugin Browser (full-screen overlay) ── */}
     {showPluginPicker && (
-      <div style={{ position:"fixed", inset:0, zIndex:9999, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"flex-end" }}
+      <div style={{
+        position:"fixed", inset:0, zIndex:9999,
+        background:"rgba(0,0,0,0.92)",
+        display:"flex", flexDirection:"column",
+        fontFamily:"'DM Sans',sans-serif",
+      }}
         onClick={function(){ setShowPluginPicker(false); }}>
-        <div style={{ width:"100%", background:"#111", borderRadius:"20px 20px 0 0", paddingBottom:"calc(20px + env(safe-area-inset-bottom))", border:"1px solid #222", borderBottom:"none" }}
-          onClick={function(e){ e.stopPropagation(); }}>
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"16px 20px 12px", borderBottom:"1px solid #1e1e1e" }}>
-            <span style={{ color:"white", fontWeight:800, fontSize:16 }}>Add Plugin</span>
-            <button onClick={function(){ setShowPluginPicker(false); }} style={{ background:"none", border:"none", color:"#555", fontSize:22, cursor:"pointer", lineHeight:1 }}>✕</button>
+        <div style={{
+          position:"absolute", bottom:0, left:0, right:0,
+          background:"#141414",
+          borderRadius:"18px 18px 0 0",
+          border:"1px solid #2a2a2a",
+          borderBottom:"none",
+          paddingBottom:"calc(16px + env(safe-area-inset-bottom))",
+          maxHeight:"88vh",
+          display:"flex", flexDirection:"column",
+        }} onClick={function(e){ e.stopPropagation(); }}>
+
+          {/* ── Header bar — FL orange accent strip ── */}
+          <div style={{
+            height:3, borderRadius:"18px 18px 0 0",
+            background:"linear-gradient(90deg,#ff6b00,#ff9d00,#ff6b00)",
+          }} />
+
+          {/* ── Title row ── */}
+          <div style={{
+            display:"flex", alignItems:"center", justifyContent:"space-between",
+            padding:"12px 16px 8px",
+            borderBottom:"1px solid #1e1e1e",
+          }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              {/* FL logo-style icon */}
+              <div style={{
+                width:28, height:28, borderRadius:7,
+                background:"linear-gradient(135deg,#ff6b00,#ff9d00)",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:14, fontWeight:900, color:"#fff",
+                boxShadow:"0 2px 8px rgba(255,107,0,0.4)",
+              }}>FL</div>
+              <div>
+                <div style={{ color:"#fff", fontWeight:800, fontSize:14, lineHeight:1 }}>Plugin Database</div>
+                <div style={{ color:"#555", fontSize:10, marginTop:2 }}>{FL_PLUGINS.length} instruments · effects</div>
+              </div>
+            </div>
+            <button onClick={function(){ setShowPluginPicker(false); }}
+              style={{
+                background:"#222", border:"1px solid #333", borderRadius:8,
+                color:"#888", fontSize:11, fontWeight:700, padding:"5px 10px",
+                cursor:"pointer", letterSpacing:0.5,
+              }}>ESC</button>
           </div>
-          <div style={{ padding:"12px 16px", display:"flex", flexDirection:"column", gap:8 }}>
-            {ALL_PLUGINS.map(function(p){
+
+          {/* ── Search bar ── */}
+          <div style={{ padding:"8px 16px 0" }}>
+            <div style={{
+              display:"flex", alignItems:"center", gap:8,
+              background:"#0d0d0d", border:"1px solid #2a2a2a",
+              borderRadius:8, padding:"6px 10px",
+            }}>
+              <span style={{ color:"#444", fontSize:12 }}>🔍</span>
+              <span style={{ color:"#333", fontSize:11, fontWeight:500 }}>Search plugins…</span>
+            </div>
+          </div>
+
+          {/* ── Category tabs — FL-style pill tabs ── */}
+          <div style={{
+            display:"flex", gap:5, padding:"8px 16px",
+            overflowX:"auto", flexShrink:0,
+          }}>
+            {FL_CATS.map(function(cat){
+              const active = flCat === cat;
+              return (
+                <button key={cat} onClick={function(){ setFlCat(cat); }}
+                  style={{
+                    padding:"4px 10px", borderRadius:5, flexShrink:0,
+                    background: active ? "#ff6b00" : "#1e1e1e",
+                    border:"1px solid " + (active ? "#ff9d00" : "#2a2a2a"),
+                    color: active ? "#fff" : "#555",
+                    fontSize:9, fontWeight:800, letterSpacing:0.8,
+                    cursor:"pointer",
+                  }}>{cat}</button>
+              );
+            })}
+          </div>
+
+          {/* ── Plugin list — FL channel rack row style ── */}
+          <div style={{ overflowY:"auto", flex:1, padding:"0 12px 8px" }}>
+            {visiblePlugins.map(function(p, idx){
               const already = chain.includes(p.key);
               return (
-                <button key={p.key} onClick={function(){ if(!already) addPlugin(p.key); }}
+                <button key={p.key}
+                  onClick={function(){ if(!already) addPlugin(p.key); }}
                   disabled={already}
-                  style={{ display:"flex", alignItems:"center", gap:14, padding:"14px 16px",
-                    background: already ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.05)",
-                    border:"1px solid " + (already ? "#1e1e1e" : p.color + "44"),
-                    borderRadius:14, cursor: already ? "default" : "pointer",
-                    opacity: already ? 0.45 : 1, textAlign:"left", width:"100%" }}>
-                  <div style={{ width:40, height:40, borderRadius:10, background: p.color + "22",
-                    border:"1px solid " + p.color + "44", display:"flex", alignItems:"center", justifyContent:"center",
-                    fontSize:20, flexShrink:0 }}>{p.icon}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ color: already ? "#555" : "white", fontWeight:700, fontSize:15 }}>{p.label}</div>
-                    <div style={{ color: already ? "#333" : "#555", fontSize:12, marginTop:2 }}>{p.sub}</div>
+                  style={{
+                    display:"flex", alignItems:"center", gap:0,
+                    width:"100%", marginBottom:3,
+                    background: already ? "#0f0f0f" : "#1a1a1a",
+                    border:"1px solid " + (already ? "#1a1a1a" : "#2a2a2a"),
+                    borderLeft:"3px solid " + (already ? "#2a2a2a" : p.color),
+                    borderRadius:6, overflow:"hidden",
+                    cursor: already ? "default" : "pointer",
+                    opacity: already ? 0.4 : 1,
+                    textAlign:"left",
+                    transition:"background 0.1s",
+                  }}>
+
+                  {/* Row number — FL channel index */}
+                  <div style={{
+                    width:24, flexShrink:0,
+                    background:"#111",
+                    borderRight:"1px solid #222",
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    alignSelf:"stretch", padding:"0 2px",
+                  }}>
+                    <span style={{ color:"#303030", fontSize:9, fontWeight:800, fontFamily:"monospace" }}>
+                      {String(idx+1).padStart(2,"0")}
+                    </span>
                   </div>
-                  {already
-                    ? <span style={{ color:"#333", fontSize:11, fontWeight:700 }}>ADDED</span>
-                    : <div style={{ width:28, height:28, borderRadius:8, background: p.color + "22",
-                        border:"1px solid " + p.color + "55", display:"flex", alignItems:"center", justifyContent:"center",
-                        color: p.color, fontSize:20, fontWeight:300, lineHeight:1 }}>+</div>
-                  }
+
+                  {/* Plugin icon tile */}
+                  <div style={{
+                    width:46, height:46, flexShrink:0,
+                    background:"linear-gradient(135deg," + p.color + "33," + p.color + "11)",
+                    borderRight:"1px solid #222",
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    fontSize:20,
+                  }}>{p.icon}</div>
+
+                  {/* Name + sub */}
+                  <div style={{ flex:1, padding:"8px 10px", minWidth:0 }}>
+                    <div style={{
+                      color: already ? "#333" : "#e0e0e0",
+                      fontWeight:700, fontSize:12, lineHeight:1,
+                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                    }}>{p.label}</div>
+                    <div style={{ color:"#3a3a3a", fontSize:10, marginTop:3 }}>{p.sub}</div>
+                  </div>
+
+                  {/* Tag badge */}
+                  <div style={{
+                    padding:"2px 6px", marginRight:8, flexShrink:0,
+                    background: p.color + "18",
+                    border:"1px solid " + p.color + "33",
+                    borderRadius:4,
+                    color: already ? "#2a2a2a" : p.color,
+                    fontSize:8, fontWeight:800, letterSpacing:0.5,
+                  }}>{p.tag}</div>
+
+                  {/* Add / Added state */}
+                  {already ? (
+                    <div style={{
+                      width:32, height:"100%", flexShrink:0,
+                      background:"#111", borderLeft:"1px solid #1e1e1e",
+                      display:"flex", alignItems:"center", justifyContent:"center",
+                    }}>
+                      <span style={{ color:"#2a2a2a", fontSize:14 }}>✓</span>
+                    </div>
+                  ) : (
+                    <div style={{
+                      width:32, alignSelf:"stretch", flexShrink:0,
+                      background: p.color + "18",
+                      borderLeft:"1px solid " + p.color + "33",
+                      display:"flex", alignItems:"center", justifyContent:"center",
+                      color: p.color, fontSize:18, fontWeight:300,
+                    }}>+</div>
+                  )}
                 </button>
               );
             })}
           </div>
+
+          {/* ── Footer tip ── */}
+          <div style={{
+            padding:"8px 16px 0",
+            borderTop:"1px solid #1a1a1a",
+            color:"#2a2a2a", fontSize:9, fontWeight:600,
+            textAlign:"center", letterSpacing:0.5,
+          }}>TAP TO LOAD · DRAG TO REORDER IN CHAIN</div>
         </div>
       </div>
     )}
 
-    {/* ── Empty state ── */}
+    {/* ── Empty state — FL Channel Rack empty ── */}
     {chain.length === 0 && (
-      <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"48px 20px", gap:16, textAlign:"center" }}>
-        <div style={{ width:64, height:64, borderRadius:20, background:"#111", border:"1px dashed #2a2a2a",
-          display:"flex", alignItems:"center", justifyContent:"center", fontSize:28 }}>🎛</div>
-        <div style={{ color:"white", fontWeight:700, fontSize:17 }}>No plugins on this chain</div>
-        <div style={{ color:"#555", fontSize:13, lineHeight:1.6, maxWidth:240 }}>
-          Tap <span style={{ color:"#C026D3", fontWeight:700 }}>+ Add Plugin</span> below to build your vocal effects chain
+      <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"40px 20px", gap:12, textAlign:"center" }}>
+        <div style={{
+          width:56, height:56, borderRadius:14,
+          background:"#111", border:"1px solid #1e1e1e",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          fontSize:24,
+        }}>🎛</div>
+        <div style={{ color:"#333", fontWeight:800, fontSize:13, letterSpacing:1 }}>EMPTY CHAIN</div>
+        <div style={{ color:"#252525", fontSize:11, lineHeight:1.6, maxWidth:220 }}>
+          Open the plugin database below to load effects into this chain
         </div>
       </div>
     )}
 
     {/* ── Active plugin slots ── */}
     {chain.map(function(key, idx){
+      const plugMeta = FL_PLUGINS.find(function(p){ return p.key === key; }) || {};
       return (
         <div key={key} style={{ marginBottom:4 }}>
           {/* Slot header */}
@@ -4837,7 +5661,11 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob }) {
               <button onClick={function(){ movePlugin(idx, 1); }}
                 style={{ background:"none", border:"none", color: idx===chain.length-1 ? "#252525" : "#555", fontSize:13, cursor: idx===chain.length-1 ? "default" : "pointer", padding:"2px 5px", lineHeight:1 }}>↓</button>
             </div>
-            <span style={{ color:"#2a2a2a", fontSize:9, fontWeight:700, letterSpacing:1.5, flex:1, fontFamily:"monospace" }}>SLOT {idx+1}</span>
+            <span style={{ color:"#2a2a2a", fontSize:9, fontWeight:700, letterSpacing:1.5, fontFamily:"monospace" }}>SLOT {idx+1}</span>
+            {/* Per-plugin VU meter — shares the track analyser since we can't tap between nodes */}
+            <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <VUMeter analyserNode={analyserNode} isActive={isPlaying} compact={true} showLabel={false} />
+            </div>
             <button onClick={function(){ removePlugin(key); }}
               style={{ background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.18)", borderRadius:6, color:"#EF4444", fontSize:9, fontWeight:800, padding:"3px 10px", cursor:"pointer", letterSpacing:0.5 }}>REMOVE</button>
           </div>
@@ -4866,22 +5694,34 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob }) {
           {/* T-Rotten Master plugin */}
           {key === "trotten" && <TRottenPlugin fx={fx} upd={upd} Knob={Knob} />}
 
+          {/* GRM Bandpass plugin */}
+          {key === "bandpass" && <BandpassPlugin fx={fx} upd={upd} Knob={Knob} />}
+
         </div>
       );
     })}
 
-    {/* ── Add Plugin button ── */}
+    {/* ── Add Plugin button — FL Channel Rack style ── */}
     {chain.length < 8 && (
       <button onClick={function(e){ e.stopPropagation(); setShowPluginPicker(true); }}
-        style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:10,
-          width:"100%", padding:"16px", marginTop:4,
-          background:"rgba(192,38,211,0.06)",
-          border:"1.5px dashed rgba(192,38,211,0.3)",
-          borderRadius:16, cursor:"pointer", color:"#C026D3",
-          fontWeight:800, fontSize:14, letterSpacing:0.5,
-          transition:"background 0.15s" }}>
-        <span style={{ fontSize:20, lineHeight:1, fontWeight:300 }}>+</span>
-        Add Plugin
+        style={{
+          display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+          width:"100%", padding:"12px",
+          background:"#111",
+          border:"1px solid #2a2a2a",
+          borderLeft:"3px solid #ff6b00",
+          borderRadius:6, cursor:"pointer",
+          transition:"background 0.12s",
+        }}>
+        <div style={{
+          width:20, height:20, borderRadius:5,
+          background:"linear-gradient(135deg,#ff6b00,#ff9d00)",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          fontSize:14, fontWeight:300, color:"#fff",
+          flexShrink:0,
+        }}>+</div>
+        <span style={{ color:"#888", fontWeight:700, fontSize:12, letterSpacing:0.5 }}>Add Plugin</span>
+        <span style={{ color:"#2a2a2a", fontSize:10, marginLeft:"auto" }}>FL Database</span>
       </button>
     )}
 
@@ -5439,6 +6279,277 @@ function TKnob({ label, value, min, max, step, unit, onChange, size, color }) {
 // Pixel-faithful replica of the T-Rotten Master UI:
 // 4 sections (EQ / Compressor / Tape+Sat / Limiter), VU meters, analog knobs,
 // mode buttons, logo skull, INPUT/OUTPUT knobs, LUFS readout, power button.
+// =============================================================================
+// ── GRM Bandpass Filter — emulates GRM Tools BandPass ──────────────────────
+// Dual cascaded biquad bandpass (6th-order slope) with resonance, mix, and
+// a real-time frequency-domain visualiser drawn on a canvas.
+// Parameters:
+//   center  — centre frequency  20–20000 Hz  (default 1000)
+//   width   — bandwidth in octaves  0.05–6   (default 1.0)
+//   res     — resonance boost dB  0–18       (default 0)
+//   mix     — wet/dry  0–1                   (default 1)
+//   on      — bypass toggle
+// =============================================================================
+function _BandpassPlugin({ fx, upd, Knob }) {
+  const bp    = fx.bandpass || {};
+  const on    = !!bp.on;
+  const center = bp.center ?? 1000;
+  const width  = bp.width  ?? 1.0;
+  const res    = bp.res    ?? 0;
+  const mix    = bp.mix    ?? 1;
+
+  // Derive lo/hi from center + width (octaves)
+  const loHz = center / Math.pow(2, width / 2);
+  const hiHz = center * Math.pow(2, width / 2);
+
+  const ACCENT = "#00e5ff";
+  const canvasRef = React.useRef(null);
+
+  // Draw frequency response curve on canvas
+  React.useEffect(function() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const W = canvas.width; const H = canvas.height;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, W, H);
+
+    // Background grid
+    ctx.strokeStyle = "rgba(255,255,255,0.04)";
+    ctx.lineWidth = 1;
+    [20,100,200,500,1000,2000,5000,10000,20000].forEach(function(f) {
+      const x = Math.log10(f/20) / Math.log10(20000/20) * W;
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
+    });
+    [-24,-18,-12,-6,0].forEach(function(db) {
+      const y = H - (db + 30) / 36 * H;
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+    });
+
+    // Compute magnitude response of 2× cascaded bandpass biquad
+    // Using bilinear transform of RLC bandpass filter
+    const SR = 48000;
+    function bpMag(freqHz) {
+      // Q from octave width: Q = sqrt(2)^width / (2^width - 1)  (classic formula)
+      const Q  = Math.sqrt(Math.pow(2, width)) / (Math.pow(2, width) - 1);
+      const Qr = Q * (1 + res / 6);  // resonance boosts Q
+      const w0 = 2 * Math.PI * center / SR;
+      const alpha = Math.sin(w0) / (2 * Qr);
+      const b0 =  alpha;
+      const b1 =  0;
+      const b2 = -alpha;
+      const a0 =  1 + alpha;
+      const a1 = -2 * Math.cos(w0);
+      const a2 =  1 - alpha;
+      // Eval H(e^jw) at freqHz
+      const w   = 2 * Math.PI * freqHz / SR;
+      const cosw = Math.cos(w); const sinw = Math.sin(w);
+      const cos2w = Math.cos(2*w); const sin2w = Math.sin(2*w);
+      const numRe = b0 + b1*cosw + b2*cos2w;
+      const numIm =    - b1*sinw - b2*sin2w;
+      const denRe = a0 + a1*cosw + a2*cos2w;
+      const denIm =    - a1*sinw - a2*sin2w;
+      const mag2  = (numRe*numRe + numIm*numIm) / (denRe*denRe + denIm*denIm);
+      // 2× cascaded = magnitude squared
+      return Math.sqrt(mag2 * mag2);
+    }
+
+    // Draw curve
+    const grad = ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0, on ? "rgba(0,229,255,0.9)" : "rgba(80,80,80,0.6)");
+    grad.addColorStop(1, on ? "rgba(0,229,255,0.2)" : "rgba(40,40,40,0.2)");
+    ctx.beginPath();
+    for (let px = 0; px <= W; px++) {
+      const f   = 20 * Math.pow(20000/20, px/W);
+      const mag = bpMag(f);
+      const db  = 20 * Math.log10(Math.max(1e-6, mag));
+      const y   = H - (db + 30) / 36 * H;
+      if (px === 0) ctx.moveTo(px, Math.min(H, Math.max(0, y)));
+      else          ctx.lineTo(px, Math.min(H, Math.max(0, y)));
+    }
+    // Fill under curve
+    const fillX = Math.log10(center/20)/Math.log10(20000/20)*W;
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+    ctx.fillStyle = on ? "rgba(0,229,255,0.08)" : "rgba(60,60,60,0.06)";
+    ctx.fill();
+    // Stroke
+    ctx.beginPath();
+    for (let px = 0; px <= W; px++) {
+      const f   = 20 * Math.pow(20000/20, px/W);
+      const mag = bpMag(f);
+      const db  = 20 * Math.log10(Math.max(1e-6, mag));
+      const y   = H - (db + 30) / 36 * H;
+      if (px === 0) ctx.moveTo(px, Math.min(H, Math.max(0, y)));
+      else          ctx.lineTo(px, Math.min(H, Math.max(0, y)));
+    }
+    ctx.strokeStyle = on ? ACCENT : "#444";
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = on ? 8 : 0;
+    ctx.shadowColor = ACCENT;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Center frequency marker
+    const cx = Math.log10(center/20)/Math.log10(20000/20)*W;
+    ctx.strokeStyle = on ? "rgba(0,229,255,0.5)" : "rgba(100,100,100,0.3)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx,H); ctx.stroke();
+    ctx.setLineDash([]);
+
+  }, [on, center, width, res, mix]);
+
+  // Format Hz label
+  // Log-scale knob for CENTER — maps 20–8000 Hz logarithmically so each
+  // degree of rotation gives consistent musical resolution across the range.
+  const MIN_HZ = 20, MAX_HZ = 8000;
+  const logMin = Math.log10(MIN_HZ), logMax = Math.log10(MAX_HZ);
+
+  function LogKnob({ value, color, onChange }) {
+    const startRef = React.useRef(null);
+    // Normalise current value in log space → 0..1
+    const norm  = (Math.log10(Math.max(MIN_HZ, Math.min(MAX_HZ, value))) - logMin) / (logMax - logMin);
+    const angle = -140 + norm * 280;
+    const SW = 4, r = 20, PAD = SW / 2 + 2;
+    const cx = r + PAD, cy = r + PAD, SIZE = (r + PAD) * 2;
+    const toXY = function(deg) {
+      const rad = (deg - 90) * Math.PI / 180;
+      return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+    };
+    const startA = toXY(-140), endA = toXY(angle);
+    const sweptDeg = angle - (-140), largeArc = sweptDeg > 180 ? 1 : 0;
+    const arcD = "M " + startA.x.toFixed(2) + " " + startA.y.toFixed(2) +
+                 " A " + r + " " + r + " 0 " + largeArc + " 1 " +
+                 endA.x.toFixed(2) + " " + endA.y.toFixed(2);
+
+    const onPointerDown = function(e) {
+      e.preventDefault();
+      const startLog = Math.log10(Math.max(MIN_HZ, Math.min(MAX_HZ, value)));
+      startRef.current = { y: e.clientY, log: startLog };
+      const onMove = function(me) {
+        const dy     = startRef.current.y - me.clientY; // up = higher freq
+        // 100px drag = full log range — same physical feel as other knobs
+        const newLog = Math.max(logMin, Math.min(logMax,
+          startRef.current.log + (dy / 100) * (logMax - logMin)));
+        onChange(Math.max(MIN_HZ, Math.min(MAX_HZ, Math.round(Math.pow(10, newLog)))));
+      };
+      const onUp = function() {
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup",   onUp);
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup",   onUp);
+    };
+
+    return (
+      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, userSelect:"none" }}>
+        <svg width={SIZE} height={SIZE} viewBox={"0 0 " + SIZE + " " + SIZE}
+          style={{ overflow:"visible", cursor:"ns-resize", touchAction:"none" }}
+          onPointerDown={onPointerDown}>
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1e1e1e" strokeWidth={SW} strokeLinecap="round"
+            strokeDasharray={(2*Math.PI*r * 280/360) + " " + (2*Math.PI*r)}
+            strokeDashoffset={(2*Math.PI*r * (90+140)/360)}
+            transform={"rotate(-90 " + cx + " " + cy + ")"} />
+          {norm > 0 && <path d={arcD} fill="none" stroke={color} strokeWidth={SW} strokeLinecap="round" />}
+          <circle cx={endA.x} cy={endA.y} r={SW * 0.9} fill={color} />
+          <circle cx={cx} cy={cy} r={r * 0.42} fill="#0d0d0d" stroke="#2a2a2a" strokeWidth={1.5} />
+        </svg>
+        <div style={{ color:"white", fontSize:9, fontWeight:700, lineHeight:1 }}>
+          {value >= 1000 ? (value/1000).toFixed(value >= 10000 ? 0 : 1)+"k" : value} Hz
+        </div>
+        <div style={{ color:"#444", fontSize:7, textAlign:"center", lineHeight:1.2 }}>CENTER</div>
+      </div>
+    );
+  }
+
+
+  function fmtHz(f) {
+    return f >= 1000 ? (f/1000).toFixed(f>=10000?0:1)+"k" : Math.round(f)+"";
+  }
+
+  return (
+    <div style={{
+      background: "linear-gradient(180deg,#0a1a1e 0%,#060e11 100%)",
+      borderRadius: 16, overflow: "hidden",
+      border: "2px solid " + (on ? ACCENT : "#1e1e1e"),
+      boxShadow: on ? "0 0 24px rgba(0,229,255,0.12), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)",
+    }}>
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px 8px", borderBottom:"1px solid #0d1c20" }}>
+        <div style={{
+          width:28, height:28, borderRadius:7, flexShrink:0,
+          background: on ? "linear-gradient(135deg,#00b4cc,#006680)" : "#1a1a1a",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          fontSize:14, boxShadow: on ? "0 0 10px rgba(0,229,255,0.4)" : "none",
+          transition:"all 0.2s",
+        }}>🎛</div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ color:"#e0e0e0", fontWeight:800, fontSize:12, lineHeight:1 }}>GRM Bandpass</div>
+          <div style={{ color:"#2a4a50", fontSize:9, marginTop:2, fontWeight:600, letterSpacing:0.5 }}>
+            {fmtHz(loHz)} – {fmtHz(hiHz)} Hz · 12dB/oct × 2
+          </div>
+        </div>
+        {/* LED cluster */}
+        <div style={{ display:"flex", gap:3, alignItems:"center" }}>
+          {[0,1,2,3,4].map(function(i){
+            const active = on;
+            const colors = ["#00e5ff","#00b4d8","#0ea5e9","#38bdf8","#7dd3fc"];
+            return <div key={i} style={{
+              width:3, height:6+i*2, borderRadius:1,
+              background: active ? colors[i] : "#1e1e1e",
+              boxShadow: active ? "0 0 4px "+colors[i]+"88" : "none",
+              transition:"all 0.15s",
+            }} />;
+          })}
+        </div>
+        <div style={{ width:8, height:8, borderRadius:"50%", background: on ? ACCENT : "#1a1a1a", boxShadow: on ? "0 0 6px "+ACCENT : "none", transition:"all 0.2s" }} />
+        <button onClick={function(){ upd("bandpass",{on:!on}); }} style={{
+          background: on ? "linear-gradient(180deg,#007a8a,#005f6b)" : "linear-gradient(180deg,#2a2a2a,#222)",
+          border:"1px solid "+(on ? ACCENT : "#333"), borderRadius:5, color:"white",
+          fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1,
+        }}>{on ? "ON" : "OFF"}</button>
+      </div>
+
+      {/* Canvas visualiser */}
+      <div style={{ padding:"10px 14px 0", opacity: on ? 1 : 0.45, transition:"opacity 0.2s" }}>
+        <canvas ref={canvasRef} width={320} height={72}
+          style={{ width:"100%", height:72, borderRadius:8, background:"rgba(0,10,14,0.6)", display:"block" }} />
+        {/* Freq axis labels */}
+        <div style={{ display:"flex", justifyContent:"space-between", padding:"2px 0 0", fontSize:8, color:"#1e3a42", fontWeight:600, letterSpacing:0.3 }}>
+          {["20","100","500","1k","5k","20k"].map(function(l){ return <span key={l}>{l}</span>; })}
+        </div>
+      </div>
+
+      {/* Knobs */}
+      <div style={{ padding:"10px 14px 14px", opacity: on ? 1 : 0.45, transition:"opacity 0.2s" }}>
+        <div style={{ display:"flex", gap:8, justifyContent:"space-between", flexWrap:"wrap" }}>
+          <LogKnob value={center} color={ACCENT} onChange={function(v){ upd("bandpass",{center:v}); }} />
+          <Knob label="WIDTH" value={width} min={0.05} max={6} step={0.05} unit="oct"
+            color="#38bdf8" onChange={function(v){ upd("bandpass",{width:v}); }} />
+          <Knob label="RESO" value={res} min={0} max={18} step={0.5} unit="dB"
+            color="#7dd3fc" onChange={function(v){ upd("bandpass",{res:v}); }} />
+          <Knob label="MIX" value={Math.round(mix*100)} min={0} max={100} step={1} unit="%"
+            color="#0ea5e9" onChange={function(v){ upd("bandpass",{mix:v/100}); }} />
+        </div>
+        {/* Lo/Hi readout */}
+        <div style={{ display:"flex", justifyContent:"space-between", marginTop:8, padding:"6px 10px", background:"rgba(0,229,255,0.04)", borderRadius:6, border:"1px solid rgba(0,229,255,0.08)" }}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ color:"#0e5a6a", fontSize:8, fontWeight:700, letterSpacing:1 }}>LO CUT</div>
+            <div style={{ color: on ? "#38bdf8" : "#2a4a50", fontSize:11, fontWeight:800, marginTop:2 }}>{fmtHz(loHz)} Hz</div>
+          </div>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ color:"#0e5a6a", fontSize:8, fontWeight:700, letterSpacing:1 }}>CENTER</div>
+            <div style={{ color: on ? ACCENT : "#2a4a50", fontSize:11, fontWeight:800, marginTop:2 }}>{fmtHz(center)} Hz</div>
+          </div>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ color:"#0e5a6a", fontSize:8, fontWeight:700, letterSpacing:1 }}>HI CUT</div>
+            <div style={{ color: on ? "#38bdf8" : "#2a4a50", fontSize:11, fontWeight:800, marginTop:2 }}>{fmtHz(hiHz)} Hz</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function _TRottenMasterPlugin({ fx, upd }) {
   const m  = fx.trotten || {};
   const on = !!m.on;
@@ -6338,7 +7449,7 @@ function _HDelayPlugin({ fx, upd, Knob }) {
 // here because this is a real component, not an IIFE or callback.
 // Re-renders ONLY when fx data, fxTrackId, trackName, or trackColor change.
 // =============================================================================
-const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackColor, onClose, onUpd }) {
+const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackColor, onClose, onUpd, analyserNode, isPlaying }) {
   const upd = onUpd; // stable ref-backed callback passed from StudioScreen
 
   // ── Rotary Knob ──
@@ -6638,9 +7749,13 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
       <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0, position:"sticky", top:0, zIndex:10 }}>
         <div style={{ width:8, height:8, borderRadius:"50%", background:trackColor, marginRight:8 }} />
         <span style={{ color:"white", fontWeight:800, fontSize:14, flex:1 }}>{trackName} — Effects</span>
+        {/* FX panel master VU meter */}
+        <div style={{ marginRight:10 }}>
+          <VUMeter analyserNode={analyserNode} isActive={isPlaying} compact={true} showLabel={false} />
+        </div>
         <button onClick={onClose} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:13, padding:"5px 14px", cursor:"pointer" }}>Done</button>
       </div>
-      <FxPanelPlugins fx={fx} upd={upd} eq5={eq5} EQGraph={EQGraph} CompGraph={CompGraph} ReverbViz={ReverbViz} Knob={Knob} />
+      <FxPanelPlugins fx={fx} upd={upd} eq5={eq5} EQGraph={EQGraph} CompGraph={CompGraph} ReverbViz={ReverbViz} Knob={Knob} analyserNode={analyserNode} isPlaying={isPlaying} />
     </div>
   );
 }, function areEqual(prev, next) {
@@ -6648,7 +7763,8 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
   return prev.fxTrackId === next.fxTrackId &&
          prev.fx === next.fx &&
          prev.trackName === next.trackName &&
-         prev.trackColor === next.trackColor;
+         prev.trackColor === next.trackColor &&
+         prev.isPlaying === next.isPlaying;
 });
 
 // =============================================================================
@@ -6747,8 +7863,7 @@ function StudioScreen({ user, onExit }) {
 
   // ── Constants ─────────────────────────────────────────────────
   const PPS         = 100;       // PIXELS_PER_SECOND — single source of truth
-  const SIDEBAR_W   = 140;       // left column: track headers (locked horizontally)
-  const TRACK_H     = 68;        // each track row height
+  const SIDEBAR_W   = 158;       // left column: Logic Pro-style track headers
   const RULER_H     = 32;        // timeline ruler height
   const PLAYHEAD_X  = 0;         // playhead flush with sidebar edge — no gap
 
@@ -6757,6 +7872,9 @@ function StudioScreen({ user, onExit }) {
   const [bpm,          setBpm]          = useState(120);
   const [timeSigNum,   setTimeSigNum]   = useState(4);
   const [zoom,         setZoom]         = useState(1);
+  const [vZoom,        setVZoom]        = useState(1);   // vertical track-height zoom
+
+  const TRACK_H     = Math.round(92 * vZoom); // each track row height — scales with vertical zoom
   const [snapToGrid,   setSnapToGrid]   = useState(true);
   const [projectKey,   setProjectKey]   = useState("C major");
   const [projectName,  setProjectName]  = useState("New Project");
@@ -6823,6 +7941,8 @@ function StudioScreen({ user, onExit }) {
   const [trimmingClip, setTrimmingClip]  = useState(null);
   const [monitoringOn, setMonitoringOn] = useState(false);
   const [monitorVol,   setMonitorVol]   = useState(0.8);
+  const micInputGainRef = useRef(1.0); // default 0dB (unity gain)
+  const [micInputGain, setMicInputGainState] = useState(1.0); // 0.25–4.0 range (-12..+12dB)
   const [headphonesIn, setHeadphonesIn] = useState(false);
   const [monitorWarn,  setMonitorWarn]  = useState("");
   const [showAutoPitch,setShowAutoPitch] = useState(false);
@@ -6863,6 +7983,7 @@ function StudioScreen({ user, onExit }) {
   const monitorStreamRef    = useRef(null);
   const monitorSrcRef       = useRef(null);
   const monitorGainRef      = useRef(null);
+  const monitorMicBoostRef  = useRef(null); // pre-gain mic input boost node
   const monitorAnalyserRef  = useRef(null);
   const monitorSplitterRef  = useRef(null); // ChannelSplitter for mono-centre
   const monitorMergerRef    = useRef(null); // ChannelMerger  for mono-centre
@@ -6878,8 +7999,10 @@ function StudioScreen({ user, onExit }) {
   const pitchWorkletReadyRef = useRef(false); // true once the phase-vocoder worklet is registered
 
   // ── Audio engine gain/FX refs (declared here to follow Rules of Hooks) ──
-  const gainNodesRef  = useRef({});   // trackId → GainNode
-  const masterGainRef = useRef(null); // single master output
+  const gainNodesRef       = useRef({});   // trackId → GainNode
+  const trackAnalysersRef  = useRef({});   // trackId → AnalyserNode (for VU meters)
+  const masterAnalyserRef  = useRef(null); // master output analyser
+  const masterGainRef      = useRef(null); // single master output
   const fxNodesRef    = useRef({});   // trackId → live audio node references
 
   // ── Ruler drag ref ───────────────────────────────────────────────────────
@@ -6889,6 +8012,63 @@ function StudioScreen({ user, onExit }) {
   const [selectedTrackId, setSelectedTrackId] = useState(null); // which vocal track records into
   const [selectedClipId, setSelectedClipId] = useState(null);
   const dragRef = useRef(null);
+
+  // ── Track reorder via long-press drag ────────────────────────────────────
+  const [reorderDragId,   setReorderDragId]   = useState(null);  // id of track being dragged
+  const [reorderDropIdx,  setReorderDropIdx]  = useState(null);  // index where it will drop
+  const reorderLongPressRef = useRef(null);   // setTimeout handle
+  const reorderDragRef      = useRef(null);   // { trackId, startY, currentIdx }
+
+  // Reorder helpers
+  const reorderMoveTrack = useCallback(function(fromIdx, toIdx) {
+    if (fromIdx === toIdx) return;
+    setTracks(function(prev) {
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      return next;
+    });
+  }, [setTracks]);
+
+  const handleHeaderLongPressStart = useCallback(function(e, track) {
+    const touch = e.touches ? e.touches[0] : e;
+    const startY = touch.clientY;
+    const currentIdx = tracks.findIndex(function(t){ return t.id === track.id; });
+    reorderLongPressRef.current = setTimeout(function() {
+      // Vibrate to confirm hold (if supported)
+      if (navigator.vibrate) navigator.vibrate(40);
+      setReorderDragId(track.id);
+      setReorderDropIdx(currentIdx);
+      reorderDragRef.current = { trackId: track.id, startY, currentIdx };
+    }, 1500);
+  }, [tracks]);
+
+  const handleHeaderLongPressCancel = useCallback(function() {
+    clearTimeout(reorderLongPressRef.current);
+  }, []);
+
+  const handleHeaderDragMove = useCallback(function(e) {
+    if (!reorderDragRef.current) return;
+    e.preventDefault();
+    const touch = e.touches ? e.touches[0] : e;
+    const dy = touch.clientY - reorderDragRef.current.startY;
+    const movedRows = Math.round(dy / TRACK_H);
+    const fromIdx = reorderDragRef.current.currentIdx;
+    const toIdx = Math.max(0, Math.min(tracks.length - 1, fromIdx + movedRows));
+    setReorderDropIdx(toIdx);
+  }, [tracks.length, TRACK_H]);
+
+  const handleHeaderDragEnd = useCallback(function() {
+    if (!reorderDragRef.current) return;
+    const fromIdx = reorderDragRef.current.currentIdx;
+    if (reorderDropIdx !== null && reorderDropIdx !== fromIdx) {
+      reorderMoveTrack(fromIdx, reorderDropIdx);
+    }
+    setReorderDragId(null);
+    setReorderDropIdx(null);
+    reorderDragRef.current = null;
+    clearTimeout(reorderLongPressRef.current);
+  }, [reorderDropIdx, reorderMoveTrack]);
 
   useEffect(function () { zoomRef.current = zoom; }, [zoom]);
   useEffect(function () { isPlayingRef.current = isPlaying; }, [isPlaying]);
@@ -6956,7 +8136,7 @@ function StudioScreen({ user, onExit }) {
   useEffect(function () {
     try {
       const snap = {
-        projectName, bpm, projectKey, timeSigNum, zoom,
+        projectName, bpm, projectKey, timeSigNum, zoom, vZoom,
         snapToGrid, loopEnabled, loopIn, loopOut,
         // Save track metadata (name, type, color) but not audio buffers
         tracksMeta: tracks.map(function(t) {
@@ -6966,7 +8146,7 @@ function StudioScreen({ user, onExit }) {
       };
       sessionStorage.setItem("bf_studio_state", JSON.stringify(snap));
     } catch(e) {}
-  }, [projectName, bpm, projectKey, timeSigNum, zoom, snapToGrid, loopEnabled, loopIn, loopOut, tracks]);
+  }, [projectName, bpm, projectKey, timeSigNum, zoom, vZoom, snapToGrid, loopEnabled, loopIn, loopOut, tracks]);
 
   // Restore studio state on mount (handles iOS background reload)
   useEffect(function () {
@@ -6982,6 +8162,7 @@ function StudioScreen({ user, onExit }) {
       if (snap.projectKey)   setProjectKey(snap.projectKey);
       if (snap.timeSigNum)   setTimeSigNum(snap.timeSigNum);
       if (snap.zoom)         setZoom(snap.zoom);
+      if (snap.vZoom)        setVZoom(snap.vZoom);
       if (snap.snapToGrid !== undefined) setSnapToGrid(snap.snapToGrid);
       if (snap.loopEnabled !== undefined) setLoopEnabled(snap.loopEnabled);
       if (snap.loopIn  !== undefined)    setLoopIn(snap.loopIn);
@@ -7222,6 +8403,8 @@ function StudioScreen({ user, onExit }) {
       if (mCtx.state === "suspended") await mCtx.resume();
 
       const src  = mCtx.createMediaStreamSource(stream);
+      const micBoost = mCtx.createGain();
+      micBoost.gain.value = micInputGainRef.current;
       const gain = mCtx.createGain();
       gain.gain.value = monitorVol;
 
@@ -7233,12 +8416,13 @@ function StudioScreen({ user, onExit }) {
       // The browser's implicit upmix can route mono only to the left channel on some iOS
       // versions. We use a ChannelSplitter + ChannelMerger to guarantee an identical copy
       // of the mono mic signal on BOTH L and R at equal gain — perfectly centred, no drift.
-      // Graph: src(1ch) → splitter[0] ──→ merger[0] (L)
-      //                            └──→ merger[1] (R)
+      // Graph: src(1ch) → micBoost → splitter[0] ──→ merger[0] (L)
+      //                                        └──→ merger[1] (R)
       //        merger(2ch) → gain → destination
       const splitter = mCtx.createChannelSplitter(1); // force single-channel split
       const merger   = mCtx.createChannelMerger(2);   // 2-channel output (stereo)
-      src.connect(splitter);
+      src.connect(micBoost);
+      micBoost.connect(splitter);
       splitter.connect(merger, 0, 0); // mono → L
       splitter.connect(merger, 0, 1); // mono → R (identical copy)
       merger.connect(gain);
@@ -7247,6 +8431,7 @@ function StudioScreen({ user, onExit }) {
 
       monitorSrcRef.current      = src;
       monitorGainRef.current     = gain;
+      monitorMicBoostRef.current = micBoost;
       monitorAnalyserRef.current = analyser;
       monitorSplitterRef.current = splitter;
       monitorMergerRef.current   = merger;
@@ -7266,6 +8451,7 @@ function StudioScreen({ user, onExit }) {
       // Disconnect all Web Audio nodes
       try { monitorGainRef.current     && monitorGainRef.current.disconnect(); }     catch(e) {}
       try { monitorSrcRef.current      && monitorSrcRef.current.disconnect(); }      catch(e) {}
+      try { monitorMicBoostRef.current && monitorMicBoostRef.current.disconnect(); } catch(e) {}
       try { monitorAnalyserRef.current && monitorAnalyserRef.current.disconnect(); } catch(e) {}
       try { monitorSplitterRef.current && monitorSplitterRef.current.disconnect(); } catch(e) {}
       try { monitorMergerRef.current   && monitorMergerRef.current.disconnect(); }   catch(e) {}
@@ -7283,6 +8469,7 @@ function StudioScreen({ user, onExit }) {
       monitorStreamRef.current   = null;
       monitorSrcRef.current      = null;
       monitorGainRef.current     = null;
+      monitorMicBoostRef.current = null;
       monitorAnalyserRef.current = null;
       monitorSplitterRef.current = null;
       monitorMergerRef.current   = null;
@@ -7300,6 +8487,13 @@ function StudioScreen({ user, onExit }) {
       monitorGainRef.current.gain.setTargetAtTime(monitorVol, monitorCtxRef.current.currentTime, 0.01);
     }
   }, [monitorVol]);
+
+  useEffect(function(){
+    micInputGainRef.current = micInputGain;
+    if (monitorMicBoostRef.current && monitorCtxRef.current) {
+      monitorMicBoostRef.current.gain.setTargetAtTime(micInputGain, monitorCtxRef.current.currentTime, 0.01);
+    }
+  }, [micInputGain]);
 
   // ── Scroll container helpers ──────────────────────────────────
   // With paddingLeft=PLAYHEAD_X on inner div, Bar1 (x=0) sits exactly under the playhead.
@@ -7904,6 +9098,12 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       masterGainRef.current = actx.createGain();
       masterGainRef.current.gain.value = 1;
       masterGainRef.current.connect(actx.destination);
+      // Master output VU analyser (side-branch)
+      const ma = actx.createAnalyser();
+      ma.fftSize = 256;
+      ma.smoothingTimeConstant = 0.5;
+      masterGainRef.current.connect(ma);
+      masterAnalyserRef.current = ma;
     }
     return masterGainRef.current;
   };
@@ -8172,6 +9372,24 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         trOn ? Math.max(0.05, tr.limRel ?? 0.5) : 0.25, now, T
       );
     }
+
+    // ── GRM Bandpass — live param morphing ────────────────────────────────
+    if (live.bandpass && fx.bandpass !== undefined) {
+      const bpFx  = fx.bandpass || {};
+      const bpOn  = !!(fx.bandpass && fx.bandpass.on);
+      const center = bpOn ? Math.min(8000, bpFx.center ?? 1000) : 1000;
+      const octW   = bpOn ? (bpFx.width  ?? 1.0)  : 1.0;
+      const resDb  = bpOn ? (bpFx.res    ?? 0)    : 0;
+      const mixWet = bpOn ? (bpFx.mix    ?? 1)    : 0;
+      const Q  = Math.sqrt(Math.pow(2, octW)) / (Math.pow(2, octW) - 1);
+      const Qr = Math.max(0.1, Q * (1 + resDb / 6));
+      live.bandpass.bp1.frequency.setTargetAtTime(center, now, T);
+      live.bandpass.bp1.Q.setTargetAtTime(Qr, now, T);
+      live.bandpass.bp2.frequency.setTargetAtTime(center, now, T);
+      live.bandpass.bp2.Q.setTargetAtTime(Qr, now, T);
+      live.bandpass.bpDry.gain.setTargetAtTime(1 - mixWet, now, T);
+      live.bandpass.bpWet.gain.setTargetAtTime(mixWet,     now, T);
+    }
   };
   const toggleMute = function (id) {
     setTracks(function(prev){
@@ -8205,6 +9423,8 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       try { g.disconnect(); } catch (e) {}
     });
     gainNodesRef.current = {};
+    // Reset per-track analyser refs
+    trackAnalysersRef.current = {};
     // Clear live FX node refs
     fxNodesRef.current = {};
     // Ramp master gain to 0 instantly to cut any tail
@@ -8261,6 +9481,13 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       volGain.gain.value = (track.volume ?? 1) * (shouldPlay ? 1 : 0);
       volGain.connect(node); node = volGain;
       gainNodesRef.current[track.id] = volGain;
+
+      // ── Per-track VU analyser (side-branch, read-only, doesn't affect sound) ──
+      const trackAnalyser = actx.createAnalyser();
+      trackAnalyser.fftSize = 256;
+      trackAnalyser.smoothingTimeConstant = 0.5;
+      volGain.connect(trackAnalyser); // taps off AFTER volume/mute
+      trackAnalysersRef.current[track.id] = trackAnalyser;
 
       // ── Reverb — always built so wet/dry can be morphed live ──
       // We always allocate the reverb graph; when off, wetG = 0 and dryG = 1
@@ -8703,6 +9930,51 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
           trComp, trTape, trTapeShelf, trLim, trOutGain,
           buildTapeCurve,
         };
+      }
+
+      // ── GRM Bandpass — dual cascaded biquad bandpass (≈12 dB/oct × 2 = 6th order) ──
+      // Always built wet/dry so mix morphs live. When off, dryG=1 / wetG=0.
+      {
+        const bpFx   = fx.bandpass || {};
+        const bpOn   = !!(fx.bandpass && fx.bandpass.on);
+        const center = bpOn ? Math.min(8000, bpFx.center ?? 1000) : 1000;
+        const octW   = bpOn ? (bpFx.width  ?? 1.0)  : 1.0;
+        const resDb  = bpOn ? (bpFx.res    ?? 0)    : 0;
+        const mixWet = bpOn ? (bpFx.mix    ?? 1)    : 0;
+
+        // Q from octave bandwidth: Q = √2^w / (2^w − 1)
+        const Q  = Math.sqrt(Math.pow(2, octW)) / (Math.pow(2, octW) - 1);
+        const Qr = Math.max(0.1, Q * (1 + resDb / 6));
+
+        // First cascaded biquad bandpass
+        const bp1 = actx.createBiquadFilter();
+        bp1.type = "bandpass";
+        bp1.frequency.value = center;
+        bp1.Q.value = Qr;
+
+        // Second cascaded biquad bandpass (same params → steeper skirts)
+        const bp2 = actx.createBiquadFilter();
+        bp2.type = "bandpass";
+        bp2.frequency.value = center;
+        bp2.Q.value = Qr;
+
+        // Wet/dry mix
+        const bpDry = actx.createGain(); bpDry.gain.value = 1 - mixWet;
+        const bpWet = actx.createGain(); bpWet.gain.value = mixWet;
+        const bpOut = actx.createGain(); bpOut.gain.value = 1;
+        const bpEntry = actx.createGain(); bpEntry.gain.value = 1;
+
+        // Routing: entry → dry → out ; entry → bp1 → bp2 → wet → out → next
+        bpEntry.connect(bpDry);
+        bpDry.connect(bpOut);
+        bpEntry.connect(bp1);
+        bp1.connect(bp2);
+        bp2.connect(bpWet);
+        bpWet.connect(bpOut);
+        bpOut.connect(node);
+        node = bpEntry;
+
+        liveNodes.bandpass = { bp1, bp2, bpDry, bpWet, bpOut };
       }
 
       // ── Pitch/Autotune via phase-vocoder AudioWorklet ──────────────────────
@@ -9179,7 +10451,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         // Save studio state so it survives an iOS background reload
         try {
           sessionStorage.setItem("bf_studio_state", JSON.stringify({
-            projectName, bpm, projectKey, timeSigNum, zoom,
+            projectName, bpm, projectKey, timeSigNum, zoom, vZoom,
             snapToGrid, loopEnabled, loopIn, loopOut,
             tracksMeta: tracks.map(function(t) {
               return { id: t.id, name: t.name, type: t.type, color: t.color,
@@ -9209,7 +10481,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [monitoringOn, projectName, bpm, projectKey, timeSigNum, zoom, snapToGrid, loopEnabled, loopIn, loopOut, tracks]);
+  }, [monitoringOn, projectName, bpm, projectKey, timeSigNum, zoom, vZoom, snapToGrid, loopEnabled, loopIn, loopOut, tracks]);
 
   // selectedTrackId declared at top of component (Rules of Hooks)
 
@@ -9255,12 +10527,18 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
       const actx    = getActx();
       const srcNode = actx.createMediaStreamSource(stream);
+      // ── Mic input gain boost — raises low mic levels before recording ──
+      // Applies the same gain the user set via the Mic Gain slider.
+      // Signal chain: srcNode → micInputBoost → recSplitter → recMerger → analyser → MediaRecorder
+      const micInputBoost = actx.createGain();
+      micInputBoost.gain.value = micInputGainRef.current;
       const analyser = actx.createAnalyser(); analyser.fftSize = 256;
       // Mono-centre the recording analyser feed (same as monitoring) so the
       // waveform meter reads equally from both channels.
       const recSplitter = actx.createChannelSplitter(1);
       const recMerger   = actx.createChannelMerger(2);
-      srcNode.connect(recSplitter);
+      srcNode.connect(micInputBoost);
+      micInputBoost.connect(recSplitter);
       recSplitter.connect(recMerger, 0, 0); // mono → L
       recSplitter.connect(recMerger, 0, 1); // mono → R
       recMerger.connect(analyser);
@@ -9292,6 +10570,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         stream.getTracks().forEach(function (t) { t.stop(); });
         try { analyser.disconnect(); } catch(e) {}
         try { srcNode.disconnect(); } catch(e) {}
+        try { micInputBoost.disconnect(); } catch(e) {}
 
         const blob = new Blob(chunksRef.current, { type: mime });
         const url  = URL.createObjectURL(blob);
@@ -9759,33 +11038,66 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   const handleRegionTouchEnd  = function () {};
 
   // ── Pinch zoom ────────────────────────────────────────────────
+  // Logic Pro / BandLab behaviour:
+  //   • Horizontal pinch (fingers moving apart/together left-right) → H-zoom (timeline)
+  //   • Vertical pinch   (fingers moving apart/together up-down)    → V-zoom (track heights)
+  //   • Diagonal pinch applies both axes proportionally
   useEffect(function () {
     const el = scrollRef.current;
     if (!el) return;
     const onStart = function (e) {
       if (e.touches.length !== 2) return;
-      const dx=e.touches[0].clientX-e.touches[1].clientX, dy=e.touches[0].clientY-e.touches[1].clientY;
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
       const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-      pinchRef.current = { dist:Math.sqrt(dx*dx+dy*dy), zoom:zoomRef.current, midX, scrollLeft:el.scrollLeft };
+      pinchRef.current = {
+        // full distance (legacy — still used for the pivot anchor)
+        dist: Math.sqrt(dx * dx + dy * dy),
+        // per-axis distances for independent scaling
+        distX: Math.abs(dx),
+        distY: Math.abs(dy),
+        zoom:  zoomRef.current,
+        vZoom: vZoom,        // snapshot current v-zoom at gesture start
+        midX,
+        scrollLeft: el.scrollLeft,
+      };
     };
     const onMove = function (e) {
       if (e.touches.length !== 2 || !pinchRef.current) return;
       e.preventDefault();
-      const dx=e.touches[0].clientX-e.touches[1].clientX, dy=e.touches[0].clientY-e.touches[1].clientY;
-      const d=Math.sqrt(dx*dx+dy*dy);
-      const newZoom = Math.min(32, Math.max(0.05, +(pinchRef.current.zoom*d/pinchRef.current.dist).toFixed(3)));
-      // Anchor scroll to the pinch midpoint so the timeline scales around your fingers
-      const ratio = newZoom / pinchRef.current.zoom;
-      const pivotX = pinchRef.current.midX - el.getBoundingClientRect().left + pinchRef.current.scrollLeft;
-      el.scrollLeft = Math.max(0, pivotX * ratio - (pinchRef.current.midX - el.getBoundingClientRect().left));
-      setZoom(newZoom);
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
+
+      // ── Horizontal zoom (H-zoom) ─────────────────────────────
+      if (pinchRef.current.distX > 4) {   // only when gesture has meaningful H span
+        const newZoom = Math.min(32, Math.max(0.05,
+          +(pinchRef.current.zoom * absDx / pinchRef.current.distX).toFixed(3)));
+        // Anchor scroll to pinch midpoint
+        const ratio  = newZoom / pinchRef.current.zoom;
+        const pivotX = pinchRef.current.midX - el.getBoundingClientRect().left + pinchRef.current.scrollLeft;
+        el.scrollLeft = Math.max(0, pivotX * ratio - (pinchRef.current.midX - el.getBoundingClientRect().left));
+        setZoom(newZoom);
+      }
+
+      // ── Vertical zoom (V-zoom) ───────────────────────────────
+      if (pinchRef.current.distY > 4) {   // only when gesture has meaningful V span
+        const newVZoom = Math.min(4, Math.max(0.4,
+          +(pinchRef.current.vZoom * absDy / pinchRef.current.distY).toFixed(3)));
+        setVZoom(newVZoom);
+      }
     };
     const onEnd = function () { pinchRef.current = null; };
-    el.addEventListener("touchstart",onStart,{passive:true});
-    el.addEventListener("touchmove", onMove, {passive:false});
-    el.addEventListener("touchend",  onEnd,  {passive:true});
-    return function(){ el.removeEventListener("touchstart",onStart); el.removeEventListener("touchmove",onMove); el.removeEventListener("touchend",onEnd); };
-  }, []);
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove",  onMove,  { passive: false });
+    el.addEventListener("touchend",   onEnd,   { passive: true });
+    return function () {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove",  onMove);
+      el.removeEventListener("touchend",   onEnd);
+    };
+  }, [vZoom]);  // re-bind when vZoom changes so snapshot stays fresh
 
   // ── Metronome ─────────────────────────────────────────────────
   useEffect(function () {
@@ -11311,6 +12623,8 @@ self.onmessage = async function(e) {
 
       {/* Zoom / Loop bar — monitoring toggle lives here too */}
       <div style={{ display:"flex",alignItems:"center",gap:6,padding:"4px 12px",background:"#090909",borderBottom:"1px solid #0f0f0f",flexShrink:0 }}>
+        {/* H-zoom label */}
+        <span style={{ color:"#333",fontSize:7,fontWeight:800,letterSpacing:0.5,flexShrink:0 }}>H</span>
         <button onClick={function(){
           setZoom(function(z){
             // Exponential zoom-out: each tap multiplies by ~0.7 so steps feel even at all levels
@@ -11346,8 +12660,25 @@ self.onmessage = async function(e) {
           });
         }} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:16,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>+</button>
         <div style={{ width:1,background:"#1a1a1a",height:14,margin:"0 4px" }} />
+        {/* Vertical zoom controls — identical behaviour to horizontal, scales track row heights */}
+        <span style={{ color:"#333",fontSize:7,fontWeight:800,letterSpacing:0.5,flexShrink:0 }}>V</span>
+        <button onClick={function(){
+          setVZoom(function(v){ return Math.max(0.4, parseFloat((v * 0.7).toFixed(3))); });
+        }} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:12,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }} title="Vertical zoom out">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 2v9M2 6.5h9" stroke="#888" strokeWidth="1.6" strokeLinecap="round"/><path d="M3.5 9.5 9.5 3.5" stroke="transparent" strokeWidth="0"/><path d="M4 9h5" stroke="#888" strokeWidth="1.6" strokeLinecap="round"/></svg>
+        </button>
+        <span style={{ color:"#555",fontSize:9,fontFamily:"monospace",width:32,textAlign:"center" }}>
+          {Math.round(vZoom * 100)}%
+        </span>
+        <button onClick={function(){
+          setVZoom(function(v){ return Math.min(4, parseFloat((v * 1.4).toFixed(3))); });
+        }} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:12,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }} title="Vertical zoom in">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 2v9M2 6.5h9" stroke="#888" strokeWidth="1.6" strokeLinecap="round"/></svg>
+        </button>
+        <div style={{ width:1,background:"#1a1a1a",height:14,margin:"0 4px" }} />
         <button onClick={function(){ setLoopEnabled(function(v){return !v;});}} style={{ background:loopEnabled?"rgba(59,130,246,0.2)":"#141414",border:"1px solid "+(loopEnabled?"#3B82F6":"#222"),borderRadius:6,color:loopEnabled?"#3B82F6":"#555",fontSize:10,fontWeight:700,padding:"3px 8px",cursor:"pointer" }}>LOOP</button>
         <div style={{ flex:1 }} />
+        <div style={{ width:1, background:"#1a1a1a", height:14, margin:"0 2px" }} />
         {/* 🎧 Input monitoring toggle */}
         <button
           onClick={function(){ monitoringOn ? stopMonitoring() : startMonitoring(); }}
@@ -11363,6 +12694,20 @@ self.onmessage = async function(e) {
             onChange={function(e){ setMonitorVol(parseFloat(e.target.value)); }}
             style={{ width:50,accentColor:"#22C55E",height:2 }} />
         )}
+        {/* Mic input gain — compact: icon + slider + dB, all inline */}
+        <div style={{ display:"flex",alignItems:"center",gap:3,flexShrink:0 }}>
+          <span style={{ fontSize:9,color:"#555",fontWeight:700,flexShrink:0 }}>🎙</span>
+          <input type="range" min={0.25} max={4} step={0.05} value={micInputGain}
+            title={"Mic Gain: " + (20 * Math.log10(micInputGain)).toFixed(1) + " dB  (default = 0.0 dB)"}
+            onChange={function(e){
+              const v = parseFloat(e.target.value);
+              setMicInputGainState(v);
+            }}
+            style={{ width:44,accentColor:"#C026D3",height:2,flexShrink:0 }} />
+          <span style={{ fontSize:8,color:micInputGain > 3 ? "#F59E0B" : "#555",fontWeight:700,width:24,textAlign:"right",flexShrink:0,fontFamily:"monospace" }}>
+            {micInputGain >= 1 ? "+" : ""}{(20 * Math.log10(micInputGain)).toFixed(0)}dB
+          </span>
+        </div>
         {/* Mic source picker — dropdown. Headset option is never disabled;
             status is shown in the label itself so users always know what's connected. */}
         <select
@@ -11491,42 +12836,45 @@ userPickedMicRef.current = true;
             </div>
 
             {/* ── TRACK ROWS ── each is a flex row: sticky header | lane ── */}
-            {tracks.map(function(track){
+            {tracks.map(function(track, trackIdx){
               const isRec   = isRecording && recTrackId === track.id;
               const hasSolo = tracks.some(function(t){return t.isSoloed;});
               const dimmed  = hasSolo && !track.isSoloed;
               const clips   = track.clips || [];
+              const isBeingDragged = reorderDragId === track.id;
+              const isDropTgt = reorderDropIdx === trackIdx && reorderDragId !== null && reorderDragId !== track.id;
               return (
-                <div key={track.id} style={{ display:"flex", height:TRACK_H, borderBottom:"1px solid #0f0f0f", opacity:dimmed?0.4:1 }}>
+                <div key={track.id} style={{ display:"flex", height:TRACK_H, borderBottom: isDropTgt ? "2px solid #30D158" : "1px solid #0f0f0f", opacity:dimmed?0.4:1, position:"relative" }}>
 
                   {/* Track header — sticky left, never scrolls away horizontally */}
                   <div
-                    onClick={function(){ setSelectedTrackId(track.id); }}
                     style={{
                       width:SIDEBAR_W, flexShrink:0,
                       position:"sticky", left:0, zIndex:10,
-                      background:"#0a0a0a",
-                      borderRight: selectedTrackId===track.id ? "1px solid rgba(255,255,255,0.95)" : "1px solid #141414",
-                      boxShadow: selectedTrackId===track.id ? "inset 0 0 16px rgba(255,255,255,0.18), 0 0 20px rgba(255,255,255,0.45)" : "none",
-                      padding:"5px 7px", display:"flex", flexDirection:"column", justifyContent:"space-between",
-                      cursor:"pointer",
-                      transition:"border-color 0.15s, box-shadow 0.15s",
                     }}
                   >
-                    <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-                      <div style={{ width:7, height:7, borderRadius:"50%", background:isRec?"#EF4444":track.color, flexShrink:0 }} />
-                      <span style={{ color:"white", fontSize:10, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>{track.name}</span>
-                      <span style={{ color:"#444", fontSize:9 }}>{track.type==="beat"?"🎵":"🎙"}</span>
-                    </div>
-                    <div style={{ display:"flex", gap:3, alignItems:"center" }}>
-                      <button onClick={function(e){ e.stopPropagation(); toggleMute(track.id); }} style={{ background:track.isMuted?"rgba(245,158,11,0.2)":"#1a1a1a", border:"1px solid "+(track.isMuted?"#F59E0B":"#2a2a2a"), borderRadius:4, color:track.isMuted?"#F59E0B":"#555", fontSize:8, padding:"2px 4px", cursor:"pointer", fontWeight:700 }}>M</button>
-                      <button onClick={function(e){ e.stopPropagation(); toggleSolo(track.id); }} style={{ background:track.isSoloed?"rgba(34,197,94,0.2)":"#1a1a1a", border:"1px solid "+(track.isSoloed?"#22C55E":"#2a2a2a"), borderRadius:4, color:track.isSoloed?"#22C55E":"#555", fontSize:8, padding:"2px 4px", cursor:"pointer", fontWeight:700 }}>S</button>
-                      <button onClick={function(e){ e.stopPropagation(); setFxTrackId(function(v){ return v===track.id?null:track.id; }); }} style={{ background:fxTrackId===track.id?"rgba(139,92,246,0.2)":"#1a1a1a", border:"1px solid "+(fxTrackId===track.id?"#8B5CF6":"#2a2a2a"), borderRadius:4, color:fxTrackId===track.id?"#8B5CF6":"#555", fontSize:7, padding:"2px 4px", cursor:"pointer", fontWeight:700 }}>FX</button>
-                      {track.clips&&track.clips.length>1&&(
-                        <button onClick={function(e){ e.stopPropagation(); setShowTakes(function(v){ return v===track.id?null:track.id; }); }} style={{ background:showTakes===track.id?"rgba(59,130,246,0.2)":"#1a1a1a", border:"1px solid "+(showTakes===track.id?"#3B82F6":"#2a2a2a"), borderRadius:4, color:showTakes===track.id?"#3B82F6":"#555", fontSize:7, padding:"2px 4px", cursor:"pointer", fontWeight:700 }}>{track.clips.length}✦</button>
-                      )}
-                      <button onClick={function(e){ e.stopPropagation(); removeTrack(track.id); }} style={{ background:"none", border:"none", color:"#333", fontSize:10, cursor:"pointer", marginLeft:"auto", padding:"0 2px" }}>✕</button>
-                    </div>
+                    <LogicTrackHeader
+                      track={track}
+                      isRec={isRec}
+                      isSelected={selectedTrackId===track.id}
+                      fxOpen={fxTrackId===track.id}
+                      showTakes={showTakes===track.id}
+                      onSelect={function(){ setSelectedTrackId(track.id); }}
+                      onMute={function(){ toggleMute(track.id); }}
+                      onSolo={function(){ toggleSolo(track.id); }}
+                      onFx={function(){ setFxTrackId(function(v){ return v===track.id?null:track.id; }); }}
+                      onTakes={function(){ setShowTakes(function(v){ return v===track.id?null:track.id; }); }}
+                      onRemove={function(){ removeTrack(track.id); }}
+                      updateTrack={updateTrack}
+                      analyserNode={trackAnalysersRef.current[track.id] || null}
+                      isPlaying={isPlaying}
+                      isDragging={isBeingDragged}
+                      isDropTarget={isDropTgt}
+                      onLongPressStart={function(e){ handleHeaderLongPressStart(e, track); }}
+                      onLongPressCancel={handleHeaderLongPressCancel}
+                      onDragMove={handleHeaderDragMove}
+                      onDragEnd={handleHeaderDragEnd}
+                    />
                   </div>
 
                   {/* Lane outer — overflow:visible for trim handles only */}
@@ -11746,9 +13094,21 @@ userPickedMicRef.current = true;
         const fx = t.effects || {};
         // Keep ref current every render so FxPanel's stable onUpd always has latest data
         fxUpdRef.current = function(section, patch, rawValue){
-          const newEffects = section === "pluginChain"
-            ? { ...t.effects, pluginChain: rawValue }
-            : { ...t.effects, [section]:{ ...(t.effects[section]||{}), ...patch } };
+          let newEffects;
+          if (section === "pluginChain") {
+            newEffects = { ...t.effects, pluginChain: rawValue };
+          } else if (section === "__remove") {
+            // Atomic: remove from chain AND force plugin section off so audio bypasses
+            const pluginKey = rawValue;
+            const newChain  = (t.effects.pluginChain || []).filter(function(k){ return k !== pluginKey; });
+            newEffects = {
+              ...t.effects,
+              pluginChain: newChain,
+              [pluginKey]: { ...(t.effects[pluginKey] || {}), on: false },
+            };
+          } else {
+            newEffects = { ...t.effects, [section]:{ ...(t.effects[section]||{}), ...patch } };
+          }
           updateTrack(t.id, { effects: newEffects });
           applyFxLive(t.id, newEffects);
         };
@@ -11761,6 +13121,8 @@ userPickedMicRef.current = true;
             trackColor={t.color}
             onClose={function(){ setFxTrackId(null); }}
             onUpd={fxUpdRef.current}
+            analyserNode={trackAnalysersRef.current[fxTrackId] || null}
+            isPlaying={isPlaying}
           />
         );
       })()}
@@ -11790,108 +13152,331 @@ userPickedMicRef.current = true;
         );
       })()}
 
-      {/* ══ MIXER ═══════════════════════════════════════════════ */}
-      {showMixer && (
-        <div style={{ background:"#0c0c0c",borderTop:"1px solid #222",flexShrink:0,maxHeight:"54vh",display:"flex",flexDirection:"column" }} onClick={function(e){ e.stopPropagation(); }}>
-          {/* ── Mixer header ── */}
-          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 16px 4px",flexShrink:0 }}>
-            <span style={{ color:"#555",fontSize:10,fontWeight:800,letterSpacing:2 }}>MIXER</span>
-            <button onClick={function(){ setShowMixer(false); }} style={{ background:"none",border:"none",color:"#444",fontSize:18,cursor:"pointer",lineHeight:1,padding:0 }}>×</button>
-          </div>
+      {/* ══ GARAGEBAND-STYLE MIXER ══════════════════════════════ */}
+      {showMixer && (function(){
+        // GB mixer: dark #1c1c1e panel, per-channel strips with:
+        //   knob pan, tall vertical fader with GB-style thumb, dual VU bars, M/S buttons, colour tab at bottom
+        const GB_BG       = "#1c1c1e";
+        const GB_STRIP    = "#2c2c2e";
+        const GB_BORDER   = "#3a3a3c";
+        const GB_LABEL    = "#8e8e93";
+        const GB_FADER_H  = 140; // px tall fader travel area
+        const STRIP_W     = 58;
 
-          {/* ── Channel strips ── */}
-          <div style={{ overflowX:"auto",overflowY:"auto",WebkitOverflowScrolling:"touch",flex:1,minHeight:0 }}>
-            <div style={{ display:"flex",gap:0,minWidth:"max-content",padding:"0 8px 12px" }}>
-              {tracks.map(function(t, ti){
-                const vol = t.volume ?? 1;
-                const pan = t.pan || 0;
-                const panPct = Math.round(pan * 100);
-                const volPct = Math.round(vol * 100);
-                const trackW = Math.max(72, Math.floor((window.innerWidth - 16) / Math.min(tracks.length, 5)));
-                return (
-                  <div key={t.id} style={{ width:trackW,display:"flex",flexDirection:"column",alignItems:"center",gap:0,borderRight:"1px solid #1a1a1a",padding:"0 4px" }}>
-                    {/* Track colour + name */}
-                    <div style={{ display:"flex",alignItems:"center",gap:4,padding:"4px 0 6px",width:"100%" }}>
-                      <div style={{ width:8,height:8,borderRadius:"50%",background:t.color,flexShrink:0 }} />
-                      <span style={{ color:"#aaa",fontSize:9,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1 }}>{t.name}</span>
-                    </div>
+        function GBPanKnob({ pan, color, onChange }) {
+          const dragRef = React.useRef(null);
+          // pan −1..1 → norm 0..1
+          const norm  = (pan + 1) / 2;
+          const angle = -140 + norm * 280;
+          const r = 14, SW = 3, PAD = SW / 2 + 2;
+          const cx = r + PAD, cy = r + PAD, SIZE = (r + PAD) * 2;
+          const toXY = function(deg){ const rad=(deg-90)*Math.PI/180; return {x:cx+r*Math.cos(rad),y:cy+r*Math.sin(rad)}; };
+          const startA = toXY(-140), endA = toXY(angle);
+          const swept  = angle-(-140), large = swept>180?1:0;
+          const arcD   = "M "+startA.x.toFixed(2)+" "+startA.y.toFixed(2)+" A "+r+" "+r+" 0 "+large+" 1 "+endA.x.toFixed(2)+" "+endA.y.toFixed(2);
+          function onPD(e){
+            e.preventDefault();
+            dragRef.current = { y:e.clientY, val:pan };
+            function onM(me){
+              const dy = dragRef.current.y - me.clientY;
+              const nv = Math.max(-1, Math.min(1, dragRef.current.val + dy/60));
+              onChange(+nv.toFixed(2));
+            }
+            function onU(){ document.removeEventListener("pointermove",onM); document.removeEventListener("pointerup",onU); }
+            document.addEventListener("pointermove",onM);
+            document.addEventListener("pointerup",onU);
+          }
+          return (
+            <svg width={SIZE} height={SIZE} viewBox={"0 0 "+SIZE+" "+SIZE}
+              style={{cursor:"ns-resize",touchAction:"none",overflow:"visible",display:"block"}}
+              onPointerDown={onPD}
+              onDoubleClick={function(){ onChange(0); }}>
+              {/* Track arc */}
+              <circle cx={cx} cy={cy} r={r} fill="none" stroke="#3a3a3c" strokeWidth={SW} strokeLinecap="round"
+                strokeDasharray={(2*Math.PI*r*280/360)+" "+(2*Math.PI*r)}
+                strokeDashoffset={(2*Math.PI*r*(90+140)/360)}
+                transform={"rotate(-90 "+cx+" "+cy+")"} />
+              {/* Centre dot */}
+              <line x1={cx} y1={PAD} x2={cx} y2={PAD+4} stroke="#555" strokeWidth={1} />
+              {/* Filled arc */}
+              {norm>0.01 && norm<0.99 && <path d={arcD} fill="none" stroke={color} strokeWidth={SW} strokeLinecap="round"/>}
+              {/* Dot at 0 */}
+              {Math.abs(pan)<0.02 && <circle cx={cx} cy={PAD+1} r={2} fill={color}/>}
+              {/* Thumb */}
+              <circle cx={endA.x} cy={endA.y} r={SW*0.85} fill={color}/>
+              {/* Inner cap */}
+              <circle cx={cx} cy={cy} r={r*0.38} fill="#1c1c1e" stroke="#3a3a3c" strokeWidth={1.5}/>
+            </svg>
+          );
+        }
 
-                    {/* ── PAN ── large touch-friendly horizontal slider */}
-                    <div style={{ width:"100%",marginBottom:8 }}>
-                      <div style={{ display:"flex",justifyContent:"space-between",marginBottom:3 }}>
-                        <span style={{ color:"#555",fontSize:8,fontWeight:600 }}>PAN</span>
-                        <span style={{ color:pan===0?"#555":t.color,fontSize:8,fontWeight:700 }}>
-                          {pan===0?"C":pan>0?("R"+panPct):("L"+Math.abs(panPct))}
+        function GBFader({ vol, color, muted, onChange }) {
+          const dragRef = React.useRef(null);
+          const trackH  = GB_FADER_H;
+          // vol 0..1.5 → thumb Y: 0=top(max), trackH=bottom(min)
+          const thumbY  = trackH - Math.max(0, Math.min(1, vol / 1.5)) * trackH;
+          // Unity (vol=1) tick position
+          const unityY  = trackH - (1/1.5)*trackH;
+
+          function onPD(e){
+            e.preventDefault();
+            const rect = e.currentTarget.getBoundingClientRect();
+            dragRef.current = { rect };
+            function onM(me){
+              const rel = me.clientY - dragRef.current.rect.top;
+              const n   = Math.max(0, Math.min(1, rel / trackH));
+              onChange(+((1-n)*1.5).toFixed(3));
+            }
+            function onU(){ document.removeEventListener("pointermove",onM); document.removeEventListener("pointerup",onU); }
+            document.addEventListener("pointermove",onM);
+            document.addEventListener("pointerup",onU);
+          }
+
+          const thumbColor = muted ? "#636366" : "#e5e5ea";
+          const fillH = Math.max(0, Math.min(1, vol/1.5)) * trackH;
+
+          return (
+            <div style={{ position:"relative", width:28, height:trackH, flexShrink:0, cursor:"pointer" }}
+              onPointerDown={onPD}
+              onDoubleClick={function(){ onChange(1); }}>
+              {/* Rail background */}
+              <div style={{ position:"absolute", left:"50%", transform:"translateX(-50%)", top:0, bottom:0, width:4, background:"#3a3a3c", borderRadius:2 }} />
+              {/* Fill (level indicator on rail) */}
+              <div style={{
+                position:"absolute", left:"50%", transform:"translateX(-50%)",
+                bottom:0, width:4,
+                height: fillH,
+                background: muted ? "#48484a" : "linear-gradient(0deg,"+color+"cc,"+color+"66 80%,transparent)",
+                borderRadius:2,
+              }} />
+              {/* Unity tick */}
+              <div style={{ position:"absolute", left:"calc(50% + 4px)", top: unityY-0.5, width:6, height:1, background:"#636366" }} />
+              {/* Fader thumb — GB style: rounded rect pill */}
+              <div style={{
+                position:"absolute", left:"50%", top: thumbY - 14,
+                transform:"translateX(-50%)",
+                width:24, height:28,
+                background: muted
+                  ? "linear-gradient(180deg,#48484a,#3a3a3c)"
+                  : "linear-gradient(180deg,#f2f2f7,#d1d1d6)",
+                borderRadius:5,
+                boxShadow: muted ? "0 1px 3px rgba(0,0,0,0.8)" : "0 2px 6px rgba(0,0,0,0.7), 0 1px 0 rgba(255,255,255,0.15) inset",
+                display:"flex", alignItems:"center", justifyContent:"center",
+              }}>
+                {/* Grip lines */}
+                {[0,1,2].map(function(i){
+                  return <div key={i} style={{ position:"absolute", left:5, right:5, top:9+i*3, height:1, background: muted?"rgba(100,100,100,0.5)":"rgba(0,0,0,0.18)", borderRadius:0.5 }} />;
+                })}
+              </div>
+            </div>
+          );
+        }
+
+        function GBVUBars({ analyserNode, active }) {
+          const { level, peak, clipping } = useAnalyser(analyserNode, active);
+          const rOff   = React.useRef(0.88 + Math.random()*0.12);
+          const rLevel = Math.min(1, level * rOff.current);
+          const rPeak  = Math.min(1, peak  * rOff.current);
+          const BAR_H  = GB_FADER_H;
+          const SEGS   = 24;
+
+          function renderCol(lv, pk) {
+            return (
+              <div style={{ display:"flex", flexDirection:"column-reverse", gap:1, height:BAR_H, width:5 }}>
+                {Array.from({length:SEGS}, function(_,i){
+                  const frac    = i / SEGS;
+                  const lit     = lv >= frac;
+                  const isPeak  = pk>0 && Math.abs(pk-frac)<(1.5/SEGS);
+                  const col     = frac>=0.875?"#ff3b30":frac>=0.688?"#ffd60a":"#30d158";
+                  const dim     = frac>=0.875?"#3a0a08":frac>=0.688?"#3a2a00":"#0a2a14";
+                  return <div key={i} style={{
+                    flex:1, borderRadius:1,
+                    background: isPeak?"#fff": lit?col:dim,
+                  }}/>;
+                })}
+              </div>
+            );
+          }
+
+          return (
+            <div style={{ display:"flex", gap:2, alignItems:"flex-end" }}>
+              {renderCol(level, peak)}
+              {renderCol(rLevel, rPeak)}
+            </div>
+          );
+        }
+
+        return (
+          <div style={{
+            background: GB_BG,
+            borderTop: "1px solid "+GB_BORDER,
+            flexShrink: 0,
+            maxHeight: "58vh",
+            display: "flex",
+            flexDirection: "column",
+          }} onClick={function(e){ e.stopPropagation(); }}>
+
+            {/* ── GB Mixer header bar ── */}
+            <div style={{
+              display:"flex", alignItems:"center", justifyContent:"space-between",
+              padding:"8px 14px 6px",
+              borderBottom:"1px solid "+GB_BORDER,
+              flexShrink:0,
+            }}>
+              <span style={{ color:"#ebebf5cc", fontSize:13, fontWeight:700, letterSpacing:0.3 }}>Mixer</span>
+              <button onClick={function(){ setShowMixer(false); }} style={{
+                background:"none", border:"none", color:GB_LABEL, fontSize:20,
+                cursor:"pointer", lineHeight:1, padding:"0 2px",
+              }}>×</button>
+            </div>
+
+            {/* ── Channel strip scroll area ── */}
+            <div style={{ overflowX:"auto", overflowY:"hidden", WebkitOverflowScrolling:"touch", flex:1, minHeight:0 }}>
+              <div style={{ display:"flex", gap:0, minWidth:"max-content", padding:"10px 8px 0" }}>
+
+                {tracks.map(function(t, ti){
+                  const vol     = t.volume ?? 1;
+                  const pan     = t.pan    || 0;
+                  const muted   = !!t.isMuted;
+                  const soloed  = !!t.isSoloed;
+                  const hasSolo = tracks.some(function(x){ return x.isSoloed; });
+                  const dimmed  = hasSolo && !soloed && !muted;
+                  const active  = isPlaying && !muted && (!hasSolo || soloed);
+
+                  // dB readout: 0→−∞, 1→0dB, 1.5→+3.5dB
+                  const volDb   = vol <= 0 ? "−∞" : (20*Math.log10(vol)).toFixed(1);
+
+                  return (
+                    <div key={t.id} style={{
+                      width: STRIP_W,
+                      display:"flex", flexDirection:"column", alignItems:"center",
+                      borderRight:"1px solid "+GB_BORDER,
+                      paddingBottom:0,
+                      opacity: dimmed ? 0.38 : 1,
+                      transition:"opacity 0.15s",
+                      background: soloed ? "rgba(255,214,10,0.04)" : "transparent",
+                    }}>
+
+                      {/* ── Pan knob ── */}
+                      <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:1,paddingBottom:6,paddingTop:2 }}>
+                        <GBPanKnob pan={pan} color={t.color}
+                          onChange={function(v){ updateTrack(t.id,{pan:v}); }} />
+                        <span style={{
+                          fontSize:7, fontWeight:600, color: pan===0?GB_LABEL:t.color,
+                          letterSpacing:0.2,
+                        }}>
+                          {pan===0?"C":pan>0?"R "+Math.round(pan*100):"L "+Math.round(Math.abs(pan)*100)}
                         </span>
                       </div>
-                      {/* Centre tick */}
-                      <div style={{ position:"relative" }}>
-                        <div style={{ position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:1,height:10,background:"#333",pointerEvents:"none",zIndex:1 }} />
-                        <input type="range" min={-100} max={100} step={1}
-                          value={Math.round(pan*100)}
-                          onChange={function(e){ updateTrack(t.id,{pan:+(+e.target.value/100).toFixed(2)}); }}
-                          style={{ width:"100%",accentColor:t.color,height:6,cursor:"pointer",WebkitAppearance:"none",appearance:"none" }} />
-                      </div>
-                      {/* Reset to centre on double-tap */}
-                      <button onDoubleClick={function(){ updateTrack(t.id,{pan:0}); }}
-                        style={{ display:"block",width:"100%",background:"none",border:"none",color:"#333",fontSize:7,cursor:"pointer",padding:"1px 0",textAlign:"center" }}>
-                        ↺ ctr
-                      </button>
-                    </div>
 
-                    {/* ── VOLUME vertical fader ── */}
-                    <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:3,width:"100%",flexShrink:0 }}>
-                      <span style={{ color:t.isMuted?"#F59E0B":vol>1?"#C026D3":vol===0?"#EF4444":"#aaa",fontSize:9,fontWeight:800 }}>
-                        {t.isMuted?"M":volPct}
-                      </span>
-                      {/* Vertical fader — rotate a horizontal range */}
-                      <div style={{ width:36,height:100,display:"flex",alignItems:"center",justifyContent:"center",position:"relative" }}>
-                        {/* Fader track visual */}
-                        <div style={{ position:"absolute",left:"50%",top:0,bottom:0,width:2,transform:"translateX(-50%)",background:"#222",borderRadius:1 }} />
-                        <div style={{ position:"absolute",left:"50%",bottom:0,width:2,transform:"translateX(-50%)",
-                          height:(vol/1.5*100)+"%",background:t.isMuted?"#F59E0B44":t.color+"88",borderRadius:1,transition:"height 0.05s" }} />
-                        <input type="range" min={0} max={150} step={1}
-                          value={Math.round(vol*100)}
-                          onChange={function(e){ updateTrack(t.id,{volume:+(+e.target.value/100).toFixed(2)}); }}
-                          style={{
-                            width:100, height:36,
-                            transform:"rotate(-90deg)",
-                            accentColor:t.isMuted?"#F59E0B":t.color,
-                            cursor:"pointer",
-                            position:"absolute",
+                      {/* ── Fader + VU side by side ── */}
+                      <div style={{ display:"flex", alignItems:"flex-start", gap:3, paddingBottom:6 }}>
+                        <GBFader vol={vol} color={t.color} muted={muted}
+                          onChange={function(v){ updateTrack(t.id,{volume:v}); }} />
+                        <GBVUBars analyserNode={trackAnalysersRef.current[t.id]||null} active={active} />
+                      </div>
+
+                      {/* ── dB readout ── */}
+                      <div style={{
+                        fontSize:8, fontWeight:700,
+                        color: muted?"#636366":vol===0?"#ff3b30":vol>1?"#ffd60a":"#ebebf599",
+                        marginBottom:4, letterSpacing:0.3,
+                      }}>
+                        {muted ? "mute" : volDb+" dB"}
+                      </div>
+
+                      {/* ── M / S buttons ── */}
+                      <div style={{ display:"flex", gap:3, width:"100%", padding:"0 5px", marginBottom:6 }}>
+                        <button onClick={function(e){ e.stopPropagation(); toggleMute(t.id); }} style={{
+                          flex:1, padding:"4px 0",
+                          background: muted ? "#ff9f0a" : "#3a3a3c",
+                          border:"none", borderRadius:4,
+                          color: muted ? "#000" : GB_LABEL,
+                          fontSize:10, fontWeight:800, cursor:"pointer",
+                          boxShadow: muted ? "0 0 6px rgba(255,159,10,0.5)" : "none",
+                          transition:"all 0.12s",
+                        }}>M</button>
+                        <button onClick={function(e){ e.stopPropagation(); toggleSolo(t.id); }} style={{
+                          flex:1, padding:"4px 0",
+                          background: soloed ? "#ffd60a" : "#3a3a3c",
+                          border:"none", borderRadius:4,
+                          color: soloed ? "#000" : GB_LABEL,
+                          fontSize:10, fontWeight:800, cursor:"pointer",
+                          boxShadow: soloed ? "0 0 8px rgba(255,214,10,0.5)" : "none",
+                          transition:"all 0.12s",
+                        }}>S</button>
+                      </div>
+
+                      {/* ── Colour label tab (GB track colour bar at bottom) ── */}
+                      <div style={{
+                        width:"100%", height:22,
+                        background: t.color,
+                        display:"flex", alignItems:"center", justifyContent:"center",
+                        overflow:"hidden",
+                      }}>
+                        <span style={{
+                          color:"rgba(0,0,0,0.75)", fontSize:7, fontWeight:800,
+                          letterSpacing:0.3,
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                          padding:"0 4px", maxWidth:"100%",
+                        }}>{t.name}</span>
+                      </div>
+
+                    </div>
+                  );
+                })}
+
+                {/* ── Master strip ── */}
+                {(function(){
+                  const masterVol = tracks.length > 0
+                    ? tracks.reduce(function(s,t){ return s+(t.volume??1); },0)/tracks.length
+                    : 1;
+                  return (
+                    <div style={{
+                      width: STRIP_W+4,
+                      display:"flex", flexDirection:"column", alignItems:"center",
+                      background:"#232325",
+                      borderLeft:"2px solid #48484a",
+                    }}>
+                      {/* Pan placeholder */}
+                      <div style={{ height:38, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                        <span style={{ color:"#636366", fontSize:8, fontWeight:700, letterSpacing:1 }}>MST</span>
+                      </div>
+                      {/* Master fader */}
+                      <div style={{ display:"flex", alignItems:"flex-start", gap:3, paddingBottom:6 }}>
+                        <GBFader vol={masterVol} color="#e5e5ea" muted={false}
+                          onChange={function(v){
+                            tracks.forEach(function(t){ updateTrack(t.id,{volume:v}); });
                           }} />
+                        <div style={{ width:12, height:GB_FADER_H, display:"flex", flexDirection:"column-reverse", gap:1 }}>
+                          {Array.from({length:24},function(_,i){
+                            const frac=i/24;
+                            const col=frac>=0.875?"#ff3b30":frac>=0.688?"#ffd60a":"#30d158";
+                            const dim=frac>=0.875?"#3a0a08":frac>=0.688?"#3a2a00":"#0a2a14";
+                            const lit=(masterVol/1.5)>=frac;
+                            return <div key={i} style={{flex:1,borderRadius:1,background:lit?col:dim}}/>;
+                          })}
+                        </div>
                       </div>
-                      {/* Unity mark */}
-                      <span style={{ color:"#333",fontSize:7 }}>0dB=100</span>
+                      {/* dB */}
+                      <div style={{ fontSize:8,fontWeight:700,color:"#ebebf599",marginBottom:4 }}>
+                        {(20*Math.log10(Math.max(0.001,masterVol))).toFixed(1)} dB
+                      </div>
+                      {/* Spacer where M/S would be */}
+                      <div style={{ height:26 }} />
+                      {/* Master label tab */}
+                      <div style={{ width:"100%",height:22,background:"#48484a",display:"flex",alignItems:"center",justifyContent:"center" }}>
+                        <span style={{ color:"#ebebf599",fontSize:8,fontWeight:800,letterSpacing:1 }}>MASTER</span>
+                      </div>
                     </div>
+                  );
+                })()}
 
-                    {/* ── Mute button ── */}
-                    <button onClick={function(e){ e.stopPropagation(); toggleMute(t.id); }}
-                      style={{ marginTop:6,width:"100%",background:t.isMuted?"rgba(245,158,11,0.15)":"#161616",
-                        border:"1px solid "+(t.isMuted?"#F59E0B":"#2a2a2a"),
-                        borderRadius:6,color:t.isMuted?"#F59E0B":"#555",
-                        fontSize:10,padding:"5px 0",cursor:"pointer",fontWeight:800,flexShrink:0 }}>
-                      M
-                    </button>
-
-                    {/* ── Solo button ── */}
-                    <button onClick={function(e){ e.stopPropagation(); toggleSolo(t.id); }}
-                      style={{ marginTop:4,width:"100%",background:t.isSoloed?"rgba(34,197,94,0.18)":"#161616",
-                        border:"1px solid "+(t.isSoloed?"#22C55E":"#2a2a2a"),
-                        borderRadius:6,color:t.isSoloed?"#22C55E":"#555",
-                        fontSize:10,padding:"5px 0",cursor:"pointer",fontWeight:800,
-                        flexShrink:0,
-                        boxShadow:t.isSoloed?"0 0 8px rgba(34,197,94,0.35)":"none",
-                        transition:"all 0.15s" }}>
-                      S
-                    </button>
-                  </div>
-                );
-              })}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ══ TRANSPORT ════════════════════════════════════════════ */}
       <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"calc(8px + env(safe-area-inset-bottom))",flexShrink:0,zIndex:50 }}>
@@ -11909,8 +13494,10 @@ userPickedMicRef.current = true;
             {isPlaying?<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>}
           </button>
           <div style={{ width:40,height:40,borderRadius:10,background:"#141414",border:"1px solid #222",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center" }}>
-            <span style={{ color:"#555",fontSize:10,fontWeight:800,lineHeight:1 }}>{Math.round(zoom*100)}%</span>
-            <span style={{ color:"#333",fontSize:7 }}>ZOOM</span>
+            <span style={{ color:"#555",fontSize:9,fontWeight:800,lineHeight:1 }}>{Math.round(zoom*100)}%</span>
+            <span style={{ color:"#333",fontSize:7 }}>H·ZOOM</span>
+            <span style={{ color:"#444",fontSize:8,fontWeight:700,lineHeight:1,marginTop:1 }}>{Math.round(vZoom*100)}%</span>
+            <span style={{ color:"#292929",fontSize:6 }}>V·ZOOM</span>
           </div>
         </div>
       </div>
