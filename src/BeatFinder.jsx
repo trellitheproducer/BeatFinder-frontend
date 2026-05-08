@@ -4556,8 +4556,21 @@ function WaveformCanvas({ audioBuffer, color, width, height, playedFraction, dim
       return;
     }
 
-    const raw = audioBuffer.getChannelData(0);
+    // Mix down all channels to mono so waveform always shows regardless of
+    // whether iOS decoded the recording as mono or stereo.
+    const nc  = audioBuffer.numberOfChannels;
     const sr  = audioBuffer.sampleRate;
+    let raw;
+    if (nc === 1) {
+      raw = audioBuffer.getChannelData(0);
+    } else {
+      const len = audioBuffer.length;
+      raw = new Float32Array(len);
+      for (let c = 0; c < nc; c++) {
+        const ch = audioBuffer.getChannelData(c);
+        for (let i = 0; i < len; i++) raw[i] += ch[i] / nc;
+      }
+    }
 
     // Only draw the trimmed region of the buffer
     const tS = Math.max(0, (trimStart || 0) * sr);
@@ -7213,19 +7226,22 @@ function StudioScreen({ user, onExit }) {
       const mCtx = monitorCtxRef.current;
       if (mCtx.state === "suspended") await mCtx.resume();
 
-      const src    = mCtx.createMediaStreamSource(stream);
-      const merger = mCtx.createChannelMerger(2);
-      const gain   = mCtx.createGain();
+      const src  = mCtx.createMediaStreamSource(stream);
+      const gain = mCtx.createGain();
       gain.gain.value = monitorVol;
 
       // Analyser as a SIDE BRANCH off gain — not in the audio path, so zero added latency
       const analyser = mCtx.createAnalyser();
       analyser.fftSize = 256;
 
-      // Duplicate mono mic to both L and R channels
-      src.connect(merger, 0, 0);
-      src.connect(merger, 0, 1);
-      merger.connect(gain);
+      // Center the mono mic to both L and R using a StereoPanner at 0.
+      // ChannelMerger was silently dropping the R connection on iOS Safari,
+      // causing audio to come out the left ear only.
+      const panner = mCtx.createStereoPanner();
+      panner.pan.value = 0;
+
+      src.connect(panner);
+      panner.connect(gain);
       gain.connect(mCtx.destination);
       gain.connect(analyser); // side branch — read-only, not in the output chain
 
@@ -9078,13 +9094,18 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   // ── Resume AudioContext when app returns from background ─────
   useEffect(function () {
     const onVisible = function () {
-      if (actxRef.current && actxRef.current.state === "suspended") {
-        actxRef.current.resume().then(function () {
-          // Re-sync master start so elapsed time is correct
-          if (isPlayingRef.current) {
-            masterStartRef.current = actxRef.current.currentTime - (playheadAtRef.current);
-          }
-        });
+      if (document.hidden) {
+        // App went to background — stop monitoring immediately so mic is released
+        if (monitoringOn) { stopMonitoring(); }
+      } else {
+        // App returned to foreground — resume AudioContext if suspended
+        if (actxRef.current && actxRef.current.state === "suspended") {
+          actxRef.current.resume().then(function () {
+            if (isPlayingRef.current) {
+              masterStartRef.current = actxRef.current.currentTime - (playheadAtRef.current);
+            }
+          });
+        }
       }
     };
     document.addEventListener("visibilitychange", onVisible);
@@ -9093,7 +9114,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, []);
+  }, [monitoringOn]);
 
   // selectedTrackId declared at top of component (Rules of Hooks)
 
@@ -9132,6 +9153,9 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       // All DSP (echo cancellation, noise suppression, AGC) stays OFF — raw clean signal.
       // Post-processing is handled by the Noise Remover FX plugin instead.
       const recConstraints = await buildMicConstraints(micSource);
+      // Always open a fresh stream for recording — never reuse the monitoring stream.
+      // The monitoring stream may have been opened with different constraints (different
+      // mic source, stale deviceId) and reusing it gives degraded or wrong-source audio.
       const stream = await navigator.mediaDevices.getUserMedia({ audio: recConstraints });
 
       const actx    = getActx();
@@ -10430,6 +10454,7 @@ self.onmessage = async function(e) {
               <button onClick={function(){
                 setUnsavedAlert(false);
                 // Full reset so old project doesn't ghost back
+                stopMonitoring();
                 stopAll(); setIsPlaying(false);
                 setTracks([]); setProjectName("New Project");
                 setBpm(120); setProjectKey("C major"); setTimeSigNum(4);
@@ -10462,6 +10487,7 @@ self.onmessage = async function(e) {
                   // Save then reset + exit
                   setTimeout(async function(){
                     await saveProject();
+                    stopMonitoring();
                     stopAll(); setIsPlaying(false);
                     setTracks([]); setProjectName("New Project");
                     setBpm(120); setProjectKey("C major"); setTimeSigNum(4);
@@ -10482,6 +10508,7 @@ self.onmessage = async function(e) {
                   setProjectName(name);
                   setShowNamePrompt(false);
                   await saveProject();
+                  stopMonitoring();
                   // Full reset — close the project before going home
                   stopAll(); setIsPlaying(false);
                   setTracks([]); setProjectName("New Project");
@@ -10736,7 +10763,8 @@ self.onmessage = async function(e) {
           if(!isSaved&&hasContent){
             setUnsavedAlert("exit");
           } else {
-            // Clean exit — reset so studio opens fresh next time
+            // Clean exit — stop monitoring and reset so studio opens fresh next time
+            stopMonitoring();
             stopAll(); setIsPlaying(false);
             setTracks([]); setProjectName("New Project");
             setBpm(120); setProjectKey("C major"); setTimeSigNum(4);
@@ -10852,8 +10880,7 @@ self.onmessage = async function(e) {
           value={micSource}
           onChange={function(e){
             const next = e.target.value;
-            if (next === "__scan__") { checkHeadphones(); return; }
-            userPickedMicRef.current = true;
+userPickedMicRef.current = true;
             setMicSource(next);
             if (monitoringOn) { stopMonitoring(); setTimeout(function(){ startMonitoring(undefined, next); }, 150); }
           }}
@@ -10862,7 +10889,7 @@ self.onmessage = async function(e) {
         >
           <option value="builtin">📱 iPhone Mic</option>
           <option value="headset">🎙 Headset Mic</option>
-          <option value="__scan__" style={{ color:"#666", fontStyle:"italic" }}>⟳ Detect headset…</option>
+
         </select>
       </div>
       {monitorWarn && <div style={{ background:"rgba(245,158,11,0.1)",borderBottom:"1px solid rgba(245,158,11,0.2)",color:"#F59E0B",fontSize:11,padding:"4px 16px",textAlign:"center",flexShrink:0 }}>{monitorWarn}</div>}
