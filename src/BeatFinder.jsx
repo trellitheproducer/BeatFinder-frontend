@@ -7972,6 +7972,7 @@ function StudioScreen({ user, onExit }) {
   const recStopActxTimeRef = useRef(null); // actx.currentTime snapshot at the moment stop is pressed
   const clipIdRef = useRef(null);
   const countTimerRef   = useRef(null);
+  const scrollResumeTimerRef = useRef(null);
   const metroRef        = useRef(null);
   const pinchRef        = useRef(null);
   const zoomRef         = useRef(zoom);
@@ -8074,6 +8075,11 @@ function StudioScreen({ user, onExit }) {
   useEffect(function () { isPlayingRef.current = isPlaying; }, [isPlaying]);
   useEffect(function () { tracksRef.current = tracks; }, [tracks]);
 
+  // Clear scroll-resume timer on unmount
+  useEffect(function () {
+    return function () { if (scrollResumeTimerRef.current) clearTimeout(scrollResumeTimerRef.current); };
+  }, []);
+
   // Set initial position — Bar1 under centred playhead at t=0
   useEffect(function () {
     if (scrollRef.current && trackContainerRef.current) {
@@ -8138,15 +8144,17 @@ function StudioScreen({ user, onExit }) {
       const snap = {
         projectName, bpm, projectKey, timeSigNum, zoom, vZoom,
         snapToGrid, loopEnabled, loopIn, loopOut,
-        // Save track metadata (name, type, color) but not audio buffers
+        metronomeOn, showBeatGrid, micInputGain,
+        // Save full track metadata including volume and pan
         tracksMeta: tracks.map(function(t) {
           return { id: t.id, name: t.name, type: t.type, color: t.color,
-                   isMuted: t.isMuted, isSoloed: t.isSoloed };
+                   isMuted: t.isMuted, isSoloed: t.isSoloed,
+                   volume: t.volume, pan: t.pan };
         }),
       };
       sessionStorage.setItem("bf_studio_state", JSON.stringify(snap));
     } catch(e) {}
-  }, [projectName, bpm, projectKey, timeSigNum, zoom, vZoom, snapToGrid, loopEnabled, loopIn, loopOut, tracks]);
+  }, [projectName, bpm, projectKey, timeSigNum, zoom, vZoom, snapToGrid, loopEnabled, loopIn, loopOut, metronomeOn, showBeatGrid, micInputGain, tracks]);
 
   // Restore studio state on mount (handles iOS background reload)
   useEffect(function () {
@@ -8154,19 +8162,49 @@ function StudioScreen({ user, onExit }) {
       const raw = sessionStorage.getItem("bf_studio_state");
       if (!raw) return;
       const snap = JSON.parse(raw);
-      // Only restore if we have a named project (not default) — avoids overwriting intentional new session
-      if (snap.projectName && snap.projectName !== "New Project") {
-        setProjectName(snap.projectName);
-      }
+      if (snap.projectName) setProjectName(snap.projectName);
       if (snap.bpm)          setBpm(snap.bpm);
       if (snap.projectKey)   setProjectKey(snap.projectKey);
       if (snap.timeSigNum)   setTimeSigNum(snap.timeSigNum);
       if (snap.zoom)         setZoom(snap.zoom);
       if (snap.vZoom)        setVZoom(snap.vZoom);
-      if (snap.snapToGrid !== undefined) setSnapToGrid(snap.snapToGrid);
+      if (snap.snapToGrid !== undefined)  setSnapToGrid(snap.snapToGrid);
       if (snap.loopEnabled !== undefined) setLoopEnabled(snap.loopEnabled);
-      if (snap.loopIn  !== undefined)    setLoopIn(snap.loopIn);
+      if (snap.loopIn  !== undefined)     setLoopIn(snap.loopIn);
       if (snap.loopOut !== undefined && snap.loopOut > 0) setLoopOut(snap.loopOut);
+      if (snap.metronomeOn !== undefined) setMetronomeOn(snap.metronomeOn);
+      if (snap.showBeatGrid !== undefined) setShowBeatGrid(snap.showBeatGrid);
+      if (snap.micInputGain !== undefined) setMicInputGainState(snap.micInputGain);
+      // Restore track metadata (volume, pan, mute, solo) — clips can't be serialised
+      if (Array.isArray(snap.tracksMeta) && snap.tracksMeta.length > 0) {
+        setTracks(function(prev) {
+          // If tracks already exist (e.g. loaded project), merge; otherwise seed shells
+          if (prev.length > 0) {
+            return prev.map(function(t) {
+              const meta = snap.tracksMeta.find(function(m) { return m.id === t.id; });
+              if (!meta) return t;
+              return Object.assign({}, t, {
+                name: meta.name ?? t.name,
+                color: meta.color ?? t.color,
+                isMuted: meta.isMuted ?? t.isMuted,
+                isSoloed: meta.isSoloed ?? t.isSoloed,
+                volume: meta.volume ?? t.volume,
+                pan: meta.pan ?? t.pan,
+              });
+            });
+          }
+          // No tracks yet — restore shells so the track list isn't empty
+          return snap.tracksMeta.map(function(m) {
+            return {
+              id: m.id, name: m.name, type: m.type || "vocal",
+              color: m.color || "#30D158",
+              isMuted: m.isMuted || false, isSoloed: m.isSoloed || false,
+              volume: m.volume ?? 1, pan: m.pan ?? 0,
+              clips: [], // audio clips can't be serialised — user sees empty lanes
+            };
+          });
+        });
+      }
     } catch(e) {}
   }, []); // run once on mount only
 
@@ -10443,23 +10481,30 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
   // ── Recording ─────────────────────────────────────────────────
   // ── Resume AudioContext when app returns from background ─────
+  // ── Resume AudioContext when app returns from background ─────
   useEffect(function () {
+    const saveState = function () {
+      try {
+        sessionStorage.setItem("bf_studio_state", JSON.stringify({
+          projectName, bpm, projectKey, timeSigNum, zoom, vZoom,
+          snapToGrid, loopEnabled, loopIn, loopOut,
+          metronomeOn, showBeatGrid, micInputGain,
+          tracksMeta: tracks.map(function(t) {
+            return { id: t.id, name: t.name, type: t.type, color: t.color,
+                     isMuted: t.isMuted, isSoloed: t.isSoloed,
+                     volume: t.volume, pan: t.pan };
+          }),
+        }));
+        sessionStorage.setItem("bf_session_started", "1");
+      } catch(e) {}
+    };
+
     const onVisible = function () {
       if (document.hidden) {
         // App went to background — stop monitoring so mic is released
         if (monitoringOn) { stopMonitoring(); }
-        // Save studio state so it survives an iOS background reload
-        try {
-          sessionStorage.setItem("bf_studio_state", JSON.stringify({
-            projectName, bpm, projectKey, timeSigNum, zoom, vZoom,
-            snapToGrid, loopEnabled, loopIn, loopOut,
-            tracksMeta: tracks.map(function(t) {
-              return { id: t.id, name: t.name, type: t.type, color: t.color,
-                       isMuted: t.isMuted, isSoloed: t.isSoloed };
-            }),
-          }));
-          sessionStorage.setItem("bf_session_started", "1");
-        } catch(e) {}
+        // Save full studio state so it survives an iOS background reload
+        saveState();
       } else {
         // App returned to foreground — resume AudioContext if suspended
         if (actxRef.current && actxRef.current.state === "suspended") {
@@ -10475,13 +10520,17 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         }
       }
     };
+    // pagehide fires just before iOS discards the page — most reliable save point
+    const onPageHide = function () { saveState(); };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
+    window.addEventListener("pagehide", onPageHide);
     return function () {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
+      window.removeEventListener("pagehide", onPageHide);
     };
-  }, [monitoringOn, projectName, bpm, projectKey, timeSigNum, zoom, vZoom, snapToGrid, loopEnabled, loopIn, loopOut, tracks]);
+  }, [monitoringOn, projectName, bpm, projectKey, timeSigNum, zoom, vZoom, snapToGrid, loopEnabled, loopIn, loopOut, metronomeOn, showBeatGrid, micInputGain, tracks]);
 
   // selectedTrackId declared at top of component (Rules of Hooks)
 
@@ -12150,7 +12199,7 @@ self.onmessage = async function(e) {
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
-      style={{ background:"#080808", height:"calc(100vh - env(safe-area-inset-bottom))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
+      style={{ background:"#080808", height:"100%", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
     >
       {/* ── Overlays ── */}
@@ -12526,10 +12575,32 @@ self.onmessage = async function(e) {
                 <button onClick={function(){ setSnapToGrid(function(v){ return !v; }); }} style={{ background:snapToGrid?"rgba(192,38,211,0.2)":"#141414",border:"1px solid "+(snapToGrid?"#C026D3":"#2a2a2a"),borderRadius:20,color:snapToGrid?"#C026D3":"#555",fontWeight:700,fontSize:12,padding:"6px 16px",cursor:"pointer" }}>{snapToGrid?"ON":"OFF"}</button>
               </div>
             </div>
-            <div style={{ margin:"0 16px 32px",background:"#1a1a1a",borderRadius:14 }}>
+            <div style={{ margin:"0 16px 16px",background:"#1a1a1a",borderRadius:14 }}>
               <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px" }}>
                 <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Metronome</div><div style={{ color:"#555",fontSize:11,marginTop:2 }}>Click while recording</div></div>
                 <button onClick={function(){ setMetronomeOn(function(v){ return !v; }); }} style={{ background:metronomeOn?"rgba(192,38,211,0.2)":"#141414",border:"1px solid "+(metronomeOn?"#C026D3":"#2a2a2a"),borderRadius:20,color:metronomeOn?"#C026D3":"#555",fontWeight:700,fontSize:12,padding:"6px 16px",cursor:"pointer" }}>{metronomeOn?"ON":"OFF"}</button>
+              </div>
+            </div>
+            <div style={{ margin:"0 16px 32px",background:"#1a1a1a",borderRadius:14 }}>
+              <div style={{ padding:"14px 16px 10px" }}>
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10 }}>
+                  <div>
+                    <div style={{ color:"white",fontWeight:700,fontSize:13 }}>Microphone Gain</div>
+                    <div style={{ color:"#555",fontSize:11,marginTop:2 }}>Boost or cut the mic input level</div>
+                  </div>
+                  <span style={{ fontSize:12,fontWeight:800,fontFamily:"monospace",color:micInputGain > 3 ? "#F59E0B" : "#C026D3",minWidth:44,textAlign:"right" }}>
+                    {micInputGain >= 1 ? "+" : ""}{(20 * Math.log10(micInputGain)).toFixed(1)} dB
+                  </span>
+                </div>
+                <input type="range" min={0.25} max={4} step={0.05} value={micInputGain}
+                  title={"Mic Gain: " + (20 * Math.log10(micInputGain)).toFixed(1) + " dB  (default = 0.0 dB)"}
+                  onChange={function(e){ setMicInputGainState(parseFloat(e.target.value)); }}
+                  style={{ width:"100%",accentColor:"#C026D3" }} />
+                <div style={{ display:"flex",justifyContent:"space-between",marginTop:4 }}>
+                  <span style={{ color:"#444",fontSize:10,fontFamily:"monospace" }}>−12 dB</span>
+                  <span style={{ color:"#444",fontSize:10,fontFamily:"monospace" }}>0 dB</span>
+                  <span style={{ color:"#444",fontSize:10,fontFamily:"monospace" }}>+12 dB</span>
+                </div>
               </div>
             </div>
           </div>
@@ -12694,20 +12765,6 @@ self.onmessage = async function(e) {
             onChange={function(e){ setMonitorVol(parseFloat(e.target.value)); }}
             style={{ width:50,accentColor:"#22C55E",height:2 }} />
         )}
-        {/* Mic input gain — compact: icon + slider + dB, all inline */}
-        <div style={{ display:"flex",alignItems:"center",gap:3,flexShrink:0 }}>
-          <span style={{ fontSize:9,color:"#555",fontWeight:700,flexShrink:0 }}>🎙</span>
-          <input type="range" min={0.25} max={4} step={0.05} value={micInputGain}
-            title={"Mic Gain: " + (20 * Math.log10(micInputGain)).toFixed(1) + " dB  (default = 0.0 dB)"}
-            onChange={function(e){
-              const v = parseFloat(e.target.value);
-              setMicInputGainState(v);
-            }}
-            style={{ width:44,accentColor:"#C026D3",height:2,flexShrink:0 }} />
-          <span style={{ fontSize:8,color:micInputGain > 3 ? "#F59E0B" : "#555",fontWeight:700,width:24,textAlign:"right",flexShrink:0,fontFamily:"monospace" }}>
-            {micInputGain >= 1 ? "+" : ""}{(20 * Math.log10(micInputGain)).toFixed(0)}dB
-          </span>
-        </div>
         {/* Mic source picker — dropdown. Headset option is never disabled;
             status is shown in the label itself so users always know what's connected. */}
         <select
@@ -12777,16 +12834,31 @@ userPickedMicRef.current = true;
           }}
           onScroll={function(e){
             const sl = e.target.scrollLeft;
+            const t = Math.max(0, sl / effectivePPS);
+
             if (!isPlayingRef.current) {
-              const t = Math.max(0, sl / effectivePPS);
+              // Not playing — just move the playhead
               setCurrentTime(t);
               playheadAtRef.current = t;
               updatePlayheadDOM(t, sl);
             } else {
-              // During playback: playhead is driven by RAF, just update DOM position
-              const actx = actxRef.current;
-              const t = actx ? playheadAtRef.current + (actx.currentTime - masterStartRef.current) : playheadAtRef.current;
+              // Playing — pause immediately, seek to scroll position, resume after scroll settles
+              stopAll();
+              setIsPlaying(false);
+              setCurrentTime(t);
+              playheadAtRef.current = t;
               updatePlayheadDOM(t, sl);
+
+              // Resume playback once the user stops scrolling (300ms debounce)
+              if (scrollResumeTimerRef.current) clearTimeout(scrollResumeTimerRef.current);
+              scrollResumeTimerRef.current = setTimeout(function () {
+                scrollResumeTimerRef.current = null;
+                if (!isPlayingRef.current) {
+                  setCurrentTime(t);
+                  playheadAtRef.current = t;
+                  setIsPlaying(true);
+                }
+              }, 300);
             }
           }}
         >
@@ -13448,15 +13520,7 @@ userPickedMicRef.current = true;
                           onChange={function(v){
                             tracks.forEach(function(t){ updateTrack(t.id,{volume:v}); });
                           }} />
-                        <div style={{ width:12, height:GB_FADER_H, display:"flex", flexDirection:"column-reverse", gap:1 }}>
-                          {Array.from({length:24},function(_,i){
-                            const frac=i/24;
-                            const col=frac>=0.875?"#ff3b30":frac>=0.688?"#ffd60a":"#30d158";
-                            const dim=frac>=0.875?"#3a0a08":frac>=0.688?"#3a2a00":"#0a2a14";
-                            const lit=(masterVol/1.5)>=frac;
-                            return <div key={i} style={{flex:1,borderRadius:1,background:lit?col:dim}}/>;
-                          })}
-                        </div>
+                        <GBVUBars analyserNode={masterAnalyserRef.current} active={isPlaying} />
                       </div>
                       {/* dB */}
                       <div style={{ fontSize:8,fontWeight:700,color:"#ebebf599",marginBottom:4 }}>
@@ -13513,9 +13577,9 @@ const NAV = [
   { id: "trending",  label: "Trending",icon: "🔥" },
   { id: "search",    label: "Search",  icon: "🔍" },
   { id: "saved",     label: "Saved",   icon: "🔖" },
-  { id: "studio",    label: "Studio",  icon: "🎙" },
   { id: "exclusive", label: "Members", icon: "🔒" },
   { id: "profile",   label: "Profile", icon: "👤" },
+  { id: "studio",    label: "Studio",  icon: "🎙" },
 ];
 
 // =============================================================================
@@ -13564,8 +13628,7 @@ export default function BeatFinder() {
   });
   const [tab, setTab] = useState(function() {
     // Restore the active tab after an iOS background reload.
-    // Never restore "studio" on startup — audio context / worklet init
-    // should only happen when the user explicitly navigates there.
+    // Never open with studio on fresh load — user must navigate there intentionally.
     try {
       const saved = sessionStorage.getItem("bf_tab");
       return (saved && saved !== "studio") ? saved : "home";
@@ -13793,7 +13856,7 @@ export default function BeatFinder() {
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} />}
-            {t === "studio"    && tab === "studio" && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
+            {t === "studio"    && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
             {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
           </div>
         ))}
@@ -13824,8 +13887,6 @@ export default function BeatFinder() {
           background: "rgba(8,8,8,0.92)",
           borderTop: "1px solid rgba(255,255,255,0.07)",
           display: tab === "studio" ? "none" : "flex",
-          height: "calc(68px + env(safe-area-inset-bottom))",
-          zIndex: 100, backdropFilter: "blur(24px)",
           paddingBottom: "env(safe-area-inset-bottom)",
           boxShadow: "0 -8px 32px rgba(0,0,0,0.6)",
         }}>
@@ -13833,63 +13894,75 @@ export default function BeatFinder() {
           const isPro    = user?.isPro || user?.isArtistPro;
           const locked   = n.id === "exclusive" && (!user || !isPro);
           const isActive = tab === n.id;
-          const activeColor = n.id === "exclusive" ? "#F59E0B" : "#C026D3";
+          const activeColor = n.id === "exclusive" ? "#F59E0B" : n.id === "studio" ? "#22C55E" : "#C026D3";
+          const isStudio = n.id === "studio";
           return (
-            <button key={n.id} onClick={() => goTab(n.id)} className="bf-nav-btn"
-              style={{
-                flex: 1, background: "none", border: "none", cursor: "pointer",
-                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
-                color: isActive ? activeColor : locked ? "#F59E0B44" : "#444",
-                position: "relative", paddingTop: 8,
-                transition: "color 0.2s ease",
-              }}>
-              {/* Active indicator dot */}
-              {isActive && (
+            <React.Fragment key={n.id}>
+              {/* Divider before Studio */}
+              {isStudio && (
                 <div style={{
-                  position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
-                  width: 20, height: 2, borderRadius: 1,
-                  background: activeColor,
-                  boxShadow: "0 0 8px " + activeColor,
+                  width: 1, background: "rgba(255,255,255,0.08)",
+                  margin: "10px 0", flexShrink: 0,
                 }} />
               )}
-              {/* Active glow bg */}
-              {isActive && (
-                <div style={{
-                  position: "absolute", inset: 0,
-                  background: "radial-gradient(ellipse at 50% 80%, " + activeColor + "18 0%, transparent 70%)",
-                  borderRadius: 12,
-                  pointerEvents: "none",
-                }} />
-              )}
-              <span style={{
-                fontSize: 17,
-                filter: isActive ? "drop-shadow(0 0 6px " + activeColor + ")" : "none",
-                transition: "filter 0.2s ease",
-                lineHeight: 1,
-              }}>{n.icon}</span>
-              <span style={{
-                fontSize: 9, fontWeight: isActive ? 800 : 600,
-                letterSpacing: isActive ? 0.3 : 0,
-                transition: "all 0.2s ease",
-              }}>{n.label}</span>
-              {locked && <div style={{
-                position: "absolute", top: 6, right: "calc(50% - 14px)",
-                background: "#F59E0B", borderRadius: "50%",
-                width: 7, height: 7,
-              }} />}
-              {n.id === "saved" && savedIds.size > 0 && (
-                <div style={{
-                  position: "absolute", top: 5, right: "calc(50% - 16px)",
-                  background: "#C026D3", borderRadius: "50%",
-                  fontSize: 8, fontWeight: 800, color: "white",
-                  padding: "1px 4px", minWidth: 14, textAlign: "center",
-                  lineHeight: "14px", height: 14,
-                  boxShadow: "0 0 6px rgba(192,38,211,0.6)",
+              <button onClick={() => goTab(n.id)} className="bf-nav-btn"
+                style={{
+                  flex: 1, background: isStudio && isActive ? "rgba(34,197,94,0.08)" : "none",
+                  border: "none", cursor: "pointer",
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
+                  color: isActive ? activeColor : locked ? "#F59E0B44" : "#444",
+                  position: "relative", paddingTop: 8,
+                  transition: "color 0.2s ease",
+                  borderRadius: isStudio ? 0 : 0,
                 }}>
-                  {savedIds.size}
-                </div>
-              )}
-            </button>
+                {/* Active indicator dot */}
+                {isActive && (
+                  <div style={{
+                    position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
+                    width: 20, height: 2, borderRadius: 1,
+                    background: activeColor,
+                    boxShadow: "0 0 8px " + activeColor,
+                  }} />
+                )}
+                {/* Active glow bg */}
+                {isActive && (
+                  <div style={{
+                    position: "absolute", inset: 0,
+                    background: "radial-gradient(ellipse at 50% 80%, " + activeColor + "18 0%, transparent 70%)",
+                    borderRadius: 12,
+                    pointerEvents: "none",
+                  }} />
+                )}
+                <span style={{
+                  fontSize: 17,
+                  filter: isActive ? "drop-shadow(0 0 6px " + activeColor + ")" : "none",
+                  transition: "filter 0.2s ease",
+                  lineHeight: 1,
+                }}>{n.icon}</span>
+                <span style={{
+                  fontSize: 9, fontWeight: isActive ? 800 : 600,
+                  letterSpacing: isActive ? 0.3 : 0,
+                  transition: "all 0.2s ease",
+                }}>{n.label}</span>
+                {locked && <div style={{
+                  position: "absolute", top: 6, right: "calc(50% - 14px)",
+                  background: "#F59E0B", borderRadius: "50%",
+                  width: 7, height: 7,
+                }} />}
+                {n.id === "saved" && savedIds.size > 0 && (
+                  <div style={{
+                    position: "absolute", top: 5, right: "calc(50% - 16px)",
+                    background: "#C026D3", borderRadius: "50%",
+                    fontSize: 8, fontWeight: 800, color: "white",
+                    padding: "1px 4px", minWidth: 14, textAlign: "center",
+                    lineHeight: "14px", height: 14,
+                    boxShadow: "0 0 6px rgba(192,38,211,0.6)",
+                  }}>
+                    {savedIds.size}
+                  </div>
+                )}
+              </button>
+            </React.Fragment>
           );
         })}
       </div>
