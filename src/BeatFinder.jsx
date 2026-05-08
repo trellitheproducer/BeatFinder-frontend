@@ -5317,6 +5317,113 @@ async function registerRNNoiseWorklet(actx) {
   await rnnoiseWorkletReady.promise;
 }
 
+// ── T-Rotten Knob ─────────────────────────────────────────────────────────────
+// Defined at MODULE LEVEL — not inside _TRottenMasterPlugin.
+// Keeping it inside caused React to see a brand-new component type on every
+// parent render, unmounting+remounting the knob and destroying drag state
+// mid-gesture. Being outside means the component identity is stable.
+//
+// Stale-closure fix: dragRef stores a mutable baseline that updates every tick,
+// so onPointerMove always calculates delta from the last position, not the
+// original mousedown value. Without this the knob snaps back on every re-render.
+//
+// Gradient-ID fix: module counter gives each mounted knob a unique SVG defs ID
+// so knobs with the same label (e.g. blank INPUT/OUTPUT knobs) don't collide.
+let _tkc = 0; // module-level mount counter for unique gradient IDs
+function TKnob({ label, value, min, max, step, unit, onChange, size, color }) {
+  const sz     = size || 44;
+  const r      = sz / 2 - 4;
+  const cx     = sz / 2, cy = sz / 2;
+  const norm   = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  const START  = -135, SWEEP = 270;
+  const angle  = START + norm * SWEEP;
+  const rad    = function(deg){ return (deg - 90) * Math.PI / 180; };
+  const pt     = function(deg, rr){ return { x: cx + rr * Math.cos(rad(deg)), y: cy + rr * Math.sin(rad(deg)) }; };
+  const arcS   = pt(START, r);
+  const arcE   = pt(angle, r);
+  const arcFE  = pt(START + SWEEP, r);
+  const swept  = angle - START;
+  const large  = swept > 180 ? 1 : 0;
+  const arcPath = `M ${arcS.x.toFixed(2)} ${arcS.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${arcE.x.toFixed(2)} ${arcE.y.toFixed(2)}`;
+  const ptrTip = pt(angle, r - 5);
+  const ptrBase= pt(angle, 4);
+  const accent = color || "#c8762a";
+
+  // Stable unique gradient ID — assigned once at mount
+  const uidRef  = React.useRef(null);
+  if (!uidRef.current) { uidRef.current = "tkg" + (++_tkc); }
+  const uid = uidRef.current;
+
+  // dragRef holds { startY, startVal } reset each pointerdown.
+  // We read the LATEST value from valueRef (not the stale closure) as the baseline.
+  const valueRef = React.useRef(value);
+  valueRef.current = value;
+  const dragRef  = React.useRef(null);
+
+  const onPointerDown = function(e) {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { startY: e.clientY, startVal: valueRef.current };
+  };
+  const onPointerMove = function(e) {
+    if (!dragRef.current) return;
+    const dy      = dragRef.current.startY - e.clientY;   // drag UP = positive
+    const sens    = (max - min) / 200;                    // 200px = full sweep
+    const raw     = dragRef.current.startVal + dy * sens;
+    const clamped = Math.min(max, Math.max(min, raw));
+    const snapped = step ? Math.round(clamped / step) * step : clamped;
+    onChange(+snapped.toFixed(6));
+  };
+  const onPointerUp = function() { dragRef.current = null; };
+
+  const fmt = function(v) {
+    if (unit === "dB" || unit === "dBFS") return (v >= 0 ? "+" : "") + v.toFixed(1);
+    if (unit === "s")  return v.toFixed(2) + "s";
+    if (unit === "%")  return Math.round(v) + "%";
+    if (unit === ":1") return v.toFixed(1) + ":1";
+    return typeof v === "number" ? (Number.isInteger(v) ? v : v.toFixed(1)) : v;
+  };
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, userSelect:"none" }}>
+      <svg width={sz} height={sz}
+        style={{ cursor:"ns-resize", touchAction:"none", overflow:"visible" }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        <circle cx={cx} cy={cy} r={r+3} fill="none" stroke="#000" strokeWidth={2} opacity={0.6}/>
+        {norm > 0.005 && <path d={arcPath} fill="none" stroke={accent} strokeWidth={3} strokeLinecap="round" style={{filter:`drop-shadow(0 0 3px ${accent}88)`}}/>}
+        <defs>
+          <radialGradient id={uid} cx="36%" cy="30%" r="70%">
+            <stop offset="0%"   stopColor="#3c3228"/>
+            <stop offset="40%"  stopColor="#221c12"/>
+            <stop offset="100%" stopColor="#0c0900"/>
+          </radialGradient>
+          <radialGradient id={uid+"h"} cx="35%" cy="28%" r="55%">
+            <stop offset="0%"   stopColor="#ffffff" stopOpacity={0.06}/>
+            <stop offset="100%" stopColor="#ffffff" stopOpacity={0}/>
+          </radialGradient>
+        </defs>
+        <circle cx={cx} cy={cy} r={r-1} fill={`url(#${uid})`}  stroke="#3a2a14" strokeWidth={1.2}/>
+        <circle cx={cx} cy={cy} r={r-1} fill={`url(#${uid}h)`}/>
+        <line x1={ptrBase.x.toFixed(2)} y1={ptrBase.y.toFixed(2)}
+              x2={ptrTip.x.toFixed(2)}  y2={ptrTip.y.toFixed(2)}
+              stroke="#f0d080" strokeWidth={2} strokeLinecap="round"/>
+      </svg>
+      <div style={{ color:"#d4a04a", fontSize:8, fontWeight:900, fontFamily:"monospace", lineHeight:1 }}>
+        {fmt(value)}{unit && !["dB","dBFS","s","%",":1"].includes(unit) ? " "+unit : ""}
+      </div>
+      {label && (
+        <div style={{ color:"#6a5030", fontSize:6.5, fontWeight:700, fontFamily:"monospace", letterSpacing:0.8, textAlign:"center", lineHeight:1.2 }}>
+          {label}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── T-Rotten Master Plugin ───────────────────────────────────────────────────
 // Pixel-faithful replica of the T-Rotten Master UI:
 // 4 sections (EQ / Compressor / Tape+Sat / Limiter), VU meters, analog knobs,
@@ -5324,109 +5431,6 @@ async function registerRNNoiseWorklet(actx) {
 function _TRottenMasterPlugin({ fx, upd }) {
   const m  = fx.trotten || {};
   const on = !!m.on;
-
-  // ── Smooth analog knob — pointer-capture, velocity-scaled drag ────────────
-  const TKnob = function({ label, value, min, max, step, unit, onChange, size, minLabel, maxLabel, color }) {
-    const sz    = size || 44;
-    const r     = sz / 2 - 4;
-    const cx    = sz / 2, cy = sz / 2;
-    const norm  = Math.max(0, Math.min(1, (value - min) / (max - min)));
-    const START = -135, END = 135;
-    const angle = START + norm * (END - START);
-    const toXY  = function(deg) {
-      const rad = (deg - 90) * Math.PI / 180;
-      return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
-    };
-    const arcS  = toXY(START), arcE = toXY(angle), arcFE = toXY(END);
-    const swept = angle - START;
-    const large = swept > 180 ? 1 : 0;
-    const arcPath = `M ${arcS.x.toFixed(2)} ${arcS.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${arcE.x.toFixed(2)} ${arcE.y.toFixed(2)}`;
-    const arcFull = `M ${arcS.x.toFixed(2)} ${arcS.y.toFixed(2)} A ${r} ${r} 0 1 1 ${arcFE.x.toFixed(2)} ${arcFE.y.toFixed(2)}`;
-    const ptrEnd  = { x: cx + (r - 5) * Math.cos((angle - 90) * Math.PI / 180), y: cy + (r - 5) * Math.sin((angle - 90) * Math.PI / 180) };
-    const ptrOrig = { x: cx + 4 * Math.cos((angle - 90) * Math.PI / 180), y: cy + 4 * Math.sin((angle - 90) * Math.PI / 180) };
-    const accent = color || "#c8762a";
-
-    const dragRef = React.useRef(null);
-    const svgRef  = React.useRef(null);
-
-    const onPointerDown = function(e) {
-      e.preventDefault();
-      e.currentTarget.setPointerCapture(e.pointerId);
-      dragRef.current = { y: e.clientY, val: value, pointerId: e.pointerId };
-    };
-    const onPointerMove = function(e) {
-      if (!dragRef.current) return;
-      const dy   = dragRef.current.y - e.clientY;
-      // sensitivity: finer at small ranges, coarser at large ones — 200px = full sweep
-      const sens = (max - min) / 200;
-      const raw  = dragRef.current.val + dy * sens;
-      const clamped = Math.min(max, Math.max(min, raw));
-      const snapped = step ? Math.round(clamped / step) * step : clamped;
-      onChange(+snapped.toFixed(4));
-    };
-    const onPointerUp = function(e) {
-      dragRef.current = null;
-    };
-
-    const fmt = function(v) {
-      if (unit === "dB" || unit === "dBFS") return (v >= 0 ? "+" : "") + v.toFixed(1);
-      if (unit === "s")  return v.toFixed(2) + "s";
-      if (unit === "%")  return Math.round(v) + "%";
-      if (unit === ":1") return v.toFixed(1) + ":1";
-      return typeof v === "number" ? (Number.isInteger(v) ? v : v.toFixed(1)) : v;
-    };
-
-    const uid = "tkg_" + label.replace(/\s/g,"") + "_" + Math.abs(min) + Math.abs(max);
-
-    return (
-      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, userSelect:"none" }}>
-
-        <svg ref={svgRef} width={sz} height={sz}
-          style={{ cursor:"ns-resize", touchAction:"none", overflow:"visible" }}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-        >
-          {/* Shadow ring */}
-          <circle cx={cx} cy={cy} r={r+3} fill="none" stroke="#000" strokeWidth={2} opacity={0.6}/>
-
-          {/* Active arc */}
-          {norm > 0.005 && <path d={arcPath} fill="none" stroke={accent} strokeWidth={3} strokeLinecap="round" style={{filter:`drop-shadow(0 0 3px ${accent}88)`}}/>}
-          {/* Knob body gradient */}
-          <defs>
-            <radialGradient id={uid} cx="36%" cy="30%" r="70%">
-              <stop offset="0%"   stopColor="#3c3228"/>
-              <stop offset="40%"  stopColor="#221c12"/>
-              <stop offset="100%" stopColor="#0c0900"/>
-            </radialGradient>
-            <radialGradient id={uid+"_hi"} cx="35%" cy="28%" r="55%">
-              <stop offset="0%"   stopColor="#ffffff" stopOpacity={0.06}/>
-              <stop offset="100%" stopColor="#ffffff" stopOpacity={0}/>
-            </radialGradient>
-          </defs>
-          {/* Body */}
-          <circle cx={cx} cy={cy} r={r-1} fill={`url(#${uid})`} stroke="#3a2a14" strokeWidth={1.2}/>
-          {/* Specular highlight */}
-          <circle cx={cx} cy={cy} r={r-1} fill={`url(#${uid}_hi)`}/>
-
-          {/* Pointer */}
-          <line x1={ptrOrig.x.toFixed(2)} y1={ptrOrig.y.toFixed(2)}
-                x2={ptrEnd.x.toFixed(2)}  y2={ptrEnd.y.toFixed(2)}
-                stroke="#f0d080" strokeWidth={2} strokeLinecap="round"/>
-        </svg>
-        {/* Value readout */}
-        <div style={{ color:"#d4a04a", fontSize:8, fontWeight:900, fontFamily:"monospace", lineHeight:1 }}>
-          {fmt(value)}{unit && unit !== "%" && unit !== "dB" && unit !== "dBFS" && unit !== "s" && unit !== ":1" ? " "+unit : ""}
-        </div>
-        {label && (
-          <div style={{ color:"#6a5030", fontSize:6.5, fontWeight:700, fontFamily:"monospace", letterSpacing:0.8, textAlign:"center", lineHeight:1.2 }}>
-            {label}
-          </div>
-        )}
-      </div>
-    );
-  };
 
   // ── Mode button ─────────────────────────────────────────────────────────────
   const ModeBtn = function({ label, active, onClick, accent }) {
@@ -6946,13 +6950,28 @@ function StudioScreen({ user, onExit }) {
       const outputs = devices.filter(function(d){ return d.kind === "audiooutput"; });
       const inputs  = devices.filter(function(d){ return d.kind === "audioinput"; });
 
-      // Only mark headphones as connected if we can positively identify a headset/headphone
-      // output by label. If labels are blank (no permission yet) we default to NOT connected
-      // so iPhone Mic stays selected. We never assume connected from absence of labels.
-      const hp = outputs.some(function(d){
+      // 1st check: named audio output (works on desktop, Chrome Android)
+      const hpByOutput = outputs.some(function(d){
         const l = (d.label||"").toLowerCase();
-        return l.includes("headphone")||l.includes("earphone")||l.includes("airpods")||l.includes("bluetooth")||l.includes("headset")||l.includes("wired");
+        return l.includes("headphone")||l.includes("earphone")||l.includes("airpods")||
+               l.includes("bluetooth")||l.includes("headset")||l.includes("wired");
       });
+
+      // 2nd check (iOS / mobile fallback): audiooutput labels stay blank until
+      // setSinkId permission. Instead check audioinput — a wired headset exposes
+      // a "Headset Microphone" input that IS labelled after mic permission is granted.
+      const hpByInput = !hpByOutput && inputs.some(function(d){
+        const l = (d.label||"").toLowerCase();
+        return l.includes("headset")||l.includes("wired")||l.includes("external")||
+               l.includes("earphone")||l.includes("airpods");
+      });
+
+      // 3rd check: if we have mic permission (any label visible) and there are
+      // more inputs than just the built-in one, a headset mic is almost certainly present.
+      const anyLabel   = inputs.some(function(d){ return !!(d.label); });
+      const hpByCount  = !hpByOutput && !hpByInput && anyLabel && inputs.length > 1;
+
+      const hp = hpByOutput || hpByInput || hpByCount;
       setHeadphonesIn(hp);
 
       // Classify mic inputs
@@ -6983,8 +7002,11 @@ function StudioScreen({ user, onExit }) {
 
   useEffect(function () {
     checkHeadphones();
-    navigator.mediaDevices.addEventListener("devicechange", checkHeadphones);
-    return function(){ navigator.mediaDevices.removeEventListener("devicechange", checkHeadphones); };
+    // iOS fires devicechange before finishing label updates — wait 300 ms
+    // so enumerateDevices returns populated labels on the re-check.
+    const onDeviceChange = function() { setTimeout(checkHeadphones, 300); };
+    navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
+    return function(){ navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange); };
   }, []);
 
   // Auto-switch mic source when headphones are plugged in / pulled out.
