@@ -7092,37 +7092,19 @@ function StudioScreen({ user, onExit }) {
     if (micReady) { setTimeout(checkHeadphones, 400); }
   }, [micReady]);
 
-  // Auto-switch mic source when headphones are plugged in / pulled out.
-  // Rules:
-  //   1. On initial mount — never auto-switch (prevHeadphonesRef starts as null sentinel)
-  //   2. Headphones plugged in → switch to headset mic ONLY if user hasn't manually chosen
-  //   3. Headphones pulled out → always revert to iPhone mic (headset mic is gone)
-  //   4. User's explicit manual choice is always respected while headphones stay connected
-  const prevHeadphonesRef = useRef(null); // null = "not yet initialised" sentinel
+  // When headphones are pulled out mid-session, revert to iPhone mic.
+  // We do NOT auto-switch TO headset on plug-in — user picks that manually.
+  // This prevents the dropdown showing "Headset Mic" on studio open.
+  const prevHeadphonesRef = useRef(null);
   useEffect(function () {
-    // Skip the very first render — we never want to auto-switch on load
     if (prevHeadphonesRef.current === null) {
       prevHeadphonesRef.current = headphonesIn;
       return;
     }
-
-    if (headphonesIn && !prevHeadphonesRef.current) {
-      // Headphones just plugged in mid-session
-      if (!userPickedMicRef.current) {
-        // User hasn't manually chosen a mic — auto-switch to headset
-        setMicSource("headset");
-        if (monitoringOn) {
-          stopMonitoring();
-          setTimeout(function(){ startMonitoring(undefined, "headset"); }, 150);
-        }
-      }
-      // If user already picked a mic explicitly, leave their choice alone
-    } else if (!headphonesIn && prevHeadphonesRef.current) {
-      // Headphones pulled out — revert mic source to built-in
+    if (!headphonesIn && prevHeadphonesRef.current) {
+      // Headphones pulled out — revert to iPhone mic
       userPickedMicRef.current = false;
       setMicSource("builtin");
-      // Don't stop monitoring — iOS handles the audio route switch automatically.
-      // Just clear any existing warn so it doesn't show stale text.
       setMonitorWarn("");
     }
     prevHeadphonesRef.current = headphonesIn;
