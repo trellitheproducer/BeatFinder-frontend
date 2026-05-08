@@ -7418,11 +7418,9 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
     // ── Output overlap-add buffer ─────────────────────────────────
     this._outBuf    = new Float32Array(this._ringLen);
     this._outW      = 0; // output write pointer (absolute)
-    this._outR      = 0; // output read pointer (absolute)
+    this._outR      = -this._N; // output read pointer — pre-rolled back by one full window so the first block doesn't read zeros before any synthesis has run
 
-    // ── Pointers tracking when next analysis hop should fire ─────
-    this._nextAna   = 0;   // absolute input sample count for next analysis
-    this._latency   = this._N; // samples of start-up latency (one full window)
+    this._nextAna   = 0;   // absolute input sample count for next analysis frame
 
     // ── YIN pitch detection ───────────────────────────────────────
     this._yinN      = 4096;  // larger YIN window for low-pitched voices
@@ -7592,15 +7590,16 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
   }
 
   // ── Phase Vocoder analysis frame ─────────────────────────────────────────
-  _analyseFrame(hopRatio) {
+  _analyseFrame(frameStart) {
     const N   = this._N;
     const N2  = this._N2;
     const win = this._win;
     const re  = new Float32Array(N);
     const im  = new Float32Array(N);
 
-    // Fill windowed frame from ring buffer
-    const readStart = this._ringW - N;
+    // Fill windowed frame from ring buffer at the scheduled hop position
+    // frameStart is the absolute sample index of the START of this frame
+    const readStart = frameStart;
     for (let i = 0; i < N; i++) {
       re[i] = this._ring[(readStart + i + this._ringLen) % this._ringLen] * win[i];
     }
@@ -7768,21 +7767,25 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
     this._currentCents += alphaS * (this._targetCents - this._currentCents);
 
     // ── 4. Run Phase Vocoder frames as needed ─────────────────────
+    // _nextAna is the absolute input sample at which the NEXT frame starts.
+    // We advance it AFTER analysis so _analyseFrame reads from the correct position.
     while (this._ringW >= this._nextAna + this._N) {
-      this._nextAna += this._hop;
       const pitchRatio = Math.pow(2, this._currentCents / 1200);
-      this._analyseFrame(1);
+      this._analyseFrame(this._nextAna % this._ringLen);
+      this._nextAna += this._hop;
       this._shiftBins(pitchRatio);
       if (formant > 0.01) this._applyFormantPreservation(pitchRatio, formant);
       this._synthesiseFrame();
     }
 
     // ── 5. Drain output into block (with latency compensation) ────
-    // We read from outR, which tracks behind outW by the window latency.
-    const readable = this._outW - this._outR;
+    // _outR starts at -N (pre-rolled) so the first N samples output silence
+    // while the vocoder fills its pipeline — this eliminates the click/burst
+    // that previously occurred at startup before any synthesis frames ran.
     for (let i = 0; i < blockSize; i++) {
-      if (this._outR + i < this._outW) {
-        const idx = (this._outR + i) % this._ringLen;
+      const absIdx = this._outR + i;
+      if (absIdx >= 0 && absIdx < this._outW) {
+        const idx = ((absIdx % this._ringLen) + this._ringLen) % this._ringLen;
         output[i] = this._outBuf[idx];
         this._outBuf[idx] = 0; // clear after reading
       } else {
@@ -7791,8 +7794,10 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
     }
     this._outR += blockSize;
 
-    // Passthrough if no meaningful correction (saves CPU & avoids artifacts)
-    if (Math.abs(this._currentCents) < 0.5) {
+    // Passthrough only in SHIFT mode with zero shift.
+    // DO NOT passthrough in autotune mode (mode===1) — the vocoder output is already
+    // written above and overwriting it here caused dropouts mid-correction.
+    if (mode === 0 && Math.abs(this._currentCents) < 0.5) {
       for (let i = 0; i < blockSize; i++) output[i] = input[i];
     }
 
