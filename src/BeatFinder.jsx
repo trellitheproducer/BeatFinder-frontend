@@ -7105,14 +7105,12 @@ function StudioScreen({ user, onExit }) {
       }
       // If user already picked a mic explicitly, leave their choice alone
     } else if (!headphonesIn && prevHeadphonesRef.current) {
-      // Headphones pulled out — headset mic is physically gone, must revert
-      // Reset the user-pick flag so next plug-in auto-switches again
+      // Headphones pulled out — revert mic source to built-in
       userPickedMicRef.current = false;
       setMicSource("builtin");
-      if (monitoringOn) {
-        stopMonitoring();
-        setMonitorWarn("⚠️ Headphones disconnected — monitoring stopped to prevent feedback.");
-      }
+      // Don't stop monitoring — iOS handles the audio route switch automatically.
+      // Just clear any existing warn so it doesn't show stale text.
+      setMonitorWarn("");
     }
     prevHeadphonesRef.current = headphonesIn;
   }, [headphonesIn]);
@@ -7186,12 +7184,10 @@ function StudioScreen({ user, onExit }) {
     if (monitorSrcRef.current) return; // already wired up
     setMonitorWarn("");
 
-    const check = await checkHeadphones();
-    const safe  = check.headphonesConnected !== undefined ? check.headphonesConnected : check;
-    if (!safe) {
-      setMonitorWarn("⚠️ Plug in headphones — monitoring disabled to prevent feedback.");
-      return;
-    }
+    // No feedback gate — on iPhone, iOS routes monitoring audio to whatever output
+    // is active (headset, AirPods, speaker) automatically. Blocking based on
+    // headphone detection was causing false negatives on iOS where labels are empty
+    // until after mic permission is granted.
 
     const useMicSource = forceMicSource !== undefined ? forceMicSource : micSource;
     const audioConstraints = await buildMicConstraints(useMicSource);
