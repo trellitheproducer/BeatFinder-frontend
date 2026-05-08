@@ -5354,27 +5354,63 @@ function TKnob({ label, value, min, max, step, unit, onChange, size, color }) {
   if (!uidRef.current) { uidRef.current = "tkg" + (++_tkc); }
   const uid = uidRef.current;
 
-  // dragRef holds { startY, startVal } reset each pointerdown.
+  // dragRef holds { startY, startVal, pointerId } reset each pointerdown.
   // We read the LATEST value from valueRef (not the stale closure) as the baseline.
-  const valueRef = React.useRef(value);
+  const valueRef   = React.useRef(value);
   valueRef.current = value;
-  const dragRef  = React.useRef(null);
+  const dragRef    = React.useRef(null);
+  const svgRef     = React.useRef(null);
+  const onChangeRef = React.useRef(onChange);
+  onChangeRef.current = onChange;
 
-  const onPointerDown = function(e) {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { startY: e.clientY, startVal: valueRef.current };
-  };
-  const onPointerMove = function(e) {
-    if (!dragRef.current) return;
-    const dy      = dragRef.current.startY - e.clientY;   // drag UP = positive
-    const sens    = (max - min) / 200;                    // 200px = full sweep
-    const raw     = dragRef.current.startVal + dy * sens;
-    const clamped = Math.min(max, Math.max(min, raw));
-    const snapped = step ? Math.round(clamped / step) * step : clamped;
-    onChange(+snapped.toFixed(6));
-  };
-  const onPointerUp = function() { dragRef.current = null; };
+  // Store max/min/step in refs so imperative handlers always read latest values
+  const maxRef  = React.useRef(max);  maxRef.current  = max;
+  const minRef  = React.useRef(min);  minRef.current  = min;
+  const stepRef = React.useRef(step); stepRef.current = step;
+
+  // Imperative pointer handlers attached with {passive:false} so preventDefault()
+  // actually suppresses iOS scroll during knob drag. React synthetic events can't
+  // set passive:false reliably in all iOS Safari versions.
+  React.useEffect(function() {
+    const el = svgRef.current;
+    if (!el) return;
+
+    function handleDown(e) {
+      e.preventDefault();
+      // setPointerCapture on SVG can be unreliable on iOS — capture on document instead
+      dragRef.current = { startY: e.clientY, startVal: valueRef.current, pointerId: e.pointerId };
+      try { el.setPointerCapture(e.pointerId); } catch(_) {}
+
+      function handleMove(ev) {
+        if (!dragRef.current) return;
+        if (ev.pointerId !== undefined && ev.pointerId !== dragRef.current.pointerId) return;
+        ev.preventDefault();
+        const dy      = dragRef.current.startY - ev.clientY; // drag UP = positive
+        const sens    = (maxRef.current - minRef.current) / 200; // 200px = full sweep
+        const raw     = dragRef.current.startVal + dy * sens;
+        const clamped = Math.min(maxRef.current, Math.max(minRef.current, raw));
+        const snapped = stepRef.current ? Math.round(clamped / stepRef.current) * stepRef.current : clamped;
+        onChangeRef.current(+snapped.toFixed(6));
+      }
+      function handleUp(ev) {
+        if (ev.pointerId !== undefined && ev.pointerId !== dragRef.current?.pointerId) return;
+        dragRef.current = null;
+        document.removeEventListener("pointermove", handleMove);
+        document.removeEventListener("pointerup",   handleUp);
+        document.removeEventListener("pointercancel", handleUp);
+      }
+
+      // Attach move/up to document so fast drags that leave the SVG still work
+      document.addEventListener("pointermove",   handleMove,  { passive: false });
+      document.addEventListener("pointerup",     handleUp,    { passive: false });
+      document.addEventListener("pointercancel", handleUp,    { passive: false });
+    }
+
+    el.addEventListener("pointerdown", handleDown, { passive: false });
+    return function() {
+      el.removeEventListener("pointerdown", handleDown);
+    };
+  }, []); // mount/unmount only — all live values go through refs
 
   const fmt = function(v) {
     if (unit === "dB" || unit === "dBFS") return (v >= 0 ? "+" : "") + v.toFixed(1);
@@ -5386,12 +5422,8 @@ function TKnob({ label, value, min, max, step, unit, onChange, size, color }) {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, userSelect:"none" }}>
-      <svg width={sz} height={sz}
-        style={{ cursor:"ns-resize", touchAction:"none", overflow:"visible" }}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
+      <svg ref={svgRef} width={sz} height={sz}
+        style={{ cursor:"ns-resize", touchAction:"none", overflow:"visible", WebkitUserSelect:"none", userSelect:"none" }}
       >
         <circle cx={cx} cy={cy} r={r+3} fill="none" stroke="#000" strokeWidth={2} opacity={0.6}/>
         {norm > 0.005 && <path d={arcPath} fill="none" stroke={accent} strokeWidth={3} strokeLinecap="round" style={{filter:`drop-shadow(0 0 3px ${accent}88)`}}/>}
@@ -6897,6 +6929,10 @@ function StudioScreen({ user, onExit }) {
       // Immediately stop — we just needed the permission grant
       stream.getTracks().forEach(function (t) { t.stop(); });
       setMicReady(true);
+      // iOS only reveals device labels (including "Headset Microphone") AFTER the
+      // first getUserMedia grant. Re-enumerate now so the headset option appears
+      // immediately if a headset is already plugged in.
+      setTimeout(checkHeadphones, 300);
       return true;
     } catch (e) {
       setMicDenied(true);
@@ -6982,7 +7018,9 @@ function StudioScreen({ user, onExit }) {
       inputs.forEach(function(d) {
         if (!d.deviceId) return;
         const l = (d.label||"").toLowerCase();
-        const isHeadset = l.includes("headset")||l.includes("wired")||l.includes("external");
+        const isHeadset = l.includes("headset")||l.includes("wired")||l.includes("external")||
+                          l.includes("airpod")||l.includes("earphone")||l.includes("earbud")||
+                          l.includes("bluetooth");
         const isBuiltIn = l.includes("iphone")||l.includes("built-in")||l.includes("internal")||l.includes("front");
         if (isHeadset && !headsetId) headsetId = d.deviceId;
         else if (isBuiltIn && !builtInId) builtInId = d.deviceId;
@@ -10534,9 +10572,9 @@ self.onmessage = async function(e) {
             style={{ width:50,accentColor:"#22C55E",height:2 }} />
         )}
         {/* Mic source picker — iPhone Mic is always the default.
-            Headset Mic option only appears once a headset is physically detected. */}
+            Headset Mic option always shown; disabled until a headset is detected. */}
         <select
-          value={headphonesIn ? micSource : "builtin"}
+          value={micSource}
           onChange={function(e){
             const next = e.target.value;
             userPickedMicRef.current = true; // user has explicitly chosen — disable auto-switch
@@ -10547,7 +10585,9 @@ self.onmessage = async function(e) {
           style={{ background:"#141414",border:"1px solid #2a2a2a",borderRadius:6,color:"#aaa",fontSize:9,fontWeight:700,padding:"3px 5px",cursor:"pointer",outline:"none",maxWidth:115 }}
         >
           <option value="builtin">📱 iPhone Mic</option>
-          {headphonesIn && <option value="headset">🎙 Headset Mic</option>}
+          <option value="headset" disabled={!headphonesIn} style={{ color: headphonesIn ? undefined : "#555" }}>
+            {headphonesIn ? "🎙 Headset Mic" : "🎙 Headset (none)"}
+          </option>
         </select>
       </div>
       {monitorWarn && <div style={{ background:"rgba(245,158,11,0.1)",borderBottom:"1px solid rgba(245,158,11,0.2)",color:"#F59E0B",fontSize:11,padding:"4px 16px",textAlign:"center",flexShrink:0 }}>{monitorWarn}</div>}
