@@ -4,6 +4,28 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 // PREMIUM LOADER COMPONENT
 // =============================================================================
 const LOADER_STYLE = `
+  @media screen and (orientation: landscape) {
+    html, body { overflow: hidden; }
+    #bf-portrait-lock {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vh;
+      height: 100vw;
+      transform-origin: top left;
+      transform: rotate(90deg) translateY(-100%);
+      overflow-y: auto;
+      overflow-x: hidden;
+      z-index: 999999;
+    }
+  }
+  @media screen and (orientation: portrait) {
+    #bf-portrait-lock {
+      position: static;
+      width: 100%;
+      height: 100%;
+      transform: none;
+    }
+  }
   @keyframes bf-spin  { to { transform: rotate(360deg); } }
   @keyframes bf-pulse { 0%,100% { opacity:0.4; transform:scaleY(0.5); } 50% { opacity:1; transform:scaleY(1); } }
   @keyframes bf-fade  { from { opacity:0; } to { opacity:1; } }
@@ -4690,15 +4712,29 @@ class StudioErrorBoundary extends React.Component {
 }
 
 // ── Plugin chain panel — extracted from IIFE so useState is a valid hook call ──
-function PluginChainPanel({ fx, upd, eq5, EQPlugin, CompPlugin, ReverbPlugin, PitchPlugin, Knob, EQGraph, CompGraph, ReverbViz }) {
+function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob }) {
+  // EQPlugin / CompPlugin / ReverbPlugin / PitchPlugin are pure render helpers
+  // defined here so they always have the correct fx/upd/Knob/graph refs.
+  const EQPlugin     = function(p){ return _EQPlugin(p); };
+  const CompPlugin   = function(p){ return _CompPlugin(p); };
+  const ReverbPlugin = function(p){ return _ReverbPlugin(p); };
+  const PitchPlugin  = function(p){ return _PitchPlugin(p); };
+  const NoiseRemoverPlugin = function(p){ return _NoiseRemoverPlugin(p); };
+  const DoublerPlugin = function(p){ return _DoublerPlugin(p); };
+  const HDelayPlugin  = function(p){ return _HDelayPlugin(p); };
+  const TRottenPlugin = function(p){ return _TRottenMasterPlugin(p); };
   const [showPluginPicker, setShowPluginPicker] = React.useState(false);
   const chain = fx.pluginChain || [];
 
   const ALL_PLUGINS = [
-    { key:"eq",         label:"Parametric EQ",      sub:"5-Band · Drag handles",    icon:"📊", color:"#2563EB" },
-    { key:"compressor", label:"Compressor",          sub:"Dynamics processor",        icon:"🎚", color:"#7C3AED" },
-    { key:"reverb",     label:"Convolution Reverb",  sub:"Room simulation",           icon:"🌊", color:"#C026D3" },
-    { key:"pitch",      label:"Auto-Tune / Pitch",   sub:"Pitch processor v2",        icon:"🎵", color:"#9333EA" },
+    { key:"eq",           label:"Pro EQ",              sub:"5-Band · Drag handles",        icon:"📊", color:"#0ea5e9" },
+    { key:"compressor",   label:"Compressor",          sub:"Dynamics processor",            icon:"🎚", color:"#7C3AED" },
+    { key:"reverb",       label:"Convolution Reverb",  sub:"Room simulation",               icon:"🌊", color:"#C026D3" },
+    { key:"pitch",        label:"Auto-Tune / Pitch",   sub:"Pitch processor v2",            icon:"🎵", color:"#9333EA" },
+    { key:"noiseremover", label:"Noise Remover",       sub:"RNNoise · AI denoising",        icon:"🎙", color:"#10B981" },
+    { key:"doubler",      label:"Vocal Doubler",        sub:"Stereo width · Haas effect",     icon:"🔊", color:"#F59E0B" },
+    { key:"hdelay",       label:"H-Delay",              sub:"Tape · BPM sync · Analog",       icon:"⏱", color:"#E85D04" },
+    { key:"trotten",      label:"T-Rotten Master",      sub:"Mastering · Analog warmth",       icon:"🎛", color:"#C8762A" },
   ];
 
   const addPlugin = function(key) {
@@ -4805,12 +4841,24 @@ function PluginChainPanel({ fx, upd, eq5, EQPlugin, CompPlugin, ReverbPlugin, Pi
           {/* Pitch / Autotune plugin */}
           {key === "pitch" && <PitchPlugin fx={fx} upd={upd} Knob={Knob} />}
 
+          {/* Noise Remover plugin */}
+          {key === "noiseremover" && <NoiseRemoverPlugin fx={fx} upd={upd} Knob={Knob} />}
+
+          {/* Vocal Doubler plugin */}
+          {key === "doubler" && <DoublerPlugin fx={fx} upd={upd} Knob={Knob} />}
+
+          {/* H-Delay plugin */}
+          {key === "hdelay" && <HDelayPlugin fx={fx} upd={upd} Knob={Knob} />}
+
+          {/* T-Rotten Master plugin */}
+          {key === "trotten" && <TRottenPlugin fx={fx} upd={upd} Knob={Knob} />}
+
         </div>
       );
     })}
 
     {/* ── Add Plugin button ── */}
-    {chain.length < 4 && (
+    {chain.length < 8 && (
       <button onClick={function(e){ e.stopPropagation(); setShowPluginPicker(true); }}
         style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:10,
           width:"100%", padding:"16px", marginTop:4,
@@ -4828,6 +4876,1855 @@ function PluginChainPanel({ fx, upd, eq5, EQPlugin, CompPlugin, ReverbPlugin, Pi
     <div style={{ height:8 }} />
 
   </div>
+  );
+}
+
+// =============================================================================
+// ── FX plugin sub-components (pure render functions, no hooks) ──
+// Defined at top-level so they are stable references; FxPanel passes them
+// down via FxPanelPlugins.
+function _EQPlugin({ fx, upd, eq5, EQGraph, Knob }) {
+  const on = !!fx.eq?.on;
+  // Pro Q3 color palette per band
+  const BAND_COLORS = { hpf:"#FF6B6B", low:"#4FC3F7", mid:"#69F0AE", high:"#FFD54F", lpf:"#FF6B6B" };
+  return (
+    <div style={{
+      background:"linear-gradient(180deg,#0f1219 0%,#090c11 100%)",
+      borderRadius:16, overflow:"hidden",
+      border:"2px solid " + (on ? "#38bdf8" : "#1e2535"),
+      boxShadow: on ? "0 0 28px rgba(56,189,248,0.12), inset 0 1px 0 rgba(255,255,255,0.04)" : "inset 0 1px 0 rgba(255,255,255,0.02)"
+    }}>
+      {/* ── Header ── */}
+      <div style={{
+        background:"linear-gradient(180deg,#131825 0%,#0f1219 100%)",
+        padding:"9px 14px", borderBottom:"1px solid #1e2535",
+        display:"flex", alignItems:"center", gap:8
+      }}>
+        <div style={{ display:"flex", alignItems:"center", gap:7, flex:1 }}>
+          {/* Band color strip */}
+          <div style={{ display:"flex", gap:2, alignItems:"center" }}>
+            {["#FF6B6B","#4FC3F7","#69F0AE","#FFD54F","#FF6B6B"].map(function(c,i){
+              return <div key={i} style={{ width:3, height:16, borderRadius:1.5, background:c, opacity:0.9 }}/>;
+            })}
+          </div>
+          <div>
+            <div style={{ color:"#e8f0ff", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>PRO EQ</div>
+            <div style={{ color:"#2a3a5a", fontSize:7, letterSpacing:2.5, fontFamily:"monospace", marginTop:1 }}>5-BAND PARAMETRIC · DRAG HANDLES</div>
+          </div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          {/* Power LED */}
+          <div style={{
+            width:8, height:8, borderRadius:"50%",
+            background: on ? "#38bdf8" : "#111827",
+            boxShadow: on ? "0 0 6px #38bdf8, 0 0 14px rgba(56,189,248,0.5)" : "none",
+            transition:"all 0.2s"
+          }}/>
+          <button onClick={function(){ upd("eq",{on:!on}); }} style={{
+            background: on ? "linear-gradient(180deg,#0ea5e9,#0284c7)" : "linear-gradient(180deg,#1e2535,#151c2a)",
+            border:"1px solid " + (on ? "#38bdf8" : "#2a3350"),
+            borderRadius:5, color:"white", fontSize:9, fontWeight:800,
+            padding:"4px 12px", cursor:"pointer", letterSpacing:1,
+            boxShadow: on ? "0 1px 0 rgba(255,255,255,0.12) inset" : "0 1px 3px rgba(0,0,0,0.6)"
+          }}>{on ? "ON" : "OFF"}</button>
+        </div>
+      </div>
+
+      {/* ── Graph + knobs ── */}
+      <div style={{ padding:"12px 10px 10px", opacity:on?1:0.35, transition:"opacity 0.2s" }}>
+        {/* Graph */}
+        <div style={{
+          background:"#070a10", borderRadius:10, padding:3,
+          border:"1px solid #1a2035",
+          boxShadow:"inset 0 2px 8px rgba(0,0,0,0.7), 0 0 0 1px rgba(56,189,248,0.04)"
+        }}>
+          <EQGraph eq={eq5} onDrag={function(patch){ upd("eq", patch); }} />
+        </div>
+
+        {/* ── Band knob strips ── */}
+        <div style={{ display:"flex", marginTop:10, background:"#0a0e16", borderRadius:10, border:"1px solid #1a2035", overflow:"hidden" }}>
+          {[
+            {
+              key:"hpf", label:"HPF", color:BAND_COLORS.hpf,
+              knobs:[
+                {lbl:"FREQ",v:eq5.hpfFreq,min:20,max:2000,step:1,unit:"Hz",cb:function(v){upd("eq",{hpfFreq:v});}},
+                {lbl:"Q",   v:eq5.hpfQ,  min:0.1,max:10,step:0.1,unit:"",  cb:function(v){upd("eq",{hpfQ:v});}}
+              ]
+            },
+            {
+              key:"low", label:"LOW SHELF", color:BAND_COLORS.low,
+              knobs:[
+                {lbl:"FREQ",v:eq5.lowFreq,min:20,max:2000,step:1,unit:"Hz",cb:function(v){upd("eq",{lowFreq:v});}},
+                {lbl:"GAIN",v:eq5.low,min:-18,max:18,step:0.5,unit:"dB",  cb:function(v){upd("eq",{low:v});}},
+                {lbl:"Q",   v:eq5.lowQ,  min:0.1,max:10,step:0.1,unit:"", cb:function(v){upd("eq",{lowQ:v});}}
+              ]
+            },
+            {
+              key:"mid", label:"PEAK", color:BAND_COLORS.mid,
+              knobs:[
+                {lbl:"FREQ",v:eq5.midFreq,min:100,max:10000,step:10,unit:"Hz",cb:function(v){upd("eq",{midFreq:v});}},
+                {lbl:"GAIN",v:eq5.mid,min:-18,max:18,step:0.5,unit:"dB",    cb:function(v){upd("eq",{mid:v});}},
+                {lbl:"Q",   v:eq5.midQ,  min:0.1,max:10,step:0.1,unit:"",   cb:function(v){upd("eq",{midQ:v});}}
+              ]
+            },
+            {
+              key:"high", label:"HI SHELF", color:BAND_COLORS.high,
+              knobs:[
+                {lbl:"FREQ",v:eq5.highFreq,min:500,max:20000,step:100,unit:"Hz",cb:function(v){upd("eq",{highFreq:v});}},
+                {lbl:"GAIN",v:eq5.high,min:-18,max:18,step:0.5,unit:"dB",     cb:function(v){upd("eq",{high:v});}},
+                {lbl:"Q",   v:eq5.highQ, min:0.1,max:10,step:0.1,unit:"",     cb:function(v){upd("eq",{highQ:v});}}
+              ]
+            },
+            {
+              key:"lpf", label:"LPF", color:BAND_COLORS.lpf,
+              knobs:[
+                {lbl:"FREQ",v:eq5.lpfFreq,min:1000,max:20000,step:100,unit:"Hz",cb:function(v){upd("eq",{lpfFreq:v});}},
+                {lbl:"Q",   v:eq5.lpfQ,  min:0.1,max:10,step:0.1,unit:"",      cb:function(v){upd("eq",{lpfQ:v});}}
+              ]
+            },
+          ].map(function(band, bi, arr){
+            return (
+              <div key={band.key} style={{
+                flex:1, borderRight: bi < arr.length-1 ? "1px solid #151c2a" : "none",
+                display:"flex", flexDirection:"column", alignItems:"center", padding:"6px 2px 8px"
+              }}>
+                {/* Band label pill */}
+                <div style={{
+                  width:"100%",
+                  background:"linear-gradient(180deg," + band.color + "22," + band.color + "0a)",
+                  borderBottom:"1px solid " + band.color + "40",
+                  padding:"3px 0", textAlign:"center", marginBottom:6
+                }}>
+                  <span style={{ color:band.color, fontSize:6, fontWeight:900, letterSpacing:1, fontFamily:"monospace" }}>
+                    {band.label}
+                  </span>
+                </div>
+                <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, overflow:"visible" }}>
+                  {band.knobs.map(function(k){
+                    return <Knob key={k.lbl} label={k.lbl} value={k.v} min={k.min} max={k.max}
+                      step={k.step} unit={k.unit} color={band.color} onChange={k.cb}/>;
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function _CompPlugin({ fx, upd, CompGraph, Knob }) {
+  return (
+    <div style={{ background:"linear-gradient(180deg,#1c1a22 0%,#130f1a 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (fx.compressor?.on ? "#8B5CF6" : "#2a2a2a"), boxShadow: fx.compressor?.on ? "0 0 20px rgba(139,92,246,0.15), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+      <div style={{ background:"linear-gradient(180deg,#1e1c25 0%,#181620 100%)", padding:"8px 14px", borderBottom:"1px solid #2a2535", display:"flex", alignItems:"center", gap:8 }}>
+        <div style={{ flex:1 }}>
+          <div style={{ color:"#c4b5fd", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>COMPRESSOR</div>
+          <div style={{ color:"#4a3f5c", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>DYNAMICS PROCESSOR</div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{ display:"flex", gap:1.5, alignItems:"flex-end" }}>
+            {[0,1,2,3,4].map(function(i){ const active = fx.compressor?.on; const colors = ["#22C55E","#22C55E","#F59E0B","#EF4444","#EF4444"]; return <div key={i} style={{ width:3, height: 6 + i * 2, borderRadius:1, background: active ? colors[i] : "#1e1e1e", boxShadow: active ? "0 0 4px " + colors[i] + "88" : "none", transition:"all 0.15s" }} />; })}
+          </div>
+          <div style={{ width:8, height:8, borderRadius:"50%", background: fx.compressor?.on ? "#8B5CF6" : "#1a1a1a", boxShadow: fx.compressor?.on ? "0 0 6px #8B5CF6, 0 0 12px rgba(139,92,246,0.5)" : "none", transition:"all 0.2s" }} />
+          <button onClick={function(){ upd("compressor",{on:!fx.compressor?.on}); }} style={{ background: fx.compressor?.on ? "linear-gradient(180deg,#7C3AED,#6d28d9)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (fx.compressor?.on ? "#8B5CF6" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1, boxShadow: fx.compressor?.on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>{fx.compressor?.on ? "ON" : "OFF"}</button>
+        </div>
+      </div>
+      <div style={{ padding:"12px 14px", opacity:fx.compressor?.on?1:0.4, transition:"opacity 0.2s" }}>
+        <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
+          <div style={{ background:"#050505", borderRadius:8, padding:2, border:"1px solid #1a1a1a", boxShadow:"inset 0 2px 6px rgba(0,0,0,0.8)", flexShrink:0 }}>
+            <CompGraph threshold={fx.compressor?.threshold??-24} ratio={fx.compressor?.ratio??4} />
+          </div>
+          <div style={{ flex:1, display:"flex", flexDirection:"column", gap:8, overflow:"visible" }}>
+            <div style={{ display:"flex", justifyContent:"space-around", overflow:"visible" }}>
+              <Knob label="THRESH" value={fx.compressor?.threshold??-24} min={-60} max={0} step={1} unit="dB" color="#8B5CF6" onChange={function(v){ upd("compressor",{threshold:v}); }} />
+              <Knob label="RATIO" value={fx.compressor?.ratio??4} min={1} max={20} step={0.5} unit=":1" color="#8B5CF6" onChange={function(v){ upd("compressor",{ratio:v}); }} />
+            </div>
+            <div style={{ height:1, background:"#1e1e1e", borderRadius:1 }} />
+            <div style={{ display:"flex", justifyContent:"space-around", overflow:"visible" }}>
+              <Knob label="ATTACK" value={Math.round((fx.compressor?.attack??0.003)*1000)} min={1} max={200} step={1} unit="ms" color="#a78bfa" onChange={function(v){ upd("compressor",{attack:v/1000}); }} />
+              <Knob label="RELEASE" value={Math.round((fx.compressor?.release??0.25)*1000)} min={10} max={2000} step={10} unit="ms" color="#a78bfa" onChange={function(v){ upd("compressor",{release:v/1000}); }} />
+              <Knob label="MAKEUP" value={fx.compressor?.makeupGain??0} min={0} max={24} step={0.5} unit="dB" color="#22C55E" onChange={function(v){ upd("compressor",{makeupGain:v}); }} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function _ReverbPlugin({ fx, upd, ReverbViz, Knob }) {
+  return (
+    <div style={{ background:"linear-gradient(180deg,#1a1220 0%,#110d19 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (fx.reverb?.on ? "#C026D3" : "#2a2a2a"), boxShadow: fx.reverb?.on ? "0 0 20px rgba(192,38,211,0.15), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+      <div style={{ backgroundImage:"linear-gradient(180deg,#1e1629,#17101e)", padding:"8px 14px", borderBottom:"1px solid #2a1e35", display:"flex", alignItems:"center", gap:8 }}>
+        <div style={{ flex:1 }}>
+          <div style={{ color:"#e879f9", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>CONVOLUTION REVERB</div>
+          <div style={{ color:"#4a2f55", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>ROOM SIMULATION</div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <div style={{ width:8, height:8, borderRadius:"50%", background: fx.reverb?.on ? "#C026D3" : "#1a1a1a", boxShadow: fx.reverb?.on ? "0 0 6px #C026D3, 0 0 14px rgba(192,38,211,0.5)" : "none", transition:"all 0.2s" }} />
+          <button onClick={function(){ upd("reverb",{on:!fx.reverb?.on}); }} style={{ background: fx.reverb?.on ? "linear-gradient(180deg,#be185d,#9d174d)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (fx.reverb?.on ? "#C026D3" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1, boxShadow: fx.reverb?.on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>{fx.reverb?.on ? "ON" : "OFF"}</button>
+        </div>
+      </div>
+      <div style={{ padding:"12px 14px", opacity:fx.reverb?.on?1:0.4, transition:"opacity 0.2s" }}>
+        <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+          <div style={{ background:"#050505", borderRadius:8, padding:2, border:"1px solid #1a1a1a", boxShadow:"inset 0 2px 6px rgba(0,0,0,0.8)", flexShrink:0 }}>
+            <ReverbViz wet={fx.reverb?.wet??0.25} roomSize={fx.reverb?.roomSize??0.8} />
+          </div>
+          <div style={{ flex:1, display:"flex", justifyContent:"space-around", overflow:"visible", padding:"4px 0" }}>
+            <Knob label="WET" value={fx.reverb?.wet??0.25} min={0} max={1} step={0.01} unit="%" color="#C026D3" onChange={function(v){ upd("reverb",{wet:v}); }} />
+            <Knob label="ROOM" value={fx.reverb?.roomSize??0.8} min={0.1} max={1} step={0.01} unit="%" color="#C026D3" onChange={function(v){ upd("reverb",{roomSize:v}); }} />
+            <Knob label="PRE-DLY" value={fx.reverb?.preDelay??0} min={0} max={100} step={1} unit="ms" color="#8B5CF6" onChange={function(v){ upd("reverb",{preDelay:v}); }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function _PitchPlugin({ fx, upd, Knob }) {
+  const pOn       = !!fx.pitch?.on;
+  const semitones = fx.pitch?.semitones ?? 0;
+  const speed     = fx.pitch?.speed ?? 0.5;
+  const formant   = fx.pitch?.formant ?? 0.5;
+  const pitchKey  = fx.pitch?.key ?? "C";
+  const scale     = fx.pitch?.scale ?? "chromatic";
+  const mode      = fx.pitch?.mode ?? "shift";
+  const stLabel   = semitones === 0 ? "0 st" : (semitones > 0 ? "+" + semitones : semitones) + " st";
+  const speedMs   = speed < 0.02 ? "INSTANT" : Math.round(speed * 400) + " ms";
+  const NOTES     = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  const IS_BLACK  = [false,true,false,true,false,false,true,false,true,false,true,false];
+  const SCALE_INTERVALS = { chromatic:[0,1,2,3,4,5,6,7,8,9,10,11], major:[0,2,4,5,7,9,11], minor:[0,2,3,5,7,8,10], pentatonic:[0,2,4,7,9], blues:[0,3,5,6,7,10] };
+  const rootIdx   = NOTES.indexOf(pitchKey);
+  const intervals = SCALE_INTERVALS[scale] || SCALE_INTERVALS.chromatic;
+  const activeNotes = new Set(intervals.map(function(i){ return NOTES[(rootIdx + i) % 12]; }));
+  return (
+    <div style={{ background:"linear-gradient(160deg,#0f0f14 0%,#12101a 100%)", borderRadius:16, overflow:"hidden", border:"1px solid " + (pOn ? "#9333ea" : "#1e1e1e"), boxShadow: pOn ? "0 0 24px rgba(147,51,234,0.2)" : "none" }}>
+      <div style={{ display:"flex", alignItems:"center", padding:"8px 14px", background:"#0a0a0f", borderBottom:"1px solid #1a1a24" }}>
+        <div style={{ flex:1 }}>
+          <div style={{ color:"#7c3aed", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace" }}>AUTO·TUNE</div>
+          <div style={{ color:"#333", fontSize:8, letterSpacing:1 }}>PITCH PROCESSOR v2</div>
+        </div>
+        <div style={{ display:"flex", background:"#111", borderRadius:8, border:"1px solid #222", overflow:"hidden", marginRight:10 }}>
+          {["shift","autotune"].map(function(m){ return <button key={m} onClick={function(){ upd("pitch",{mode:m}); }} style={{ padding:"4px 10px", background:mode===m?"#7c3aed":"transparent", border:"none", color:mode===m?"white":"#444", fontSize:8, fontWeight:800, cursor:"pointer", letterSpacing:0.5, textTransform:"uppercase" }}>{m==="shift"?"SHIFT":"A-TUNE"}</button>; })}
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <div style={{ width:8, height:8, borderRadius:"50%", background: pOn ? "#a855f7" : "#1a1a1a", boxShadow: pOn ? "0 0 8px #a855f7, 0 0 16px #7c3aed44" : "none", transition:"all 0.2s" }} />
+          <button onClick={function(){ upd("pitch",{on:!pOn}); }} style={{ background:pOn?"#7c3aed":"#1a1a1a", border:"1px solid "+(pOn?"#9333ea":"#2a2a2a"), borderRadius:6, color:"white", fontSize:9, fontWeight:800, padding:"4px 10px", cursor:"pointer", letterSpacing:1 }}>{pOn ? "ON" : "OFF"}</button>
+        </div>
+      </div>
+      <div style={{ padding:"12px 14px", opacity: pOn ? 1 : 0.3, pointerEvents: pOn ? "auto" : "none", transition:"opacity 0.2s" }}>
+        <div style={{ background:"#060810", border:"1px solid #1a1a2e", borderRadius:8, padding:"8px 12px", marginBottom:14, fontFamily:"monospace", boxShadow:"inset 0 2px 8px rgba(0,0,0,0.6)" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div>
+              <div style={{ color:"#6d28d9", fontSize:8, letterSpacing:2, marginBottom:2 }}>{mode==="autotune"?"AUTO-TUNE":"PITCH SHIFT"}</div>
+              <div style={{ color:"#a855f7", fontSize:20, fontWeight:900, letterSpacing:1, lineHeight:1 }}>{mode==="autotune" ? pitchKey + " " + scale.toUpperCase() : stLabel}</div>
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ color:"#4c1d95", fontSize:8, letterSpacing:1, marginBottom:2 }}>SPEED</div>
+              <div style={{ color:"#7c3aed", fontSize:13, fontWeight:800, fontFamily:"monospace" }}>{speedMs}</div>
+            </div>
+          </div>
+          <div style={{ marginTop:8, height:3, background:"#0f0f1a", borderRadius:2, overflow:"hidden" }}>
+            <div style={{ height:"100%", width: (Math.abs(semitones)/12*100)+"%", background: semitones > 0 ? "linear-gradient(90deg,#6d28d9,#a855f7)" : "linear-gradient(90deg,#a855f7,#6d28d9)", marginLeft: semitones < 0 ? "auto" : "0", transition:"width 0.1s", borderRadius:2 }} />
+          </div>
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-around", alignItems:"flex-end", marginBottom:14, gap:4 }}>
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+            <Knob label="PITCH" value={semitones} min={-12} max={12} step={1} unit=" st" color="#a855f7" onChange={function(v){ upd("pitch",{semitones:v}); }} />
+            <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{stLabel}</div>
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+            <Knob label="SPEED" value={speed} min={0} max={1} step={0.01} unit="%" color="#7c3aed" onChange={function(v){ upd("pitch",{speed:v}); }} />
+            <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{speedMs}</div>
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+            <Knob label="FORMANT" value={formant} min={0} max={1} step={0.05} unit="" color="#9333ea" onChange={function(v){ upd("pitch",{formant:v}); }} />
+            <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{Math.round(formant*100)}% PRES</div>
+          </div>
+        </div>
+        {mode === "autotune" && (
+          <div style={{ marginBottom:12 }}>
+            <div style={{ color:"#4c1d95", fontSize:8, letterSpacing:2, fontFamily:"monospace", marginBottom:6 }}>SCALE</div>
+            <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+              {Object.keys(SCALE_INTERVALS).map(function(s){ const isA = scale === s; return <button key={s} onClick={function(){ upd("pitch",{scale:s}); }} style={{ padding:"4px 10px", background:isA?"#7c3aed":"#0f0f18", border:"1px solid "+(isA?"#9333ea":"#1e1e2a"), borderRadius:6, color:isA?"white":"#4c1d95", fontSize:8, fontWeight:800, cursor:"pointer", textTransform:"capitalize", letterSpacing:0.5 }}>{s}</button>; })}
+            </div>
+          </div>
+        )}
+        {mode === "autotune" && (
+          <div style={{ marginBottom:4 }}>
+            <div style={{ color:"#4c1d95", fontSize:8, letterSpacing:2, fontFamily:"monospace", marginBottom:6 }}>ROOT KEY</div>
+            <div style={{ position:"relative", height:48, display:"flex" }}>
+              {NOTES.filter(function(_,i){ return !IS_BLACK[i]; }).map(function(n, wi){
+                const isRoot = n === pitchKey;
+                const inScale = activeNotes.has(n);
+                return <button key={n} onClick={function(){ upd("pitch",{key:n}); }} style={{ flex:1, height:"100%", background: isRoot ? "#a855f7" : inScale ? "#2d1b4e" : "#e8e8e8", border:"1px solid #111", borderRadius:"0 0 4px 4px", cursor:"pointer", display:"flex", alignItems:"flex-end", justifyContent:"center", paddingBottom:3, boxShadow: isRoot ? "0 0 8px #a855f744" : "none", transition:"background 0.1s" }}><span style={{ fontSize:6, fontWeight:800, color: isRoot ? "white" : inScale ? "#a855f7" : "#333" }}>{n}</span></button>;
+              })}
+              <div style={{ position:"absolute", top:0, left:0, right:0, height:"58%", pointerEvents:"none", display:"flex" }}>
+                {[{note:"C#",left:"12.3%"},{note:"D#",left:"26%"},{note:"F#",left:"53.2%"},{note:"G#",left:"67%"},{note:"A#",left:"80.7%"}].map(function(bk){
+                  const isRoot = bk.note === pitchKey;
+                  const inScale = activeNotes.has(bk.note);
+                  return <button key={bk.note} onClick={function(){ upd("pitch",{key:bk.note}); }} style={{ position:"absolute", left:bk.left, width:"9%", height:"100%", background: isRoot ? "#a855f7" : inScale ? "#3b0d6b" : "#111", border:"1px solid "+(isRoot?"#9333ea":"#000"), borderRadius:"0 0 4px 4px", cursor:"pointer", pointerEvents:"auto", boxShadow: isRoot ? "0 0 8px #a855f7" : "none", zIndex:2 }} />;
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// ── NOISE REMOVER PLUGIN ─────────────────────────────────────────────────────
+// Uses RNNoise (Mozilla's recurrent neural net) via WebAssembly + AudioWorklet.
+// Falls back to Web Audio biquad-based suppression when WASM unavailable.
+// =============================================================================
+
+// RNNoise AudioWorklet processor — inlined as a Blob URL so no extra file needed.
+// The worklet processes 480-sample frames (RNNoise native frame size at 48kHz).
+const RNNOISE_WORKLET_CODE = `
+// ── RNNoise AudioWorklet Processor ──────────────────────────────────────────
+// Loads rnnoise.wasm from CDN, processes 480-sample chunks, returns denoised audio.
+// Falls back to passthrough if WASM load fails (keeps audio flowing no matter what).
+const RNNOISE_CDN = "https://unpkg.com/rnnoise@0.1.0/dist/rnnoise.wasm";
+const FRAME = 480; // RNNoise native frame size
+
+class RNNoiseProcessor extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    this._ready    = false;
+    this._bypass   = false;
+    this._strength = (options.processorOptions && options.processorOptions.strength) || 0.85;
+    this._inputBuf = new Float32Array(FRAME);
+    this._inFill   = 0;
+    this._outBuf   = [];
+    this._rnn      = null;
+    this._state    = null;
+    this._heapIn   = null;
+    this._heapOut  = null;
+
+    this.port.onmessage = (e) => {
+      if (e.data.type === "bypass")   this._bypass   = e.data.value;
+      if (e.data.type === "strength") this._strength = e.data.value;
+    };
+
+    this._loadWasm().catch(() => { this._ready = false; });
+  }
+
+  async _loadWasm() {
+    try {
+      const resp   = await fetch(RNNOISE_CDN);
+      const buffer = await resp.arrayBuffer();
+      const module = await WebAssembly.compile(buffer);
+      const mem    = new WebAssembly.Memory({ initial: 256, maximum: 512 });
+      const instance = await WebAssembly.instantiate(module, {
+        env: { memory: mem, abort: () => {} }
+      });
+      const ex = instance.exports;
+      // rnnoise ABI: rnnoise_create() → state ptr, rnnoise_process_frame(st, out, in)
+      if (ex.rnnoise_create && ex.rnnoise_process_frame) {
+        this._rnn   = ex;
+        this._state = ex.rnnoise_create(0);
+        // Allocate persistent heap I/O buffers (FRAME * 4 bytes each, float32)
+        const base  = ex.malloc ? ex.malloc(FRAME * 4 * 2) : 0;
+        this._heapIn  = base;
+        this._heapOut = base + FRAME * 4;
+        this._mem = new Float32Array(mem.buffer);
+        this._ready = true;
+      }
+    } catch(_) {
+      // WASM unavailable — passthrough mode
+    }
+  }
+
+  process(inputs, outputs) {
+    const inp = inputs[0];
+    const out = outputs[0];
+    if (!inp || !inp[0]) return true;
+
+    const src = inp[0];
+    const dst = out[0];
+
+    if (this._bypass || !this._ready || !this._rnn) {
+      // Passthrough
+      for (let i = 0; i < dst.length; i++) dst[i] = src[i];
+      return true;
+    }
+
+    // Feed samples into 480-frame accumulator
+    for (let i = 0; i < src.length; i++) {
+      this._inputBuf[this._inFill++] = src[i];
+      if (this._inFill === FRAME) {
+        this._processFrame();
+        this._inFill = 0;
+      }
+    }
+
+    // Drain output buffer into dst
+    const avail = Math.min(dst.length, this._outBuf.length);
+    for (let i = 0; i < avail; i++) dst[i] = this._outBuf.shift();
+    // Pad with silence if output buffer not full yet (initial latency)
+    for (let i = avail; i < dst.length; i++) dst[i] = 0;
+
+    return true;
+  }
+
+  _processFrame() {
+    const rnn  = this._rnn;
+    const mem  = this._mem;
+    const st   = this._state;
+    const hinI = this._heapIn  >> 2; // float32 index
+    const hinO = this._heapOut >> 2;
+
+    // Write input to WASM heap (scale to 16-bit range that RNNoise expects)
+    for (let i = 0; i < FRAME; i++) mem[hinI + i] = this._inputBuf[i] * 32768;
+
+    // Run RNNoise — returns voice activity probability (0..1)
+    const vad = rnn.rnnoise_process_frame(st, this._heapOut, this._heapIn);
+
+    // Mix denoised signal with original based on strength + VAD gating
+    const gate = Math.pow(Math.max(0, Math.min(1, vad)), 0.5);
+    const mix  = this._strength * gate + (1 - this._strength);
+
+    for (let i = 0; i < FRAME; i++) {
+      const clean = mem[hinO + i] / 32768;
+      this._outBuf.push(clean * mix + this._inputBuf[i] * (1 - mix));
+    }
+  }
+}
+
+registerProcessor("rnnoise-processor", RNNoiseProcessor);
+`;
+
+// Singleton worklet registration tracker
+const rnnoiseWorkletReady = { current: false, promise: null };
+
+async function registerRNNoiseWorklet(actx) {
+  if (rnnoiseWorkletReady.current) return;
+  if (rnnoiseWorkletReady.promise) { await rnnoiseWorkletReady.promise; return; }
+  rnnoiseWorkletReady.promise = (async () => {
+    try {
+      const blob = new Blob([RNNOISE_WORKLET_CODE], { type: "application/javascript" });
+      const url  = URL.createObjectURL(blob);
+      await actx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      rnnoiseWorkletReady.current = true;
+    } catch(e) {
+      // Worklet registration failed — plugin will use fallback biquad path
+    }
+  })();
+  await rnnoiseWorkletReady.promise;
+}
+
+// ── T-Rotten Master Plugin ───────────────────────────────────────────────────
+// Pixel-faithful replica of the T-Rotten Master UI:
+// 4 sections (EQ / Compressor / Tape+Sat / Limiter), VU meters, analog knobs,
+// mode buttons, logo skull, INPUT/OUTPUT knobs, LUFS readout, power button.
+function _TRottenMasterPlugin({ fx, upd }) {
+  const m  = fx.trotten || {};
+  const on = !!m.on;
+
+  // ── Smooth analog knob — pointer-capture, velocity-scaled drag ────────────
+  const TKnob = function({ label, value, min, max, step, unit, onChange, size, minLabel, maxLabel, color }) {
+    const sz    = size || 44;
+    const r     = sz / 2 - 4;
+    const cx    = sz / 2, cy = sz / 2;
+    const norm  = Math.max(0, Math.min(1, (value - min) / (max - min)));
+    const START = -135, END = 135;
+    const angle = START + norm * (END - START);
+    const toXY  = function(deg) {
+      const rad = (deg - 90) * Math.PI / 180;
+      return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+    };
+    const arcS  = toXY(START), arcE = toXY(angle), arcFE = toXY(END);
+    const swept = angle - START;
+    const large = swept > 180 ? 1 : 0;
+    const arcPath = `M ${arcS.x.toFixed(2)} ${arcS.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${arcE.x.toFixed(2)} ${arcE.y.toFixed(2)}`;
+    const arcFull = `M ${arcS.x.toFixed(2)} ${arcS.y.toFixed(2)} A ${r} ${r} 0 1 1 ${arcFE.x.toFixed(2)} ${arcFE.y.toFixed(2)}`;
+    const ptrEnd  = { x: cx + (r - 5) * Math.cos((angle - 90) * Math.PI / 180), y: cy + (r - 5) * Math.sin((angle - 90) * Math.PI / 180) };
+    const ptrOrig = { x: cx + 4 * Math.cos((angle - 90) * Math.PI / 180), y: cy + 4 * Math.sin((angle - 90) * Math.PI / 180) };
+    const accent = color || "#c8762a";
+
+    const dragRef = React.useRef(null);
+    const svgRef  = React.useRef(null);
+
+    const onPointerDown = function(e) {
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      dragRef.current = { y: e.clientY, val: value, pointerId: e.pointerId };
+    };
+    const onPointerMove = function(e) {
+      if (!dragRef.current) return;
+      const dy   = dragRef.current.y - e.clientY;
+      // sensitivity: finer at small ranges, coarser at large ones — 200px = full sweep
+      const sens = (max - min) / 200;
+      const raw  = dragRef.current.val + dy * sens;
+      const clamped = Math.min(max, Math.max(min, raw));
+      const snapped = step ? Math.round(clamped / step) * step : clamped;
+      onChange(+snapped.toFixed(4));
+    };
+    const onPointerUp = function(e) {
+      dragRef.current = null;
+    };
+
+    const fmt = function(v) {
+      if (unit === "dB" || unit === "dBFS") return (v >= 0 ? "+" : "") + v.toFixed(1);
+      if (unit === "s")  return v.toFixed(2) + "s";
+      if (unit === "%")  return Math.round(v) + "%";
+      if (unit === ":1") return v.toFixed(1) + ":1";
+      return typeof v === "number" ? (Number.isInteger(v) ? v : v.toFixed(1)) : v;
+    };
+
+    const uid = "tkg_" + label.replace(/\s/g,"") + "_" + Math.abs(min) + Math.abs(max);
+
+    return (
+      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, userSelect:"none" }}>
+
+        <svg ref={svgRef} width={sz} height={sz}
+          style={{ cursor:"ns-resize", touchAction:"none", overflow:"visible" }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+        >
+          {/* Shadow ring */}
+          <circle cx={cx} cy={cy} r={r+3} fill="none" stroke="#000" strokeWidth={2} opacity={0.6}/>
+
+          {/* Active arc */}
+          {norm > 0.005 && <path d={arcPath} fill="none" stroke={accent} strokeWidth={3} strokeLinecap="round" style={{filter:`drop-shadow(0 0 3px ${accent}88)`}}/>}
+          {/* Knob body gradient */}
+          <defs>
+            <radialGradient id={uid} cx="36%" cy="30%" r="70%">
+              <stop offset="0%"   stopColor="#3c3228"/>
+              <stop offset="40%"  stopColor="#221c12"/>
+              <stop offset="100%" stopColor="#0c0900"/>
+            </radialGradient>
+            <radialGradient id={uid+"_hi"} cx="35%" cy="28%" r="55%">
+              <stop offset="0%"   stopColor="#ffffff" stopOpacity={0.06}/>
+              <stop offset="100%" stopColor="#ffffff" stopOpacity={0}/>
+            </radialGradient>
+          </defs>
+          {/* Body */}
+          <circle cx={cx} cy={cy} r={r-1} fill={`url(#${uid})`} stroke="#3a2a14" strokeWidth={1.2}/>
+          {/* Specular highlight */}
+          <circle cx={cx} cy={cy} r={r-1} fill={`url(#${uid}_hi)`}/>
+
+          {/* Pointer */}
+          <line x1={ptrOrig.x.toFixed(2)} y1={ptrOrig.y.toFixed(2)}
+                x2={ptrEnd.x.toFixed(2)}  y2={ptrEnd.y.toFixed(2)}
+                stroke="#f0d080" strokeWidth={2} strokeLinecap="round"/>
+        </svg>
+        {/* Value readout */}
+        <div style={{ color:"#d4a04a", fontSize:8, fontWeight:900, fontFamily:"monospace", lineHeight:1 }}>
+          {fmt(value)}{unit && unit !== "%" && unit !== "dB" && unit !== "dBFS" && unit !== "s" && unit !== ":1" ? " "+unit : ""}
+        </div>
+        {label && (
+          <div style={{ color:"#6a5030", fontSize:6.5, fontWeight:700, fontFamily:"monospace", letterSpacing:0.8, textAlign:"center", lineHeight:1.2 }}>
+            {label}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── Mode button ─────────────────────────────────────────────────────────────
+  const ModeBtn = function({ label, active, onClick, accent }) {
+    const ac = accent || "#c8762a";
+    return (
+      <button onClick={onClick} style={{
+        padding:"3px 7px", fontSize:7, fontWeight:900,
+        fontFamily:"monospace", letterSpacing:0.8,
+        background: active ? ac + "22" : "#120e06",
+        border:"1px solid " + (active ? ac : "#2a1c08"),
+        borderRadius:3, color: active ? ac : "#3a2510",
+        cursor:"pointer", transition:"all 0.12s",
+        boxShadow: active ? "0 0 6px " + ac + "55, inset 0 1px 0 " + ac + "22" : "none",
+        textShadow: active ? "0 0 8px " + ac : "none",
+      }}>{label}</button>
+    );
+  };
+
+  // ── LED indicator ────────────────────────────────────────────────────────────
+  const LED = function({ color, glow }) {
+    return (
+      <div style={{
+        width:6, height:6, borderRadius:"50%",
+        background: glow ? color : "#1a1208",
+        boxShadow: glow ? `0 0 6px ${color}, 0 0 12px ${color}66` : "inset 0 1px 2px #00000088",
+        border:"1px solid " + (glow ? color : "#0a0800"),
+        transition:"all 0.3s",
+      }}/>
+    );
+  };
+
+  // ── VU meter segment row ─────────────────────────────────────────────────────
+  const HVU = function({ level, label }) {
+    const segs   = 30;
+    const filled = Math.round(Math.min(1, Math.max(0, level)) * segs);
+    return (
+      <div style={{ display:"flex", alignItems:"center", gap:3 }}>
+        <div style={{ color:"#4a3020", fontSize:6.5, fontFamily:"monospace", width:7, textAlign:"right", flexShrink:0 }}>{label}</div>
+        <div style={{ display:"flex", gap:1, alignItems:"center" }}>
+          {Array.from({length: segs}, function(_, i) {
+            const lit     = i < filled;
+            const isRed   = i >= segs - 3;
+            const isAmber = i >= segs - 8 && i < segs - 3;
+            const col     = !lit ? "#160f04" : isRed ? "#ef4444" : isAmber ? "#f59e0b" : "#c8762a";
+            return <div key={i} style={{
+              width: isRed ? 3.5 : isAmber ? 4 : 4.5, height:7, borderRadius:1,
+              background: col,
+              boxShadow: lit ? `0 0 4px ${col}bb` : "none",
+            }}/>;
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // ── Section label ─────────────────────────────────────────────────────────
+  const SecLabel = function({ children }) {
+    return (
+      <div style={{ color:"#6a5535", fontSize:7.5, fontWeight:900, letterSpacing:2.5,
+        marginBottom:8, textAlign:"center", fontFamily:"monospace",
+        textShadow:"0 1px 3px #000" }}>
+        {children}
+      </div>
+    );
+  };
+
+  const Divider = function() {
+    return <div style={{ width:1, alignSelf:"stretch", background:"linear-gradient(180deg,transparent,#2a1c08 20%,#2a1c08 80%,transparent)", margin:"0 2px" }}/>;
+  };
+
+  // State
+  const eqLow    = m.eqLow    ?? 0;
+  const eqMid    = m.eqMid    ?? 0;
+  const eqHigh   = m.eqHigh   ?? 0;
+  const eqLowT   = m.eqLowT   || "shelf";
+  const eqMidT   = m.eqMidT   || "bell";
+  const eqHighT  = m.eqHighT  || "shelf";
+  const compThr  = m.compThr  ?? -15;
+  const compAmt  = m.compAmt  ?? 50;
+  const compMode = m.compMode || "auto";
+  const tapeDrv  = m.tapeDrv  ?? 50;
+  const tapeSat  = m.tapeSat  ?? 5;
+  const tapeMode = m.tapeMode || "modern";
+  const limCeil  = m.limCeil  ?? -0.5;
+  const limRel   = m.limRel   ?? 0.5;
+  const limMode  = m.limMode  || "truepeak";
+  const inGain   = m.inputGain  ?? 0;
+  const outGain  = m.outputGain ?? 0;
+
+  const vuLvl = Math.max(0.12, Math.min(0.97, 0.62 + outGain / 40 + (eqLow + eqHigh) / 60));
+
+  return (
+    <div style={{
+      borderRadius:12, overflow:"hidden", fontFamily:"monospace",
+      border:"2px solid " + (on ? "#3a2810" : "#1a1006"),
+      boxShadow: on ? "0 4px 40px rgba(160,90,10,0.18), inset 0 1px 0 rgba(255,200,100,0.04)" : "0 2px 12px rgba(0,0,0,0.6)",
+      background:"#0c0900",
+    }}>
+
+      {/* ══ TOP BAR ═════════════════════════════════════════════════════════ */}
+      <div style={{
+        background:"linear-gradient(180deg,#141008 0%,#0c0900 100%)",
+        borderBottom:"1px solid #201508",
+        padding:"6px 12px",
+        display:"flex", alignItems:"center", justifyContent:"space-between",
+      }}>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <span style={{ color:"#3a2510", fontSize:10, lineHeight:1 }}>☰</span>
+          <span style={{ color:"#3a2510", fontSize:10 }}>‹</span>
+          <span style={{ color:"#c8762a", fontSize:9, fontWeight:900, letterSpacing:1.5,
+            textShadow:"0 0 10px rgba(200,118,42,0.6)" }}>Rotten But Loud</span>
+          <span style={{ color:"#3a2510", fontSize:10 }}>›</span>
+
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ display:"flex", gap:5, alignItems:"center" }}>
+            <span style={{ color:"#c8762a", fontSize:8, fontWeight:900, letterSpacing:1 }}>A</span>
+            <span style={{ color:"#2a1a06", fontSize:8 }}>|</span>
+            <span style={{ color:"#3a2510", fontSize:8 }}>B</span>
+            <span style={{ color:"#3a2510", fontSize:8, marginLeft:4, letterSpacing:1 }}>COPY</span>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:4, borderLeft:"1px solid #2a1a08", paddingLeft:10 }}>
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end" }}>
+              <span style={{ color:"#3a2510", fontSize:6, letterSpacing:1 }}>OVERSAMPLING</span>
+              <span style={{ color:"#6a5030", fontSize:7, fontWeight:900 }}>4x ▾</span>
+            </div>
+            <span style={{ color:"#3a2510", fontSize:11 }}>⚙</span>
+            {/* Power */}
+            <div onClick={function(){ upd("trotten",{on:!on}); }} style={{
+              width:22, height:22, borderRadius:"50%", cursor:"pointer",
+              border:"1.5px solid " + (on ? "#c8762a" : "#2a1a08"),
+              display:"flex", alignItems:"center", justifyContent:"center",
+              background: on ? "#1c1006" : "#0c0900",
+              boxShadow: on ? "0 0 10px #c8762a66, inset 0 0 6px #c8762a22" : "none",
+              transition:"all 0.2s",
+            }}>
+              <span style={{ fontSize:10, color: on ? "#c8762a" : "#2a1a08", lineHeight:1 }}>⏻</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ══ MAIN FACEPLATE ══════════════════════════════════════════════════ */}
+      <div style={{
+        background:"linear-gradient(160deg,#1c1509 0%,#141006 40%,#0e0c05 100%)",
+        padding:"10px 8px 10px",
+        opacity: on ? 1 : 0.35, transition:"opacity 0.25s",
+      }}>
+
+        {/* ── ROW 1: Logo + EQ + Compressor ─────────────────────────────── */}
+        <div style={{ display:"flex", gap:0 }}>
+
+          {/* LOGO */}
+          <div style={{ width:58, flexShrink:0, display:"flex", flexDirection:"column",
+            justifyContent:"flex-start", paddingRight:7, paddingTop:2 }}>
+            <div style={{ color:"#c8762a", fontSize:13, fontWeight:900, letterSpacing:0.5, lineHeight:1.1,
+              textShadow:"0 0 12px rgba(200,118,42,0.55)" }}>T-<br/>ROTTEN</div>
+            <div style={{ color:"#8c1e10", fontSize:8.5, fontWeight:900, letterSpacing:2, lineHeight:1, marginTop:2 }}>MASTER</div>
+            <div style={{ color:"#3a2510", fontSize:5, letterSpacing:1, marginTop:3, lineHeight:1.5 }}>
+              MASTERING<br/>PROCESSOR
+            </div>
+            <div style={{ marginTop:5, opacity:0.25 }}>
+              <div style={{ fontSize:22, filter:"sepia(100%) saturate(40%) brightness(55%)" }}>💀</div>
+            </div>
+          </div>
+
+          <Divider/>
+
+          {/* ── EQUALIZER ── */}
+          <div style={{ flex:1.3, display:"flex", flexDirection:"column", alignItems:"center", padding:"0 5px" }}>
+            <SecLabel>EQUALIZER</SecLabel>
+            <div style={{ display:"flex", gap:6, justifyContent:"center" }}>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                <LED color="#ef4444" glow={eqLow !== 0}/>
+                <TKnob label="LOW" value={eqLow} min={-12} max={12} step={0.5} unit="dB" size={42}
+                  onChange={function(v){ upd("trotten",{eqLow:v}); }}/>
+                <ModeBtn label={eqLowT.toUpperCase()} active={true}
+                  onClick={function(){ upd("trotten",{eqLowT: eqLowT==="shelf"?"bell":"shelf"}); }}/>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                <LED color="#888" glow={false}/>
+                <TKnob label="MID" value={eqMid} min={-12} max={12} step={0.5} unit="dB" size={42}
+                  onChange={function(v){ upd("trotten",{eqMid:v}); }}/>
+                <ModeBtn label={eqMidT.toUpperCase()} active={true}
+                  onClick={function(){ upd("trotten",{eqMidT: eqMidT==="bell"?"shelf":"bell"}); }}/>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                <LED color="#ef4444" glow={eqHigh !== 0}/>
+                <TKnob label="HIGH" value={eqHigh} min={-12} max={12} step={0.5} unit="dB" size={42}
+                  onChange={function(v){ upd("trotten",{eqHigh:v}); }}/>
+                <ModeBtn label={eqHighT.toUpperCase()} active={true}
+                  onClick={function(){ upd("trotten",{eqHighT: eqHighT==="shelf"?"bell":"shelf"}); }}/>
+              </div>
+            </div>
+          </div>
+
+          <Divider/>
+
+          {/* ── COMPRESSOR ── */}
+          <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", padding:"0 5px" }}>
+            <SecLabel>COMPRESSOR</SecLabel>
+            <div style={{ display:"flex", gap:6, justifyContent:"center" }}>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                <LED color="#f59e0b" glow={compMode !== "off"}/>
+                <TKnob label="THRESHOLD" value={compThr} min={-30} max={0} step={1} unit="dB" size={42}
+                  onChange={function(v){ upd("trotten",{compThr:v}); }}/>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                <LED color="#888" glow={false}/>
+                <TKnob label="AMOUNT" value={compAmt} min={0} max={100} step={1} unit="%" size={42}
+                  onChange={function(v){ upd("trotten",{compAmt:v}); }}/>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:3, marginTop:4 }}>
+              {["auto","relax","punch"].map(function(m2){
+                return <ModeBtn key={m2} label={m2.toUpperCase()} active={compMode===m2}
+                  accent="#c8762a" onClick={function(){ upd("trotten",{compMode:m2}); }}/>;
+              })}
+            </div>
+          </div>
+
+        </div>
+
+        {/* ── Horizontal rule between rows ─────────────────────────────── */}
+        <div style={{ height:1, background:"linear-gradient(90deg,transparent,#2a1c08 15%,#2a1c08 85%,transparent)", margin:"10px 0 8px" }}/>
+
+        {/* ── ROW 2: Tape/Saturation + Limiter ─────────────────────────── */}
+        <div style={{ display:"flex", gap:0 }}>
+
+          {/* ── TAPE / SATURATION ── */}
+          <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", padding:"0 5px" }}>
+            <SecLabel>TAPE / SATURATION</SecLabel>
+            <div style={{ display:"flex", gap:6, justifyContent:"center" }}>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                <LED color="#f59e0b" glow={tapeMode !== "off"}/>
+                <TKnob label="DRIVE" value={tapeDrv} min={0} max={10} step={0.1} size={42}
+                  onChange={function(v){ upd("trotten",{tapeDrv:v}); }}/>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                <LED color="#888" glow={false}/>
+                <TKnob label="TAPE" value={tapeSat} min={0} max={10} step={0.1} size={42}
+                  onChange={function(v){ upd("trotten",{tapeSat:v}); }}/>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:3, marginTop:4 }}>
+              {["classic","modern","dirty"].map(function(m2){
+                return <ModeBtn key={m2} label={m2.toUpperCase()} active={tapeMode===m2}
+                  accent="#c8762a" onClick={function(){ upd("trotten",{tapeMode:m2}); }}/>;
+              })}
+            </div>
+          </div>
+
+          <Divider/>
+
+          {/* ── LIMITER ── */}
+          <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", padding:"0 5px" }}>
+            <SecLabel>LIMITER</SecLabel>
+            <div style={{ display:"flex", gap:6, justifyContent:"center" }}>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                <LED color="#ef4444" glow={true}/>
+                <TKnob label="CEILING" value={limCeil} min={-1} max={0} step={0.1} unit="dBFS" size={42}
+                  onChange={function(v){ upd("trotten",{limCeil:v}); }}/>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                <LED color="#888" glow={false}/>
+                <TKnob label="RELEASE" value={limRel} min={0.1} max={1} step={0.01} unit="s" size={42}
+                  onChange={function(v){ upd("trotten",{limRel:v}); }}/>
+              </div>
+            </div>
+            <div style={{ marginTop:4 }}>
+              <ModeBtn label="TRUE PEAK" active={limMode==="truepeak"} accent="#c8762a"
+                onClick={function(){ upd("trotten",{limMode: limMode==="truepeak"?"peak":"truepeak"}); }}/>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* ══ METERS STRIP ════════════════════════════════════════════════════ */}
+      <div style={{
+        background:"linear-gradient(180deg,#0e0b05 0%,#080600 100%)",
+        borderTop:"1px solid #201508",
+        padding:"8px 10px 7px",
+        display:"flex", gap:8, alignItems:"center",
+        opacity: on ? 1 : 0.28, transition:"opacity 0.25s",
+      }}>
+        {/* Input knob */}
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, flexShrink:0 }}>
+          <div style={{ color:"#6a5030", fontSize:7, fontWeight:900, letterSpacing:1 }}>INPUT</div>
+          <TKnob label="" value={inGain} min={-24} max={24} step={0.5} unit="dB" size={40}
+            onChange={function(v){ upd("trotten",{inputGain:v}); }}/>
+          <div style={{ color:"#c8762a", fontSize:8, fontFamily:"monospace", fontWeight:700 }}>
+            {(inGain >= 0 ? "+" : "") + inGain.toFixed(1)}
+          </div>
+        </div>
+
+        {/* VU meters — input + output stacked */}
+        <div style={{ flex:1, display:"flex", flexDirection:"column", gap:4 }}>
+          <HVU level={vuLvl * 0.88} label="L"/>
+          <HVU level={vuLvl * 0.83} label="R"/>
+          <div style={{ display:"flex", justifyContent:"space-between", paddingLeft:11 }}>
+            {["-40","-18","-9","-3","0"].map(function(l){
+              return <div key={l} style={{ color:"#3a2510", fontSize:5, fontFamily:"monospace" }}>{l}</div>;
+            })}
+          </div>
+        </div>
+
+        {/* Output knob */}
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, flexShrink:0 }}>
+          <div style={{ color:"#6a5030", fontSize:7, fontWeight:900, letterSpacing:1 }}>OUTPUT</div>
+          <TKnob label="" value={outGain} min={-24} max={24} step={0.5} unit="dB" size={40}
+            onChange={function(v){ upd("trotten",{outputGain:v}); }}/>
+          <div style={{ color:"#c8762a", fontSize:8, fontFamily:"monospace", fontWeight:700 }}>
+            {(outGain >= 0 ? "+" : "") + outGain.toFixed(1)}
+          </div>
+        </div>
+      </div>
+
+
+
+    </div>
+  );
+}
+
+// ── Noise Remover Plugin UI ──────────────────────────────────────────────────
+function _NoiseRemoverPlugin({ fx, upd, Knob }) {
+  const nr   = fx.noiseremover || {};
+  const on   = !!nr.on;
+  const str  = nr.strength    ?? 0.85;
+  const kb   = nr.keyboard    ?? true;   // keyboard/click suppression
+  const echo = nr.echo        ?? 0.4;    // room echo reduction amount
+  const veh  = nr.voice       ?? 0.6;   // voice enhancement
+
+  const pct = function(v){ return Math.round(v * 100) + "%"; };
+
+  // Animated level bar sub-component
+  const LevelBar = function({ label, value, color, active }) {
+    return (
+      <div style={{ display:"flex", flexDirection:"column", gap:3, alignItems:"center" }}>
+        <div style={{ width:28, height:64, background:"#0a0a0a", borderRadius:4, border:"1px solid #1a1a1a", position:"relative", overflow:"hidden" }}>
+          <div style={{
+            position:"absolute", bottom:0, left:0, right:0,
+            height: active ? pct(value) : "0%",
+            background: active
+              ? "linear-gradient(0deg," + color + "cc," + color + "44)"
+              : "#1a1a1a",
+            transition:"height 0.3s ease, background 0.3s",
+            borderRadius:3,
+          }} />
+          {[0.25,0.5,0.75].map(function(t){
+            return <div key={t} style={{ position:"absolute", left:0, right:0, bottom:pct(t), height:1, background:"#111", pointerEvents:"none" }} />;
+          })}
+        </div>
+        <div style={{ color: active ? color : "#333", fontSize:7, fontWeight:700, letterSpacing:0.5, textAlign:"center", transition:"color 0.3s" }}>{label}</div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{
+      background:"linear-gradient(160deg,#020f0a 0%,#071410 60%,#050d0a 100%)",
+      borderRadius:16, overflow:"hidden",
+      border:"2px solid " + (on ? "#10B981" : "#1a2a22"),
+      boxShadow: on ? "0 0 24px rgba(16,185,129,0.18), inset 0 1px 0 rgba(16,185,129,0.08)" : "inset 0 1px 0 rgba(255,255,255,0.02)",
+      transition:"border-color 0.25s, box-shadow 0.25s",
+    }}>
+
+      {/* ── Header ── */}
+      <div style={{ background:"linear-gradient(180deg,#0d1f18 0%,#091710 100%)", padding:"9px 14px", borderBottom:"1px solid #0d2018", display:"flex", alignItems:"center", gap:8 }}>
+        <div style={{ flex:1 }}>
+          <div style={{ color:"#10B981", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>NOISE REMOVER</div>
+          <div style={{ color:"#0d3d28", fontSize:7, letterSpacing:2, fontFamily:"monospace", marginTop:2 }}>RNNOISE · AI DENOISING</div>
+        </div>
+        {/* Status LED */}
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <div style={{
+            width:8, height:8, borderRadius:"50%",
+            background: on ? "#10B981" : "#0d2018",
+            boxShadow: on ? "0 0 6px #10B981, 0 0 14px rgba(16,185,129,0.5)" : "none",
+            transition:"all 0.2s",
+          }} />
+          <button onClick={function(){ upd("noiseremover",{on:!on}); }}
+            style={{
+              background: on ? "linear-gradient(180deg,#059669,#047857)" : "linear-gradient(180deg,#0d2018,#091510)",
+              border:"1px solid " + (on ? "#10B981" : "#0d2a1c"),
+              borderRadius:5, color: on ? "white" : "#1a4a30",
+              fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1,
+              boxShadow: on ? "0 1px 0 rgba(255,255,255,0.15) inset" : "none",
+              transition:"all 0.2s",
+            }}>
+            {on ? "ON" : "OFF"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding:"12px 14px", opacity: on ? 1 : 0.35, transition:"opacity 0.25s", pointerEvents: on ? "auto" : "none" }}>
+
+        {/* ── Neural net strength + level meters ── */}
+        <div style={{ display:"flex", gap:12, alignItems:"flex-end", marginBottom:14 }}>
+          {/* Level meter strip */}
+          <div style={{ display:"flex", gap:5, alignItems:"flex-end", background:"#050e0a", borderRadius:8, padding:"8px 10px", border:"1px solid #0d1f15", flexShrink:0 }}>
+            <LevelBar label="IN"    value={str * 0.9}       color="#EF4444" active={on} />
+            <LevelBar label="CLEAN" value={str}             color="#10B981" active={on} />
+            <LevelBar label="VOICE" value={str * veh}       color="#34D399" active={on} />
+          </div>
+
+          {/* Main knobs */}
+          <div style={{ flex:1, display:"flex", justifyContent:"space-around", alignItems:"flex-end", gap:4 }}>
+            <Knob label="STRENGTH" value={str}  min={0} max={1} step={0.01} unit="%" color="#10B981"
+              onChange={function(v){ upd("noiseremover",{strength:v}); }} />
+            <Knob label="ECHO RED" value={echo} min={0} max={1} step={0.01} unit="%" color="#34D399"
+              onChange={function(v){ upd("noiseremover",{echo:v}); }} />
+            <Knob label="VOICE"    value={veh}  min={0} max={1} step={0.01} unit="%" color="#6EE7B7"
+              onChange={function(v){ upd("noiseremover",{voice:v}); }} />
+          </div>
+        </div>
+
+        {/* ── Toggle strip ── */}
+        <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+
+          {/* Keyboard / click suppression */}
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+            background:"#060e0a", borderRadius:8, padding:"8px 12px", border:"1px solid #0d1f15" }}>
+            <div>
+              <div style={{ color:"#9febe8", fontSize:11, fontWeight:700 }}>Keyboard Suppression</div>
+              <div style={{ color:"#1a3d2a", fontSize:9, marginTop:1 }}>Notch filters for typing & click noise</div>
+            </div>
+            <button onClick={function(){ upd("noiseremover",{keyboard:!kb}); }}
+              style={{ background: kb ? "rgba(16,185,129,0.15)" : "#0a1a10",
+                border:"1px solid " + (kb ? "#10B981" : "#1a2a1f"),
+                borderRadius:6, color: kb ? "#10B981" : "#1a3d2a",
+                fontSize:9, fontWeight:800, padding:"5px 12px", cursor:"pointer", letterSpacing:1,
+                minWidth:44, transition:"all 0.2s" }}>
+              {kb ? "ON" : "OFF"}
+            </button>
+          </div>
+
+          {/* Room echo reduction info row */}
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+            background:"#060e0a", borderRadius:8, padding:"8px 12px", border:"1px solid #0d1f15" }}>
+            <div>
+              <div style={{ color:"#9febe8", fontSize:11, fontWeight:700 }}>Room Echo Reduction</div>
+              <div style={{ color:"#1a3d2a", fontSize:9, marginTop:1 }}>HPF + spectral gate · dial via ECHO RED knob</div>
+            </div>
+            <div style={{ color:"#10B981", fontSize:11, fontWeight:800, fontFamily:"monospace" }}>
+              {Math.round(echo * 100)}%
+            </div>
+          </div>
+
+          {/* Voice enhancement info row */}
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+            background:"#060e0a", borderRadius:8, padding:"8px 12px", border:"1px solid #0d1f15" }}>
+            <div>
+              <div style={{ color:"#9febe8", fontSize:11, fontWeight:700 }}>Voice Enhancement</div>
+              <div style={{ color:"#1a3d2a", fontSize:9, marginTop:1 }}>Presence boost 2–5kHz + gentle drive</div>
+            </div>
+            <div style={{ color:"#34D399", fontSize:11, fontWeight:800, fontFamily:"monospace" }}>
+              +{Math.round(veh * 8)}dB
+            </div>
+          </div>
+
+        </div>
+
+        {/* ── Mode badge ── */}
+        <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:6 }}>
+          <div style={{ flex:1, height:1, background:"#0d1f15" }} />
+          <div style={{ color:"#0d3d28", fontSize:8, fontFamily:"monospace", letterSpacing:2, fontWeight:700 }}>
+            RNNOISE · 48kHz · 10ms LATENCY
+          </div>
+          <div style={{ flex:1, height:1, background:"#0d1f15" }} />
+        </div>
+
+      </div>
+    </div>
+  );
+}
+// =============================================================================
+// ── VOCAL DOUBLER PLUGIN ──────────────────────────────────────────────────
+// Professional Haas-effect stereo doubler with detuned copies, width control
+// and a stereo correlation meter (L/R phase visualiser).
+// =============================================================================
+function _DoublerPlugin({ fx, upd, Knob }) {
+  const d     = fx.doubler || {};
+  const on    = !!d.on;
+  const delay = d.delay    ?? 20;      // ms  – Haas time offset (L copy)
+  const detune= d.detune   ?? 8;       // cents – subtle pitch detuning for the doubled copy
+  const width = d.width    ?? 0.7;     // 0–1 stereo spread
+  const mix   = d.mix      ?? 0.5;     // 0–1 wet/dry
+
+  // Live meter: simple animated L/R bars to convey stereo width
+  const [meterL, setMeterL] = React.useState(0.6);
+  const [meterR, setMeterR] = React.useState(0.6);
+  const rafRef = React.useRef(null);
+  React.useEffect(function () {
+    if (!on) { setMeterL(0); setMeterR(0); return; }
+    let t = 0;
+    const tick = function () {
+      t += 0.04;
+      setMeterL(0.35 + Math.abs(Math.sin(t * 1.3 + 0.5)) * 0.55 * width);
+      setMeterR(0.35 + Math.abs(Math.sin(t * 1.1))        * 0.55 * width);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return function () { cancelAnimationFrame(rafRef.current); };
+  }, [on, width]);
+
+  const accentColor = "#F59E0B";
+
+  return (
+    <div style={{ background:"linear-gradient(180deg,#1c1710 0%,#130f08 100%)", borderRadius:16, overflow:"hidden",
+      border:"2px solid " + (on ? accentColor : "#2a2a2a"),
+      boxShadow: on ? "0 0 20px rgba(245,158,11,0.15), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+
+      {/* ── Header ── */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px 8px", borderBottom:"1px solid #1e1e1e" }}>
+        {/* Stereo correlation meter */}
+        <div style={{ display:"flex", flexDirection:"column", gap:2, flexShrink:0 }}>
+          {["L","R"].map(function(ch, i){
+            const val = i === 0 ? meterL : meterR;
+            return (
+              <div key={ch} style={{ display:"flex", alignItems:"center", gap:3 }}>
+                <span style={{ color:"#555", fontSize:7, fontWeight:800, fontFamily:"monospace", width:6 }}>{ch}</span>
+                <div style={{ width:32, height:4, background:"#111", borderRadius:2, overflow:"hidden" }}>
+                  <div style={{ width: Math.round(val * 100) + "%", height:"100%",
+                    background: on
+                      ? "linear-gradient(90deg,#F59E0B," + (val > 0.7 ? "#EF4444" : "#FBBF24") + ")"
+                      : "#1e1e1e",
+                    transition:"width 0.05s linear", borderRadius:2 }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ flex:1 }}>
+          <div style={{ color:"white", fontWeight:800, fontSize:13, lineHeight:1 }}>Vocal Doubler</div>
+          <div style={{ color:"#555", fontSize:9, marginTop:2, letterSpacing:0.5 }}>
+            Haas · Detune · Stereo Width
+          </div>
+        </div>
+
+        {/* LED + ON/OFF */}
+        <div style={{ width:8, height:8, borderRadius:"50%",
+          background: on ? accentColor : "#1a1a1a",
+          boxShadow: on ? "0 0 6px " + accentColor + ", 0 0 12px rgba(245,158,11,0.5)" : "none",
+          transition:"all 0.2s" }} />
+        <button onClick={function(){ upd("doubler", {on: !on}); }}
+          style={{ background: on
+            ? "linear-gradient(180deg,#d97706,#b45309)"
+            : "linear-gradient(180deg,#2a2a2a,#222)",
+            border:"1px solid " + (on ? accentColor : "#333"),
+            borderRadius:5, color:"white", fontSize:9, fontWeight:800,
+            padding:"4px 12px", cursor:"pointer", letterSpacing:1,
+            boxShadow: on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>
+          {on ? "ON" : "OFF"}
+        </button>
+      </div>
+
+      {/* ── Controls ── */}
+      <div style={{ padding:"14px 14px 10px", opacity: on ? 1 : 0.38, transition:"opacity 0.2s" }}>
+        <div style={{ display:"flex", justifyContent:"space-around", flexWrap:"wrap", gap:8 }}>
+          <Knob label="DELAY"  value={delay}  min={5}   max={50}  step={1}    unit="ms"   color={accentColor} onChange={function(v){ upd("doubler",{delay:v}); }} />
+          <Knob label="DETUNE" value={detune} min={0}   max={50}  step={0.5}  unit="¢"    color="#FBBF24"    onChange={function(v){ upd("doubler",{detune:v}); }} />
+          <Knob label="WIDTH"  value={width}  min={0}   max={1}   step={0.01} unit="%"    color="#F97316"    onChange={function(v){ upd("doubler",{width:v}); }} />
+          <Knob label="MIX"    value={mix}    min={0}   max={1}   step={0.01} unit="%"    color="#FB923C"    onChange={function(v){ upd("doubler",{mix:v}); }} />
+        </div>
+
+        {/* Info strip */}
+        <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:6 }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+            background:"#0d0b06", borderRadius:8, padding:"8px 12px", border:"1px solid #1c1608" }}>
+            <div>
+              <div style={{ color:"#fcd34d", fontSize:11, fontWeight:700 }}>Haas Offset</div>
+              <div style={{ color:"#2a200a", fontSize:9, marginTop:1 }}>
+                Sub-35ms delays = wide stereo, no flange
+              </div>
+            </div>
+            <div style={{ color:accentColor, fontSize:11, fontWeight:800, fontFamily:"monospace" }}>
+              {delay}ms
+            </div>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+            background:"#0d0b06", borderRadius:8, padding:"8px 12px", border:"1px solid #1c1608" }}>
+            <div>
+              <div style={{ color:"#fcd34d", fontSize:11, fontWeight:700 }}>Pitch Detune</div>
+              <div style={{ color:"#2a200a", fontSize:9, marginTop:1 }}>
+                Chorusing via subtle detuned copy
+              </div>
+            </div>
+            <div style={{ color:accentColor, fontSize:11, fontWeight:800, fontFamily:"monospace" }}>
+              ±{detune}¢
+            </div>
+          </div>
+        </div>
+
+        {/* Footer badge */}
+        <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:6 }}>
+          <div style={{ flex:1, height:1, background:"#1c1608" }} />
+          <div style={{ color:"#2a1800", fontSize:8, fontFamily:"monospace", letterSpacing:2, fontWeight:700 }}>
+            HAAS · DETUNE · M/S WIDTH
+          </div>
+          <div style={{ flex:1, height:1, background:"#1c1608" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// ── H-DELAY PLUGIN UI ────────────────────────────────────────────────────────
+// Emulates Waves H-Delay: tape/digital modes, BPM sync, ping-pong, hi/lo cut,
+// analog-style saturation, modulation, and a live tap-tempo delay display.
+// =============================================================================
+function _HDelayPlugin({ fx, upd, Knob }) {
+  const hd = fx.hdelay || {};
+  const on         = !!hd.on;
+  const mode       = hd.mode       ?? "digital";   // "digital" | "tape" | "ping"
+  const sync       = hd.sync       ?? false;        // BPM sync on/off
+  const bpm        = hd.bpm        ?? 120;
+  const subdivision= hd.subdivision?? "1/4";        // note value for BPM sync
+  const delayMs    = hd.delayMs    ?? 375;          // manual delay in ms (up to 2000ms)
+  const feedback   = hd.feedback   ?? 0.35;         // 0–0.95
+  const wet        = hd.wet        ?? 0.40;         // mix
+  const hiCut      = hd.hiCut      ?? 8000;         // Hz
+  const loCut      = hd.loCut      ?? 80;           // Hz
+  const modDepth   = hd.modDepth   ?? 0.15;         // 0–1 (chorus-style mod on tape mode)
+  const modRate    = hd.modRate    ?? 0.5;           // Hz
+  const drive      = hd.drive      ?? 0.0;          // 0–1 analog saturation
+  const stereoOf   = hd.stereoOf   ?? 0.0;          // ping-pong offset 0–1
+
+  const ACCENT = "#E85D04";
+  const ACCENT2 = "#FB923C";
+
+  // ── BPM sync helper ──
+  const SUBDIVISIONS = ["1/1","1/2","1/2T","1/4","1/4T","1/8","1/8T","1/16","1/16T","1/32"];
+  function subdivMs(sub, bpmVal) {
+    const beat = 60000 / bpmVal;
+    const map = {
+      "1/1": beat*4, "1/2": beat*2, "1/2T": beat*(4/3),
+      "1/4": beat,   "1/4T": beat*(2/3),
+      "1/8": beat/2, "1/8T": beat/3,
+      "1/16":beat/4, "1/16T":beat/6, "1/32":beat/8,
+    };
+    return Math.min(2000, Math.round(map[sub] || beat));
+  }
+  const effectiveMs = sync ? subdivMs(subdivision, bpm) : delayMs;
+
+  // ── Animated echo trail visualiser ──
+  const canvasRef = React.useRef(null);
+  const vizRaf    = React.useRef(null);
+  const vizPhase  = React.useRef(0);
+  React.useEffect(function() {
+    const cvs = canvasRef.current; if (!cvs) return;
+    const ctx = cvs.getContext("2d");
+    const W = cvs.width, H = cvs.height;
+    function draw() {
+      vizPhase.current += 0.018;
+      const phase = vizPhase.current;
+      ctx.clearRect(0,0,W,H);
+      if (!on) { vizRaf.current = requestAnimationFrame(draw); return; }
+      // Background grid
+      ctx.strokeStyle = "#1a1008"; ctx.lineWidth = 1;
+      for(let x=0;x<W;x+=24){ ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke(); }
+      for(let y=0;y<H;y+=12){ ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke(); }
+      // Echo pulses — draw decaying echoes at delay intervals
+      const maxEchoes = 7;
+      for(let e=0;e<maxEchoes;e++){
+        const decay   = Math.pow(feedback, e);
+        if (decay < 0.03) break;
+        // X position: map echo number to horizontal position (delayed in time)
+        const pxPerMs = W / 600;
+        const tOff    = (effectiveMs * e * pxPerMs) % W;
+        // Animated shimmer using phase
+        const shimmer = mode === "tape" ? Math.sin(phase * modRate * 6.28 + e) * modDepth * 6 : 0;
+        const cx = (tOff + shimmer + (phase * 40)) % W;
+        const pulseH = H * 0.72 * decay;
+        const alpha  = decay * (0.85 - e * 0.08);
+        // Ping-pong: alternate left/right
+        const cy = mode === "ping"
+          ? (e % 2 === 0 ? H * 0.3 : H * 0.7)
+          : H / 2;
+        // Glow
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, pulseH * 0.6);
+        grad.addColorStop(0, `rgba(232,93,4,${alpha})`);
+        grad.addColorStop(0.5,`rgba(251,146,60,${alpha * 0.5})`);
+        grad.addColorStop(1,  "rgba(232,93,4,0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, pulseH * 0.35, pulseH * 0.45, 0, 0, Math.PI*2);
+        ctx.fill();
+        // Vertical bar
+        ctx.fillStyle = `rgba(232,93,4,${alpha * 0.6})`;
+        ctx.fillRect(cx-1.5, cy - pulseH/2, 3, pulseH);
+      }
+      // Center line
+      ctx.strokeStyle = "rgba(232,93,4,0.12)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke();
+      vizRaf.current = requestAnimationFrame(draw);
+    }
+    vizRaf.current = requestAnimationFrame(draw);
+    return function(){ cancelAnimationFrame(vizRaf.current); };
+  }, [on, effectiveMs, feedback, mode, modDepth, modRate]);
+
+  // ── Tap tempo ──
+  const tapTimes = React.useRef([]);
+  function tapTempo() {
+    const now = Date.now();
+    tapTimes.current = tapTimes.current.filter(function(t){ return now - t < 3000; });
+    tapTimes.current.push(now);
+    if (tapTimes.current.length >= 2) {
+      const diffs = tapTimes.current.slice(1).map(function(t,i){ return t - tapTimes.current[i]; });
+      const avg = diffs.reduce(function(a,b){ return a+b; }, 0) / diffs.length;
+      const tBpm = Math.round(60000 / avg);
+      upd("hdelay", { bpm: Math.max(40, Math.min(250, tBpm)), sync: true });
+    }
+  }
+
+  const modeBtnStyle = function(m) { return ({
+    flex:1, padding:"7px 4px", border:"1px solid " + (mode===m ? ACCENT : "#2a2a2a"),
+    background: mode===m ? "linear-gradient(180deg,#7c2d0a,#5a1f06)" : "rgba(255,255,255,0.03)",
+    borderRadius:7, color: mode===m ? "#FB923C" : "#444",
+    fontSize:10, fontWeight:800, cursor:"pointer", letterSpacing:0.5,
+    transition:"all 0.15s",
+  }); };
+
+  return (
+    <div style={{ background:"linear-gradient(180deg,#1a0e06 0%,#100800 100%)", borderRadius:16,
+      overflow:"hidden", border:"2px solid " + (on ? ACCENT : "#2a2a2a"),
+      boxShadow: on ? "0 0 24px rgba(232,93,4,0.18), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+
+      {/* ── Header ── */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px 8px", borderBottom:"1px solid #1e1000" }}>
+        <div style={{ flex:1 }}>
+          <div style={{ color:"white", fontWeight:800, fontSize:14, lineHeight:1, letterSpacing:0.3 }}>H-Delay</div>
+          <div style={{ color:"#4a2800", fontSize:9, marginTop:2, letterSpacing:1 }}>TAPE · DIGITAL · PING-PONG</div>
+        </div>
+        {/* Delay time readout */}
+        <div style={{ textAlign:"right" }}>
+          <div style={{ color: ACCENT, fontFamily:"monospace", fontWeight:800, fontSize:16, lineHeight:1 }}>
+            {effectiveMs}
+          </div>
+          <div style={{ color:"#4a2800", fontSize:8, fontWeight:700, letterSpacing:1 }}>MS</div>
+        </div>
+        {/* LED + toggle */}
+        <div style={{ width:8, height:8, borderRadius:"50%",
+          background: on ? ACCENT : "#1a1a1a",
+          boxShadow: on ? "0 0 6px "+ACCENT+",0 0 14px rgba(232,93,4,0.5)" : "none", transition:"all 0.2s" }} />
+        <button onClick={function(){ upd("hdelay",{on:!on}); }}
+          style={{ background: on ? "linear-gradient(180deg,#c2410c,#9a3412)" : "linear-gradient(180deg,#2a2a2a,#222)",
+            border:"1px solid " + (on ? ACCENT : "#333"), borderRadius:5, color:"white",
+            fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1,
+            boxShadow: on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>
+          {on ? "ON" : "OFF"}
+        </button>
+      </div>
+
+      <div style={{ padding:"12px 14px 10px", opacity: on ? 1 : 0.38, transition:"opacity 0.2s" }}>
+
+        {/* ── Mode selector ── */}
+        <div style={{ display:"flex", gap:5, marginBottom:12 }}>
+          {[["digital","⚡ Digital"],["tape","📼 Tape"],["ping","🔀 Ping-Pong"]].map(function([m,l]){
+            return <button key={m} onClick={function(){ upd("hdelay",{mode:m}); }} style={modeBtnStyle(m)}>{l}</button>;
+          })}
+        </div>
+
+        {/* ── Echo visualiser ── */}
+        <canvas ref={canvasRef} width={288} height={56}
+          style={{ display:"block", width:"100%", height:56, borderRadius:8,
+            border:"1px solid #1e1000", marginBottom:12, background:"#0a0600" }} />
+
+        {/* ── BPM sync row ── */}
+        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12,
+          background:"#0d0800", borderRadius:10, padding:"8px 10px", border:"1px solid #1e1000" }}>
+          <button onClick={function(){ upd("hdelay",{sync:!sync}); }}
+            style={{ background: sync ? "linear-gradient(180deg,#c2410c,#9a3412)" : "rgba(255,255,255,0.04)",
+              border:"1px solid " + (sync ? ACCENT : "#2a2a2a"), borderRadius:6,
+              color: sync ? "#FB923C" : "#444", fontSize:9, fontWeight:800,
+              padding:"5px 10px", cursor:"pointer", letterSpacing:0.5, flexShrink:0 }}>
+            SYNC
+          </button>
+          {sync ? (
+            <div style={{ flex:1, display:"flex", gap:4, overflowX:"auto" }}>
+              {SUBDIVISIONS.map(function(s){
+                const active = subdivision === s;
+                return (
+                  <button key={s} onClick={function(){ upd("hdelay",{subdivision:s}); }}
+                    style={{ flexShrink:0, padding:"4px 7px", border:"1px solid " + (active ? ACCENT : "#222"),
+                      background: active ? ACCENT+"22" : "transparent",
+                      borderRadius:5, color: active ? ACCENT2 : "#444",
+                      fontSize:9, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>
+                    {s}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ flex:1 }}>
+              <input type="range" min={1} max={2000} step={1} value={delayMs}
+                onChange={function(e){ upd("hdelay",{delayMs:+e.target.value}); }}
+                style={{ width:"100%", accentColor:ACCENT, cursor:"pointer" }} />
+              <div style={{ display:"flex", justifyContent:"space-between", marginTop:2 }}>
+                <span style={{ color:"#2a1800", fontSize:8 }}>1ms</span>
+                <span style={{ color:ACCENT, fontSize:9, fontWeight:800, fontFamily:"monospace" }}>{delayMs}ms</span>
+                <span style={{ color:"#2a1800", fontSize:8 }}>2000ms</span>
+              </div>
+            </div>
+          )}
+          {/* Tap tempo */}
+          <button onClick={tapTempo}
+            style={{ flexShrink:0, background:"rgba(232,93,4,0.08)",
+              border:"1px solid rgba(232,93,4,0.25)", borderRadius:7,
+              color:ACCENT2, fontSize:9, fontWeight:800, padding:"6px 10px",
+              cursor:"pointer", letterSpacing:0.3, lineHeight:1.2, textAlign:"center" }}>
+            TAP<br />
+            <span style={{ fontSize:8, color:"#4a2800" }}>{bpm}BPM</span>
+          </button>
+        </div>
+
+        {/* ── BPM field (sync mode) ── */}
+        {sync && (
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12,
+            background:"#0d0800", borderRadius:10, padding:"7px 10px", border:"1px solid #1e1000" }}>
+            <span style={{ color:"#4a2800", fontSize:10, fontWeight:700 }}>BPM</span>
+            <input type="number" min={40} max={250} step={1} value={bpm}
+              onChange={function(e){ upd("hdelay",{bpm:Math.max(40,Math.min(250,+e.target.value))}); }}
+              style={{ flex:1, background:"#050300", border:"1px solid #1e1000", borderRadius:6,
+                color:ACCENT2, fontSize:13, fontWeight:800, fontFamily:"monospace",
+                padding:"4px 8px", textAlign:"center", outline:"none" }} />
+            <span style={{ color:"#4a2800", fontSize:9 }}>{effectiveMs}ms / beat div</span>
+          </div>
+        )}
+
+        {/* ── Knob row 1: main ── */}
+        <div style={{ display:"flex", justifyContent:"space-around", flexWrap:"wrap", gap:8, marginBottom:4 }}>
+          <Knob label="FEEDBACK" value={Math.round(feedback*100)} min={0}  max={95} step={1}   unit="%" color={ACCENT}  onChange={function(v){ upd("hdelay",{feedback:v/100}); }} />
+          <Knob label="MIX"      value={Math.round(wet*100)}      min={0}  max={100} step={1}  unit="%" color={ACCENT2} onChange={function(v){ upd("hdelay",{wet:v/100}); }} />
+          <Knob label="HI CUT"   value={hiCut}  min={500}  max={20000} step={100} unit="Hz" color="#FB923C" onChange={function(v){ upd("hdelay",{hiCut:v}); }} />
+          <Knob label="LO CUT"   value={loCut}  min={20}   max={500}   step={5}   unit="Hz" color="#FDBA74" onChange={function(v){ upd("hdelay",{loCut:v}); }} />
+        </div>
+
+        {/* ── Knob row 2: character ── */}
+        <div style={{ display:"flex", justifyContent:"space-around", flexWrap:"wrap", gap:8 }}>
+          <Knob label="DRIVE"    value={Math.round(drive*100)}    min={0}  max={100} step={1} unit="%"  color="#EF4444" onChange={function(v){ upd("hdelay",{drive:v/100}); }} />
+          <Knob label="MOD RATE" value={modRate}  min={0.05} max={5}  step={0.05} unit="Hz" color="#F97316" onChange={function(v){ upd("hdelay",{modRate:v}); }} />
+          <Knob label="MOD DEPT" value={Math.round(modDepth*100)} min={0} max={100} step={1} unit="%" color="#FB923C" onChange={function(v){ upd("hdelay",{modDepth:v/100}); }} />
+          {mode === "ping" && <Knob label="PAN OFF" value={Math.round(stereoOf*100)} min={0} max={100} step={1} unit="%" color="#FBBF24" onChange={function(v){ upd("hdelay",{stereoOf:v/100}); }} />}
+        </div>
+
+        {/* ── Info strip ── */}
+        <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:5 }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+            background:"#0a0600", borderRadius:8, padding:"7px 10px", border:"1px solid #150c00" }}>
+            <div>
+              <div style={{ color:"#FB923C", fontSize:11, fontWeight:700 }}>
+                {mode==="tape" ? "Tape Mode" : mode==="ping" ? "Ping-Pong" : "Digital Mode"}
+              </div>
+              <div style={{ color:"#2a1800", fontSize:9, marginTop:1 }}>
+                {mode==="tape" ? "Wow/flutter + saturation + modulation" :
+                 mode==="ping" ? "L↔R alternate bouncing echoes" :
+                 "Clean infinite-precision repeats"}
+              </div>
+            </div>
+            <div style={{ color:ACCENT, fontSize:11, fontWeight:800, fontFamily:"monospace" }}>
+              {Math.round(feedback*100)}%
+            </div>
+          </div>
+          {drive > 0.02 && (
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+              background:"#0a0600", borderRadius:8, padding:"7px 10px", border:"1px solid #150c00" }}>
+              <div style={{ color:"#FB923C", fontSize:11, fontWeight:700 }}>Analog Drive</div>
+              <div style={{ color:ACCENT, fontSize:11, fontWeight:800, fontFamily:"monospace" }}>
+                {Math.round(drive*100)}%
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer badge */}
+        <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:6 }}>
+          <div style={{ flex:1, height:1, background:"#1e1000" }} />
+          <div style={{ color:"#2a1800", fontSize:8, fontFamily:"monospace", letterSpacing:2, fontWeight:700 }}>
+            WAVES H-DELAY EMULATION · BPM SYNC · TAP TEMPO
+          </div>
+          <div style={{ flex:1, height:1, background:"#1e1000" }} />
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+// This is the correct way to prevent re-renders from the 30fps currentTime
+// here because this is a real component, not an IIFE or callback.
+// Re-renders ONLY when fx data, fxTrackId, trackName, or trackColor change.
+// =============================================================================
+const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackColor, onClose, onUpd }) {
+  const upd = onUpd; // stable ref-backed callback passed from StudioScreen
+
+  // ── Rotary Knob ──
+  const Knob = function({ label, value, min, max, step, unit, onChange, color }) {
+    const startRef = useRef(null);
+    color = color || "#8B5CF6";
+    const norm  = Math.max(0, Math.min(1, (value - min) / (max - min)));
+    const angle = -140 + norm * 280;
+    const SW = 4, r = 20, PAD = SW / 2 + 2;
+    const cx = r + PAD, cy = r + PAD, SIZE = (r + PAD) * 2;
+    const toXY = function(deg) { const rad = (deg - 90) * Math.PI / 180; return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }; };
+    const startA = toXY(-140), endA = toXY(angle);
+    const sweptDeg = angle - (-140), largeArc = sweptDeg > 180 ? 1 : 0;
+    const arcD = `M ${startA.x.toFixed(2)} ${startA.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${endA.x.toFixed(2)} ${endA.y.toFixed(2)}`;
+    const onPointerDown = function(e) {
+      e.preventDefault();
+      startRef.current = { y: e.clientY, val: value };
+      const onMove = function(me) {
+        const dy = startRef.current.y - me.clientY;
+        const raw = startRef.current.val + (dy / 100) * (max - min);
+        const clamped = Math.min(max, Math.max(min, raw));
+        const snapped = step ? Math.round(clamped / step) * step : clamped;
+        onChange(+snapped.toFixed(3));
+      };
+      const onUp = function() { document.removeEventListener("pointermove", onMove); document.removeEventListener("pointerup", onUp); };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+    };
+    const display = unit === "dB" ? (value >= 0 ? "+" : "") + value + "dB"
+                  : unit === "%" ? Math.round(value * 100) + "%"
+                  : unit === "ms" ? value + "ms"
+                  : unit === ":1" ? value + ":1"
+                  : unit === "Q"  ? value
+                  : unit === " st" ? (value >= 0 ? "+" : "") + value + " st"
+                  : value + (unit || "");
+    return (
+      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, userSelect:"none" }}>
+        <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} style={{ overflow:"visible", cursor:"ns-resize", touchAction:"none" }} onPointerDown={onPointerDown}>
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1e1e1e" strokeWidth={SW} strokeLinecap="round"
+            strokeDasharray={`${2*Math.PI*r * 280/360} ${2*Math.PI*r}`}
+            strokeDashoffset={`${2*Math.PI*r * (90+140)/360}`}
+            transform={`rotate(-90 ${cx} ${cy})`} />
+          {norm > 0 && <path d={arcD} fill="none" stroke={color} strokeWidth={SW} strokeLinecap="round" />}
+          <circle cx={endA.x} cy={endA.y} r={SW * 0.9} fill={color} />
+          <circle cx={cx} cy={cy} r={r * 0.42} fill="#0d0d0d" stroke="#2a2a2a" strokeWidth={1.5} />
+        </svg>
+        <div style={{ color:"white", fontSize:9, fontWeight:700, lineHeight:1 }}>{display}</div>
+        <div style={{ color:"#444", fontSize:7, textAlign:"center", lineHeight:1.2 }}>{label}</div>
+      </div>
+    );
+  };
+
+  // ── EQ Graph ──
+  const EQ_SR = 44100;
+  const eqCalcCoeffs = function(type, freq, gainDB, Q) {
+    const f=Math.max(10,Math.min(freq,EQ_SR*0.499)), w0=2*Math.PI*f/EQ_SR, cw=Math.cos(w0), sw=Math.sin(w0);
+    const A=Math.pow(10,gainDB/40), aq=sw/(2*Math.max(0.001,Q));
+    let b0,b1,b2,a0,a1,a2;
+    if(type==="peaking"){b0=1+aq*A;b1=-2*cw;b2=1-aq*A;a0=1+aq/A;a1=-2*cw;a2=1-aq/A;}
+    else if(type==="lowshelf"){const sa=2*Math.sqrt(A)*aq;b0=A*((A+1)-(A-1)*cw+sa);b1=2*A*((A-1)-(A+1)*cw);b2=A*((A+1)-(A-1)*cw-sa);a0=(A+1)+(A-1)*cw+sa;a1=-2*((A-1)+(A+1)*cw);a2=(A+1)+(A-1)*cw-sa;}
+    else if(type==="highshelf"){const sa=2*Math.sqrt(A)*aq;b0=A*((A+1)+(A-1)*cw+sa);b1=-2*A*((A-1)+(A+1)*cw);b2=A*((A+1)+(A-1)*cw-sa);a0=(A+1)-(A-1)*cw+sa;a1=2*((A-1)-(A+1)*cw);a2=(A+1)+(A-1)*cw-sa;}
+    else if(type==="highpass"){b0=(1+cw)/2;b1=-(1+cw);b2=(1+cw)/2;a0=1+aq;a1=-2*cw;a2=1-aq;}
+    else{b0=(1-cw)/2;b1=1-cw;b2=(1-cw)/2;a0=1+aq;a1=-2*cw;a2=1-aq;}
+    if(Math.abs(a0)<1e-30) return {b0:1,b1:0,b2:0,a1:0,a2:0};
+    return {b0:b0/a0,b1:b1/a0,b2:b2/a0,a1:a1/a0,a2:a2/a0};
+  };
+  const eqEvalMag = function(c,f){
+    const w=2*Math.PI*Math.max(1,f)/EQ_SR, cw=Math.cos(w), sw=Math.sin(w), cw2=Math.cos(2*w), sw2=Math.sin(2*w);
+    const bRe=c.b0+c.b1*cw+c.b2*cw2, bIm=c.b1*sw+c.b2*sw2, aRe=1+c.a1*cw+c.a2*cw2, aIm=c.a1*sw+c.a2*sw2;
+    const den=aRe*aRe+aIm*aIm; if(den<1e-30) return 0;
+    return 20*Math.log10(Math.sqrt((bRe*bRe+bIm*bIm)/den));
+  };
+  const EQGraph = function({ eq, onDrag }) {
+    // ── Pro Q3-style EQ display ──────────────────────────────────────────────
+    // Full-width canvas, 20Hz–20kHz log scale, ±18dB range, vivid curve fill,
+    // per-band Q-width rings on handles, live frequency/gain readout tooltip.
+    const W = 320, H = 160;
+    const DB_MAX = 18;   // ±18 dB range (matches Pro Q3 default view)
+    const PAD_L = 28;    // left margin for dB labels
+    const PAD_B = 16;    // bottom margin for freq labels
+    const PW = W - PAD_L, PH = H - PAD_B;
+    const bands = [
+      { key:"hpf",  type:"highpass",  freq:eq.hpfFreq||80,    gain:0,          q:eq.hpfQ||0.707,  color:"#FF6B6B", drag:"x",  label:"HPF" },
+      { key:"low",  type:"lowshelf",  freq:eq.lowFreq||200,   gain:eq.low||0,  q:eq.lowQ||0.707,  color:"#4FC3F7", drag:"xy", label:"LS"  },
+      { key:"mid",  type:"peaking",   freq:eq.midFreq||1000,  gain:eq.mid||0,  q:eq.midQ||1.0,    color:"#69F0AE", drag:"xy", label:"PK"  },
+      { key:"high", type:"highshelf", freq:eq.highFreq||8000, gain:eq.high||0, q:eq.highQ||0.707, color:"#FFD54F", drag:"xy", label:"HS"  },
+      { key:"lpf",  type:"lowpass",   freq:eq.lpfFreq||18000, gain:0,          q:eq.lpfQ||0.707,  color:"#FF6B6B", drag:"x",  label:"LPF" },
+    ];
+    const LOG_RANGE = Math.log10(20000/20);
+    // Coordinate helpers — all values live in the padded plot area
+    const freqToX = function(f){ return PAD_L + PW*Math.log10(Math.max(20,f)/20)/LOG_RANGE; };
+    const xToFreq = function(px){ return Math.round(20*Math.pow(20000/20,Math.max(0,Math.min(1,(px-PAD_L)/PW)))); };
+    const gainToY = function(g){ return (PH/2)-(Math.max(-DB_MAX,Math.min(DB_MAX,g))/DB_MAX)*(PH/2-6); };
+    const yToGain = function(py){ return +((PH/2-py)/(PH/2-6)*DB_MAX).toFixed(2); };
+    // Build the combined frequency response curve (300 points for smoothness)
+    const nPts=300, pts=[];
+    for(let i=0;i<=nPts;i++){
+      const f=20*Math.pow(20000/20,i/nPts);
+      let db=0;
+      bands.forEach(function(b){ db+=eqEvalMag(eqCalcCoeffs(b.type,b.freq,b.gain,b.q),f); });
+      pts.push([freqToX(f), gainToY(Math.max(-DB_MAX-2,Math.min(DB_MAX+2,db)))]);
+    }
+    // Smooth cubic bezier path
+    let path=`M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for(let i=1;i<pts.length-1;i++){
+      const[x0,y0]=pts[i-1],[x1,y1]=pts[i],[x2,y2]=pts[i+1];
+      path+=` C ${((x0+x1)/2).toFixed(1)} ${y0.toFixed(1)} ${((x1+x2)/2).toFixed(1)} ${y1.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+    }
+    const[lx,ly]=pts[pts.length-1]; path+=` L ${lx.toFixed(1)} ${ly.toFixed(1)}`;
+    const zeroY = gainToY(0);
+    const fill = path + ` L ${W} ${zeroY} L ${PAD_L} ${zeroY} Z`;
+    const dragging=useRef(null), svgRef=useRef(null), [hovered,setHovered]=useState(null);
+    // Tooltip state: {x,y,freq,gain}
+    const [tip,setTip]=useState(null);
+    // Q ring radius: maps Q (0.1–10) to a visual bandwidth arc in pixels
+    const qToRingR = function(q,freq){ const bwHz=(freq/Math.max(0.01,q)); return Math.max(10,Math.min(40,PW*(Math.log10((freq+bwHz/2)/Math.max(20,freq-bwHz/2))/LOG_RANGE)*0.6)); };
+    const FREQ_MARKS = [20,50,100,200,500,1000,2000,5000,10000,20000];
+    const DB_MARKS   = [-18,-12,-6,0,6,12,18];
+    return (
+      <svg ref={svgRef} width={W} height={H}
+        style={{display:"block",background:"#0b0d12",borderRadius:10,touchAction:"none",cursor:"crosshair",userSelect:"none"}}
+        onMouseMove={function(e){
+          if(!svgRef.current) return;
+          const r=svgRef.current.getBoundingClientRect();
+          const px=e.clientX-r.left, py=e.clientY-r.top;
+          const b=dragging.current;
+          if(b){
+            const patch={};
+            if(b.drag==="x"||b.drag==="xy"){
+              const f=xToFreq(px);
+              if(b.key==="hpf")patch.hpfFreq=Math.max(20,Math.min(2000,f));
+              if(b.key==="lpf")patch.lpfFreq=Math.max(1000,Math.min(20000,f));
+              if(b.key==="low")patch.lowFreq=Math.max(20,Math.min(2000,f));
+              if(b.key==="mid")patch.midFreq=Math.max(100,Math.min(10000,f));
+              if(b.key==="high")patch.highFreq=Math.max(500,Math.min(20000,f));
+            }
+            if(b.drag==="y"||b.drag==="xy"){
+              const g=Math.max(-DB_MAX,Math.min(DB_MAX,yToGain(py)));
+              if(b.key==="low")patch.low=g;
+              if(b.key==="mid")patch.mid=g;
+              if(b.key==="high")patch.high=g;
+            }
+            if(Object.keys(patch).length) onDrag(patch);
+            setTip({x:px,y:py,freq:xToFreq(px),gain:yToGain(py).toFixed(1)});
+          }
+        }}
+        onMouseUp={function(){dragging.current=null;}}
+        onMouseLeave={function(){dragging.current=null;setTip(null);}}
+        onTouchMove={function(e){
+          e.preventDefault();
+          const b=dragging.current; if(!b||!svgRef.current) return;
+          const r=svgRef.current.getBoundingClientRect();
+          const px=e.touches[0].clientX-r.left, py=e.touches[0].clientY-r.top;
+          const patch={};
+          if(b.drag==="x"||b.drag==="xy"){
+            const f=xToFreq(px);
+            if(b.key==="hpf")patch.hpfFreq=Math.max(20,Math.min(2000,f));
+            if(b.key==="lpf")patch.lpfFreq=Math.max(1000,Math.min(20000,f));
+            if(b.key==="low")patch.lowFreq=Math.max(20,Math.min(2000,f));
+            if(b.key==="mid")patch.midFreq=Math.max(100,Math.min(10000,f));
+            if(b.key==="high")patch.highFreq=Math.max(500,Math.min(20000,f));
+          }
+          if(b.drag==="y"||b.drag==="xy"){
+            const g=Math.max(-DB_MAX,Math.min(DB_MAX,yToGain(py)));
+            if(b.key==="low")patch.low=g;
+            if(b.key==="mid")patch.mid=g;
+            if(b.key==="high")patch.high=g;
+          }
+          if(Object.keys(patch).length) onDrag(patch);
+        }}
+        onTouchEnd={function(){dragging.current=null;}}>
+
+        {/* ── Background gradient (Pro Q3 dark navy) ── */}
+        <defs>
+          <linearGradient id="eqBg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#0f1219"/>
+            <stop offset="100%" stopColor="#080b0f"/>
+          </linearGradient>
+          <linearGradient id="curveFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.22"/>
+            <stop offset="55%" stopColor="#818cf8" stopOpacity="0.10"/>
+            <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.02"/>
+          </linearGradient>
+          <filter id="eqGlow">
+            <feGaussianBlur stdDeviation="1.5" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <rect x={0} y={0} width={W} height={H} fill="url(#eqBg)" rx={10}/>
+
+        {/* ── Frequency grid lines ── */}
+        {FREQ_MARKS.map(function(f){
+          const x=freqToX(f);
+          const major=[100,1000,10000].includes(f);
+          return <line key={f} x1={x} y1={0} x2={x} y2={PH} stroke={major?"#1f2433":"#131720"} strokeWidth={major?1:0.75}/>;
+        })}
+
+        {/* ── dB grid lines ── */}
+        {DB_MARKS.map(function(g){
+          const y=gainToY(g);
+          return (
+            <g key={g}>
+              <line x1={PAD_L} y1={y} x2={W} y2={y}
+                stroke={g===0?"#2a3045":"#161b28"}
+                strokeWidth={g===0?1.2:0.75}
+                strokeDasharray={g===0?"none":"3 4"}/>
+              <text x={PAD_L-3} y={y+3.5} fill={g===0?"#3d4a6a":"#2a3350"}
+                fontSize={7} textAnchor="end" fontFamily="monospace">
+                {g>0?"+":""}{g}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* ── Frequency labels ── */}
+        {FREQ_MARKS.map(function(f){
+          const x=freqToX(f);
+          const label=f>=1000?(f/1000)+"k":f;
+          return <text key={f} x={x} y={H-3} fill="#2a3350" fontSize={7} textAnchor="middle" fontFamily="monospace">{label}</text>;
+        })}
+
+        {/* ── Curve fill & stroke ── */}
+        <path d={fill} fill="url(#curveFill)"/>
+        <path d={path} fill="none" stroke="#38bdf8" strokeWidth={2} strokeLinecap="round" filter="url(#eqGlow)"/>
+
+        {/* ── Zero line ── */}
+        <line x1={PAD_L} y1={zeroY} x2={W} y2={zeroY} stroke="#2a3045" strokeWidth={1}/>
+
+        {/* ── Band handles: Q ring + center dot ── */}
+        {bands.map(function(b){
+          const hx=freqToX(b.freq), hy=gainToY(b.gain);
+          const cur=b.drag==="x"?"ew-resize":b.drag==="y"?"ns-resize":"move";
+          const rRing=qToRingR(b.q,b.freq);
+          const isActive=hovered===b.key||dragging.current?.key===b.key;
+          return (
+            <g key={b.key}>
+              {/* Vertical frequency guide */}
+              <line x1={hx} y1={0} x2={hx} y2={PH}
+                stroke={b.color+"30"} strokeWidth={isActive?1.5:1} strokeDasharray="3 4"/>
+              {/* Q-width bandwidth ring — mimics Pro Q3's bell width arc */}
+              <ellipse cx={hx} cy={hy} rx={rRing} ry={Math.min(rRing*0.55,20)}
+                fill="none" stroke={b.color+"35"} strokeWidth={isActive?1.5:1}/>
+              {/* Outer glow disc */}
+              <circle cx={hx} cy={hy} r={isActive?17:13}
+                fill={b.color+"18"} stroke={b.color+"22"} strokeWidth={1}/>
+              {/* Main handle dot */}
+              <circle cx={hx} cy={hy} r={isActive?9:7}
+                fill={b.color} fillOpacity={isActive?1:0.85}
+                stroke="#0b0d12" strokeWidth={2}
+                style={{cursor:cur}}
+                onMouseDown={function(e){e.preventDefault();e.stopPropagation();dragging.current=b;}}
+                onMouseEnter={function(){setHovered(b.key);}}
+                onMouseLeave={function(){setHovered(null);}}
+                onTouchStart={function(e){e.preventDefault();e.stopPropagation();dragging.current=b;}}/>
+              {/* Band label inside handle */}
+              <text x={hx} y={hy+3} fill="white" fontSize={isActive?7:6}
+                textAnchor="middle" fontWeight="900" pointerEvents="none"
+                fontFamily="monospace">{b.label}</text>
+              {/* Live readout badge when active */}
+              {isActive && (
+                <g>
+                  <rect x={hx-22} y={hy-28} width={44} height={14} rx={4}
+                    fill="#0b0d12" stroke={b.color+"55"} strokeWidth={1}/>
+                  <text x={hx} y={hy-18} fill={b.color} fontSize={7}
+                    textAnchor="middle" fontFamily="monospace" fontWeight="700">
+                    {b.freq>=1000?(b.freq/1000).toFixed(1)+"k":b.freq+"Hz"}
+                    {b.gain!==0?" "+(b.gain>0?"+":"")+b.gain.toFixed(1)+"dB":""}
+                  </text>
+                </g>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    );
+  };
+
+  // ── Compressor graph ──
+  const CompGraph = function({ threshold, ratio }) {
+    const W=150, H=110, dBtoP=function(db){return(db+60)/60;}, pts=[];
+    for(let i=0;i<=60;i++){const inDb=-60+i;const outDb=inDb<threshold?inDb:threshold+(inDb-threshold)/ratio;pts.push(`${W*dBtoP(inDb)},${H*(1-dBtoP(outDb))}`);}
+    const thX=W*dBtoP(threshold);
+    return (<svg width={W} height={H} style={{display:"block",background:"#080808",borderRadius:8,flexShrink:0}}><line x1={0} y1={H} x2={W} y2={0} stroke="#1e1e1e" strokeWidth={1} strokeDasharray="4 3"/><path d={"M "+pts.join(" L ")} fill="none" stroke="#8B5CF6" strokeWidth={2} strokeLinecap="round"/><path d={"M "+pts.join(" L ")+` L ${W} ${H} L 0 ${H} Z`} fill="rgba(139,92,246,0.1)"/><line x1={thX} y1={0} x2={thX} y2={H} stroke="#EF4444" strokeWidth={1} strokeDasharray="3 2"/><text x={thX+3} y={11} fill="#EF4444" fontSize={8}>{threshold}dB</text><text x={3} y={10} fill="#444" fontSize={7}>OUT</text><text x={W-22} y={H-3} fill="#444" fontSize={7}>IN</text></svg>);
+  };
+
+  // ── Reverb visualiser ──
+  const ReverbViz = function({ wet, roomSize }) {
+    const W=140, H=80, decay=roomSize*3;
+    return (<svg width={W} height={H} style={{display:"block",background:"#080808",borderRadius:8,flexShrink:0}}><line x1={0} y1={H/2} x2={W} y2={H/2} stroke="#1a1a1a" strokeWidth={1}/>{Array.from({length:28},function(_,i){const x=(i/27)*W;const amp=Math.exp(-i/(decay*4))*(H/2-5)*wet;const j=(Math.sin(i*7.3)*0.4+0.6)*amp;return <line key={i} x1={x} y1={H/2-j} x2={x} y2={H/2+j} stroke={`rgba(192,38,211,${0.25+0.75*Math.exp(-i/5)})`} strokeWidth={2}/>;})}</svg>);
+  };
+
+  // ── EQ defaults — Pro Q3 style: tighter midQ, ±18 dB range ──
+  const eq5 = { hpfFreq:80,hpfQ:0.707,lowFreq:200,low:0,lowQ:0.707,midFreq:1000,mid:0,midQ:1.41,highFreq:8000,high:0,highQ:0.707,lpfFreq:18000,lpfQ:0.707,...fx.eq };
+
+  return (
+    <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto" }} onClick={function(e){ e.stopPropagation(); }}>
+      <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0, position:"sticky", top:0, zIndex:10 }}>
+        <div style={{ width:8, height:8, borderRadius:"50%", background:trackColor, marginRight:8 }} />
+        <span style={{ color:"white", fontWeight:800, fontSize:14, flex:1 }}>{trackName} — Effects</span>
+        <button onClick={onClose} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:13, padding:"5px 14px", cursor:"pointer" }}>Done</button>
+      </div>
+      <FxPanelPlugins fx={fx} upd={upd} eq5={eq5} EQGraph={EQGraph} CompGraph={CompGraph} ReverbViz={ReverbViz} Knob={Knob} />
+    </div>
+  );
+}, function areEqual(prev, next) {
+  // Skip re-render if only currentTime/scroll changed — only re-render for real fx data changes
+  return prev.fxTrackId === next.fxTrackId &&
+         prev.fx === next.fx &&
+         prev.trackName === next.trackName &&
+         prev.trackColor === next.trackColor;
+});
+
+// =============================================================================
+// BEAT GRID OVERLAY COMPONENT
+// Renders detected beat marker lines over the DAW timeline.
+// Uses absolute positioning to match the scroll container's coordinate space.
+// Designed to be a zero-overhead read-only visual layer — no audio access.
+// =============================================================================
+function BeatGridOverlay({ beats, effectivePPS, sidebarW, rulerH, scrollRef, isPlaying, currentTime, bpm }) {
+  const canvasRef = useRef(null);
+
+  // Draw beat grid on a canvas that floats over the timeline lanes
+  useEffect(function () {
+    const canvas = canvasRef.current;
+    if (!canvas || !beats || beats.length === 0) return;
+
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const scrollLeft = el.scrollLeft;
+
+    // Visible time range (add 2s buffer on each side)
+    const visStart = Math.max(0, scrollLeft / effectivePPS - 2);
+    const visEnd   = (scrollLeft + W) / effectivePPS + 2;
+
+    // Draw each beat line
+    beats.forEach(function (t, i) {
+      if (t < visStart || t > visEnd) return;
+      const x = Math.round(t * effectivePPS - scrollLeft);
+      if (x < 0 || x > W) return;
+
+      // Downbeat (every 4th beat) gets a brighter, taller line
+      const isDownbeat = (i % 4 === 0);
+
+      ctx.beginPath();
+      ctx.moveTo(x, rulerH);
+      ctx.lineTo(x, H);
+      ctx.strokeStyle = isDownbeat
+        ? "rgba(192,38,211,0.35)"
+        : "rgba(192,38,211,0.13)";
+      ctx.lineWidth = isDownbeat ? 1.5 : 0.75;
+      ctx.stroke();
+
+      // Tiny triangle at the ruler bottom for downbeats
+      if (isDownbeat) {
+        ctx.beginPath();
+        ctx.moveTo(x - 4, rulerH);
+        ctx.lineTo(x + 4, rulerH);
+        ctx.lineTo(x, rulerH + 6);
+        ctx.closePath();
+        ctx.fillStyle = "rgba(192,38,211,0.6)";
+        ctx.fill();
+      }
+    });
+
+  // Redraw when scroll or beat data changes
+  // eslint-disable-next-line
+  }, [beats, effectivePPS, currentTime, bpm]);
+
+  // Keep canvas sized to container
+  useEffect(function () {
+    const el = scrollRef.current;
+    if (!el) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onScroll = function () {
+      // Force re-paint on scroll
+      canvas.dispatchEvent(new Event("bfredraw"));
+    };
+    el.addEventListener("scroll", onScroll, { passive:true });
+    return function () { el.removeEventListener("scroll", onScroll); };
+  }, [scrollRef]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={window.innerWidth}
+      height={window.innerHeight}
+      style={{
+        position:"absolute",
+        top:0, left:sidebarW,
+        pointerEvents:"none",
+        zIndex:15,
+        opacity:1,
+      }}
+    />
   );
 }
 
@@ -4870,6 +6767,9 @@ function StudioScreen({ user, onExit }) {
   const [showAddMenu,  setShowAddMenu]  = useState(false);
   const [renamingProj, setRenamingProj] = useState(false);
   const [unsavedAlert, setUnsavedAlert] = useState(false);
+  const [showNamePrompt, setShowNamePrompt] = useState(false); // name-before-save modal
+  const [pendingNameAction, setPendingNameAction] = useState(null); // "exit" | "new"
+  const [pendingName, setPendingName] = useState("");
   const [isSaved,      setIsSaved]      = useState(false);
   const [savedProjects,setSavedProjects]= useState([]);
   const [saveStatus,   setSaveStatus]   = useState("");
@@ -4879,6 +6779,19 @@ function StudioScreen({ user, onExit }) {
   const [exportMsg,    setExportMsg]    = useState("");
   const [bpmDetecting, setBpmDetecting] = useState(false);
   const [detectedBpm,  setDetectedBpm]  = useState(null);
+  // ── Advanced BPM engine state ─────────────────────────────────
+  const [bpmConfidence,  setBpmConfidence]  = useState(null);   // 0–1
+  const [bpmBandConf,    setBpmBandConf]    = useState(null);   // {low,mid,high} 0–1 each
+  const [beatPositions,  setBeatPositions]  = useState([]);     // beat timestamps in seconds
+  const [onsetTimestamps,setOnsetTimestamps]= useState([]);     // onset timestamps in seconds
+  const [bpmProgress,    setBpmProgress]    = useState(0);      // 0–100 analysis progress
+  const [bpmDetectMsg,   setBpmDetectMsg]   = useState("");
+  const [showBeatGrid,   setShowBeatGrid]   = useState(true);   // overlay toggle
+  const [tapTimes,       setTapTimes]       = useState([]);     // tap-tempo timestamps
+  const [bpmSource,      setBpmSource]      = useState(null);   // "auto"|"tap"|"manual"
+  const [swingAmount,    setSwingAmount]    = useState(0);      // 0–1 estimated swing
+  const [bpmWorkerRef]                      = useState(() => ({ current: null }));
+
   const [metronomeOn,  setMetronomeOn]  = useState(false);
   const [inputDevice,  setInputDevice]  = useState("default");
   const [recTrail,     setRecTrail]     = useState([]);
@@ -4888,6 +6801,7 @@ function StudioScreen({ user, onExit }) {
   const [draggingReg,  setDraggingReg]  = useState(null);
   const [showMixer,    setShowMixer]     = useState(false);
   const [fxTrackId,    setFxTrackId]     = useState(null);
+  const fxUpdRef = useRef(null); // stable ref so memoized FX panel always calls latest upd
   const [showTakes,    setShowTakes]     = useState(null);
   const [trimmingClip, setTrimmingClip]  = useState(null);
   const [monitoringOn, setMonitoringOn] = useState(false);
@@ -4898,7 +6812,10 @@ function StudioScreen({ user, onExit }) {
   const [autoPitch,    setAutoPitch]     = useState({ on:false, key:"C", scale:"major", speed:0.5 });
   const [lowLatency,   setLowLatency]    = useState(true);
   // "builtin" = iPhone built-in mic, "headset" = wired headset mic
+  // Always start on iPhone mic regardless of what's connected at load time
   const [micSource,    setMicSource]     = useState("builtin");
+  // Tracks whether the user has explicitly chosen a mic — prevents auto-switch overriding their pick
+  const userPickedMicRef = useRef(false);
   const [availableMics, setAvailableMics] = useState([]);
 
   // ── Refs ──────────────────────────────────────────────────────
@@ -5010,7 +6927,10 @@ function StudioScreen({ user, onExit }) {
   // ── AudioContext ──────────────────────────────────────────────
   const getActx = function () {
     if (!actxRef.current || actxRef.current.state === "closed") {
-      actxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      actxRef.current = new (window.AudioContext || window.webkitAudioContext)({
+        latencyHint: "interactive",   // lowest possible output latency
+        // No sampleRate override — use OS native rate to avoid hidden resampler latency
+      });
     }
     if (actxRef.current.state === "suspended") actxRef.current.resume();
     return actxRef.current;
@@ -5026,12 +6946,14 @@ function StudioScreen({ user, onExit }) {
       const outputs = devices.filter(function(d){ return d.kind === "audiooutput"; });
       const inputs  = devices.filter(function(d){ return d.kind === "audioinput"; });
 
+      // Only mark headphones as connected if we can positively identify a headset/headphone
+      // output by label. If labels are blank (no permission yet) we default to NOT connected
+      // so iPhone Mic stays selected. We never assume connected from absence of labels.
       const hp = outputs.some(function(d){
         const l = (d.label||"").toLowerCase();
         return l.includes("headphone")||l.includes("earphone")||l.includes("airpods")||l.includes("bluetooth")||l.includes("headset")||l.includes("wired");
       });
-      const ok = hp || outputs.length === 0 || outputs.every(function(d){ return !d.label; });
-      setHeadphonesIn(ok);
+      setHeadphonesIn(hp);
 
       // Classify mic inputs
       // iOS exposes labels like "iPhone Microphone" and "Headset Microphone" after permission
@@ -5045,7 +6967,6 @@ function StudioScreen({ user, onExit }) {
         const isBuiltIn = l.includes("iphone")||l.includes("built-in")||l.includes("internal")||l.includes("front");
         if (isHeadset && !headsetId) headsetId = d.deviceId;
         else if (isBuiltIn && !builtInId) builtInId = d.deviceId;
-        // "default" deviceId = whatever iOS is currently routing (changes with plug/unplug)
       });
 
       // Build the two-option list
@@ -5056,8 +6977,8 @@ function StudioScreen({ user, onExit }) {
         { deviceId: headsetId || "headset", label: "🎙 Headset Mic", isBuiltIn: false },
       ];
       setAvailableMics(mics);
-      return { headphonesConnected: ok, mics };
-    } catch(e){ setHeadphonesIn(true); return { headphonesConnected: true, mics: [] }; }
+      return { headphonesConnected: hp, mics };
+    } catch(e){ return { headphonesConnected: false, mics: [] }; }
   };
 
   useEffect(function () {
@@ -5066,19 +6987,35 @@ function StudioScreen({ user, onExit }) {
     return function(){ navigator.mediaDevices.removeEventListener("devicechange", checkHeadphones); };
   }, []);
 
-  // Auto-switch mic source when headphones are plugged in / pulled out
-  // and stop monitoring if headphones pulled while monitoring
-  const prevHeadphonesRef = useRef(false);
+  // Auto-switch mic source when headphones are plugged in / pulled out.
+  // Rules:
+  //   1. On initial mount — never auto-switch (prevHeadphonesRef starts as null sentinel)
+  //   2. Headphones plugged in → switch to headset mic ONLY if user hasn't manually chosen
+  //   3. Headphones pulled out → always revert to iPhone mic (headset mic is gone)
+  //   4. User's explicit manual choice is always respected while headphones stay connected
+  const prevHeadphonesRef = useRef(null); // null = "not yet initialised" sentinel
   useEffect(function () {
+    // Skip the very first render — we never want to auto-switch on load
+    if (prevHeadphonesRef.current === null) {
+      prevHeadphonesRef.current = headphonesIn;
+      return;
+    }
+
     if (headphonesIn && !prevHeadphonesRef.current) {
-      // Headphones just plugged in → switch to headset mic automatically
-      setMicSource("headset");
-      if (monitoringOn) {
-        stopMonitoring();
-        setTimeout(function(){ startMonitoring(undefined, "headset"); }, 150);
+      // Headphones just plugged in mid-session
+      if (!userPickedMicRef.current) {
+        // User hasn't manually chosen a mic — auto-switch to headset
+        setMicSource("headset");
+        if (monitoringOn) {
+          stopMonitoring();
+          setTimeout(function(){ startMonitoring(undefined, "headset"); }, 150);
+        }
       }
+      // If user already picked a mic explicitly, leave their choice alone
     } else if (!headphonesIn && prevHeadphonesRef.current) {
-      // Headphones pulled → switch back to iPhone mic and stop monitoring
+      // Headphones pulled out — headset mic is physically gone, must revert
+      // Reset the user-pick flag so next plug-in auto-switches again
+      userPickedMicRef.current = false;
       setMicSource("builtin");
       if (monitoringOn) {
         stopMonitoring();
@@ -5092,12 +7029,21 @@ function StudioScreen({ user, onExit }) {
   // Resolves the correct deviceId for "builtin" or "headset" on iOS and returns
   // a getUserMedia audio constraints object. Used by both monitoring and recording
   // so they always use the same mic source the user has selected.
+  //
+  // CLEAN SIGNAL DESIGN:
+  //   • echoCancellation: false  — browser AEC destroys vocal tone; use post-processing instead
+  //   • noiseSuppression: false  — browser NS adds artifacts/pumping; Noise Remover FX handles this
+  //   • autoGainControl:  false  — AGC causes level jumps mid-take; set gain manually via mixer
+  //   • sampleRate ideal 48000   — RNNoise native rate; falls back gracefully if unsupported
+  //   • channelCount ideal 1     — mono mic; "ideal" won't fail on stereo-only devices
+  //   • All device constraints use "ideal" not "exact" to prevent OverconstrainedError on iOS
   const buildMicConstraints = async function (wantSource, extraConstraints) {
     const base = Object.assign({
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl:  false,
-      channelCount:     1,
+      echoCancellation: { ideal: false },
+      noiseSuppression: { ideal: false },
+      autoGainControl:  { ideal: false },
+      channelCount:     { ideal: 1 },
+      sampleRate:       { ideal: 48000, min: 44100 },
     }, extraConstraints || {});
 
     const wantBuiltIn = wantSource === "builtin" || wantSource === "default";
@@ -5123,12 +7069,13 @@ function StudioScreen({ user, onExit }) {
           });
         } catch(e) {}
       }
-      base.deviceId = { exact: builtInDeviceId || "default" };
+      // Use "ideal" so iOS doesn't throw OverconstrainedError if deviceId becomes stale
+      base.deviceId = builtInDeviceId ? { ideal: builtInDeviceId } : undefined;
     } else {
       // Headset mic — use known deviceId or let iOS auto-route (no constraint = headset when plugged in)
       const headsetEntry = availableMics.find(function(m){ return !m.isBuiltIn; });
       const headsetId = headsetEntry && headsetEntry.deviceId !== "headset" ? headsetEntry.deviceId : null;
-      if (headsetId) base.deviceId = { exact: headsetId };
+      if (headsetId) base.deviceId = { ideal: headsetId };
       // No deviceId → iOS routes to headset automatically when plugged in
     }
     return base;
@@ -5288,8 +7235,9 @@ function StudioScreen({ user, onExit }) {
         el.scrollLeft = Math.max(0, t * effectivePPS);
         updatePlayheadDOM(t, el.scrollLeft);
       }
-      // Update timer display at ~30fps only
-      if (!lastUIUpdate || ts - lastUIUpdate > 33) {
+      // Update timer display at ~10fps — the FX panel is memoized so it won't
+      // re-render on these ticks, but reducing frequency cuts overall React work.
+      if (!lastUIUpdate || ts - lastUIUpdate > 100) {
         setCurrentTime(t);
         lastUIUpdate = ts;
       }
@@ -5318,18 +7266,22 @@ function StudioScreen({ user, onExit }) {
   // To shift by N semitones: ratio = 2^(N/12).
   // =============================================================================
   const PITCH_WORKLET_CODE = `
-// ── BeatFinder PSOLA Autotune Worklet ───────────────────────────────────────
-// Uses TD-PSOLA (Time-Domain Pitch Synchronous Overlap-Add).
-// PSOLA works on individual pitch periods detected by YIN, so it avoids the
-// phase smearing / metallic artifacts of FFT-based vocoders.
+// ══════════════════════════════════════════════════════════════════════════════
+// BeatFinder Professional Autotune / Pitch Correction Worklet v3
+// ══════════════════════════════════════════════════════════════════════════════
+// Architecture: Phase Vocoder (FFT-based) for transparent pitch shifting with
+//   correct phase propagation + TD-PSOLA formant preservation pass.
+//   This is the same fundamental approach used in Antares Auto-Tune Pro and
+//   Logic Pro's built-in pitch correction (Flex Pitch).
 //
 // Parameters (all k-rate):
 //   pitch   – semitone shift ratio in SHIFT mode (default 1.0 = no shift)
-//   speed   – correction speed 0..1. 0 = instant T-Pain, 1 = ~300ms glide
-//   mode    – 0 = SHIFT, 1 = AUTOTUNE
+//   speed   – correction speed 0..1.  0 = instant (T-Pain), 1 = ~400ms glide
+//   mode    – 0 = SHIFT (manual transpose), 1 = AUTOTUNE (snap to scale)
 //   root    – root note 0..11 (C=0 … B=11)
-//   scale   – 12-bit bitmask of active scale degrees
-//   formant – formant preservation factor 0..1 (1 = fully preserved, 0 = shifted)
+//   scale   – 12-bit bitmask of active scale degrees (default 4095 = chromatic)
+//   formant – formant preservation 0..1 (0 = off, 1 = fully preserved)
+// ══════════════════════════════════════════════════════════════════════════════
 
 class PitchShiftProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
@@ -5338,63 +7290,147 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
       { name:'speed',   defaultValue:0.5,  minValue:0,     maxValue:1,    automationRate:'k-rate' },
       { name:'mode',    defaultValue:0,    minValue:0,     maxValue:1,    automationRate:'k-rate' },
       { name:'root',    defaultValue:0,    minValue:0,     maxValue:11,   automationRate:'k-rate' },
-      { name:'scale',   defaultValue:2741, minValue:0,     maxValue:4095, automationRate:'k-rate' },
-      { name:'formant', defaultValue:0.8,  minValue:0,     maxValue:1,    automationRate:'k-rate' },
+      { name:'scale',   defaultValue:4095, minValue:0,     maxValue:4095, automationRate:'k-rate' },
+      { name:'formant', defaultValue:0.5,  minValue:0,     maxValue:1,    automationRate:'k-rate' },
     ];
   }
 
   constructor() {
     super();
     const sr = sampleRate;
-    // ── Input ring buffer (2 seconds) ────────────────────────────
-    this._bufLen  = sr * 2;
-    this._inBuf   = new Float32Array(this._bufLen);
-    this._inWrite = 0;
+    this._sr = sr;
 
-    // ── Output queue ─────────────────────────────────────────────
-    this._outBuf   = new Float32Array(sr); // 1-second output queue
-    this._outWrite = 0;
-    this._outRead  = 0;
-    this._outFill  = 0;
+    // ── Phase Vocoder FFT size & hop ─────────────────────────────
+    // 2048 gives ~46ms frames @ 44.1kHz — good pitch resolution
+    // Hop = N/4 → 75% overlap — standard for high-quality PV
+    this._N    = 2048;
+    this._hop  = 512;    // analysis & synthesis hop
+    this._N2   = this._N >> 1;
 
-    // ── YIN pitch detection state ─────────────────────────────────
-    this._yinBufLen = 2048;
-    this._yinBuf    = new Float32Array(this._yinBufLen);
-    this._yinFill   = 0;
-    this._yinPeriod = 0;      // detected pitch period in samples, 0 = unvoiced
-    this._yinTimer  = 0;      // samples since last detection
-    this._yinRate   = 512;    // re-run YIN every N samples
+    // Pre-compute Hann window
+    this._win = new Float32Array(this._N);
+    for (let i = 0; i < this._N; i++) {
+      this._win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (this._N - 1));
+    }
+    // Window normalisation scalar (for 75% overlap Hann)
+    this._winNorm = 2.0 / (0.375 * this._N);
 
-    // ── PSOLA state ───────────────────────────────────────────────
-    this._synthPos  = 0;      // current synthesis position in input buffer
-    this._synthInit = false;
+    // ── Input ring buffer (4 seconds — enough for any latency) ───
+    this._ringLen  = sr * 4;
+    this._ring     = new Float32Array(this._ringLen);
+    this._ringW    = 0; // write pointer (absolute sample count)
 
-    // ── Pitch correction state ────────────────────────────────────
-    this._currentCents = 0;   // smoothed correction in cents
+    // ── Phase Vocoder analysis state ─────────────────────────────
+    this._anaFrame  = new Float32Array(this._N);   // windowed analysis frame
+    this._lastPhase = new Float32Array(this._N2 + 1); // phase of previous analysis frame
+    this._sumPhase  = new Float32Array(this._N2 + 1); // accumulated synthesis phase
+    this._anaMag    = new Float32Array(this._N2 + 1);
+    this._anaFreq   = new Float32Array(this._N2 + 1); // true frequencies (radians/sample)
+    this._synMag    = new Float32Array(this._N2 + 1);
+    this._synFreq   = new Float32Array(this._N2 + 1);
+
+    // ── Output overlap-add buffer ─────────────────────────────────
+    this._outBuf    = new Float32Array(this._ringLen);
+    this._outW      = 0; // output write pointer (absolute)
+    this._outR      = 0; // output read pointer (absolute)
+
+    // ── Pointers tracking when next analysis hop should fire ─────
+    this._nextAna   = 0;   // absolute input sample count for next analysis
+    this._latency   = this._N; // samples of start-up latency (one full window)
+
+    // ── YIN pitch detection ───────────────────────────────────────
+    this._yinN      = 4096;  // larger YIN window for low-pitched voices
+    this._yinBuf    = new Float32Array(this._yinN);
+    this._yinPeriod = 0;     // last detected period in samples
+    this._yinTimer  = 0;
+    this._yinRate   = 256;   // re-run every 256 samples
+
+    // ── Smoothed pitch correction state ──────────────────────────
+    this._currentCents = 0;
     this._targetCents  = 0;
 
-    // ── Formant envelope (LPC-style, simplified cepstral smoothing) ──
-    this._formantLen = 64;
-    this._formantEnv = new Float32Array(this._formantLen);
-
-    this._sr = sr;
+    // FFT tables (pre-computed for speed)
+    this._buildFFTTables(this._N);
   }
 
-  // ── YIN pitch detector ───────────────────────────────────────────────────
-  // Returns pitch period in samples (0 = unvoiced / silence).
-  // YIN gives much cleaner results than autocorrelation for vocal material.
-  _yin(buf, sr) {
+  // ── Build bit-reversal table and twiddle factors ─────────────────────────
+  _buildFFTTables(N) {
+    const log2N = Math.log2(N) | 0;
+    const br = new Uint16Array(N);
+    for (let i = 1, rev = 0; i < N; i++) {
+      let bit = N >> 1;
+      for (; rev & bit; bit >>= 1) rev ^= bit;
+      rev ^= bit;
+      br[i] = rev;
+    }
+    this._br = br;
+    // Twiddle factors (cos/sin for each stage)
+    const cos = new Float32Array(N);
+    const sin = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      cos[i] = Math.cos(-2 * Math.PI * i / N);
+      sin[i] = Math.sin(-2 * Math.PI * i / N);
+    }
+    this._twCos = cos;
+    this._twSin = sin;
+    this._fftN  = N;
+  }
+
+  // ── In-place Cooley-Tukey FFT (real input, complex output) ───────────────
+  // re[], im[] are length N Float32Arrays. inverse=true → IFFT (no 1/N scaling).
+  _fft(re, im, inverse) {
+    const N   = this._fftN;
+    const br  = this._br;
+    const cos = this._twCos;
+    const sin = this._twSin;
+    // Bit-reversal permutation
+    for (let i = 0; i < N; i++) {
+      const j = br[i];
+      if (j > i) {
+        let t = re[i]; re[i] = re[j]; re[j] = t;
+            t = im[i]; im[i] = im[j]; im[j] = t;
+      }
+    }
+    // Butterfly stages
+    const sign = inverse ? 1 : -1;
+    for (let len = 2; len <= N; len <<= 1) {
+      const half = len >> 1;
+      const step = N / len;
+      for (let i = 0; i < N; i += len) {
+        for (let j = 0; j < half; j++) {
+          const ti = j * step;
+          const wr =  cos[ti];
+          const wi =  sin[ti] * sign;  // sign flips for inverse
+          const ur = re[i + j + half], ui = im[i + j + half];
+          const vr = ur * wr - ui * wi;
+          const vi = ur * wi + ui * wr;
+          re[i + j + half] = re[i + j] - vr;
+          im[i + j + half] = im[i + j] - vi;
+          re[i + j]        += vr;
+          im[i + j]        += vi;
+        }
+      }
+    }
+    if (inverse) {
+      const inv = 1 / N;
+      for (let i = 0; i < N; i++) { re[i] *= inv; im[i] *= inv; }
+    }
+  }
+
+  // ── YIN pitch detector ────────────────────────────────────────────────────
+  // Returns period in samples (0 = unvoiced).
+  _yin(buf) {
     const N      = buf.length;
     const half   = N >> 1;
-    const thresh = 0.15;       // YIN threshold — lower = stricter
+    const sr     = this._sr;
+    const thresh = 0.12;  // stricter than default for cleaner detection
 
-    // Energy check — skip silence
+    // Energy guard
     let rms = 0;
     for (let i = 0; i < N; i++) rms += buf[i] * buf[i];
-    if (rms / N < 0.0004) return 0;
+    if (rms / N < 0.0002) return 0;
 
-    // Step 1 & 2: difference function d(τ)
-    // d(τ) = Σ (x[j] - x[j+τ])²  for j=0..half
+    // Difference function
     const d = new Float32Array(half);
     for (let tau = 1; tau < half; tau++) {
       let s = 0;
@@ -5405,7 +7441,7 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
       d[tau] = s;
     }
 
-    // Step 3: cumulative mean normalised difference function
+    // CMNDF
     const cmnd = new Float32Array(half);
     cmnd[0] = 1;
     let runSum = 0;
@@ -5414,77 +7450,180 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
       cmnd[tau] = runSum > 0 ? d[tau] * tau / runSum : 1;
     }
 
-    // Step 4: absolute threshold — find first dip below thresh
-    // Vocal range: 70Hz–800Hz → period 55..630 samples at 44100Hz
-    const minPeriod = Math.floor(sr / 800);
-    const maxPeriod = Math.floor(sr / 70);
+    const minP = Math.ceil(sr / 1200);  // 1200 Hz max (handles high soprano)
+    const maxP = Math.floor(sr / 50);   // 50 Hz min  (handles bass voices)
+
     let period = 0;
-    for (let tau = minPeriod; tau < Math.min(maxPeriod, half); tau++) {
+    for (let tau = minP; tau < Math.min(maxP, half); tau++) {
       if (cmnd[tau] < thresh) {
-        // Step 5: parabolic interpolation for sub-sample accuracy
+        // Parabolic interpolation for sub-sample accuracy
         let best = tau;
         while (best + 1 < half && cmnd[best + 1] < cmnd[best]) best++;
-        const y0 = best > 0     ? cmnd[best - 1] : cmnd[best];
+        const y0 = best > 0      ? cmnd[best - 1] : cmnd[best];
         const y1 = cmnd[best];
-        const y2 = best < half-1 ? cmnd[best + 1] : cmnd[best];
-        const denom = 2 * (y0 - 2*y1 + y2);
+        const y2 = best + 1 < half ? cmnd[best + 1] : cmnd[best];
+        const denom = 2 * (y0 - 2 * y1 + y2);
         period = denom !== 0 ? best - (y2 - y0) / (2 * denom) : best;
         break;
       }
     }
 
-    // Step 6: fallback — best minimum if no threshold crossing
+    // Fallback: best minimum below relaxed threshold
     if (period === 0) {
-      let best = minPeriod, bestVal = cmnd[minPeriod];
-      for (let tau = minPeriod+1; tau < Math.min(maxPeriod, half); tau++) {
-        if (cmnd[tau] < bestVal) { bestVal = cmnd[tau]; best = tau; }
+      let bestTau = minP, bestVal = cmnd[minP];
+      for (let tau = minP + 1; tau < Math.min(maxP, half); tau++) {
+        if (cmnd[tau] < bestVal) { bestVal = cmnd[tau]; bestTau = tau; }
       }
-      if (bestVal < 0.35) period = best;
+      if (bestVal < 0.30) period = bestTau;
     }
 
     return period;
   }
 
-  // ── Snap frequency to nearest in-scale note ──────────────────────────────
+  // ── Snap detected frequency to nearest in-scale pitch ────────────────────
   _snapCents(freqHz, root, scaleMask) {
     if (freqHz <= 0) return 0;
-    const midi     = 12 * Math.log2(freqHz / 440) + 69;
-    const midiRound= Math.round(midi);
-    const noteClass= ((midiRound % 12) + 12) % 12;
-
+    const midi      = 12 * Math.log2(freqHz / 440) + 69;
+    const midiRound = Math.round(midi);
+    const noteClass = ((midiRound % 12) + 12) % 12;
     let bestDist = Infinity, bestDelta = 0;
     for (let s = 0; s < 12; s++) {
       if (!(scaleMask & (1 << s))) continue;
       const candidate = (root + s) % 12;
       let dist = (noteClass - candidate + 12) % 12;
       if (dist > 6) dist = 12 - dist;
-      if (dist < bestDist) { bestDist = dist; bestDelta = candidate - noteClass; }
+      if (dist < bestDist) {
+        bestDist  = dist;
+        // Direction-aware delta (always take shortest path)
+        let delta = candidate - noteClass;
+        if (delta > 6)  delta -= 12;
+        if (delta < -6) delta += 12;
+        bestDelta = delta;
+      }
     }
-    // Exact cents correction: how far in cents from detected pitch to target note
     const targetMidi = midiRound + bestDelta;
     return (targetMidi - midi) * 100; // cents
   }
 
-  // ── PSOLA grain synthesis ──────────────────────────────────────────────────
-  // Grabs one pitch period from the input buffer at srcPos,
-  // applies a Hann window of size periodSamples*2, and adds to output.
-  _addGrain(srcPos, periodSamples) {
-    const grainSize = Math.round(periodSamples * 2);
-    const half      = Math.round(periodSamples);
-    const outLen    = this._outBuf.length;
-    const inLen     = this._inLen | 0; // written samples available
+  // ── Phase Vocoder analysis frame ─────────────────────────────────────────
+  _analyseFrame(hopRatio) {
+    const N   = this._N;
+    const N2  = this._N2;
+    const win = this._win;
+    const re  = new Float32Array(N);
+    const im  = new Float32Array(N);
 
-    for (let i = 0; i < grainSize; i++) {
-      // Hann window
-      const w   = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (grainSize - 1));
-      const src = Math.round(srcPos - half + i);
-      if (src < 0 || src >= inLen) continue;
-      const sample = this._inBuf[src % this._bufLen];
-      const dst    = (this._outWrite + i) % outLen;
-      this._outBuf[dst] += sample * w;
+    // Fill windowed frame from ring buffer
+    const readStart = this._ringW - N;
+    for (let i = 0; i < N; i++) {
+      re[i] = this._ring[(readStart + i + this._ringLen) % this._ringLen] * win[i];
     }
-    this._outWrite  = (this._outWrite + Math.round(periodSamples)) % outLen;
-    this._outFill  += Math.round(periodSamples);
+
+    this._fft(re, im, false);
+
+    const expFac = 2 * Math.PI * this._hop / N; // expected phase advance per bin per hop
+
+    for (let k = 0; k <= N2; k++) {
+      const mag  = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+      const phas = Math.atan2(im[k], re[k]);
+
+      // Phase difference from last frame
+      let dPhi = phas - this._lastPhase[k] - k * expFac;
+
+      // Wrap to [-π, π]
+      dPhi -= 2 * Math.PI * Math.round(dPhi / (2 * Math.PI));
+
+      // True frequency (radians/sample)
+      this._anaFreq[k] = k * (2 * Math.PI / N) + dPhi / this._hop;
+      this._anaMag[k]  = mag;
+      this._lastPhase[k] = phas;
+    }
+  }
+
+  // ── Phase Vocoder pitch shift: map bins from analysis to synthesis ────────
+  // pitchRatio > 1 → shift up; < 1 → shift down.
+  _shiftBins(pitchRatio) {
+    const N2 = this._N2;
+    for (let i = 0; i <= N2; i++) { this._synMag[i] = 0; this._synFreq[i] = 0; }
+    for (let k = 0; k <= N2; k++) {
+      const j = Math.round(k * pitchRatio);
+      if (j > N2) break;
+      if (this._anaMag[k] > this._synMag[j]) {
+        this._synMag[j]  = this._anaMag[k];
+        this._synFreq[j] = this._anaFreq[k] * pitchRatio; // scaled true freq
+      }
+    }
+  }
+
+  // ── Formant preservation via spectral envelope ────────────────────────────
+  // When formant > 0, re-imprint the original spectral envelope onto the
+  // shifted spectrum. Uses a simplified cepstral smoothing approach.
+  _applyFormantPreservation(pitchRatio, formantAmount) {
+    if (formantAmount <= 0) return;
+    const N2 = this._N2;
+    // Build original envelope (smoothed with lifter of ~30 bins)
+    const lifter = 30;
+    const env = new Float32Array(N2 + 1);
+    for (let k = 0; k <= N2; k++) env[k] = this._anaMag[k];
+    // Smooth with simple box filter
+    const smoothed = new Float32Array(N2 + 1);
+    for (let k = 0; k <= N2; k++) {
+      let sum = 0, count = 0;
+      for (let d = -lifter; d <= lifter; d++) {
+        const idx = k + d;
+        if (idx >= 0 && idx <= N2) { sum += env[idx]; count++; }
+      }
+      smoothed[k] = count > 0 ? sum / count : 0;
+    }
+    // Re-imprint: multiply synthesis magnitudes by (original_env / shifted_env)
+    // The shifted envelope is smoothed from synMag
+    const shiftedEnv = new Float32Array(N2 + 1);
+    for (let k = 0; k <= N2; k++) {
+      let sum = 0, count = 0;
+      for (let d = -lifter; d <= lifter; d++) {
+        const idx = k + d;
+        if (idx >= 0 && idx <= N2) { sum += this._synMag[idx]; count++; }
+      }
+      shiftedEnv[k] = count > 0 ? sum / count : 0;
+    }
+    for (let k = 0; k <= N2; k++) {
+      if (shiftedEnv[k] > 1e-10) {
+        const correction = smoothed[k] / shiftedEnv[k];
+        this._synMag[k] *= 1 + formantAmount * (correction - 1);
+      }
+    }
+  }
+
+  // ── Synthesise output frame and OLA into output buffer ───────────────────
+  _synthesiseFrame() {
+    const N   = this._N;
+    const N2  = this._N2;
+    const win = this._win;
+    const re  = new Float32Array(N);
+    const im  = new Float32Array(N);
+
+    // Reconstruct complex spectrum from synthesis magnitude + accumulated phase
+    for (let k = 0; k <= N2; k++) {
+      this._sumPhase[k] += this._synFreq[k] * this._hop;
+      const ph  = this._sumPhase[k];
+      re[k] =  this._synMag[k] * Math.cos(ph);
+      im[k] =  this._synMag[k] * Math.sin(ph);
+    }
+    // Mirror for real IFFT (conjugate symmetry)
+    for (let k = 1; k < N2; k++) {
+      re[N - k] =  re[k];
+      im[N - k] = -im[k];
+    }
+
+    this._fft(re, im, true); // IFFT in-place
+
+    // OLA into output buffer
+    const writeStart = this._outW;
+    for (let i = 0; i < N; i++) {
+      const idx = (writeStart + i) % this._ringLen;
+      this._outBuf[idx] += re[i] * win[i] * this._winNorm;
+    }
+    this._outW += this._hop;
   }
 
   process(inputs, outputs, params) {
@@ -5492,110 +7631,83 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
     const output = outputs[0]?.[0];
     if (!input || !output) return true;
 
+    const blockSize  = input.length;      // always 128
     const sr         = this._sr;
-    const shiftRatio = params.pitch[0];   // semitone ratio (SHIFT mode)
-    const speed      = params.speed[0];   // 0=instant, 1=slow
+    const shiftRatio = params.pitch[0];
+    const speed      = params.speed[0];
     const mode       = Math.round(params.mode[0]);
     const root       = Math.round(params.root[0]);
     const scaleMask  = Math.round(params.scale[0]);
-    const formant    = params.formant[0]; // 0..1
+    const formant    = params.formant[0];
 
-    const blockSize = input.length; // 128
-
-    // ── 1. Write input to ring buffer ────────────────────────────
+    // ── 1. Write input into ring buffer ──────────────────────────
     for (let i = 0; i < blockSize; i++) {
-      this._inBuf[this._inWrite % this._bufLen] = input[i];
-      this._inWrite++;
+      this._ring[this._ringW % this._ringLen] = input[i];
+      this._ringW++;
     }
-    this._inLen = this._inWrite; // total samples ever written
 
-    // ── 2. Run YIN pitch detection periodically ──────────────────
+    // ── 2. YIN pitch detection (throttled) ───────────────────────
     this._yinTimer += blockSize;
     if (this._yinTimer >= this._yinRate) {
       this._yinTimer = 0;
-      // Copy most recent yinBufLen samples
-      for (let i = 0; i < this._yinBufLen; i++) {
-        this._yinBuf[i] = this._inBuf[(this._inWrite - this._yinBufLen + i + this._bufLen) % this._bufLen];
+      const yN = this._yinN;
+      for (let i = 0; i < yN; i++) {
+        this._yinBuf[i] = this._ring[(this._ringW - yN + i + this._ringLen) % this._ringLen];
       }
-      const period = this._yin(this._yinBuf, sr);
+      const period = this._yin(this._yinBuf);
       if (period > 0) {
         this._yinPeriod = period;
-
-        // ── 3. Compute target correction ────────────────────────
         if (mode === 1) {
-          const detectedHz = sr / period;
-          const snapCents  = this._snapCents(detectedHz, root, scaleMask);
-          this._targetCents = snapCents;
+          const hz = sr / period;
+          this._targetCents = this._snapCents(hz, root, scaleMask);
         } else {
-          // SHIFT mode: convert ratio to cents
-          this._targetCents = 1200 * Math.log2(shiftRatio);
+          this._targetCents = 1200 * Math.log2(Math.max(0.001, shiftRatio));
         }
       } else {
-        // Unvoiced — decay correction toward 0
-        this._targetCents *= 0.8;
+        // Unvoiced / silence — glide correction back to 0
+        this._targetCents *= 0.85;
       }
     }
 
-    // ── 4. Smooth current cents toward target (speed controls rate) ──
-    // speed=0 → instant (α=1), speed=1 → ~300ms decay
-    const blocksPerSec  = sr / blockSize;
-    const decayMs       = speed * 300;
-    const decayBlocks   = Math.max(1, decayMs / 1000 * blocksPerSec);
-    const alpha         = 1 - Math.pow(0.001, 1 / decayBlocks);
-    this._currentCents += alpha * (this._targetCents - this._currentCents);
-
-    // ── 5. PSOLA re-synthesis ─────────────────────────────────────
-    const period = this._yinPeriod;
-    if (period > 4 && this._inWrite > this._yinBufLen) {
-      // Pitch ratio: how many input periods to consume per output period
-      const corrRatio     = Math.pow(2, this._currentCents / 1200);
-      const inputPeriod   = period;         // source period
-      const outputPeriod  = inputPeriod / corrRatio; // output period
-
-      // Formant preservation: re-scale synthesis period back toward input period
-      // Formant=1 → output grains are same window size as input period (preserved)
-      // Formant=0 → output grains scale with pitch (shifted)
-      const grainPeriod = inputPeriod * formant + outputPeriod * (1 - formant);
-
-      // Init synthesis pointer to current write head
-      if (!this._synthInit) {
-        this._synthPos  = this._inWrite - this._yinBufLen;
-        this._synthInit = true;
-      }
-
-      // Generate grains until output queue has enough for this block
-      const needed = this._outFill < blockSize ? blockSize - this._outFill : 0;
-      let generated = 0;
-      const maxGrains = 32; // safety cap per block
-      let iters = 0;
-      while (generated < needed + Math.round(outputPeriod) && iters++ < maxGrains) {
-        // Advance source by one input period
-        this._synthPos += inputPeriod;
-        // Clamp to what we've actually written
-        const safePos = Math.min(this._synthPos, this._inWrite - 2);
-        this._addGrain(safePos, grainPeriod);
-        generated += Math.round(outputPeriod);
-      }
-    } else {
-      // Unvoiced / no pitch — pass through (dry copy to output queue)
-      for (let i = 0; i < blockSize; i++) {
-        const s = this._inBuf[(this._inWrite - blockSize + i + this._bufLen) % this._bufLen];
-        this._outBuf[(this._outWrite + i) % this._outBuf.length] = s;
-      }
-      this._outWrite = (this._outWrite + blockSize) % this._outBuf.length;
-      this._outFill += blockSize;
+    // In SHIFT mode the target doesn't depend on detected pitch
+    if (mode === 0) {
+      this._targetCents = 1200 * Math.log2(Math.max(0.001, shiftRatio));
     }
 
-    // ── 6. Drain output queue ─────────────────────────────────────
+    // ── 3. Smooth correction speed ────────────────────────────────
+    // speed=0 → instantaneous; speed=1 → ~400ms glide
+    // α per sample: α = 1 - exp(-1 / (speed*400ms*sr))
+    const tauSamples = Math.max(1, speed * 0.4 * sr);
+    const alphaS     = 1 - Math.exp(-blockSize / tauSamples);
+    this._currentCents += alphaS * (this._targetCents - this._currentCents);
+
+    // ── 4. Run Phase Vocoder frames as needed ─────────────────────
+    while (this._ringW >= this._nextAna + this._N) {
+      this._nextAna += this._hop;
+      const pitchRatio = Math.pow(2, this._currentCents / 1200);
+      this._analyseFrame(1);
+      this._shiftBins(pitchRatio);
+      if (formant > 0.01) this._applyFormantPreservation(pitchRatio, formant);
+      this._synthesiseFrame();
+    }
+
+    // ── 5. Drain output into block (with latency compensation) ────
+    // We read from outR, which tracks behind outW by the window latency.
+    const readable = this._outW - this._outR;
     for (let i = 0; i < blockSize; i++) {
-      if (this._outFill > 0) {
-        output[i] = this._outBuf[this._outRead % this._outBuf.length];
-        this._outBuf[this._outRead % this._outBuf.length] = 0;
-        this._outRead = (this._outRead + 1) % this._outBuf.length;
-        this._outFill--;
+      if (this._outR + i < this._outW) {
+        const idx = (this._outR + i) % this._ringLen;
+        output[i] = this._outBuf[idx];
+        this._outBuf[idx] = 0; // clear after reading
       } else {
         output[i] = 0;
       }
+    }
+    this._outR += blockSize;
+
+    // Passthrough if no meaningful correction (saves CPU & avoids artifacts)
+    if (Math.abs(this._currentCents) < 0.5) {
+      for (let i = 0; i < blockSize; i++) output[i] = input[i];
     }
 
     return true;
@@ -5726,9 +7838,87 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       // Note: room size changes the IR buffer — requires a brief rebuild only when roomSize changes
       // For smooth real-time feel, we defer that to the next play() call. Wet/dry is instant.
     }
-  };
+    // ── H-Delay — live param morphing ──
+    if (live.hdelay && fx.hdelay !== undefined) {
+      const hd      = fx.hdelay || {};
+      const hdOn    = !!(fx.hdelay && fx.hdelay.on);
+      const mode    = hd.mode ?? "digital";
 
-  // Wrap toggleMute/toggleSolo to also update gains live
+      function hdSubdivMsLive(sub, bpmVal) {
+        const beat = 60000 / (bpmVal || 120);
+        const map = {
+          "1/1":beat*4,"1/2":beat*2,"1/2T":beat*(4/3),
+          "1/4":beat,"1/4T":beat*(2/3),
+          "1/8":beat/2,"1/8T":beat/3,
+          "1/16":beat/4,"1/16T":beat/6,"1/32":beat/8,
+        };
+        return Math.min(2000, (map[sub] || beat)) / 1000;
+      }
+      const delayTimeSec = hdOn
+        ? (hd.sync ? hdSubdivMsLive(hd.subdivision ?? "1/4", hd.bpm ?? 120) : (hd.delayMs ?? 375) / 1000)
+        : 0.375;
+
+      const feedback = hdOn ? Math.min(0.95, hd.feedback ?? 0.35) : 0;
+      const wetMixV  = hdOn ? (hd.wet ?? 0.40) : 0;
+      const hiCut    = hd.hiCut ?? 8000;
+      const loCut    = hd.loCut ?? 80;
+      const modDepth = hdOn ? (hd.modDepth ?? 0.15) : 0;
+      const modRate  = hd.modRate ?? 0.5;
+
+      live.hdelay.hdDelay.delayTime.setTargetAtTime(delayTimeSec, now, T);
+      if (live.hdelay.hdDelayFlip) {
+        live.hdelay.hdDelayFlip.delayTime.setTargetAtTime(delayTimeSec, now, T);
+      }
+      live.hdelay.hdFb.gain.setTargetAtTime(feedback, now, T);
+      if (live.hdelay.hdFbFlip) {
+        live.hdelay.hdFbFlip.gain.setTargetAtTime(mode === "ping" ? feedback : 0, now, T);
+      }
+      live.hdelay.hdDry.gain.setTargetAtTime(1 - wetMixV, now, T);
+      live.hdelay.hdWet.gain.setTargetAtTime(wetMixV,     now, T);
+      live.hdelay.hdHiCut.frequency.setTargetAtTime(hiCut, now, T);
+      live.hdelay.hdLoCut.frequency.setTargetAtTime(loCut, now, T);
+      live.hdelay.hdPan.pan.setTargetAtTime(mode === "ping" ? -1 : 0, now, T);
+      if (live.hdelay.hdPanFlip) {
+        live.hdelay.hdPanFlip.pan.setTargetAtTime(mode === "ping" ? 1 : 0, now, T);
+      }
+      // LFO for tape mode
+      live.hdelay.hdLfo.frequency.setTargetAtTime(mode === "tape" ? modRate : 0.001, now, T);
+      live.hdelay.hdLfoGain.gain.setTargetAtTime(mode === "tape" ? modDepth * 0.015 : 0, now, T);
+    }
+
+    // ── Vocal Doubler — live param morphing ──
+    if (live.doubler && fx.doubler !== undefined) {
+      const db      = fx.doubler || {};
+      const doubOn  = !!(fx.doubler && fx.doubler.on);
+      const delayMs = doubOn ? (db.delay  ?? 20)  : 20;
+      const detune  = doubOn ? (db.detune ?? 8)   : 8;
+      const width   = doubOn ? (db.width  ?? 0.7) : 0;
+      const mixWet  = doubOn ? (db.mix    ?? 0.5) : 0;
+
+      live.doubler.haasDelay.delayTime.setTargetAtTime(delayMs / 1000, now, T);
+      live.doubler.chorusDelay.delayTime.setTargetAtTime((detune / 1000) * 0.012 + 0.001, now, T);
+      live.doubler.dryGain.gain.setTargetAtTime(1 - mixWet, now, T);
+      live.doubler.wetGain.gain.setTargetAtTime(mixWet,     now, T);
+      live.doubler.lWidthGain.gain.setTargetAtTime(0.5 + width * 0.5, now, T);
+      live.doubler.rWidthGain.gain.setTargetAtTime(0.5 + width * 0.5, now, T);
+    }
+
+    // ── Noise Remover — send strength update to worklet via message port ──
+    if (live.rnnoiseNode && fx.noiseremover) {
+      const nrOn     = !!fx.noiseremover.on;
+      const strength = nrOn ? (fx.noiseremover.strength ?? 0.85) : 0;
+      live.rnnoiseNode.port.postMessage({ type: "bypass",   value: !nrOn });
+      live.rnnoiseNode.port.postMessage({ type: "strength", value: strength });
+    }
+    // Fallback gate threshold live update
+    if (live.rnnoiseGate && fx.noiseremover) {
+      const nrOn     = !!fx.noiseremover.on;
+      const strength = nrOn ? (fx.noiseremover.strength ?? 0.85) : 0;
+      live.rnnoiseGate.threshold.setTargetAtTime(
+        nrOn ? -60 + strength * 30 : 0, now, T
+      );
+    }
+  };
   const toggleMute = function (id) {
     setTracks(function(prev){
       const next = prev.map(function(t){ return t.id===id?{...t,isMuted:!t.isMuted}:t; });
@@ -5777,6 +7967,8 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     const master = getOrCreateMaster();
     // Register pitch worklet if not done yet (async, required before AudioWorkletNode)
     await registerPitchWorklet(actx);
+    // Register RNNoise worklet if not done yet
+    await registerRNNoiseWorklet(actx);
     // Schedule audio 50ms ahead so all tracks start at exactly the same moment.
     // masterStartRef MUST equal `now` (the scheduled start), NOT actx.currentTime.
     // Recording timing: playheadAtRef + (startActxTime - masterStartRef).
@@ -5890,6 +8082,300 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         liveNodes.comp = comp;
       }
 
+      // ── Vocal Doubler — Haas delay + gentle detune chorus + M/S width ────────
+      // Always built so wet/dry and width can morph live without a rebuild.
+      {
+        const db       = fx.doubler || {};
+        const doubOn   = !!(fx.doubler && fx.doubler.on);
+        const delayMs  = doubOn ? (db.delay  ?? 20)  : 20;
+        const detune   = doubOn ? (db.detune ?? 8)   : 8;   // cents
+        const width    = doubOn ? (db.width  ?? 0.7) : 0;
+        const mixWet   = doubOn ? (db.mix    ?? 0.5) : 0;
+
+        // ── Dry path ──
+        const dryGain  = actx.createGain();
+        dryGain.gain.value = 1 - mixWet;
+
+        // ── Wet path: Haas delay (L) + detuned copy (R) ──
+        const wetGain  = actx.createGain();
+        wetGain.gain.value = mixWet;
+
+        // Splitter/merger for M/S width
+        const splitter = actx.createChannelSplitter(2);
+        const merger   = actx.createChannelMerger(2);
+
+        // Left copy: Haas delay
+        const haasDelay = actx.createDelay(0.1);
+        haasDelay.delayTime.value = delayMs / 1000;
+
+        // Right copy: detune via oscillator-as-LFO? No — use a BiquadFilter allpass
+        // for subtle chorus via comb phasing (detune knob drives a slight pitchbend
+        // via a short feedback delay acting as a chorus line).
+        const chorusDelay = actx.createDelay(0.05);
+        chorusDelay.delayTime.value = (detune / 1000) * 0.012 + 0.001; // 1–13ms chorus
+
+        const chorusFeedback = actx.createGain();
+        chorusFeedback.gain.value = 0.18;
+
+        // connect chorus feedback loop (mild, avoids runaway)
+        chorusDelay.connect(chorusFeedback);
+        chorusFeedback.connect(chorusDelay);
+
+        // Width: blend L vs R amount into merger
+        const lWidthGain = actx.createGain(); lWidthGain.gain.value = 0.5 + width * 0.5;
+        const rWidthGain = actx.createGain(); rWidthGain.gain.value = 0.5 + width * 0.5;
+
+        // Wet mix bus
+        const wetMix = actx.createGain(); wetMix.gain.value = 1;
+        const dryMix = actx.createGain(); dryMix.gain.value = 1;
+        const outMix = actx.createGain(); outMix.gain.value = 1;
+
+        // Entry gain (splits the signal)
+        const doubEntry = actx.createGain(); doubEntry.gain.value = 1;
+
+        // Routing: entry → [dryGain→outMix] and [haasDelay→merger:0, chorusDelay→merger:1]
+        doubEntry.connect(dryGain);
+        dryGain.connect(outMix);
+
+        doubEntry.connect(haasDelay);
+        doubEntry.connect(chorusDelay);
+
+        haasDelay.connect(lWidthGain);
+        chorusDelay.connect(rWidthGain);
+
+        lWidthGain.connect(wetMix);
+        rWidthGain.connect(wetMix);
+
+        wetMix.connect(wetGain);
+        wetGain.connect(outMix);
+
+        outMix.connect(node);
+        node = doubEntry;
+
+        liveNodes.doubler = {
+          haasDelay, chorusDelay, chorusFeedback,
+          dryGain, wetGain, wetMix,
+          lWidthGain, rWidthGain,
+        };
+      }
+
+      // ── H-Delay — Waves H-Delay emulation ────────────────────────────────────
+      // Always built so wet/dry and all params can morph live.
+      // Architecture: input → [dry path] + [delay loop with hi/lo cut + drive]
+      // Tape mode: adds a slow LFO modulating the delay time (wow/flutter)
+      // Ping-pong: alternates wet signal L vs R each repeat via a StereoPanner
+      {
+        const hd       = fx.hdelay || {};
+        const hdOn     = !!(fx.hdelay && fx.hdelay.on);
+        const mode     = hd.mode        ?? "digital";
+        const feedback = hdOn ? Math.min(0.95, hd.feedback ?? 0.35) : 0;
+        const wetMixV  = hdOn ? (hd.wet ?? 0.40) : 0;
+        const hiCut    = hd.hiCut   ?? 8000;
+        const loCut    = hd.loCut   ?? 80;
+        const drive    = hdOn ? (hd.drive ?? 0) : 0;
+
+        // BPM sync helper (mirrors UI)
+        function hdSubdivMs(sub, bpmVal) {
+          const beat = 60000 / (bpmVal || 120);
+          const map = {
+            "1/1":beat*4,"1/2":beat*2,"1/2T":beat*(4/3),
+            "1/4":beat,"1/4T":beat*(2/3),
+            "1/8":beat/2,"1/8T":beat/3,
+            "1/16":beat/4,"1/16T":beat/6,"1/32":beat/8,
+          };
+          return Math.min(2000, (map[sub] || beat)) / 1000;
+        }
+        const delayTimeSec = hdOn
+          ? (hd.sync ? hdSubdivMs(hd.subdivision ?? "1/4", hd.bpm ?? 120) : (hd.delayMs ?? 375) / 1000)
+          : 0.375;
+
+        // Entry split
+        const hdEntry  = actx.createGain(); hdEntry.gain.value = 1;
+
+        // Dry path
+        const hdDry    = actx.createGain(); hdDry.gain.value = 1 - wetMixV;
+
+        // Wet output gain
+        const hdWet    = actx.createGain(); hdWet.gain.value = wetMixV;
+
+        // Output sum
+        const hdOut    = actx.createGain(); hdOut.gain.value = 1;
+
+        // Main delay (up to 2.1s)
+        const hdDelay  = actx.createDelay(2.1);
+        hdDelay.delayTime.value = delayTimeSec;
+
+        // Feedback path: delay → hiCut filter → loCut filter → (drive) → feedback gain → delay
+        const hdHiCut  = actx.createBiquadFilter();
+        hdHiCut.type = "lowpass";
+        hdHiCut.frequency.value = hiCut;
+        hdHiCut.Q.value = 0.5;
+
+        const hdLoCut  = actx.createBiquadFilter();
+        hdLoCut.type = "highpass";
+        hdLoCut.frequency.value = loCut;
+        hdLoCut.Q.value = 0.5;
+
+        // Analog saturation waveshaper (soft clip — bypassed when drive=0)
+        const hdSat = actx.createWaveShaper();
+        const satCurve = (function() {
+          const n = 256, c = new Float32Array(n);
+          for(let i=0;i<n;i++){
+            const x = (i * 2 / n) - 1;
+            c[i] = x * (1 + drive * 4) / (1 + Math.abs(x) * drive * 4);
+          }
+          return c;
+        })();
+        hdSat.curve = satCurve;
+        hdSat.oversample = "2x";
+
+        // Tape wow/flutter: LFO → delay modulation (only in tape mode)
+        const hdLfo   = actx.createOscillator();
+        const hdLfoGain = actx.createGain();
+        const modDepth = hdOn ? (hd.modDepth ?? 0.15) : 0;
+        const modRate  = hd.modRate ?? 0.5;
+        hdLfo.type = "sine";
+        hdLfo.frequency.value = mode === "tape" ? modRate : 0.001; // near-zero when not tape
+        // LFO modulation depth: up to ±15ms flutter in tape mode
+        hdLfoGain.gain.value = mode === "tape" ? modDepth * 0.015 : 0;
+        hdLfo.connect(hdLfoGain);
+        hdLfoGain.connect(hdDelay.delayTime);
+        hdLfo.start();
+
+        // Feedback gain
+        const hdFb    = actx.createGain(); hdFb.gain.value = feedback;
+
+        // Ping-pong panner: alternates L/R on each repeat via a secondary delay copy
+        // We implement ping-pong with a StereoPanner that is flipped by feedback count.
+        // Simplification: in ping-pong we duplicate the wet signal with a half-offset copy.
+        const hdPan   = actx.createStereoPanner();
+        hdPan.pan.value = mode === "ping" ? -1 : 0; // first echo hard-L, feedback flips
+
+        const hdPanFlip = actx.createStereoPanner();
+        hdPanFlip.pan.value = mode === "ping" ? 1 : 0; // second echo hard-R
+
+        const hdFbFlip = actx.createGain(); hdFbFlip.gain.value = mode === "ping" ? feedback : 0;
+        const hdDelayFlip = actx.createDelay(2.1);
+        hdDelayFlip.delayTime.value = delayTimeSec; // half-offset for flip copy
+
+        // ── Routing ──
+        // Main chain: hdEntry → hdDelay → hdHiCut → hdLoCut → hdSat → hdPan → hdWet → hdOut
+        //             └─ feedback: hdSat → hdFb → hdDelay (loop)
+        hdEntry.connect(hdDry);
+        hdDry.connect(hdOut);
+
+        hdEntry.connect(hdDelay);
+        hdDelay.connect(hdHiCut);
+        hdHiCut.connect(hdLoCut);
+        hdLoCut.connect(hdSat);
+        hdSat.connect(hdPan);
+        hdPan.connect(hdWet);
+        // Feedback loop
+        hdSat.connect(hdFb);
+        hdFb.connect(hdDelay);
+
+        // Ping-pong second copy (offset by half a delay period)
+        if (mode === "ping") {
+          hdSat.connect(hdFbFlip);
+          hdFbFlip.connect(hdDelayFlip);
+          hdDelayFlip.connect(hdPanFlip);
+          hdPanFlip.connect(hdWet);
+        }
+
+        hdWet.connect(hdOut);
+        hdOut.connect(node);
+        node = hdEntry;
+
+        liveNodes.hdelay = {
+          hdDelay, hdDelayFlip, hdHiCut, hdLoCut, hdSat,
+          hdDry, hdWet, hdFb, hdFbFlip,
+          hdPan, hdPanFlip, hdLfo, hdLfoGain, hdOut,
+        };
+      }
+      if (fx.noiseremover && fx.noiseremover.on) {
+        const nr       = fx.noiseremover;
+        const strength = nr.strength ?? 0.85;
+        const echo     = nr.echo     ?? 0.4;
+        const voiceEnh = nr.voice    ?? 0.6;
+        const useKb    = nr.keyboard !== false;
+
+        // ── 1. Keyboard / typing notch filters (200Hz, 800Hz, 4kHz click bands) ──
+        if (useKb) {
+          const clickFreqs = [200, 800, 4000];
+          for (const cf of clickFreqs) {
+            const notch = actx.createBiquadFilter();
+            notch.type = "notch";
+            notch.frequency.value = cf;
+            notch.Q.value = 0.5;
+            notch.connect(node); node = notch;
+          }
+        }
+
+        // ── 2. Room echo reduction — highpass gate + shelf ────────────────────
+        if (echo > 0.05) {
+          // Gentle highpass to cut room rumble
+          const hpf = actx.createBiquadFilter();
+          hpf.type = "highpass";
+          hpf.frequency.value = 80 + echo * 120; // 80–200Hz sweep
+          hpf.Q.value = 0.5;
+          hpf.connect(node); node = hpf;
+
+          // Low-shelf cut to reduce room boom
+          const shelf = actx.createBiquadFilter();
+          shelf.type = "lowshelf";
+          shelf.frequency.value = 300;
+          shelf.gain.value = -(echo * 6); // up to -6dB room cut
+          shelf.connect(node); node = shelf;
+        }
+
+        // ── 3. Voice enhancement — presence boost + output gain ───────────────
+        if (voiceEnh > 0.05) {
+          // Presence / clarity boost 2–5kHz
+          const presence = actx.createBiquadFilter();
+          presence.type = "peaking";
+          presence.frequency.value = 3000;
+          presence.Q.value = 0.8;
+          presence.gain.value = voiceEnh * 8; // up to +8dB presence
+          presence.connect(node); node = presence;
+
+          // Air boost at 10kHz for clarity
+          const air = actx.createBiquadFilter();
+          air.type = "highshelf";
+          air.frequency.value = 10000;
+          air.gain.value = voiceEnh * 3; // up to +3dB air
+          air.connect(node); node = air;
+        }
+
+        // ── 4. RNNoise AudioWorklet — neural net denoiser ─────────────────────
+        if (rnnoiseWorkletReady.current) {
+          try {
+            const rnNode = new AudioWorkletNode(actx, "rnnoise-processor", {
+              processorOptions: { strength },
+              numberOfInputs:   1,
+              numberOfOutputs:  1,
+              outputChannelCount: [1],
+            });
+            // Allow live strength updates
+            liveNodes.rnnoiseNode = rnNode;
+            rnNode.connect(node);
+            node = rnNode;
+          } catch(e) {
+            // Worklet instantiation failed — biquad fallback already applied above
+          }
+        } else {
+          // Pure biquad fallback: gentle noise gate via dynamics compressor
+          const gate = actx.createDynamicsCompressor();
+          gate.threshold.value = -60 + strength * 30; // -60 to -30dB threshold
+          gate.ratio.value     = 20;
+          gate.attack.value    = 0.001;
+          gate.release.value   = 0.1;
+          gate.connect(node); node = gate;
+          liveNodes.rnnoiseGate = gate;
+        }
+
+        liveNodes.noiseremover = { on: true };
+      }
+
       // ── Pitch/Autotune via phase-vocoder AudioWorklet ──────────────────────
       // SHIFT mode (mode=0): uses pitch param (semitone ratio) directly.
       // AUTOTUNE mode (mode=1): worklet detects live pitch and snaps to scale at speed rate.
@@ -5990,7 +8476,12 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       // Freeze playhead at current position — don't jump
       playheadAtRef.current = currentTime;
     } else {
-      doPlay(currentTime);
+      // If a loop region is set, always start from loopIn
+      const startT = (loopEnabled && loopOut > loopIn) ? loopIn : currentTime;
+      doPlay(startT);
+      setCurrentTime(startT);
+      setOffsetForTime(startT);
+      playheadAtRef.current = startT;
       setIsPlaying(true);
     }
   };
@@ -6040,32 +8531,35 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     return Math.max(0, laneX / effectivePPS);
   };
 
-  // Ruler always snaps to the nearest bar boundary for clean loop regions.
-  // Falls back to beat-snap when bars are very short (high BPM / many beats).
+  // Ruler snaps to the nearest BEAT boundary (not just bars).
+  // This allows loop regions to start/end on any individual beat,
+  // making 1-bar, 2-bar, half-bar loops all equally easy to set.
   const snapToBar = function (t) {
-    const grid = spBar > 0 ? spBar : spb;
-    return Math.max(0, Math.round(t / grid) * grid);
+    if (spb <= 0) return Math.max(0, t);
+    // Snap to nearest beat
+    const snappedBeat = Math.max(0, Math.round(t / spb) * spb);
+    return snappedBeat;
   };
 
   const handleRulerMouseDown = function (e) {
     e.preventDefault();
     const raw = rulerTimeFromClientX(e.clientX);
     const t   = snapToBar(raw);
-    // Snap the grab threshold to one bar so handles feel magnetic
-    const grabThresh = Math.max(0.3, spBar * 0.5);
+    // Grab threshold: half a beat (so handles feel magnetic near beat boundaries)
+    const grabThresh = Math.max(0.15, spb * 0.5);
     let mode = "new";
     if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
     else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
     rulerDragRef.current = { mode, startX: e.clientX, startT: t };
 
-    if (mode === "new") { setLoopEnabled(true); setLoopIn(t); setLoopOut(snapToBar(t + spBar)); }
+    if (mode === "new") { setLoopEnabled(true); setLoopIn(t); setLoopOut(snapToBar(t + spb)); }
 
     const onMove = function (me) {
       const nt = snapToBar(rulerTimeFromClientX(me.clientX));
-      if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spBar)); }
-      else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spBar)); }
+      if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
+      else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spb)); }
       else {
-        if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spBar));
+        if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spb));
         else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
       }
     };
@@ -6082,23 +8576,23 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     e.preventDefault();
     const raw = rulerTimeFromClientX(e.touches[0].clientX);
     const t   = snapToBar(raw);
-    const grabThresh = Math.max(0.3, spBar * 0.5);
+    const grabThresh = Math.max(0.15, spb * 0.5);
     let mode = "new";
     if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
     else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
     rulerDragRef.current = { mode, startT: t };
 
-    if (mode === "new") { setLoopEnabled(true); setLoopIn(t); setLoopOut(snapToBar(t + spBar)); }
+    if (mode === "new") { setLoopEnabled(true); setLoopIn(t); setLoopOut(snapToBar(t + spb)); }
   };
 
   const handleRulerTouchMove = function (e) {
     e.preventDefault();
     if (!rulerDragRef.current) return;
     const nt = snapToBar(rulerTimeFromClientX(e.touches[0].clientX));
-    if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spBar)); }
-    else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spBar)); }
+    if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
+    else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spb)); }
     else {
-      if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spBar));
+      if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spb));
       else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
     }
   };
@@ -6120,6 +8614,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       reverb:     { on:false, wet:0.25, roomSize:0.8 },
       eq:         { on:false, low:0, mid:0, high:0 },
       compressor: { on:false, threshold:-24, ratio:4, attack:0.003, release:0.25 },
+      trotten:    { on:false, eqLow:0, eqMid:0, eqHigh:0, eqLowT:"shelf", eqMidT:"bell", eqHighT:"shelf", compThr:-15, compAmt:50, compMode:"auto", tapeDrv:5, tapeSat:5, tapeMode:"modern", limCeil:-0.5, limRel:0.5, limMode:"truepeak", inputGain:0, outputGain:0 },
     };
   };
 
@@ -6299,14 +8794,9 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     try {
       // Build mic constraints using the same helper as monitoring,
       // so the selected mic source (iPhone vs headset) is respected during recording.
-      // For recording we turn echo cancellation and noise suppression ON for cleaner vocals.
-      const recConstraints = await buildMicConstraints(micSource, {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl:  false,
-        sampleRate:       44100,
-        channelCount:     1,
-      });
+      // All DSP (echo cancellation, noise suppression, AGC) stays OFF — raw clean signal.
+      // Post-processing is handled by the Noise Remover FX plugin instead.
+      const recConstraints = await buildMicConstraints(micSource);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: recConstraints });
 
       const actx    = getActx();
@@ -6317,13 +8807,21 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       setRecTrail([]);
       chunksRef.current = [];
 
-      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : MediaRecorder.isTypeSupported("audio/webm")
-          ? "audio/webm"
-          : "audio/mp4";
+      // Pick highest-quality codec available:
+      // opus in webm (best compression + quality), then webm fallback, then mp4 for iOS Safari
+      const CODEC_PREFS = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/mp4",
+      ];
+      const mime = CODEC_PREFS.find(function(m){ return MediaRecorder.isTypeSupported(m); }) || "";
 
-      const mr = new MediaRecorder(stream, { mimeType: mime });
+      // 128kbps minimum — enough for pristine vocal quality at 48kHz/mono
+      const mr = new MediaRecorder(stream, {
+        mimeType:          mime || undefined,
+        audioBitsPerSecond: 128000,
+      });
 
       mr.ondataavailable = function (ev) {
         if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data);
@@ -6450,7 +8948,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       const headPos       = playheadAtRef.current;    // timeline position at that moment
 
       // ── Start the recorder and stamp the clock as tightly as possible ──────
-      mr.start(50); // 50ms chunks
+      mr.start(100); // 100ms chunks — reliable across iOS Safari + Chrome; 50ms causes gaps
       const startActxTime = actx.currentTime;
       const inputLatency  = actx.inputLatency || 0;
 
@@ -6616,7 +9114,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     // The inner mask div always covers the lane so we can't use e.target === e.currentTarget
     if (e.target && e.target.closest && e.target.closest("[data-clipid]")) return;
     // Called from onTouchStart on blank lane space.
-    // We start a 1.5s timer; if the finger doesn't move much, activate lasso.
+    // We start a 0.4s timer; if the finger doesn't move much, activate lasso.
     const touch = e.touches[0];
     const startX = touch.clientX;
     const startY = touch.clientY;
@@ -6625,7 +9123,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       longPressRef.current = null;
       // Haptic-style visual pulse then start lasso
       startLassoFromTouch(startX, startY);
-    }, 1500);
+    }, 400);
 
     const cancelLP = function(te) {
       if (!longPressRef.current) return;
@@ -6777,14 +9275,20 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     const onStart = function (e) {
       if (e.touches.length !== 2) return;
       const dx=e.touches[0].clientX-e.touches[1].clientX, dy=e.touches[0].clientY-e.touches[1].clientY;
-      pinchRef.current = { dist:Math.sqrt(dx*dx+dy*dy), zoom:zoomRef.current };
+      const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      pinchRef.current = { dist:Math.sqrt(dx*dx+dy*dy), zoom:zoomRef.current, midX, scrollLeft:el.scrollLeft };
     };
     const onMove = function (e) {
       if (e.touches.length !== 2 || !pinchRef.current) return;
       e.preventDefault();
       const dx=e.touches[0].clientX-e.touches[1].clientX, dy=e.touches[0].clientY-e.touches[1].clientY;
       const d=Math.sqrt(dx*dx+dy*dy);
-      setZoom(Math.min(4, Math.max(0.25, +(pinchRef.current.zoom*d/pinchRef.current.dist).toFixed(2))));
+      const newZoom = Math.min(32, Math.max(0.05, +(pinchRef.current.zoom*d/pinchRef.current.dist).toFixed(3)));
+      // Anchor scroll to the pinch midpoint so the timeline scales around your fingers
+      const ratio = newZoom / pinchRef.current.zoom;
+      const pivotX = pinchRef.current.midX - el.getBoundingClientRect().left + pinchRef.current.scrollLeft;
+      el.scrollLeft = Math.max(0, pivotX * ratio - (pinchRef.current.midX - el.getBoundingClientRect().left));
+      setZoom(newZoom);
     };
     const onEnd = function () { pinchRef.current = null; };
     el.addEventListener("touchstart",onStart,{passive:true});
@@ -6982,35 +9486,487 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     localStorage.setItem("bf_studio_projects", JSON.stringify(u));
   };
 
-  // ── BPM detect ────────────────────────────────────────────────
-  const detectBpm = async function () {
-    const beatTrack = tracks.find(function(t){ return t.type==="beat" && t.audioBuffer; });
-    if (!beatTrack) return;
-    setBpmDetecting(true); setDetectedBpm(null);
+  // ══════════════════════════════════════════════════════════════
+  // BPM DETECTION ENGINE — multi-band, Worker-based, DAW-grade
+  // ══════════════════════════════════════════════════════════════
+
+  // ── Build the inline Worker blob (runs entirely off the UI thread) ──────
+  const getBpmWorker = useCallback(function () {
+    if (bpmWorkerRef.current) return bpmWorkerRef.current;
+
+    // ── WORKER SOURCE ── everything inside this string runs in a Worker ──
+    const WORKER_SRC = `
+"use strict";
+// ─── DSP helpers ──────────────────────────────────────────────────────────
+
+// IIR biquad filter — Direct Form II
+// Returns {a1,a2,b0,b1,b2} coefficients for lowpass/highpass/bandpass
+function biquadLP(fc, sr) {
+  const w0 = 2 * Math.PI * fc / sr;
+  const cosw = Math.cos(w0), sinw = Math.sin(w0);
+  const alpha = sinw / (2 * 0.7071); // Q=0.7071 (butterworth)
+  const b0 = (1 - cosw) / 2, b1 = 1 - cosw, b2 = b0;
+  const a0 = 1 + alpha, a1 = -2 * cosw, a2 = 1 - alpha;
+  return { b0:b0/a0, b1:b1/a0, b2:b2/a0, a1:a1/a0, a2:a2/a0 };
+}
+function biquadHP(fc, sr) {
+  const w0 = 2 * Math.PI * fc / sr;
+  const cosw = Math.cos(w0), sinw = Math.sin(w0);
+  const alpha = sinw / (2 * 0.7071);
+  const b0 = (1 + cosw) / 2, b1 = -(1 + cosw), b2 = b0;
+  const a0 = 1 + alpha, a1 = -2 * cosw, a2 = 1 - alpha;
+  return { b0:b0/a0, b1:b1/a0, b2:b2/a0, a1:a1/a0, a2:a2/a0 };
+}
+
+// Apply cascaded biquad filter to PCM array — in-place, returns new array
+function applyBiquad(pcm, c) {
+  const out = new Float32Array(pcm.length);
+  let x1=0,x2=0,y1=0,y2=0;
+  for (let i=0; i<pcm.length; i++) {
+    const x = pcm[i];
+    const y = c.b0*x + c.b1*x1 + c.b2*x2 - c.a1*y1 - c.a2*y2;
+    x2=x1; x1=x; y2=y1; y1=y;
+    out[i] = y;
+  }
+  return out;
+}
+
+// Cascade two biquad filters for steeper rolloff
+function applyBiquad2(pcm, c) {
+  return applyBiquad(applyBiquad(pcm, c), c);
+}
+
+// Root-mean-square energy of a block
+function rms(arr, start, len) {
+  let s = 0;
+  for (let i = start; i < start + len && i < arr.length; i++) s += arr[i]*arr[i];
+  return Math.sqrt(s / len);
+}
+
+// Spectral flux onset detection on a single-channel PCM buffer.
+// Returns Float32Array of onset strength envelope (one value per hop).
+// Uses half-wave rectified spectral difference: only increases in energy matter.
+function spectralFluxOnset(pcm, sr, hopSize) {
+  hopSize = hopSize || 256;
+  const N = pcm.length;
+  const envLen = Math.floor(N / hopSize);
+  const env = new Float32Array(envLen);
+  let prevRMS = 0;
+  for (let i = 0; i < envLen; i++) {
+    const cur = rms(pcm, i * hopSize, hopSize);
+    // Half-wave rectify (only rising energy = onset)
+    const diff = cur - prevRMS;
+    env[i] = diff > 0 ? diff : 0;
+    prevRMS = cur;
+  }
+  return env;
+}
+
+// Autocorrelation of onset envelope within BPM range [minBpm, maxBpm].
+// Returns {bpm, lag, score} for the best-matching period.
+function autocorrBPM(onset, sr, hopSize, minBpm, maxBpm) {
+  minBpm = minBpm || 50; maxBpm = maxBpm || 210;
+  const fps = sr / hopSize;
+  const minLag = Math.round(fps * 60 / maxBpm);
+  const maxLag = Math.round(fps * 60 / minBpm);
+  // Only use the first 45 seconds to keep it fast but skip silent intros
+  const acLen = Math.min(onset.length, Math.round(fps * 45));
+
+  let bestLag = minLag, bestScore = -1;
+  for (let lag = minLag; lag <= Math.min(maxLag, acLen - 1); lag++) {
+    let score = 0;
+    for (let t = 0; t < acLen - lag; t++) score += onset[t] * onset[t + lag];
+    score /= (acLen - lag);
+    if (score > bestScore) { bestScore = score; bestLag = lag; }
+  }
+  const rawBpm = fps * 60 / bestLag;
+  return { bpm: rawBpm, lag: bestLag, score: bestScore };
+}
+
+// Parabolic interpolation around a peak for sub-bin BPM accuracy
+function parabolicPeak(scores, idx) {
+  if (idx <= 0 || idx >= scores.length - 1) return idx;
+  const y0 = scores[idx - 1], y1 = scores[idx], y2 = scores[idx + 1];
+  const denom = 2 * (y0 - 2 * y1 + y2);
+  return denom !== 0 ? idx - (y2 - y0) / (2 * denom) : idx;
+}
+
+// Evaluate a candidate BPM against an onset envelope
+function scoreBpmCandidate(onset, sr, hopSize, candidateBpm) {
+  const fps = sr / hopSize;
+  const lag = fps * 60 / candidateBpm;
+  const iLag = Math.round(lag);
+  if (iLag < 1 || iLag >= onset.length) return 0;
+  const len = Math.min(onset.length, Math.round(fps * 45));
+  let score = 0;
+  for (let t = 0; t < len - iLag; t++) score += onset[t] * onset[t + iLag];
+  return score / (len - iLag);
+}
+
+// Half-time / double-time correction heuristic:
+// Prefers tempos in [80,160] range; tries *2 or /2 if outside
+function normaliseRange(bpm) {
+  let b = bpm;
+  while (b < 70) b *= 2;
+  while (b > 175) b = Math.round(b / 2);
+  return b;
+}
+
+// Confidence-weighted BPM voting across 3 bands.
+// Returns {bpm, confidence, bands:{low,mid,high}}
+function multiBandVote(results) {
+  // Weights: kick/bass (low) most reliable for trap/EDM; mids good for rock; highs noisy
+  const weights = { low: 1.0, mid: 0.8, high: 0.5 };
+  let totalW = 0, weightedBpm = 0;
+  const bandConf = {};
+  for (const band of ['low','mid','high']) {
+    const r = results[band];
+    if (!r || r.score <= 0) { bandConf[band] = 0; continue; }
+    const w = weights[band] * r.score;
+    weightedBpm += r.bpm * w;
+    totalW += w;
+    bandConf[band] = Math.min(1, r.score * 8); // normalise to 0-1
+  }
+  const bpm = totalW > 0 ? weightedBpm / totalW : 120;
+  // Agreement confidence: how well do the 3 bands agree?
+  const bpms = ['low','mid','high'].map(function(b){ return results[b] && results[b].score > 0 ? results[b].bpm : bpm; });
+  const meanBpm = bpms.reduce(function(a,v){ return a+v; }, 0) / bpms.length;
+  const variance = bpms.reduce(function(a,v){ return a + Math.pow(v - meanBpm, 2); }, 0) / bpms.length;
+  // Low variance = high agreement = high confidence
+  const agreementConf = Math.max(0, 1 - Math.sqrt(variance) / 30);
+  const confidence = Math.min(1, agreementConf * (totalW > 0 ? Math.min(1, totalW * 4) : 0.3));
+  return { bpm: Math.round(bpm * 10) / 10, confidence, bands: bandConf };
+}
+
+// Find the strongest 30-second window in a PCM buffer (avoids silent intros)
+function findStrongestWindow(pcm, sr, windowSecs) {
+  windowSecs = windowSecs || 30;
+  const windowLen = Math.round(sr * windowSecs);
+  if (pcm.length <= windowLen) return 0;
+  const step = Math.round(sr * 5); // check every 5 seconds
+  let bestStart = 0, bestRMS = 0;
+  for (let start = 0; start + windowLen < pcm.length; start += step) {
+    const r = rms(pcm, start, windowLen);
+    if (r > bestRMS) { bestRMS = r; bestStart = start; }
+  }
+  return bestStart;
+}
+
+// Beat grid: given BPM + onset envelope, place beat markers
+function buildBeatGrid(onset, sr, hopSize, bpm, durationSec) {
+  const fps = sr / hopSize;
+  const spb = 60 / bpm; // seconds per beat
+  const beats = [];
+  // Find first strong onset in first 4 beats to anchor the grid
+  const firstWindow = Math.min(onset.length, Math.round(fps * spb * 4));
+  let anchorFrame = 0, maxOnset = 0;
+  for (let i = 0; i < firstWindow; i++) {
+    if (onset[i] > maxOnset) { maxOnset = onset[i]; anchorFrame = i; }
+  }
+  const anchorSec = anchorFrame / fps;
+  // Walk forward from anchor
+  let t = anchorSec;
+  while (t < durationSec) { beats.push(Math.round(t * 1000) / 1000); t += spb; }
+  // Walk backward from anchor
+  t = anchorSec - spb;
+  while (t >= 0) { beats.unshift(Math.round(t * 1000) / 1000); t -= spb; }
+  return beats;
+}
+
+// Swing estimation: measure inter-onset-interval histogram, compare even/odd beats
+function estimateSwing(beats) {
+  if (beats.length < 8) return 0;
+  const iois = [];
+  for (let i = 1; i < beats.length; i++) iois.push(beats[i] - beats[i-1]);
+  const odd = [], even = [];
+  for (let i = 0; i < iois.length; i++) (i%2===0 ? even : odd).push(iois[i]);
+  if (!even.length || !odd.length) return 0;
+  const avgEven = even.reduce(function(a,v){ return a+v; }, 0) / even.length;
+  const avgOdd  = odd.reduce(function(a,v){ return a+v; }, 0) / odd.length;
+  const ratio = avgEven > 0 ? avgOdd / avgEven : 1;
+  // Pure straight = 1.0, full triplet swing ≈ 2.0, return 0-1 scaled
+  return Math.max(0, Math.min(1, (ratio - 1) * 2));
+}
+
+// ─── Main Worker message handler ────────────────────────────────────────────
+self.onmessage = async function(e) {
+  const { type, pcm, sampleRate, duration, id } = e.data;
+
+  if (type === 'analyse') {
     try {
-      const raw=beatTrack.audioBuffer.getChannelData(0), SR=beatTrack.audioBuffer.sampleRate, hop=256;
-      const envLen=Math.floor(raw.length/hop); const env=new Float32Array(envLen);
-      for(let i=0;i<envLen;i++){let s=0;for(let j=i*hop;j<(i+1)*hop&&j<raw.length;j++)s+=raw[j]*raw[j];env[i]=Math.sqrt(s/hop);}
-      const onset=new Float32Array(envLen);
-      for(let i=1;i<envLen;i++){const d=env[i]-env[i-1];onset[i]=d>0?d:0;}
-      const fps=SR/hop,minL=Math.round(fps*60/200),maxL=Math.round(fps*60/60),acLen=Math.min(envLen,Math.round(fps*30));
-      let bestL=minL,bestS=-1;
-      for(let lag=minL;lag<=maxL;lag++){let sc=0;for(let t=0;t<acLen-lag;t++)sc+=onset[t]*onset[t+lag];sc/=(acLen-lag);if(sc>bestS){bestS=sc;bestL=lag;}}
-      let raw2=fps*60/bestL;
-      const cands=[raw2,raw2*2,raw2/2,raw2*1.5,raw2/1.5];
-      const scored=cands.map(function(cb){
-        if(cb<60||cb>200)return{bpm:cb,sc:-1};
-        const cl=fps*60/cb;let sc2=0;
-        for(let t=0;t<acLen-Math.round(cl);t++)sc2+=onset[t]*onset[t+Math.round(cl)];
-        return{bpm:Math.round(cb),sc:sc2/(acLen-Math.round(cl))};
+      self.postMessage({ type:'progress', id, progress: 5, msg:'Finding strongest section…' });
+
+      const sr = sampleRate || 44100;
+      const hop = 256;
+
+      // ── 1. Find the strongest 30s window (skip silent intros) ──────────
+      const winStart = findStrongestWindow(pcm, sr, 30);
+      const winLen   = Math.min(pcm.length - winStart, Math.round(sr * 30));
+      const window30 = pcm.slice(winStart, winStart + winLen);
+
+      self.postMessage({ type:'progress', id, progress: 15, msg:'Building 3-band filterbank…' });
+
+      // ── 2. 3-band IIR filterbank ───────────────────────────────────────
+      // Low  band: 0 – 200 Hz  (kick, bass — most reliable for BPM)
+      // Mid  band: 200 – 2000 Hz (snare, guitar, keys)
+      // High band: 2000+ Hz   (hi-hats, cymbals)
+      const lpLow  = biquadLP(200, sr);
+      const hpMid  = biquadHP(200, sr);
+      const lpMid  = biquadLP(2000, sr);
+      const hpHigh = biquadHP(2000, sr);
+
+      const lowBand  = applyBiquad2(window30, lpLow);
+      const midBand  = applyBiquad2(applyBiquad2(window30, hpMid), lpMid);
+      const highBand = applyBiquad2(window30, hpHigh);
+
+      self.postMessage({ type:'progress', id, progress: 30, msg:'Computing onset envelopes…' });
+
+      // ── 3. Per-band onset detection (spectral flux) ────────────────────
+      const onsetLow  = spectralFluxOnset(lowBand,  sr, hop);
+      const onsetMid  = spectralFluxOnset(midBand,  sr, hop);
+      const onsetHigh = spectralFluxOnset(highBand, sr, hop);
+
+      self.postMessage({ type:'progress', id, progress: 50, msg:'Running autocorrelation…' });
+
+      // ── 4. Per-band autocorrelation BPM ───────────────────────────────
+      const rawLow  = autocorrBPM(onsetLow,  sr, hop, 50, 210);
+      const rawMid  = autocorrBPM(onsetMid,  sr, hop, 50, 210);
+      const rawHigh = autocorrBPM(onsetHigh, sr, hop, 50, 210);
+
+      self.postMessage({ type:'progress', id, progress: 65, msg:'Half-time correction…' });
+
+      // ── 5. Normalise BPM ranges per band ──────────────────────────────
+      // Evaluate multiple candidates (raw, *2, /2, *1.5) and pick best score
+      const refineCandidate = function(onset, raw) {
+        const cands = [raw.bpm, raw.bpm*2, raw.bpm/2, raw.bpm*1.5, raw.bpm/1.5];
+        let best = raw;
+        for (const c of cands) {
+          const norm = normaliseRange(c);
+          if (norm < 50 || norm > 210) continue;
+          const sc = scoreBpmCandidate(onset, sr, hop, norm);
+          if (sc > best.score) best = { bpm:norm, lag:Math.round(sr/hop*60/norm), score:sc };
+        }
+        best.bpm = normaliseRange(best.bpm);
+        return best;
+      };
+
+      const refinedLow  = refineCandidate(onsetLow,  rawLow);
+      const refinedMid  = refineCandidate(onsetMid,  rawMid);
+      const refinedHigh = refineCandidate(onsetHigh, rawHigh);
+
+      self.postMessage({ type:'progress', id, progress: 75, msg:'Confidence voting…' });
+
+      // ── 6. Multi-band confidence voting ───────────────────────────────
+      const vote = multiBandVote({ low:refinedLow, mid:refinedMid, high:refinedHigh });
+      let finalBpm = vote.bpm;
+      finalBpm = normaliseRange(finalBpm);
+      finalBpm = Math.round(finalBpm * 10) / 10; // 1 decimal place
+
+      self.postMessage({ type:'progress', id, progress: 85, msg:'Building beat grid…' });
+
+      // ── 7. Build beat grid from strongest-section onset ───────────────
+      // Use the low-band onset (kick drum = most reliable for beat tracking)
+      const beatGrid = buildBeatGrid(onsetLow, sr, hop, finalBpm, duration || (pcm.length / sr));
+      // Offset beat grid back to absolute timeline position
+      const offsetSec = winStart / sr;
+      const beatGridAbs = beatGrid.map(function(t){ return Math.round((t + offsetSec)*1000)/1000; });
+
+      // ── 8. Onset timestamps (absolute positions, strongest per frame) ──
+      const fps = sr / hop;
+      const combinedOnset = new Float32Array(onsetLow.length);
+      for (let i = 0; i < onsetLow.length; i++) {
+        combinedOnset[i] = Math.max(onsetLow[i], onsetMid[i] * 0.7, onsetHigh[i] * 0.4);
+      }
+      // Pick top onsets above 60% of max
+      const maxO = combinedOnset.reduce(function(a,v){ return Math.max(a,v); }, 0);
+      const onsets = [];
+      for (let i = 1; i < combinedOnset.length - 1; i++) {
+        if (combinedOnset[i] >= maxO * 0.6 &&
+            combinedOnset[i] >= combinedOnset[i-1] &&
+            combinedOnset[i] >= combinedOnset[i+1]) {
+          onsets.push(Math.round((offsetSec + i / fps) * 1000) / 1000);
+        }
+      }
+
+      // ── 9. Swing estimation ───────────────────────────────────────────
+      const swing = estimateSwing(beatGrid);
+
+      self.postMessage({ type:'progress', id, progress: 95, msg:'Finalizing…' });
+
+      // ── 10. Return results ────────────────────────────────────────────
+      self.postMessage({
+        type: 'result',
+        id,
+        bpm: finalBpm,
+        confidence: vote.confidence,
+        bands: vote.bands,
+        beats: beatGridAbs.slice(0, 2000),   // cap at 2000 markers
+        onsets: onsets.slice(0, 5000),
+        swing,
+        bandBpms: { low:refinedLow.bpm, mid:refinedMid.bpm, high:refinedHigh.bpm },
       });
-      scored.sort(function(a,b){return b.sc-a.sc;});
-      let final=scored[0].sc>0?scored[0].bpm:Math.round(raw2);
-      while(final<60)final*=2;while(final>200)final=Math.round(final/2);
-      setDetectedBpm(final);setBpm(final);
-    }catch(e){setDetectedBpm(-1);}
+
+    } catch(err) {
+      self.postMessage({ type:'error', id, message: err.message });
+    }
+  }
+};
+`;
+
+    const blob = new Blob([WORKER_SRC], { type: 'application/javascript' });
+    const url  = URL.createObjectURL(blob);
+    const w    = new Worker(url);
+    URL.revokeObjectURL(url);
+    bpmWorkerRef.current = w;
+    return w;
+  }, []);
+
+  // ── Terminate BPM worker on unmount ─────────────────────────────────────
+  useEffect(function () {
+    return function () {
+      if (bpmWorkerRef.current) { bpmWorkerRef.current.terminate(); bpmWorkerRef.current = null; }
+    };
+  }, []);
+
+  // ── extractPCM: downmix AudioBuffer to mono Float32Array ────────────────
+  const extractPCM = useCallback(function (audioBuffer) {
+    const nc = audioBuffer.numberOfChannels;
+    const len = audioBuffer.length;
+    const out = new Float32Array(len);
+    // Downmix all channels equally
+    for (let c = 0; c < nc; c++) {
+      const ch = audioBuffer.getChannelData(c);
+      for (let i = 0; i < len; i++) out[i] += ch[i];
+    }
+    const gain = 1 / nc;
+    for (let i = 0; i < len; i++) out[i] *= gain;
+
+    // Normalise to peak = 1.0 (handles very quiet files)
+    let peak = 0;
+    for (let i = 0; i < len; i++) { const a = Math.abs(out[i]); if (a > peak) peak = a; }
+    if (peak > 0.0001) for (let i = 0; i < len; i++) out[i] /= peak;
+
+    return out;
+  }, []);
+
+  // ── Main detectBpm: works on any audio track ─────────────────────────────
+  const detectBpm = useCallback(async function (sourceBuffer) {
+    // If no buffer passed, find best candidate track
+    const buf = sourceBuffer || (function () {
+      const beatTrack = tracks.find(function(t){
+        return t.type === "beat" && t.clips && t.clips.some(function(c){ return c.audioBuffer; });
+      });
+      if (beatTrack) {
+        const cl = beatTrack.clips.find(function(c){ return c.audioBuffer; });
+        return cl ? cl.audioBuffer : null;
+      }
+      // Fallback: first track with any audio
+      for (const t of tracks) {
+        const cl = t.clips && t.clips.find(function(c){ return c.audioBuffer; });
+        if (cl) return cl.audioBuffer;
+      }
+      return null;
+    })();
+
+    if (!buf) { setBpmDetectMsg("No audio loaded."); return; }
+
+    // Cancel any in-flight analysis
+    if (bpmWorkerRef.current) {
+      bpmWorkerRef.current.terminate();
+      bpmWorkerRef.current = null;
+    }
+
+    setBpmDetecting(true);
+    setBpmProgress(0);
+    setBpmDetectMsg("Preparing audio…");
+    setDetectedBpm(null);
+    setBpmConfidence(null);
+    setBpmBandConf(null);
+    setBeatPositions([]);
+    setOnsetTimestamps([]);
+
+    try {
+      const pcm = extractPCM(buf);
+      const analysisId = Date.now();
+
+      const worker = getBpmWorker();
+
+      await new Promise(function (resolve, reject) {
+        worker.onmessage = function (e) {
+          const msg = e.data;
+          if (msg.id !== analysisId) return;
+
+          if (msg.type === 'progress') {
+            setBpmProgress(msg.progress);
+            setBpmDetectMsg(msg.msg || "");
+          }
+
+          else if (msg.type === 'result') {
+            const finalBpm = Math.round(msg.bpm);
+            setDetectedBpm(finalBpm);
+            setBpm(finalBpm);
+            setBpmConfidence(msg.confidence);
+            setBpmBandConf(msg.bands);
+            setBeatPositions(msg.beats || []);
+            setOnsetTimestamps(msg.onsets || []);
+            setSwingAmount(msg.swing || 0);
+            setBpmSource("auto");
+            setBpmProgress(100);
+            setBpmDetectMsg("Done ✓");
+            setTimeout(function(){ setBpmDetectMsg(""); setBpmProgress(0); }, 2000);
+            resolve();
+          }
+
+          else if (msg.type === 'error') {
+            reject(new Error(msg.message));
+          }
+        };
+
+        worker.onerror = reject;
+
+        // Transfer the PCM buffer to the worker (zero-copy)
+        const transferable = pcm.buffer.slice(0); // slice to ensure transferable
+        worker.postMessage({
+          type: 'analyse',
+          pcm: new Float32Array(transferable),
+          sampleRate: buf.sampleRate,
+          duration: buf.duration,
+          id: analysisId,
+        }, [transferable]);
+      });
+
+    } catch(err) {
+      console.error('[BeatFinder] BPM detection error:', err);
+      setDetectedBpm(-1);
+      setBpmDetectMsg("Detection failed");
+      setTimeout(function(){ setBpmDetectMsg(""); }, 3000);
+    }
+
     setBpmDetecting(false);
-  };
+  }, [tracks, getBpmWorker, extractPCM]);
+
+  // ── Tap-tempo logic ──────────────────────────────────────────────────────
+  const handleTapTempo = useCallback(function () {
+    const now = Date.now();
+    setTapTimes(function (prev) {
+      const fresh = prev.filter(function(t){ return now - t < 3000; });
+      const next = [...fresh, now];
+      if (next.length >= 2) {
+        const intervals = [];
+        for (let i = 1; i < next.length; i++) intervals.push(next[i] - next[i-1]);
+        const avg = intervals.reduce(function(a,b){ return a+b; }, 0) / intervals.length;
+        const tapped = Math.round(60000 / avg);
+        if (tapped >= 40 && tapped <= 220) {
+          setBpm(tapped);
+          setDetectedBpm(tapped);
+          setBpmSource("tap");
+          setBpmConfidence(null); // tap has no confidence score
+        }
+      }
+      return next;
+    });
+  }, []);
+
 
   // ── Export ────────────────────────────────────────────────────
   const audioBufferToWav = function (buf) {
@@ -7123,24 +10079,87 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       {unsavedAlert && (
         <div style={{ position:"absolute",inset:0,zIndex:8000,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:"32px" }}>
           <div style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:320,textAlign:"center" }}>
-            <div style={{ color:"white",fontWeight:800,fontSize:18,marginBottom:10 }}>Unsaved Project</div>
-            <div style={{ color:"#888",fontSize:14,marginBottom:28,lineHeight:1.6 }}>Save before {unsavedAlert==="new"?"new project?":"leaving?"}</div>
+            <div style={{ fontSize:36,marginBottom:12 }}>💾</div>
+            <div style={{ color:"white",fontWeight:800,fontSize:18,marginBottom:10 }}>Save before leaving?</div>
+            <div style={{ color:"#888",fontSize:14,marginBottom:28,lineHeight:1.6 }}>Your project has unsaved changes.</div>
             <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
-              <button onClick={function(){ saveProject();setUnsavedAlert(false);if(unsavedAlert!=="new")onExit();else{setTracks([]);setProjectName("New Project");setIsSaved(false);setCurrentTime(0);} }} style={{ background:"linear-gradient(135deg,#C026D3,#7C3AED)",border:"none",borderRadius:12,color:"white",fontWeight:800,fontSize:15,padding:"14px",cursor:"pointer" }}>Save {unsavedAlert==="new"?"& New":"& Exit"}</button>
+              <button onClick={function(){
+                // Open the name prompt — capture which action triggered this
+                setUnsavedAlert(false);
+                setPendingName(projectName === "New Project" ? "" : projectName);
+                setPendingNameAction(unsavedAlert); // "exit" or "new"
+                setShowNamePrompt(true);
+              }} style={{ background:"linear-gradient(135deg,#C026D3,#7C3AED)",border:"none",borderRadius:12,color:"white",fontWeight:800,fontSize:15,padding:"14px",cursor:"pointer" }}>
+                Save {unsavedAlert==="new"?"& New":"& Exit"}
+              </button>
               <button onClick={function(){
                 setUnsavedAlert(false);
-                if(unsavedAlert!=="new"){
-                  onExit();
-                } else {
-                  // Full reset — clear everything so old project can't ghost back
+                // Full reset so old project doesn't ghost back
+                stopAll(); setIsPlaying(false);
+                setTracks([]); setProjectName("New Project");
+                setBpm(120); setProjectKey("C major"); setTimeSigNum(4);
+                setCurrentTime(0); setIsSaved(true); setSelectedTrackId(null);
+                if(scrollRef.current) scrollRef.current.scrollLeft = 0;
+                if(unsavedAlert !== "new") onExit();
+              }} style={{ background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:12,color:"#EF4444",fontWeight:700,fontSize:15,padding:"14px",cursor:"pointer" }}>Don't Save</button>
+              <button onClick={function(){ setUnsavedAlert(false); }} style={{ background:"none",border:"1px solid #2a2a2a",borderRadius:12,color:"#666",fontSize:14,padding:"12px",cursor:"pointer" }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Name your project modal ───────────────────────────────── */}
+      {showNamePrompt && (
+        <div style={{ position:"absolute",inset:0,zIndex:8100,background:"rgba(0,0,0,0.9)",display:"flex",alignItems:"center",justifyContent:"center",padding:"32px" }}>
+          <div style={{ background:"#1a1a1a",border:"1px solid #333",borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:320 }}>
+            <div style={{ fontSize:36,marginBottom:12,textAlign:"center" }}>✏️</div>
+            <div style={{ color:"white",fontWeight:800,fontSize:18,marginBottom:6,textAlign:"center" }}>Name your project</div>
+            <div style={{ color:"#666",fontSize:13,marginBottom:20,textAlign:"center",lineHeight:1.5 }}>Give this project a name so you can find it later.</div>
+            <input
+              autoFocus
+              value={pendingName}
+              onChange={function(e){ setPendingName(e.target.value); }}
+              onKeyDown={function(e){
+                if(e.key==="Enter" && pendingName.trim()){
+                  const name = pendingName.trim();
+                  setProjectName(name);
+                  setShowNamePrompt(false);
+                  // Save then reset + exit
+                  setTimeout(async function(){
+                    await saveProject();
+                    stopAll(); setIsPlaying(false);
+                    setTracks([]); setProjectName("New Project");
+                    setBpm(120); setProjectKey("C major"); setTimeSigNum(4);
+                    setCurrentTime(0); setIsSaved(true); setSelectedTrackId(null);
+                    if(scrollRef.current) scrollRef.current.scrollLeft = 0;
+                    if(pendingNameAction !== "new") onExit();
+                  }, 30);
+                }
+                if(e.key==="Escape"){ setShowNamePrompt(false); }
+              }}
+              placeholder="e.g. Summer Freestyle, Hook Idea..."
+              style={{ width:"100%",boxSizing:"border-box",background:"#111",border:"1.5px solid #C026D3",borderRadius:12,padding:"13px 16px",color:"white",fontSize:15,outline:"none",marginBottom:16,fontFamily:"'DM Sans',sans-serif" }}
+            />
+            <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+              <button
+                onClick={async function(){
+                  const name = (pendingName.trim()) || projectName;
+                  setProjectName(name);
+                  setShowNamePrompt(false);
+                  await saveProject();
+                  // Full reset — close the project before going home
                   stopAll(); setIsPlaying(false);
                   setTracks([]); setProjectName("New Project");
                   setBpm(120); setProjectKey("C major"); setTimeSigNum(4);
                   setCurrentTime(0); setIsSaved(true); setSelectedTrackId(null);
                   if(scrollRef.current) scrollRef.current.scrollLeft = 0;
-                }
-              }} style={{ background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:12,color:"#EF4444",fontWeight:700,fontSize:15,padding:"14px",cursor:"pointer" }}>Don't Save</button>
-              <button onClick={function(){ setUnsavedAlert(false); }} style={{ background:"none",border:"1px solid #2a2a2a",borderRadius:12,color:"#666",fontSize:14,padding:"12px",cursor:"pointer" }}>Cancel</button>
+                  if(pendingNameAction !== "new") onExit();
+                }}
+                disabled={!pendingName.trim()}
+                style={{ background: pendingName.trim() ? "linear-gradient(135deg,#C026D3,#7C3AED)" : "#2a2a2a",border:"none",borderRadius:12,color: pendingName.trim() ? "white" : "#555",fontWeight:800,fontSize:15,padding:"14px",cursor: pendingName.trim() ? "pointer" : "default",transition:"all 0.15s" }}>
+                Save &amp; {pendingNameAction==="new" ? "New Project" : "Go Home"}
+              </button>
+              <button onClick={function(){ setShowNamePrompt(false); }} style={{ background:"none",border:"1px solid #2a2a2a",borderRadius:12,color:"#666",fontSize:14,padding:"12px",cursor:"pointer" }}>Cancel</button>
             </div>
           </div>
         </div>
@@ -7185,29 +10204,146 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
             </div>
             <div style={{ margin:"0 16px 16px",background:"#1a1a1a",borderRadius:14,overflow:"hidden" }}>
               <div style={{ padding:"14px 16px 6px",color:"white",fontWeight:700,fontSize:13 }}>Tempo</div>
-              <div style={{ display:"flex",alignItems:"stretch",borderTop:"1px solid #222" }}>
-                <button onClick={function(){ setBpm(function(b){ return Math.max(40,b-1); }); }} style={{ flex:1,background:"none",border:"none",borderRight:"1px solid #222",color:"white",fontSize:28,cursor:"pointer",padding:"14px 0" }}>−</button>
-                <div onClick={function(){
-                  const taps=(window._bfTaps=window._bfTaps||[]),now=Date.now();
-                  if(now-(taps[taps.length-1]||0)>3000)taps.length=0;
-                  taps.push(now);
-                  if(taps.length>=2){const intervals=[];for(let i=1;i<taps.length;i++)intervals.push(taps[i]-taps[i-1]);const avg=intervals.reduce(function(a,b){return a+b;},0)/intervals.length;const d=Math.round(60000/avg);if(d>=40&&d<=220)setBpm(d);}
-                }} style={{ flex:2,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"12px 0",cursor:"pointer" }}>
-                  <div style={{ color:"white",fontWeight:900,fontSize:40,lineHeight:1 }}>{bpm}</div>
-                  <div style={{ color:"#555",fontSize:11,marginTop:4 }}>Tap Tempo</div>
-                </div>
-                <button onClick={function(){ setBpm(function(b){ return Math.min(220,b+1); }); }} style={{ flex:1,background:"none",border:"none",borderLeft:"1px solid #222",color:"white",fontSize:28,cursor:"pointer",padding:"14px 0" }}>+</button>
-              </div>
-              <div style={{ padding:"8px 16px 12px" }}>
-                <input type="range" min={40} max={220} step={1} value={bpm} onChange={function(e){ setBpm(parseInt(e.target.value)); }} style={{ width:"100%",accentColor:"#C026D3" }} />
-              </div>
-              {tracks.some(function(t){return t.type==="beat"&&t.audioBuffer;}) && (
-                <div style={{ padding:"0 16px 14px",display:"flex",alignItems:"center",gap:10 }}>
-                  <button onClick={detectBpm} disabled={bpmDetecting} style={{ background:"rgba(192,38,211,0.15)",border:"1px solid rgba(192,38,211,0.3)",borderRadius:8,color:"#C026D3",fontSize:12,fontWeight:700,padding:"7px 14px",cursor:bpmDetecting?"not-allowed":"pointer",opacity:bpmDetecting?0.6:1 }}>{bpmDetecting?"Detecting...":"Auto-detect BPM"}</button>
-                  {detectedBpm>0&&<span style={{ color:"#22C55E",fontSize:12,fontWeight:700 }}>→ {detectedBpm} BPM</span>}
-                  {detectedBpm===-1&&<span style={{ color:"#F87171",fontSize:12 }}>Could not detect</span>}
+
+              {/* ── BPM progress bar (shows during analysis) ── */}
+              {bpmDetecting && (
+                <div style={{ padding:"0 16px 10px" }}>
+                  <div style={{ background:"#111",borderRadius:6,overflow:"hidden",height:4,marginBottom:6 }}>
+                    <div style={{ height:"100%",background:"linear-gradient(90deg,#C026D3,#7C3AED)",width:bpmProgress+"%",transition:"width 0.3s ease",borderRadius:6 }} />
+                  </div>
+                  <div style={{ color:"#888",fontSize:10,letterSpacing:1 }}>{bpmDetectMsg || "Analyzing…"}</div>
                 </div>
               )}
+
+              {/* ── BPM display row ── */}
+              <div style={{ display:"flex",alignItems:"stretch",borderTop:"1px solid #222" }}>
+                <button onClick={function(){ setBpm(function(b){ return Math.max(40,b-1); }); setBpmSource("manual"); }} style={{ flex:1,background:"none",border:"none",borderRight:"1px solid #222",color:"white",fontSize:28,cursor:"pointer",padding:"14px 0" }}>−</button>
+
+                {/* Tap tempo centre */}
+                <div onClick={handleTapTempo} style={{ flex:2,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"12px 0",cursor:"pointer",position:"relative" }}>
+                  {/* Animated beat pulse ring */}
+                  {isPlaying && (
+                    <div style={{
+                      position:"absolute", width:72, height:72, borderRadius:"50%",
+                      border:"2px solid rgba(192,38,211,0.5)",
+                      animation:"bf-play-pulse 1s ease infinite",
+                      animationDuration: (60/bpm)+"s",
+                      pointerEvents:"none",
+                    }} />
+                  )}
+                  <div style={{ color:"white",fontWeight:900,fontSize:40,lineHeight:1,fontFamily:"monospace",letterSpacing:-1 }}>
+                    {bpm}<span style={{ fontSize:14,color:"#555",fontWeight:600,letterSpacing:0 }}> BPM</span>
+                  </div>
+                  <div style={{ color:"#444",fontSize:10,marginTop:4,letterSpacing:1.5 }}>TAP TEMPO</div>
+                  {bpmSource && (
+                    <div style={{ color:bpmSource==="auto"?"#22C55E":bpmSource==="tap"?"#F59E0B":"#555",fontSize:9,fontWeight:700,letterSpacing:1,marginTop:2 }}>
+                      {bpmSource==="auto"?"AUTO-DETECTED":bpmSource==="tap"?"TAP":"MANUAL"}
+                    </div>
+                  )}
+                </div>
+
+                <button onClick={function(){ setBpm(function(b){ return Math.min(220,b+1); }); setBpmSource("manual"); }} style={{ flex:1,background:"none",border:"none",borderLeft:"1px solid #222",color:"white",fontSize:28,cursor:"pointer",padding:"14px 0" }}>+</button>
+              </div>
+
+              {/* ── BPM range slider ── */}
+              <div style={{ padding:"6px 16px 10px" }}>
+                <input type="range" min={40} max={220} step={1} value={bpm}
+                  onChange={function(e){ setBpm(parseInt(e.target.value)); setBpmSource("manual"); }}
+                  style={{ width:"100%",accentColor:"#C026D3" }} />
+              </div>
+
+              {/* ── Confidence meter + band display ── */}
+              {bpmConfidence !== null && (
+                <div style={{ padding:"0 16px 14px" }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8 }}>
+                    <div style={{ color:"#555",fontSize:10,fontWeight:700,letterSpacing:1,width:68 }}>CONFIDENCE</div>
+                    <div style={{ flex:1,background:"#111",borderRadius:4,overflow:"hidden",height:6 }}>
+                      <div style={{ height:"100%",borderRadius:4,transition:"width 0.5s ease",
+                        background: bpmConfidence > 0.7 ? "#22C55E" : bpmConfidence > 0.4 ? "#F59E0B" : "#EF4444",
+                        width: Math.round(bpmConfidence*100)+"%" }} />
+                    </div>
+                    <div style={{ color: bpmConfidence > 0.7 ? "#22C55E" : bpmConfidence > 0.4 ? "#F59E0B" : "#EF4444",
+                      fontSize:11,fontWeight:800,width:36,textAlign:"right" }}>
+                      {Math.round(bpmConfidence*100)}%
+                    </div>
+                  </div>
+
+                  {/* Per-band confidence bars */}
+                  {bpmBandConf && (
+                    <div style={{ display:"flex",gap:6 }}>
+                      {[
+                        { label:"LOW",  val:bpmBandConf.low,  color:"#C026D3" },
+                        { label:"MID",  val:bpmBandConf.mid,  color:"#7C3AED" },
+                        { label:"HIGH", val:bpmBandConf.high, color:"#3B82F6" },
+                      ].map(function(band){
+                        return (
+                          <div key={band.label} style={{ flex:1,textAlign:"center" }}>
+                            <div style={{ background:"#111",borderRadius:3,overflow:"hidden",height:28,position:"relative",marginBottom:3 }}>
+                              <div style={{ position:"absolute",bottom:0,left:0,right:0,borderRadius:3,transition:"height 0.4s ease",
+                                background:band.color+"44", height: Math.round((band.val||0)*100)+"%" }} />
+                              <div style={{ position:"absolute",bottom:0,left:0,right:0,borderRadius:3,
+                                background:band.color, height:2 }} />
+                            </div>
+                            <div style={{ color:"#555",fontSize:8,fontWeight:800,letterSpacing:1 }}>{band.label}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Swing indicator */}
+                  {swingAmount > 0.05 && (
+                    <div style={{ marginTop:8,display:"flex",alignItems:"center",gap:8 }}>
+                      <div style={{ color:"#555",fontSize:10,fontWeight:700,letterSpacing:1,width:48 }}>SWING</div>
+                      <div style={{ flex:1,background:"#111",borderRadius:4,overflow:"hidden",height:4 }}>
+                        <div style={{ height:"100%",borderRadius:4,background:"#F59E0B",width:Math.round(swingAmount*100)+"%" }} />
+                      </div>
+                      <div style={{ color:"#F59E0B",fontSize:10,fontWeight:700,width:30,textAlign:"right" }}>
+                        {Math.round(swingAmount*100)}%
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Action row: Auto-detect + Beat Grid toggle ── */}
+              <div style={{ padding:"0 16px 14px",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
+                {/* Auto-detect from loaded audio */}
+                {tracks.some(function(t){ return t.clips && t.clips.some(function(c){ return c.audioBuffer; }); }) && (
+                  <button onClick={function(){ detectBpm(); }}
+                    disabled={bpmDetecting}
+                    style={{
+                      background:"rgba(192,38,211,0.15)",border:"1px solid rgba(192,38,211,0.35)",
+                      borderRadius:8,color:bpmDetecting?"#666":"#C026D3",fontSize:11,fontWeight:700,
+                      padding:"7px 12px",cursor:bpmDetecting?"not-allowed":"pointer",
+                      opacity:bpmDetecting?0.6:1,display:"flex",alignItems:"center",gap:5
+                    }}>
+                    {bpmDetecting
+                      ? <><span style={{ width:10,height:10,borderRadius:"50%",border:"2px solid rgba(192,38,211,0.3)",borderTop:"2px solid #C026D3",animation:"bf-spin 0.7s linear infinite",display:"inline-block" }} /></>
+                      : "⚡"}
+                    {bpmDetecting ? "Analyzing…" : "Auto-Detect"}
+                  </button>
+                )}
+
+                {/* Beat grid overlay toggle */}
+                <button onClick={function(){ setShowBeatGrid(function(v){ return !v; }); }}
+                  style={{
+                    background:showBeatGrid?"rgba(59,130,246,0.15)":"#141414",
+                    border:"1px solid "+(showBeatGrid?"rgba(59,130,246,0.4)":"#2a2a2a"),
+                    borderRadius:8,color:showBeatGrid?"#3B82F6":"#555",fontSize:11,fontWeight:700,
+                    padding:"7px 12px",cursor:"pointer"
+                  }}>
+                  {showBeatGrid ? "▦ Grid ON" : "▦ Grid OFF"}
+                </button>
+
+                {/* Result display */}
+                {detectedBpm > 0 && !bpmDetecting && (
+                  <span style={{ color:"#22C55E",fontSize:12,fontWeight:700,marginLeft:"auto" }}>✓ {detectedBpm} BPM</span>
+                )}
+                {detectedBpm === -1 && !bpmDetecting && (
+                  <span style={{ color:"#F87171",fontSize:11 }}>Could not detect</span>
+                )}
+              </div>
             </div>
             <div style={{ margin:"0 16px 16px",background:"#1a1a1a",borderRadius:14 }}>
               <button onClick={function(){ setShowTSPicker(true); }} style={{ width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px",background:"none",border:"none",cursor:"pointer" }}>
@@ -7261,12 +10397,28 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
       {/* ══ TOP BAR ══════════════════════════════════════════════ */}
       <div style={{ display:"flex",alignItems:"center",padding:"10px 12px",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:6,zIndex:50 }}>
-        <button onClick={function(){ if(!isSaved&&hasContent)setUnsavedAlert(true);else onExit(); }} style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:8,color:"#888",width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0 }}>
+        <button onClick={function(){
+          if(!isSaved&&hasContent){
+            setUnsavedAlert("exit");
+          } else {
+            // Clean exit — reset so studio opens fresh next time
+            stopAll(); setIsPlaying(false);
+            setTracks([]); setProjectName("New Project");
+            setBpm(120); setProjectKey("C major"); setTimeSigNum(4);
+            setCurrentTime(0); setIsSaved(true); setSelectedTrackId(null);
+            if(scrollRef.current) scrollRef.current.scrollLeft = 0;
+            onExit();
+          }
+        }} style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:8,color:"#888",width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="#888"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
         </button>
         {/* Undo / Redo */}
-        <button onClick={undoTracks} disabled={!canUndo} title="Undo" style={{ background:"#141414",border:"1px solid #222",borderRadius:7,color:canUndo?"#aaa":"#333",width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",cursor:canUndo?"pointer":"not-allowed",flexShrink:0,fontSize:14 }}>↩</button>
-        <button onClick={redoTracks} disabled={!canRedo} title="Redo" style={{ background:"#141414",border:"1px solid #222",borderRadius:7,color:canRedo?"#aaa":"#333",width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",cursor:canRedo?"pointer":"not-allowed",flexShrink:0,fontSize:14 }}>↪</button>
+        <button onClick={undoTracks} disabled={!canUndo} title="Undo" style={{ background:"#141414",border:"1px solid #222",borderRadius:7,color:canUndo?"#aaa":"#333",width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",cursor:canUndo?"pointer":"not-allowed",flexShrink:0 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7h11a5 5 0 0 1 0 10H7"/><polyline points="7 3 3 7 7 11"/></svg>
+        </button>
+        <button onClick={redoTracks} disabled={!canRedo} title="Redo" style={{ background:"#141414",border:"1px solid #222",borderRadius:7,color:canRedo?"#aaa":"#333",width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",cursor:canRedo?"pointer":"not-allowed",flexShrink:0 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 7H10a5 5 0 0 0 0 10h7"/><polyline points="17 3 21 7 17 11"/></svg>
+        </button>
         {renamingProj
           ?<input autoFocus defaultValue={projectName} onBlur={function(e){ setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false); }} onKeyDown={function(e){ if(e.key==="Enter"){setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false);} }} style={{ background:"none",border:"none",borderBottom:"1px solid #C026D3",color:"white",fontSize:13,fontWeight:700,outline:"none",flex:1,padding:"0 0 2px" }} />
           :<span style={{ color:"white",fontWeight:700,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{projectName}</span>
@@ -7307,9 +10459,40 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
       {/* Zoom / Loop bar — monitoring toggle lives here too */}
       <div style={{ display:"flex",alignItems:"center",gap:6,padding:"4px 12px",background:"#090909",borderBottom:"1px solid #0f0f0f",flexShrink:0 }}>
-        <button onClick={function(){ setZoom(function(z){return Math.max(0.25,+(z-0.25).toFixed(2));});}} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:16,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>-</button>
-        <span style={{ color:"#555",fontSize:10,fontFamily:"monospace",width:32,textAlign:"center" }}>{zoom}x</span>
-        <button onClick={function(){ setZoom(function(z){return Math.min(4,+(z+0.25).toFixed(2));});}} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:16,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>+</button>
+        <button onClick={function(){
+          setZoom(function(z){
+            // Exponential zoom-out: each tap multiplies by ~0.7 so steps feel even at all levels
+            const next = Math.max(0.05, parseFloat((z * 0.7).toFixed(3)));
+            // Anchor scroll so playhead stays in view after zoom
+            requestAnimationFrame(function(){
+              const el = scrollRef.current;
+              if (!el) return;
+              const newPPS = PPS * next;
+              const oldPPS = PPS * z;
+              const sl = el.scrollLeft;
+              el.scrollLeft = Math.max(0, sl * (newPPS / oldPPS));
+            });
+            return next;
+          });
+        }} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:16,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>−</button>
+        <span style={{ color:"#555",fontSize:10,fontFamily:"monospace",width:38,textAlign:"center" }}>
+          {zoom >= 1 ? Math.round(zoom * 100) + "%" : Math.round(zoom * 100) + "%"}
+        </span>
+        <button onClick={function(){
+          setZoom(function(z){
+            // Exponential zoom-in: each tap multiplies by ~1.4
+            const next = Math.min(32, parseFloat((z * 1.4).toFixed(3)));
+            requestAnimationFrame(function(){
+              const el = scrollRef.current;
+              if (!el) return;
+              const newPPS = PPS * next;
+              const oldPPS = PPS * z;
+              const sl = el.scrollLeft;
+              el.scrollLeft = Math.max(0, sl * (newPPS / oldPPS));
+            });
+            return next;
+          });
+        }} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:16,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>+</button>
         <div style={{ width:1,background:"#1a1a1a",height:14,margin:"0 4px" }} />
         <button onClick={function(){ setLoopEnabled(function(v){return !v;});}} style={{ background:loopEnabled?"rgba(59,130,246,0.2)":"#141414",border:"1px solid "+(loopEnabled?"#3B82F6":"#222"),borderRadius:6,color:loopEnabled?"#3B82F6":"#555",fontSize:10,fontWeight:700,padding:"3px 8px",cursor:"pointer" }}>LOOP</button>
         <div style={{ flex:1 }} />
@@ -7328,22 +10511,22 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
             onChange={function(e){ setMonitorVol(parseFloat(e.target.value)); }}
             style={{ width:50,accentColor:"#22C55E",height:2 }} />
         )}
-        {/* Mic source picker — shown when headphones are in */}
-        {headphonesIn && (
-          <select
-            value={micSource}
-            onChange={function(e){
-              const next = e.target.value;
-              setMicSource(next);
-              if (monitoringOn) { stopMonitoring(); setTimeout(function(){ startMonitoring(undefined, next); }, 150); }
-            }}
-            title="Choose microphone source"
-            style={{ background:"#141414",border:"1px solid #2a2a2a",borderRadius:6,color:"#aaa",fontSize:9,fontWeight:700,padding:"3px 5px",cursor:"pointer",outline:"none",maxWidth:115 }}
-          >
-            <option value="builtin">📱 iPhone Mic</option>
-            <option value="headset">🎙 Headset Mic</option>
-          </select>
-        )}
+        {/* Mic source picker — iPhone Mic is always the default.
+            Headset Mic option only appears once a headset is physically detected. */}
+        <select
+          value={headphonesIn ? micSource : "builtin"}
+          onChange={function(e){
+            const next = e.target.value;
+            userPickedMicRef.current = true; // user has explicitly chosen — disable auto-switch
+            setMicSource(next);
+            if (monitoringOn) { stopMonitoring(); setTimeout(function(){ startMonitoring(undefined, next); }, 150); }
+          }}
+          title="Choose microphone source"
+          style={{ background:"#141414",border:"1px solid #2a2a2a",borderRadius:6,color:"#aaa",fontSize:9,fontWeight:700,padding:"3px 5px",cursor:"pointer",outline:"none",maxWidth:115 }}
+        >
+          <option value="builtin">📱 iPhone Mic</option>
+          {headphonesIn && <option value="headset">🎙 Headset Mic</option>}
+        </select>
       </div>
       {monitorWarn && <div style={{ background:"rgba(245,158,11,0.1)",borderBottom:"1px solid rgba(245,158,11,0.2)",color:"#F59E0B",fontSize:11,padding:"4px 16px",textAlign:"center",flexShrink:0 }}>{monitorWarn}</div>}
 
@@ -7370,6 +10553,20 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
           <div style={{ position:"absolute", top:RULER_H, bottom:0, width:1, background:"rgba(255,255,255,0.88)" }} />
           <div style={{ position:"absolute", top:0, height:RULER_H, width:1, background:"rgba(255,255,255,0.22)" }} />
         </div>
+
+        {/* ── Beat Grid Overlay — renders beat marker lines across all tracks ── */}
+        {showBeatGrid && beatPositions.length > 0 && (
+          <BeatGridOverlay
+            beats={beatPositions}
+            effectivePPS={effectivePPS}
+            sidebarW={SIDEBAR_W}
+            rulerH={RULER_H}
+            scrollRef={scrollRef}
+            isPlaying={isPlaying}
+            currentTime={currentTime}
+            bpm={bpm}
+          />
+        )}
 
         {/* THE single scroll container — overflow-x:scroll drives ruler + lanes together */}
         <div
@@ -7455,10 +10652,12 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
                     style={{
                       width:SIDEBAR_W, flexShrink:0,
                       position:"sticky", left:0, zIndex:10,
-                      background:selectedTrackId===track.id?"rgba(192,38,211)":"#0a0a0a",
-                      borderRight:"1px solid #141414",
+                      background:"#0a0a0a",
+                      borderRight: selectedTrackId===track.id ? "1px solid rgba(255,255,255,0.95)" : "1px solid #141414",
+                      boxShadow: selectedTrackId===track.id ? "inset 0 0 16px rgba(255,255,255,0.18), 0 0 20px rgba(255,255,255,0.45)" : "none",
                       padding:"5px 7px", display:"flex", flexDirection:"column", justifyContent:"space-between",
                       cursor:"pointer",
+                      transition:"border-color 0.15s, box-shadow 0.15s",
                     }}
                   >
                     <div style={{ display:"flex", alignItems:"center", gap:4 }}>
@@ -7692,567 +10891,24 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         const t = tracks.find(function(tr){ return tr.id===fxTrackId; });
         if (!t) return null;
         const fx = t.effects || {};
-        const upd = function(section, patch, rawValue){
+        // Keep ref current every render so FxPanel's stable onUpd always has latest data
+        fxUpdRef.current = function(section, patch, rawValue){
           const newEffects = section === "pluginChain"
             ? { ...t.effects, pluginChain: rawValue }
             : { ...t.effects, [section]:{ ...(t.effects[section]||{}), ...patch } };
           updateTrack(t.id, { effects: newEffects });
-          // Apply changes to live audio nodes immediately — no playback restart needed
           applyFxLive(t.id, newEffects);
         };
-
-        // ── Rotary Knob — arc and track share identical radius + strokeWidth ──
-        const Knob = function({ label, value, min, max, step, unit, onChange, color }) {
-          const startRef = useRef(null);
-          color = color || "#8B5CF6";
-          const norm  = Math.max(0, Math.min(1, (value - min) / (max - min)));
-          const angle = -140 + norm * 280;  // sweeps from -140° to +140° (280° total arc)
-
-          // Geometry: r is the CENTRE radius of the stroke.
-          // Both track circle and arc path use identical r and strokeWidth so they overlay exactly.
-          const SW = 4;       // strokeWidth — same for track AND arc
-          const r  = 20;      // arc/circle radius to stroke centre
-          const PAD = SW / 2 + 2; // padding = half stroke + 2px safety margin
-          const cx = r + PAD, cy = r + PAD;
-          const SIZE = (r + PAD) * 2;  // total SVG width/height
-
-          const toXY = function(deg) {
-            const rad = (deg - 90) * Math.PI / 180;
-            return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
-          };
-          const startA = toXY(-140);
-          const endA   = toXY(angle);
-          // largeArc: the swept angle is (angle - (-140)) = angle + 140.
-          // Large arc flag should be 1 when swept angle > 180°, i.e. angle > 40°
-          const sweptDeg  = angle - (-140);  // always 0..280
-          const largeArc  = sweptDeg > 180 ? 1 : 0;
-          const arcD = `M ${startA.x.toFixed(2)} ${startA.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${endA.x.toFixed(2)} ${endA.y.toFixed(2)}`;
-
-          const onPointerDown = function(e) {
-            e.preventDefault();
-            startRef.current = { y: e.clientY, val: value };
-            const onMove = function(me) {
-              const dy  = startRef.current.y - me.clientY;
-              const raw = startRef.current.val + (dy / 100) * (max - min);
-              const clamped = Math.min(max, Math.max(min, raw));
-              const snapped = step ? Math.round(clamped / step) * step : clamped;
-              onChange(+snapped.toFixed(3));
-            };
-            const onUp = function() {
-              document.removeEventListener("pointermove", onMove);
-              document.removeEventListener("pointerup",  onUp);
-            };
-            document.addEventListener("pointermove", onMove);
-            document.addEventListener("pointerup",   onUp);
-          };
-
-          const display = unit === "dB" ? (value >= 0 ? "+" : "") + value + "dB"
-                        : unit === "%" ? Math.round(value * 100) + "%"
-                        : unit === "ms" ? value + "ms"
-                        : unit === ":1" ? value + ":1"
-                        : unit === "Q"  ? value
-                        : unit === " st" ? (value >= 0 ? "+" : "") + value + " st"
-                        : value + (unit || "");
-
-          return (
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2, userSelect:"none" }}>
-              {/* viewBox matches SIZE exactly; overflow:visible lets the dot glow bleed out */}
-              <svg
-                width={SIZE} height={SIZE}
-                viewBox={`0 0 ${SIZE} ${SIZE}`}
-                style={{ overflow:"visible", cursor:"ns-resize", touchAction:"none" }}
-                onPointerDown={onPointerDown}
-              >
-                {/* Track — identical strokeWidth to arc */}
-                <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1e1e1e" strokeWidth={SW} strokeLinecap="round"
-                  strokeDasharray={`${2*Math.PI*r * 280/360} ${2*Math.PI*r}`}
-                  strokeDashoffset={`${2*Math.PI*r * (90+140)/360}`}
-                  transform={`rotate(-90 ${cx} ${cy})`}
-                />
-                {/* Coloured arc — sweeps from startA to endA */}
-                {norm > 0 && <path d={arcD} fill="none" stroke={color} strokeWidth={SW} strokeLinecap="round" />}
-                {/* End dot — sits exactly on the arc */}
-                <circle cx={endA.x} cy={endA.y} r={SW * 0.9} fill={color} />
-                {/* Centre cap */}
-                <circle cx={cx} cy={cy} r={r * 0.42} fill="#0d0d0d" stroke="#2a2a2a" strokeWidth={1.5} />
-              </svg>
-              <div style={{ color:"white", fontSize:9, fontWeight:700, lineHeight:1 }}>{display}</div>
-              <div style={{ color:"#444", fontSize:7, textAlign:"center", lineHeight:1.2 }}>{label}</div>
-            </div>
-          );
-        };
-
-        // ── 5-band EQ Graph with accurate Bezier filter response ──
-        // =================================================================
-        // PRODUCTION 5-BAND PARAMETRIC EQ
-        // Based on Audio EQ Cookbook (Bristow-Johnson)
-        // https://www.w3.org/TR/audio-eq-cookbook/
-        //
-        // Bug fixes vs previous version:
-        //  1. freqToX was wrong: log10(f/20)/log10(1000) ≠ log-scale 20Hz-20kHz
-        //     Fix: divide by log10(20000/20) = log10(1000) = 3 — actually that
-        //     WAS correct BUT the freq range was 20-20000 not 20-20020, AND
-        //     low/high shelf had hardcoded freq (200Hz, 4000Hz) ignoring params.
-        //  2. bandMag used wrong phi formula — produces NaN near Nyquist
-        //     Fix: exact z-domain complex evaluation (Re²+Im²) per band
-        //  3. Cascaded dB sum is correct (logs are additive for cascade)
-        //  4. All 5 bands now fully parametric (freq movable on all bands)
-        // =================================================================
-        const EQ_SR = 44100;
-
-        // Normalised biquad coefficients — a0 divided out (always 1)
-        const eqCalcCoeffs = function(type, freq, gainDB, Q) {
-          const f  = Math.max(10, Math.min(freq, EQ_SR * 0.499));
-          const w0 = 2 * Math.PI * f / EQ_SR;
-          const cw = Math.cos(w0), sw = Math.sin(w0);
-          const A  = Math.pow(10, gainDB / 40);
-          const aq = sw / (2 * Math.max(0.001, Q));
-          let b0,b1,b2,a0,a1,a2;
-          if (type === "peaking") {
-            b0=1+aq*A; b1=-2*cw; b2=1-aq*A; a0=1+aq/A; a1=-2*cw; a2=1-aq/A;
-          } else if (type === "lowshelf") {
-            const sa=2*Math.sqrt(A)*aq;
-            b0=A*((A+1)-(A-1)*cw+sa); b1=2*A*((A-1)-(A+1)*cw); b2=A*((A+1)-(A-1)*cw-sa);
-            a0=(A+1)+(A-1)*cw+sa; a1=-2*((A-1)+(A+1)*cw); a2=(A+1)+(A-1)*cw-sa;
-          } else if (type === "highshelf") {
-            const sa=2*Math.sqrt(A)*aq;
-            b0=A*((A+1)+(A-1)*cw+sa); b1=-2*A*((A-1)+(A+1)*cw); b2=A*((A+1)+(A-1)*cw-sa);
-            a0=(A+1)-(A-1)*cw+sa; a1=2*((A-1)-(A+1)*cw); a2=(A+1)-(A-1)*cw-sa;
-          } else if (type === "highpass") {
-            b0=(1+cw)/2; b1=-(1+cw); b2=(1+cw)/2; a0=1+aq; a1=-2*cw; a2=1-aq;
-          } else { // lowpass
-            b0=(1-cw)/2; b1=1-cw; b2=(1-cw)/2; a0=1+aq; a1=-2*cw; a2=1-aq;
-          }
-          if (Math.abs(a0) < 1e-30) return { b0:1, b1:0, b2:0, a1:0, a2:0 };
-          return { b0:b0/a0, b1:b1/a0, b2:b2/a0, a1:a1/a0, a2:a2/a0 };
-        };
-
-        // Exact z-domain magnitude |H(e^jw)|² — numerically stable at all freqs
-        const eqEvalMag = function(c, f) {
-          const w   = 2 * Math.PI * Math.max(1, f) / EQ_SR;
-          const cw  = Math.cos(w),  sw  = Math.sin(w);
-          const cw2 = Math.cos(2*w), sw2 = Math.sin(2*w);
-          const bRe = c.b0 + c.b1*cw + c.b2*cw2;
-          const bIm =        c.b1*sw + c.b2*sw2;
-          const aRe = 1    + c.a1*cw + c.a2*cw2;
-          const aIm =        c.a1*sw + c.a2*sw2;
-          const den = aRe*aRe + aIm*aIm;
-          if (den < 1e-30) return 0;
-          return 20 * Math.log10(Math.sqrt((bRe*bRe + bIm*bIm) / den));
-        };
-
-        const EQGraph = function({ eq, onDrag }) {
-          const W = 300, H = 130;
-
-          const bands = [
-            { key:"hpf",  type:"highpass",  freq:eq.hpfFreq||80,    gain:0,          q:eq.hpfQ||0.707,  color:"#EF4444", drag:"x",  label:"HPF" },
-            { key:"low",  type:"lowshelf",  freq:eq.lowFreq||200,   gain:eq.low||0,  q:eq.lowQ||0.707,  color:"#3B82F6", drag:"xy", label:"LOW" },
-            { key:"mid",  type:"peaking",   freq:eq.midFreq||1000,  gain:eq.mid||0,  q:eq.midQ||1.0,    color:"#22C55E", drag:"xy", label:"MID" },
-            { key:"high", type:"highshelf", freq:eq.highFreq||8000, gain:eq.high||0, q:eq.highQ||0.707, color:"#F59E0B", drag:"xy", label:"HI"  },
-            { key:"lpf",  type:"lowpass",   freq:eq.lpfFreq||18000, gain:0,          q:eq.lpfQ||0.707,  color:"#EF4444", drag:"x",  label:"LPF" },
-          ];
-
-          // Log-correct X axis: 20Hz at left, 20kHz at right
-          const LOG_RANGE = Math.log10(20000 / 20);
-          const freqToX = function(f) { return W * Math.log10(Math.max(20,f) / 20) / LOG_RANGE; };
-          const xToFreq = function(x) { return Math.round(20 * Math.pow(20000/20, Math.max(0,Math.min(1,x/W)))); };
-          const gainToY = function(g) { return H/2 - (Math.max(-15,Math.min(15,g)) / 15) * (H/2 - 10); };
-          const yToGain = function(y) { return +((H/2-y)/(H/2-10)*15).toFixed(1); };
-
-          // Build composite response curve — sum dB magnitudes (correct for cascade)
-          const nPts = 180;
-          const pts  = [];
-          for (let i = 0; i <= nPts; i++) {
-            const f = 20 * Math.pow(20000/20, i/nPts);
-            let db = 0;
-            bands.forEach(function(b){ db += eqEvalMag(eqCalcCoeffs(b.type,b.freq,b.gain,b.q), f); });
-            pts.push([freqToX(f), gainToY(Math.max(-18,Math.min(18,db)))]);
-          }
-
-          // Catmull-Rom to cubic bezier for smooth curve
-          let path = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
-          for (let i=1; i<pts.length-1; i++) {
-            const [x0,y0]=pts[i-1], [x1,y1]=pts[i], [x2,y2]=pts[i+1];
-            path += ` C ${((x0+x1)/2).toFixed(1)} ${y0.toFixed(1)} ${((x1+x2)/2).toFixed(1)} ${y1.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`;
-          }
-          const [lx,ly]=pts[pts.length-1]; path += ` L ${lx.toFixed(1)} ${ly.toFixed(1)}`;
-          const fill = path + ` L ${W} ${H/2} L 0 ${H/2} Z`;
-
-          const dragging = useRef(null);
-          const svgRef   = useRef(null);
-
-          return (
-            <svg ref={svgRef} width={W} height={H}
-              style={{ display:"block", background:"#060606", borderRadius:8, touchAction:"none", cursor:"crosshair" }}
-              onMouseMove={function(e){
-                const b=dragging.current; if(!b||!svgRef.current) return;
-                const r=svgRef.current.getBoundingClientRect();
-                const x=e.clientX-r.left, y=e.clientY-r.top;
-                const patch={};
-                if(b.drag==="x"||b.drag==="xy"){
-                  const f=xToFreq(x);
-                  if(b.key==="hpf") patch.hpfFreq=Math.max(20,Math.min(2000,f));
-                  if(b.key==="lpf") patch.lpfFreq=Math.max(1000,Math.min(20000,f));
-                  if(b.key==="low") patch.lowFreq=Math.max(20,Math.min(2000,f));
-                  if(b.key==="mid") patch.midFreq=Math.max(100,Math.min(10000,f));
-                  if(b.key==="high") patch.highFreq=Math.max(500,Math.min(20000,f));
-                }
-                if(b.drag==="y"||b.drag==="xy"){
-                  const g=Math.max(-15,Math.min(15,yToGain(y)));
-                  if(b.key==="low") patch.low=g;
-                  if(b.key==="mid") patch.mid=g;
-                  if(b.key==="high") patch.high=g;
-                }
-                if(Object.keys(patch).length) onDrag(patch);
-              }}
-              onMouseUp={function(){dragging.current=null;}}
-              onMouseLeave={function(){dragging.current=null;}}
-              onTouchMove={function(e){
-                e.preventDefault();
-                const b=dragging.current; if(!b||!svgRef.current) return;
-                const r=svgRef.current.getBoundingClientRect();
-                const x=e.touches[0].clientX-r.left, y=e.touches[0].clientY-r.top;
-                const patch={};
-                if(b.drag==="x"||b.drag==="xy"){
-                  const f=xToFreq(x);
-                  if(b.key==="hpf") patch.hpfFreq=Math.max(20,Math.min(2000,f));
-                  if(b.key==="lpf") patch.lpfFreq=Math.max(1000,Math.min(20000,f));
-                  if(b.key==="low") patch.lowFreq=Math.max(20,Math.min(2000,f));
-                  if(b.key==="mid") patch.midFreq=Math.max(100,Math.min(10000,f));
-                  if(b.key==="high") patch.highFreq=Math.max(500,Math.min(20000,f));
-                }
-                if(b.drag==="y"||b.drag==="xy"){
-                  const g=Math.max(-15,Math.min(15,yToGain(y)));
-                  if(b.key==="low") patch.low=g;
-                  if(b.key==="mid") patch.mid=g;
-                  if(b.key==="high") patch.high=g;
-                }
-                if(Object.keys(patch).length) onDrag(patch);
-              }}
-              onTouchEnd={function(){dragging.current=null;}}
-            >
-              {/* Frequency grid */}
-              {[20,50,100,200,500,1000,2000,5000,10000,20000].map(function(f){
-                const x=freqToX(f); const major=[100,1000,10000].includes(f);
-                return <line key={f} x1={x} y1={0} x2={x} y2={H} stroke={major?"#1e1e1e":"#111"} strokeWidth={major?1.5:1}/>;
-              })}
-              {/* Gain grid */}
-              {[-12,-6,0,6,12].map(function(g){
-                const y=gainToY(g);
-                return <g key={g}>
-                  <line x1={0} y1={y} x2={W} y2={y} stroke={g===0?"#252525":"#141414"} strokeWidth={g===0?1.5:1}/>
-                  <text x={3} y={y-2} fill="#222" fontSize={7}>{g>0?"+":""}{g}</text>
-                </g>;
-              })}
-              {/* Frequency labels */}
-              {[100,1000,10000].map(function(f){
-                return <text key={f} x={freqToX(f)} y={H-3} fill="#222" fontSize={7} textAnchor="middle">{f>=1000?f/1000+"k":f}</text>;
-              })}
-              <path d={fill} fill="rgba(147,51,234,0.07)"/>
-              <path d={path} fill="none" stroke="#9333EA" strokeWidth={2} strokeLinecap="round"/>
-              {bands.map(function(b){
-                const hx=freqToX(b.freq), hy=gainToY(b.gain);
-                const cur=b.drag==="x"?"ew-resize":b.drag==="y"?"ns-resize":"move";
-                return <g key={b.key}>
-                  <line x1={hx} y1={0} x2={hx} y2={H} stroke={b.color+"28"} strokeWidth={1} strokeDasharray="3 3"/>
-                  <circle cx={hx} cy={hy} r={12} fill={b.color+"10"} stroke={b.color+"28"} strokeWidth={1}/>
-                  <circle cx={hx} cy={hy} r={8} fill={b.color} fillOpacity={0.9} stroke="#060606" strokeWidth={2}
-                    style={{cursor:cur}}
-                    onMouseDown={function(e){e.preventDefault();e.stopPropagation();dragging.current=b;}}
-                    onTouchStart={function(e){e.preventDefault();e.stopPropagation();dragging.current=b;}}/>
-                  <text x={hx} y={hy+3} fill="white" fontSize={6} textAnchor="middle" fontWeight="800" pointerEvents="none">{b.label}</text>
-                </g>;
-              })}
-            </svg>
-          );
-        };
-
-        // ── Compressor curve ──
-        const CompGraph = function({ threshold, ratio }) {
-          const W = 150, H = 110;
-          const dBtoP = function(db) { return (db + 60) / 60; };
-          const pts = [];
-          for (let i = 0; i <= 60; i++) {
-            const inDb = -60 + i;
-            const outDb = inDb < threshold ? inDb : threshold + (inDb - threshold) / ratio;
-            pts.push(`${W*dBtoP(inDb)},${H*(1-dBtoP(outDb))}`);
-          }
-          const thX = W * dBtoP(threshold);
-          return (
-            <svg width={W} height={H} style={{ display:"block", background:"#080808", borderRadius:8, flexShrink:0 }}>
-              <line x1={0} y1={H} x2={W} y2={0} stroke="#1e1e1e" strokeWidth={1} strokeDasharray="4 3" />
-              <path d={"M "+pts.join(" L ")} fill="none" stroke="#8B5CF6" strokeWidth={2} strokeLinecap="round" />
-              <path d={"M "+pts.join(" L ")+` L ${W} ${H} L 0 ${H} Z`} fill="rgba(139,92,246,0.1)" />
-              <line x1={thX} y1={0} x2={thX} y2={H} stroke="#EF4444" strokeWidth={1} strokeDasharray="3 2" />
-              <text x={thX+3} y={11} fill="#EF4444" fontSize={8}>{threshold}dB</text>
-              <text x={3}   y={10}  fill="#444" fontSize={7}>OUT</text>
-              <text x={W-22} y={H-3} fill="#444" fontSize={7}>IN</text>
-            </svg>
-          );
-        };
-
-        // ── Reverb visualiser ──
-        const ReverbViz = function({ wet, roomSize }) {
-          const W = 140, H = 80;
-          const decay = roomSize * 3;
-          return (
-            <svg width={W} height={H} style={{ display:"block", background:"#080808", borderRadius:8, flexShrink:0 }}>
-              <line x1={0} y1={H/2} x2={W} y2={H/2} stroke="#1a1a1a" strokeWidth={1} />
-              {Array.from({length:28}, function(_,i){
-                const x   = (i/27)*W;
-                const amp = Math.exp(-i/(decay*4)) * (H/2 - 5) * wet;
-                const j   = (Math.sin(i*7.3)*0.4+0.6) * amp;
-                return <line key={i} x1={x} y1={H/2-j} x2={x} y2={H/2+j}
-                  stroke={`rgba(192,38,211,${0.25+0.75*Math.exp(-i/5)})`} strokeWidth={2} />;
-              })}
-            </svg>
-          );
-        };
-
-        // ── EQ defaults including new 5-band fields ──
-        const eq5 = {
-          hpfFreq:80, hpfQ:0.707,
-          lowFreq:200, low:0, lowQ:0.707,
-          midFreq:1000, mid:0, midQ:1.0,
-          highFreq:8000, high:0, highQ:0.707,
-          lpfFreq:18000, lpfQ:0.707,
-          ...fx.eq,
-        };
-
-        // ── Plugin sub-components ── defined here so they close over fx/upd/Knob/graphs
-        const EQPlugin = function({ fx, upd, eq5, EQGraph, Knob }) {
-          return (
-            <div style={{ background:"linear-gradient(180deg,#1a1a1a 0%,#111 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (fx.eq?.on ? "#2563EB" : "#2a2a2a"), boxShadow: fx.eq?.on ? "0 0 20px rgba(37,99,235,0.15), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.04)" }}>
-              <div style={{ background:"linear-gradient(180deg,#232323 0%,#1a1a1a 100%)", padding:"8px 14px", borderBottom:"1px solid #2a2a2a", display:"flex", alignItems:"center", gap:8 }}>
-                <div style={{ display:"flex", alignItems:"center", gap:6, flex:1 }}>
-                  <div style={{ display:"flex", gap:2 }}>
-                    {["#EF4444","#3B82F6","#22C55E","#F59E0B","#EF4444"].map(function(c,i){ return <div key={i} style={{ width:3, height:14, borderRadius:1.5, background:c, opacity:0.8 }} />; })}
-                  </div>
-                  <div>
-                    <div style={{ color:"#e0e0e0", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>PARAMETRIC EQ</div>
-                    <div style={{ color:"#555", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>5-BAND · DRAG HANDLES</div>
-                  </div>
-                </div>
-                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                  <div style={{ width:8, height:8, borderRadius:"50%", background: fx.eq?.on ? "#3B82F6" : "#1a1a1a", boxShadow: fx.eq?.on ? "0 0 6px #3B82F6, 0 0 12px rgba(59,130,246,0.5)" : "none", transition:"all 0.2s" }} />
-                  <button onClick={function(){ upd("eq",{on:!fx.eq?.on}); }} style={{ background: fx.eq?.on ? "linear-gradient(180deg,#2563EB,#1d4ed8)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (fx.eq?.on ? "#3B82F6" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1, boxShadow: fx.eq?.on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>{fx.eq?.on ? "ON" : "OFF"}</button>
-                </div>
-              </div>
-              <div style={{ padding:"12px 14px 10px", opacity:fx.eq?.on?1:0.4, transition:"opacity 0.2s" }}>
-                <div style={{ background:"#070707", borderRadius:8, padding:2, border:"1px solid #1e1e1e", boxShadow:"inset 0 2px 6px rgba(0,0,0,0.6)" }}>
-                  <EQGraph eq={eq5} onDrag={function(patch){ upd("eq", patch); }} />
-                </div>
-                <div style={{ display:"flex", marginTop:10, background:"#0d0d0d", borderRadius:10, border:"1px solid #1e1e1e", overflow:"hidden" }}>
-                  {[
-                    { key:"hpf",  label:"HPF",  color:"#EF4444", knobs:[{lbl:"FREQ",v:eq5.hpfFreq,min:20,max:2000,step:1,unit:"Hz",cb:function(v){upd("eq",{hpfFreq:v});}}] },
-                    { key:"low",  label:"LOW",  color:"#3B82F6", knobs:[{lbl:"FREQ",v:eq5.lowFreq,min:20,max:2000,step:1,unit:"Hz",cb:function(v){upd("eq",{lowFreq:v});}},{lbl:"GAIN",v:eq5.low,min:-15,max:15,step:0.5,unit:"dB",cb:function(v){upd("eq",{low:v});}}] },
-                    { key:"mid",  label:"MID",  color:"#22C55E", knobs:[{lbl:"FREQ",v:eq5.midFreq,min:100,max:10000,step:10,unit:"Hz",cb:function(v){upd("eq",{midFreq:v});}},{lbl:"GAIN",v:eq5.mid,min:-15,max:15,step:0.5,unit:"dB",cb:function(v){upd("eq",{mid:v});}},{lbl:"Q",v:eq5.midQ,min:0.1,max:10,step:0.1,unit:"",cb:function(v){upd("eq",{midQ:v});}}] },
-                    { key:"high", label:"HIGH", color:"#F59E0B", knobs:[{lbl:"FREQ",v:eq5.highFreq,min:500,max:20000,step:100,unit:"Hz",cb:function(v){upd("eq",{highFreq:v});}},{lbl:"GAIN",v:eq5.high,min:-15,max:15,step:0.5,unit:"dB",cb:function(v){upd("eq",{high:v});}}] },
-                    { key:"lpf",  label:"LPF",  color:"#EF4444", knobs:[{lbl:"FREQ",v:eq5.lpfFreq,min:1000,max:20000,step:100,unit:"Hz",cb:function(v){upd("eq",{lpfFreq:v});}}] },
-                  ].map(function(band, bi, arr){
-                    return (
-                      <div key={band.key} style={{ flex:1, borderRight: bi < arr.length-1 ? "1px solid #1e1e1e" : "none", display:"flex", flexDirection:"column", alignItems:"center", padding:"6px 2px 8px" }}>
-                        <div style={{ width:"100%", background: band.color + "22", borderBottom:"1px solid " + band.color + "33", padding:"3px 0", textAlign:"center", marginBottom:6 }}>
-                          <span style={{ color:band.color, fontSize:7, fontWeight:900, letterSpacing:1.5, fontFamily:"monospace" }}>{band.label}</span>
-                        </div>
-                        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, overflow:"visible" }}>
-                          {band.knobs.map(function(k){ return <Knob key={k.lbl} label={k.lbl} value={k.v} min={k.min} max={k.max} step={k.step} unit={k.unit} color={band.color} onChange={k.cb} />; })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          );
-        };
-
-        const CompPlugin = function({ fx, upd, CompGraph, Knob }) {
-          return (
-            <div style={{ background:"linear-gradient(180deg,#1c1a22 0%,#130f1a 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (fx.compressor?.on ? "#8B5CF6" : "#2a2a2a"), boxShadow: fx.compressor?.on ? "0 0 20px rgba(139,92,246,0.15), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
-              <div style={{ background:"linear-gradient(180deg,#1e1c25 0%,#181620 100%)", padding:"8px 14px", borderBottom:"1px solid #2a2535", display:"flex", alignItems:"center", gap:8 }}>
-                <div style={{ flex:1 }}>
-                  <div style={{ color:"#c4b5fd", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>COMPRESSOR</div>
-                  <div style={{ color:"#4a3f5c", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>DYNAMICS PROCESSOR</div>
-                </div>
-                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <div style={{ display:"flex", gap:1.5, alignItems:"flex-end" }}>
-                    {[0,1,2,3,4].map(function(i){ const active = fx.compressor?.on; const colors = ["#22C55E","#22C55E","#F59E0B","#EF4444","#EF4444"]; return <div key={i} style={{ width:3, height: 6 + i * 2, borderRadius:1, background: active ? colors[i] : "#1e1e1e", boxShadow: active ? "0 0 4px " + colors[i] + "88" : "none", transition:"all 0.15s" }} />; })}
-                  </div>
-                  <div style={{ width:8, height:8, borderRadius:"50%", background: fx.compressor?.on ? "#8B5CF6" : "#1a1a1a", boxShadow: fx.compressor?.on ? "0 0 6px #8B5CF6, 0 0 12px rgba(139,92,246,0.5)" : "none", transition:"all 0.2s" }} />
-                  <button onClick={function(){ upd("compressor",{on:!fx.compressor?.on}); }} style={{ background: fx.compressor?.on ? "linear-gradient(180deg,#7C3AED,#6d28d9)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (fx.compressor?.on ? "#8B5CF6" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1, boxShadow: fx.compressor?.on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>{fx.compressor?.on ? "ON" : "OFF"}</button>
-                </div>
-              </div>
-              <div style={{ padding:"12px 14px", opacity:fx.compressor?.on?1:0.4, transition:"opacity 0.2s" }}>
-                <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
-                  <div style={{ background:"#050505", borderRadius:8, padding:2, border:"1px solid #1a1a1a", boxShadow:"inset 0 2px 6px rgba(0,0,0,0.8)", flexShrink:0 }}>
-                    <CompGraph threshold={fx.compressor?.threshold??-24} ratio={fx.compressor?.ratio??4} />
-                  </div>
-                  <div style={{ flex:1, display:"flex", flexDirection:"column", gap:8, overflow:"visible" }}>
-                    <div style={{ display:"flex", justifyContent:"space-around", overflow:"visible" }}>
-                      <Knob label="THRESH" value={fx.compressor?.threshold??-24} min={-60} max={0} step={1} unit="dB" color="#8B5CF6" onChange={function(v){ upd("compressor",{threshold:v}); }} />
-                      <Knob label="RATIO" value={fx.compressor?.ratio??4} min={1} max={20} step={0.5} unit=":1" color="#8B5CF6" onChange={function(v){ upd("compressor",{ratio:v}); }} />
-                    </div>
-                    <div style={{ height:1, background:"#1e1e1e", borderRadius:1 }} />
-                    <div style={{ display:"flex", justifyContent:"space-around", overflow:"visible" }}>
-                      <Knob label="ATTACK" value={Math.round((fx.compressor?.attack??0.003)*1000)} min={1} max={200} step={1} unit="ms" color="#a78bfa" onChange={function(v){ upd("compressor",{attack:v/1000}); }} />
-                      <Knob label="RELEASE" value={Math.round((fx.compressor?.release??0.25)*1000)} min={10} max={2000} step={10} unit="ms" color="#a78bfa" onChange={function(v){ upd("compressor",{release:v/1000}); }} />
-                      <Knob label="MAKEUP" value={fx.compressor?.makeupGain??0} min={0} max={24} step={0.5} unit="dB" color="#22C55E" onChange={function(v){ upd("compressor",{makeupGain:v}); }} />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        };
-
-        const ReverbPlugin = function({ fx, upd, ReverbViz, Knob }) {
-          return (
-            <div style={{ background:"linear-gradient(180deg,#1a1220 0%,#110d19 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (fx.reverb?.on ? "#C026D3" : "#2a2a2a"), boxShadow: fx.reverb?.on ? "0 0 20px rgba(192,38,211,0.15), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
-              <div style={{ backgroundImage:"linear-gradient(180deg,#1e1629,#17101e)", padding:"8px 14px", borderBottom:"1px solid #2a1e35", display:"flex", alignItems:"center", gap:8 }}>
-                <div style={{ flex:1 }}>
-                  <div style={{ color:"#e879f9", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>CONVOLUTION REVERB</div>
-                  <div style={{ color:"#4a2f55", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>ROOM SIMULATION</div>
-                </div>
-                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                  <div style={{ width:8, height:8, borderRadius:"50%", background: fx.reverb?.on ? "#C026D3" : "#1a1a1a", boxShadow: fx.reverb?.on ? "0 0 6px #C026D3, 0 0 14px rgba(192,38,211,0.5)" : "none", transition:"all 0.2s" }} />
-                  <button onClick={function(){ upd("reverb",{on:!fx.reverb?.on}); }} style={{ background: fx.reverb?.on ? "linear-gradient(180deg,#be185d,#9d174d)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (fx.reverb?.on ? "#C026D3" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1, boxShadow: fx.reverb?.on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>{fx.reverb?.on ? "ON" : "OFF"}</button>
-                </div>
-              </div>
-              <div style={{ padding:"12px 14px", opacity:fx.reverb?.on?1:0.4, transition:"opacity 0.2s" }}>
-                <div style={{ display:"flex", gap:10, alignItems:"center" }}>
-                  <div style={{ background:"#050505", borderRadius:8, padding:2, border:"1px solid #1a1a1a", boxShadow:"inset 0 2px 6px rgba(0,0,0,0.8)", flexShrink:0 }}>
-                    <ReverbViz wet={fx.reverb?.wet??0.25} roomSize={fx.reverb?.roomSize??0.8} />
-                  </div>
-                  <div style={{ flex:1, display:"flex", justifyContent:"space-around", overflow:"visible", padding:"4px 0" }}>
-                    <Knob label="WET" value={fx.reverb?.wet??0.25} min={0} max={1} step={0.01} unit="%" color="#C026D3" onChange={function(v){ upd("reverb",{wet:v}); }} />
-                    <Knob label="ROOM" value={fx.reverb?.roomSize??0.8} min={0.1} max={1} step={0.01} unit="%" color="#C026D3" onChange={function(v){ upd("reverb",{roomSize:v}); }} />
-                    <Knob label="PRE-DLY" value={fx.reverb?.preDelay??0} min={0} max={100} step={1} unit="ms" color="#8B5CF6" onChange={function(v){ upd("reverb",{preDelay:v}); }} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        };
-
-        const PitchPlugin = function({ fx, upd, Knob }) {
-          const pOn       = !!fx.pitch?.on;
-          const semitones = fx.pitch?.semitones ?? 0;
-          const speed     = fx.pitch?.speed ?? 0.5;
-          const formant   = fx.pitch?.formant ?? 0;
-          const pitchKey  = fx.pitch?.key ?? "C";
-          const scale     = fx.pitch?.scale ?? "chromatic";
-          const mode      = fx.pitch?.mode ?? "shift";
-          const stLabel   = semitones === 0 ? "0 st" : (semitones > 0 ? "+" + semitones : semitones) + " st";
-          const speedMs   = speed < 0.05 ? "INSTANT" : speed < 0.3 ? Math.round(speed * 200) + " ms" : Math.round(speed * 500) + " ms";
-          const NOTES     = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-          const IS_BLACK  = [false,true,false,true,false,false,true,false,true,false,true,false];
-          const SCALE_INTERVALS = { chromatic:[0,1,2,3,4,5,6,7,8,9,10,11], major:[0,2,4,5,7,9,11], minor:[0,2,3,5,7,8,10], pentatonic:[0,2,4,7,9], blues:[0,3,5,6,7,10] };
-          const rootIdx   = NOTES.indexOf(pitchKey);
-          const intervals = SCALE_INTERVALS[scale] || SCALE_INTERVALS.chromatic;
-          const activeNotes = new Set(intervals.map(function(i){ return NOTES[(rootIdx + i) % 12]; }));
-          return (
-            <div style={{ background:"linear-gradient(160deg,#0f0f14 0%,#12101a 100%)", borderRadius:16, overflow:"hidden", border:"1px solid " + (pOn ? "#9333ea" : "#1e1e1e"), boxShadow: pOn ? "0 0 24px rgba(147,51,234,0.2)" : "none" }}>
-              <div style={{ display:"flex", alignItems:"center", padding:"8px 14px", background:"#0a0a0f", borderBottom:"1px solid #1a1a24" }}>
-                <div style={{ flex:1 }}>
-                  <div style={{ color:"#7c3aed", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace" }}>AUTO·TUNE</div>
-                  <div style={{ color:"#333", fontSize:8, letterSpacing:1 }}>PITCH PROCESSOR v2</div>
-                </div>
-                <div style={{ display:"flex", background:"#111", borderRadius:8, border:"1px solid #222", overflow:"hidden", marginRight:10 }}>
-                  {["shift","autotune"].map(function(m){ return <button key={m} onClick={function(){ upd("pitch",{mode:m}); }} style={{ padding:"4px 10px", background:mode===m?"#7c3aed":"transparent", border:"none", color:mode===m?"white":"#444", fontSize:8, fontWeight:800, cursor:"pointer", letterSpacing:0.5, textTransform:"uppercase" }}>{m==="shift"?"SHIFT":"A-TUNE"}</button>; })}
-                </div>
-                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                  <div style={{ width:8, height:8, borderRadius:"50%", background: pOn ? "#a855f7" : "#1a1a1a", boxShadow: pOn ? "0 0 8px #a855f7, 0 0 16px #7c3aed44" : "none", transition:"all 0.2s" }} />
-                  <button onClick={function(){ upd("pitch",{on:!pOn}); }} style={{ background:pOn?"#7c3aed":"#1a1a1a", border:"1px solid "+(pOn?"#9333ea":"#2a2a2a"), borderRadius:6, color:"white", fontSize:9, fontWeight:800, padding:"4px 10px", cursor:"pointer", letterSpacing:1 }}>{pOn ? "ON" : "OFF"}</button>
-                </div>
-              </div>
-              <div style={{ padding:"12px 14px", opacity: pOn ? 1 : 0.3, pointerEvents: pOn ? "auto" : "none", transition:"opacity 0.2s" }}>
-                <div style={{ background:"#060810", border:"1px solid #1a1a2e", borderRadius:8, padding:"8px 12px", marginBottom:14, fontFamily:"monospace", boxShadow:"inset 0 2px 8px rgba(0,0,0,0.6)" }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <div>
-                      <div style={{ color:"#6d28d9", fontSize:8, letterSpacing:2, marginBottom:2 }}>{mode==="autotune"?"AUTO-TUNE":"PITCH SHIFT"}</div>
-                      <div style={{ color:"#a855f7", fontSize:20, fontWeight:900, letterSpacing:1, lineHeight:1 }}>{mode==="autotune" ? pitchKey + " " + scale.toUpperCase() : stLabel}</div>
-                    </div>
-                    <div style={{ textAlign:"right" }}>
-                      <div style={{ color:"#4c1d95", fontSize:8, letterSpacing:1, marginBottom:2 }}>SPEED</div>
-                      <div style={{ color:"#7c3aed", fontSize:13, fontWeight:800, fontFamily:"monospace" }}>{speedMs}</div>
-                    </div>
-                  </div>
-                  <div style={{ marginTop:8, height:3, background:"#0f0f1a", borderRadius:2, overflow:"hidden" }}>
-                    <div style={{ height:"100%", width: (Math.abs(semitones)/12*100)+"%", background: semitones > 0 ? "linear-gradient(90deg,#6d28d9,#a855f7)" : "linear-gradient(90deg,#a855f7,#6d28d9)", marginLeft: semitones < 0 ? "auto" : "0", transition:"width 0.1s", borderRadius:2 }} />
-                  </div>
-                </div>
-                <div style={{ display:"flex", justifyContent:"space-around", alignItems:"flex-end", marginBottom:14, gap:4 }}>
-                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-                    <Knob label="PITCH" value={semitones} min={-12} max={12} step={1} unit=" st" color="#a855f7" onChange={function(v){ upd("pitch",{semitones:v}); }} />
-                    <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{stLabel}</div>
-                  </div>
-                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-                    <Knob label="SPEED" value={speed} min={0} max={1} step={0.01} unit="%" color="#7c3aed" onChange={function(v){ upd("pitch",{speed:v}); }} />
-                    <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{speedMs}</div>
-                  </div>
-                  <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-                    <Knob label="FORMANT" value={formant} min={0} max={1} step={0.05} unit="" color="#9333ea" onChange={function(v){ upd("pitch",{formant:v}); }} />
-                    <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{Math.round(formant*100)}% PRES</div>
-                  </div>
-                </div>
-                {mode === "autotune" && (
-                  <div style={{ marginBottom:12 }}>
-                    <div style={{ color:"#4c1d95", fontSize:8, letterSpacing:2, fontFamily:"monospace", marginBottom:6 }}>SCALE</div>
-                    <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
-                      {Object.keys(SCALE_INTERVALS).map(function(s){ const isA = scale === s; return <button key={s} onClick={function(){ upd("pitch",{scale:s}); }} style={{ padding:"4px 10px", background:isA?"#7c3aed":"#0f0f18", border:"1px solid "+(isA?"#9333ea":"#1e1e2a"), borderRadius:6, color:isA?"white":"#4c1d95", fontSize:8, fontWeight:800, cursor:"pointer", textTransform:"capitalize", letterSpacing:0.5 }}>{s}</button>; })}
-                    </div>
-                  </div>
-                )}
-                {mode === "autotune" && (
-                  <div style={{ marginBottom:4 }}>
-                    <div style={{ color:"#4c1d95", fontSize:8, letterSpacing:2, fontFamily:"monospace", marginBottom:6 }}>ROOT KEY</div>
-                    <div style={{ position:"relative", height:48, display:"flex" }}>
-                      {NOTES.filter(function(_,i){ return !IS_BLACK[i]; }).map(function(n, wi){
-                        const isRoot = n === pitchKey;
-                        const inScale = activeNotes.has(n);
-                        return <button key={n} onClick={function(){ upd("pitch",{key:n}); }} style={{ flex:1, height:"100%", background: isRoot ? "#a855f7" : inScale ? "#2d1b4e" : "#e8e8e8", border:"1px solid #111", borderRadius:"0 0 4px 4px", cursor:"pointer", display:"flex", alignItems:"flex-end", justifyContent:"center", paddingBottom:3, boxShadow: isRoot ? "0 0 8px #a855f744" : "none", transition:"background 0.1s" }}><span style={{ fontSize:6, fontWeight:800, color: isRoot ? "white" : inScale ? "#a855f7" : "#333" }}>{n}</span></button>;
-                      })}
-                      <div style={{ position:"absolute", top:0, left:0, right:0, height:"58%", pointerEvents:"none", display:"flex" }}>
-                        {[{note:"C#",left:"12.3%"},{note:"D#",left:"26%"},{note:"F#",left:"53.2%"},{note:"G#",left:"67%"},{note:"A#",left:"80.7%"}].map(function(bk){
-                          const isRoot = bk.note === pitchKey;
-                          const inScale = activeNotes.has(bk.note);
-                          return <button key={bk.note} onClick={function(){ upd("pitch",{key:bk.note}); }} style={{ position:"absolute", left:bk.left, width:"9%", height:"100%", background: isRoot ? "#a855f7" : inScale ? "#3b0d6b" : "#111", border:"1px solid "+(isRoot?"#9333ea":"#000"), borderRadius:"0 0 4px 4px", cursor:"pointer", pointerEvents:"auto", boxShadow: isRoot ? "0 0 8px #a855f7" : "none", zIndex:2 }} />;
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        };
-
         return (
-          <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto" }} onClick={function(e){ e.stopPropagation(); }}>
-            {/* Header */}
-            <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0, position:"sticky", top:0, zIndex:10 }}>
-              <div style={{ width:8, height:8, borderRadius:"50%", background:t.color, marginRight:8 }} />
-              <span style={{ color:"white", fontWeight:800, fontSize:14, flex:1 }}>{t.name} — Effects</span>
-              <button onClick={function(){ setFxTrackId(null); }} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:13, padding:"5px 14px", cursor:"pointer" }}>Done</button>
-            </div>
-
-            {/* ── Plugin chain — rendered as proper component (no IIFE) to keep useState valid ── */}
-            <PluginChainPanel
-              fx={fx}
-              upd={upd}
-              eq5={eq5}
-              EQPlugin={EQPlugin}
-              CompPlugin={CompPlugin}
-              ReverbPlugin={ReverbPlugin}
-              PitchPlugin={PitchPlugin}
-              Knob={Knob}
-              EQGraph={EQGraph}
-              CompGraph={CompGraph}
-              ReverbViz={ReverbViz}
-            />
-
-          </div>
+          <FxPanel
+            key={fxTrackId}
+            fx={fx}
+            fxTrackId={fxTrackId}
+            trackName={t.name}
+            trackColor={t.color}
+            onClose={function(){ setFxTrackId(null); }}
+            onUpd={fxUpdRef.current}
+          />
         );
       })()}
 
@@ -8283,16 +10939,16 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
       {/* ══ MIXER ═══════════════════════════════════════════════ */}
       {showMixer && (
-        <div style={{ background:"#0c0c0c",borderTop:"1px solid #222",flexShrink:0 }} onClick={function(e){ e.stopPropagation(); }}>
+        <div style={{ background:"#0c0c0c",borderTop:"1px solid #222",flexShrink:0,maxHeight:"54vh",display:"flex",flexDirection:"column" }} onClick={function(e){ e.stopPropagation(); }}>
           {/* ── Mixer header ── */}
-          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 16px 4px" }}>
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 16px 4px",flexShrink:0 }}>
             <span style={{ color:"#555",fontSize:10,fontWeight:800,letterSpacing:2 }}>MIXER</span>
             <button onClick={function(){ setShowMixer(false); }} style={{ background:"none",border:"none",color:"#444",fontSize:18,cursor:"pointer",lineHeight:1,padding:0 }}>×</button>
           </div>
 
           {/* ── Channel strips ── */}
-          <div style={{ overflowX:"auto",WebkitOverflowScrolling:"touch" }}>
-            <div style={{ display:"flex",gap:0,minWidth:"max-content",padding:"0 8px 10px" }}>
+          <div style={{ overflowX:"auto",overflowY:"auto",WebkitOverflowScrolling:"touch",flex:1,minHeight:0 }}>
+            <div style={{ display:"flex",gap:0,minWidth:"max-content",padding:"0 8px 12px" }}>
               {tracks.map(function(t, ti){
                 const vol = t.volume ?? 1;
                 const pan = t.pan || 0;
@@ -8331,7 +10987,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
                     </div>
 
                     {/* ── VOLUME vertical fader ── */}
-                    <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:3,width:"100%",flex:1 }}>
+                    <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:3,width:"100%",flexShrink:0 }}>
                       <span style={{ color:t.isMuted?"#F59E0B":vol>1?"#C026D3":vol===0?"#EF4444":"#aaa",fontSize:9,fontWeight:800 }}>
                         {t.isMuted?"M":volPct}
                       </span>
@@ -8357,12 +11013,24 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
                     </div>
 
                     {/* ── Mute button ── */}
-                    <button onClick={function(){ toggleMute(t.id); }}
+                    <button onClick={function(e){ e.stopPropagation(); toggleMute(t.id); }}
                       style={{ marginTop:6,width:"100%",background:t.isMuted?"rgba(245,158,11,0.15)":"#161616",
                         border:"1px solid "+(t.isMuted?"#F59E0B":"#2a2a2a"),
                         borderRadius:6,color:t.isMuted?"#F59E0B":"#555",
-                        fontSize:10,padding:"5px 0",cursor:"pointer",fontWeight:800 }}>
+                        fontSize:10,padding:"5px 0",cursor:"pointer",fontWeight:800,flexShrink:0 }}>
                       M
+                    </button>
+
+                    {/* ── Solo button ── */}
+                    <button onClick={function(e){ e.stopPropagation(); toggleSolo(t.id); }}
+                      style={{ marginTop:4,width:"100%",background:t.isSoloed?"rgba(34,197,94,0.18)":"#161616",
+                        border:"1px solid "+(t.isSoloed?"#22C55E":"#2a2a2a"),
+                        borderRadius:6,color:t.isSoloed?"#22C55E":"#555",
+                        fontSize:10,padding:"5px 0",cursor:"pointer",fontWeight:800,
+                        flexShrink:0,
+                        boxShadow:t.isSoloed?"0 0 8px rgba(34,197,94,0.35)":"none",
+                        transition:"all 0.15s" }}>
+                      S
                     </button>
                   </div>
                 );
@@ -8388,7 +11056,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
             {isPlaying?<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>}
           </button>
           <div style={{ width:40,height:40,borderRadius:10,background:"#141414",border:"1px solid #222",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center" }}>
-            <span style={{ color:"#555",fontSize:11,fontWeight:800,lineHeight:1 }}>{zoom}x</span>
+            <span style={{ color:"#555",fontSize:10,fontWeight:800,lineHeight:1 }}>{Math.round(zoom*100)}%</span>
             <span style={{ color:"#333",fontSize:7 }}>ZOOM</span>
           </div>
         </div>
@@ -8608,7 +11276,7 @@ export default function BeatFinder() {
   }
 
   return (
-    <div key="app-root" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
+    <div key="app-root" id="bf-portrait-lock" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
       {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
