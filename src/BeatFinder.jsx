@@ -8117,6 +8117,26 @@ function StudioScreen({ user, onExit }) {
     }
   }, []);
 
+  // Prevent iOS from bouncing/scrolling the whole page in Studio.
+  // Only the timeline scrollRef is allowed to scroll — everything else is blocked.
+  const studioRootRef = useRef(null);
+  useEffect(function () {
+    function onTouchMove(e) {
+      // Walk up from the touch target — if it's inside scrollRef, allow it
+      var el = e.target;
+      while (el) {
+        if (el === scrollRef.current) return; // inside timeline — allow
+        el = el.parentElement;
+      }
+      // Outside timeline — block page scroll/bounce
+      e.preventDefault();
+    }
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    return function () {
+      document.removeEventListener("touchmove", onTouchMove, { passive: false });
+    };
+  }, []);
+
   // ── Studio mount: request mic permission only after user navigates to Studio ──
   // A 800ms delay ensures the tab transition completes before the iOS dialog appears.
   // Uses the Permissions API to check if mic is genuinely already granted,
@@ -12406,7 +12426,7 @@ self.onmessage = async function(e) {
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
-      style={{ background:"#080808", position:"fixed", top:0, left:0, right:0, bottom:0, display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none", paddingTop:"calc(96px + env(safe-area-inset-top))", paddingBottom:72 }}
+      style={{ background:"#080808", height:"100%", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
     >
       {/* ── Overlays ── */}
@@ -12837,7 +12857,7 @@ self.onmessage = async function(e) {
       )}
 
       {/* ══ TOP BAR ══════════════════════════════════════════════ */}
-      <div style={{ display:"flex",alignItems:"center",padding:"8px 12px",paddingTop:"calc(8px + env(safe-area-inset-top))",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:6,zIndex:200,position:"fixed",top:0,left:0,right:0 }}>
+      <div style={{ display:"flex",alignItems:"center",padding:"10px 12px",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:6,zIndex:50 }}>
         <button onClick={function(){
           if(!isSaved&&hasContent){
             setUnsavedAlert("exit");
@@ -12900,7 +12920,7 @@ self.onmessage = async function(e) {
       {error&&<div style={{ background:"rgba(239,68,68,0.1)",borderBottom:"1px solid rgba(239,68,68,0.2)",color:"#F87171",fontSize:12,padding:"5px 16px",textAlign:"center",flexShrink:0 }}>{error}</div>}
 
       {/* Zoom / Loop bar — monitoring toggle lives here too */}
-      <div style={{ display:"flex",alignItems:"center",gap:6,padding:"4px 12px",background:"#090909",borderBottom:"1px solid #141414",flexShrink:0,position:"fixed",top:"calc(56px + env(safe-area-inset-top))",left:0,right:0,zIndex:200 }}>
+      <div style={{ display:"flex",alignItems:"center",gap:6,padding:"4px 12px",background:"#090909",borderBottom:"1px solid #0f0f0f",flexShrink:0 }}>
         {/* H-zoom label */}
         <span style={{ color:"#333",fontSize:7,fontWeight:800,letterSpacing:0.5,flexShrink:0 }}>H</span>
         <button onClick={function(){
@@ -13744,7 +13764,7 @@ userPickedMicRef.current = true;
       })()}
 
       {/* ══ TRANSPORT ════════════════════════════════════════════ */}
-      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"calc(8px + env(safe-area-inset-bottom))",flexShrink:0,zIndex:200,position:"fixed",bottom:0,left:0,right:0 }}>
+      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"calc(8px + env(safe-area-inset-bottom))",flexShrink:0,zIndex:50 }}>
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
           <div style={{ width:40,height:40,borderRadius:10,background:showMixer?"rgba(139,92,246,0.2)":"#141414",border:"1px solid "+(showMixer?"#8B5CF6":"#222"),display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer" }} onClick={function(){ setShowMixer(function(v){return !v;}); }}>
             <span style={{ fontSize:14 }}><Icon id="fader" size={18} color={showMixer ? "#8B5CF6" : "#aaa"} strokeWidth={1.8}/></span>
