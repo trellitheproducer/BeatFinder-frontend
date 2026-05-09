@@ -7,10 +7,12 @@ const LOADER_STYLE = `
   @media screen and (orientation: landscape) {
   html, body {
     overflow: hidden;
-    overscroll-behavior: none;
-    position: fixed;
-    width: 100%;
-    height: 100%;
+    overscroll-behavior-y: none;
+  }
+  #root {
+    overscroll-behavior-y: none;
+    overflow: hidden;
+    height: 100dvh;
   }
     #bf-portrait-lock {
       position: fixed;
@@ -12412,7 +12414,7 @@ self.onmessage = async function(e) {
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
-      style={{ background:"#080808", height:"100%", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
+      style={{ background:"#080808", height:"100dvh", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
     >
       {/* ── Overlays ── */}
@@ -12843,7 +12845,7 @@ self.onmessage = async function(e) {
       )}
 
       {/* ══ TOP BAR ══════════════════════════════════════════════ */}
-      <div style={{ display:"flex",alignItems:"center",padding:"10px 12px",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:6,zIndex:50 }}>
+      <div style={{ display:"flex",alignItems:"center",padding:"10px 12px",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:6,zIndex:100,position:"sticky",top:0 }}>
         <button onClick={function(){
           if(!isSaved&&hasContent){
             setUnsavedAlert("exit");
@@ -13051,6 +13053,7 @@ userPickedMicRef.current = true;
             width:"100%", height:"100%",
             overflowX:"scroll", overflowY:"auto",
             WebkitOverflowScrolling:"touch",
+            overscrollBehavior:"none",
             scrollbarWidth:"thin", scrollbarColor:"#2a2a2a #0a0a0a",
           }}
           onScroll={function(e){
@@ -13514,10 +13517,8 @@ userPickedMicRef.current = true;
           const fillH = Math.max(0, Math.min(1, vol/1.5)) * trackH;
 
           return (
-            <div style={{ position:"relative", width:28, height:trackH, flexShrink:0, cursor:"pointer", touchAction:"none" }}
+            <div style={{ position:"relative", width:28, height:trackH, flexShrink:0, cursor:"pointer" }}
               onPointerDown={onPD}
-              onTouchStart={function(e){ e.preventDefault(); }}
-              onTouchMove={function(e){ e.preventDefault(); }}
               onDoubleClick={function(){ onChange(1); }}>
               {/* Rail background */}
               <div style={{ position:"absolute", left:"50%", transform:"translateX(-50%)", top:0, bottom:0, width:4, background:"#3a3a3c", borderRadius:2 }} />
@@ -13594,7 +13595,6 @@ userPickedMicRef.current = true;
             maxHeight: "58vh",
             display: "flex",
             flexDirection: "column",
-            overflow: "hidden",
           }} onClick={function(e){ e.stopPropagation(); }}>
 
             {/* ── GB Mixer header bar ── */}
@@ -13753,7 +13753,7 @@ userPickedMicRef.current = true;
       })()}
 
       {/* ══ TRANSPORT ════════════════════════════════════════════ */}
-      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"calc(8px + env(safe-area-inset-bottom))",flexShrink:0,zIndex:50 }}>
+      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"calc(8px + env(safe-area-inset-bottom))",flexShrink:0,zIndex:100,position:"sticky",bottom:0 }}>
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
           <div style={{ width:40,height:40,borderRadius:10,background:showMixer?"rgba(139,92,246,0.2)":"#141414",border:"1px solid "+(showMixer?"#8B5CF6":"#222"),display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer" }} onClick={function(){ setShowMixer(function(v){return !v;}); }}>
             <span style={{ fontSize:14 }}><Icon id="fader" size={18} color={showMixer ? "#8B5CF6" : "#aaa"} strokeWidth={1.8}/></span>
