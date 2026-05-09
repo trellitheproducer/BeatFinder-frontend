@@ -9245,52 +9245,13 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     }
   };
 
-  const bgAudioRef    = useRef(null); // singleton <audio> for iOS background session
-  const msDestRef     = useRef(null); // singleton MediaStreamDestination
-
   const getOrCreateMaster = function () {
     const actx = getActx();
     if (!masterGainRef.current || masterGainRef.current.context !== actx) {
       masterGainRef.current = actx.createGain();
       masterGainRef.current.gain.value = 1;
-
-      // ── iOS background audio — single signal path (no duplication) ──────────
-      // master → msDest → actx.destination   (one path only)
-      // bgAudioRef plays from msDest.stream, so iOS keeps the session alive.
-      // We do NOT connect master → actx.destination directly, to prevent double audio.
-      try {
-        // Singleton MediaStreamDestination — created once per AudioContext
-        if (!msDestRef.current || msDestRef.current.context !== actx) {
-          msDestRef.current = actx.createMediaStreamDestination();
-        }
-        masterGainRef.current.connect(msDestRef.current);
-        // Route msDest back to hardware output so audio actually plays
-        msDestRef.current.connect(actx.destination);
-
-        // Singleton <audio> element — created once, never recreated
-        if (!bgAudioRef.current) {
-          const bg = document.createElement("audio");
-          bg.setAttribute("playsinline", "");
-          bg.style.cssText = "position:fixed;width:0;height:0;left:-9999px;";
-          document.body.appendChild(bg);
-          bgAudioRef.current = bg;
-        }
-        // Only update srcObject if stream has changed — prevents restart/glitch
-        const bg = bgAudioRef.current;
-        if (bg.srcObject !== msDestRef.current.stream) {
-          bg.srcObject = msDestRef.current.stream;
-          bg.volume = 1;
-        }
-        // Only call play() if not already playing — prevents ghost layers
-        if (bg.paused) {
-          bg.play().catch(function(){});
-        }
-      } catch(e) {
-        // Fallback: direct connection if MediaStreamDestination unsupported
-        masterGainRef.current.connect(actx.destination);
-      }
-
-      // Master output VU analyser (side-branch, not in signal path)
+      masterGainRef.current.connect(actx.destination);
+      // Master output VU analyser (side-branch)
       const ma = actx.createAnalyser();
       ma.fftSize = 256;
       ma.smoothingTimeConstant = 0.5;
@@ -10368,30 +10329,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       stopAll();
       setIsPlaying(false);
       playheadAtRef.current = currentTime;
-      if ("mediaSession" in navigator) {
-        navigator.mediaSession.playbackState = "paused";
-      }
     } else {
-      // ── iOS background audio: play() MUST be called synchronously inside user gesture ──
-      // Any async delay (even 1ms) loses the gesture context and iOS blocks background privileges.
-      // bgAudioRef is the <audio> element connected to the Web Audio master output.
-      if (bgAudioRef.current && bgAudioRef.current.paused) {
-        bgAudioRef.current.play().catch(function(){});
-      }
-      if (silentAudioRef.current && silentAudioRef.current.paused) {
-        silentAudioRef.current.play().catch(function(){});
-      }
-      // Update MediaSession metadata on every play press
-      if ("mediaSession" in navigator) {
-        try {
-          navigator.mediaSession.metadata = new MediaMetadata({
-            title: projectName || "BeatFinder Studio",
-            artist: "BeatFinder",
-            album: "Studio Mode",
-          });
-          navigator.mediaSession.playbackState = "playing";
-        } catch(e) {}
-      }
       const startT = (loopEnabled && loopOut > loopIn) ? loopIn : currentTime;
       doPlay(startT);
       setCurrentTime(startT);
@@ -10656,22 +10594,40 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
   // ── Recording ─────────────────────────────────────────────────
 
-  // ── Fallback session keeper (only needed before first play) ──────
-  // Once getOrCreateMaster runs, the actual music keeps the session alive.
-  // This fallback only matters in the brief window before the user presses play.
+  // ── Background audio for iOS home screen web app ─────────────
+  // iOS suspends Web Audio when a home screen web app goes to background,
+  // UNLESS an <audio> element is actively playing audible content.
+  // The element must be: in the DOM, loop=true, volume above ~0.01, actually playing.
+  // We keep it completely separate from the Web Audio graph (no createMediaElementSource)
+  // so it doesn't interfere with playback volume or routing.
   const silentAudioRef = useRef(null);
-  const silentSrcNodeRef = useRef(null); // unused, kept for compat
+  const silentSrcNodeRef = useRef(null); // kept for API compat, unused
 
   const ensureSilentAudio = function () {
     try {
       if (!silentAudioRef.current) {
-        const a = document.createElement("audio");
-        // A minimal data URI WAV — just headers, no samples (iOS still accepts it as looping)
-        a.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+        // 1-second single-tone WAV at very low amplitude (audible to iOS, inaudible to users)
+        const sr = 44100, nSamples = sr;
+        const ab = new ArrayBuffer(44 + nSamples * 2);
+        const dv = new DataView(ab);
+        const ws = function(o, s) { for (var i=0;i<s.length;i++) dv.setUint8(o+i,s.charCodeAt(i)); };
+        ws(0,"RIFF"); dv.setUint32(4,36+nSamples*2,true); ws(8,"WAVE");
+        ws(12,"fmt "); dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
+        dv.setUint32(24,sr,true); dv.setUint32(28,sr*2,true); dv.setUint16(32,2,true); dv.setUint16(34,16,true);
+        ws(36,"data"); dv.setUint32(40,nSamples*2,true);
+        // Write a 20Hz sine wave at amplitude 50 (out of 32767) — inaudible, but non-zero
+        var arr = new Int16Array(ab, 44);
+        for (var i = 0; i < nSamples; i++) {
+          arr[i] = Math.round(50 * Math.sin(2 * Math.PI * 20 * i / sr));
+        }
+        const blob = new Blob([ab], {type:"audio/wav"});
+        const a = new Audio();
+        a.src = URL.createObjectURL(blob);
         a.loop = true;
-        a.volume = 0.01;
+        a.volume = 0.02; // low but above iOS background audio threshold
         a.setAttribute("playsinline", "");
-        a.style.cssText = "position:fixed;width:0;height:0;left:-9999px;";
+        // Must be in the DOM for iOS home screen web app background audio
+        a.style.cssText = "position:fixed;width:0;height:0;left:-9999px;opacity:0;";
         document.body.appendChild(a);
         silentAudioRef.current = a;
       }
@@ -10681,49 +10637,33 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     } catch(e) {}
   };
 
-  // ── MediaSession: register once on mount with all required handlers ──
-  // iOS requires previoustrack + nexttrack handlers or it kills background audio.
-  // Metadata is updated in togglePlay on each press so it's always current.
+  // ── MediaSession: lock screen controls + background playback permission ──
   useEffect(function () {
     if (!("mediaSession" in navigator)) return;
     try {
-      // Set initial metadata
       navigator.mediaSession.metadata = new MediaMetadata({
         title: projectName || "BeatFinder Studio",
         artist: "BeatFinder",
         album: "Studio Mode",
       });
-      // All four handlers required by iOS for background audio persistence
       navigator.mediaSession.setActionHandler("play", function () {
-        if (bgAudioRef.current && bgAudioRef.current.paused) {
-          bgAudioRef.current.play().catch(function(){});
-        }
+        ensureSilentAudio();
         if (actxRef.current && actxRef.current.state === "suspended") {
           actxRef.current.resume().catch(function(){});
         }
         setIsPlaying(true);
-        navigator.mediaSession.playbackState = "playing";
       });
       navigator.mediaSession.setActionHandler("pause", function () {
         setIsPlaying(false);
-        navigator.mediaSession.playbackState = "paused";
       });
       navigator.mediaSession.setActionHandler("stop", function () {
         setIsPlaying(false);
         setCurrentTime(0);
         playheadAtRef.current = 0;
-        navigator.mediaSession.playbackState = "paused";
       });
-      // Required dummy handlers — iOS kills background audio without these
-      navigator.mediaSession.setActionHandler("previoustrack", function () {
-        setCurrentTime(0);
-        playheadAtRef.current = 0;
-      });
-      navigator.mediaSession.setActionHandler("nexttrack", function () {
-        // No-op for studio mode
-      });
+      navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
     } catch(e) {}
-  }, []); // register once — handlers read live values via refs/setters
+  }, [isPlaying, projectName]);
 
   // ── App lifecycle: background / foreground handling ───────────
   // Uses refs so this effect never needs to re-register — stable listener.
@@ -10748,26 +10688,28 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
   useEffect(function () {
     const onBackground = function () {
-      // Release mic only — do NOT touch AudioContext, bgAudioRef, or playback state
+      // Stop mic — do NOT touch AudioContext or playback
       if (monitoringOnRef.current) { stopMonitoring(); }
       if (saveStateRef.current) saveStateRef.current();
-      // bgAudioRef keeps playing in background on its own — no action needed
+      // Ensure silent audio is playing so iOS keeps the audio session alive
+      ensureSilentAudio();
     };
 
     const onForeground = function () {
-      // Double rAF ensures screen is fully composited before audio resume
+      // Use requestAnimationFrame so we wait for the screen to be fully active
+      // before touching the AudioContext — prevents the freeze
       requestAnimationFrame(function () {
         requestAnimationFrame(function () {
           try {
-            // Resume AudioContext if iOS suspended it
-            if (actxRef.current && actxRef.current.state === "suspended") {
-              actxRef.current.resume().catch(function(){});
+            if (actxRef.current) {
+              if (actxRef.current.state === "suspended") {
+                actxRef.current.resume().catch(function(){});
+              }
             }
-            // Resume bgAudio only if iOS paused it — paused check prevents double-play
-            if (bgAudioRef.current && bgAudioRef.current.paused) {
-              bgAudioRef.current.play().catch(function(){});
-            }
+            // Reconnect silent audio through AudioContext if needed
+            ensureSilentAudio();
           } catch(e) {}
+          // Defer non-critical work further
           setTimeout(function () {
             try {
               if (monitorCtxRef.current && monitorCtxRef.current.state === "suspended") {
