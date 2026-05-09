@@ -8010,6 +8010,7 @@ function StudioScreen({ user, onExit }) {
   const scheduledRef    = useRef([]);
   const isPlayingRef    = useRef(false);
   const tracksRef       = useRef([]);  // always mirrors tracks — gives doPlay a fresh snapshot
+  const saveStateRef    = useRef(null); // updated each render so lifecycle effect always saves fresh state
 
   // ── Input monitoring refs ──────────────────────────────────────
   const monitorStreamRef    = useRef(null);
@@ -8238,9 +8239,11 @@ function StudioScreen({ user, onExit }) {
   const getActx = function () {
     if (!actxRef.current || actxRef.current.state === "closed") {
       actxRef.current = new (window.AudioContext || window.webkitAudioContext)({
-        latencyHint: "interactive",   // lowest possible output latency
-        // No sampleRate override — use OS native rate to avoid hidden resampler latency
+        latencyHint: "interactive",
       });
+      // Start the silent audio anchor the moment AudioContext is created.
+      // getActx is always called from a user gesture, so autoplay is allowed here.
+      ensureSilentAudio();
     }
     if (actxRef.current.state === "suspended") actxRef.current.resume();
     return actxRef.current;
@@ -8381,22 +8384,16 @@ function StudioScreen({ user, onExit }) {
     }
   }, [micReady]);
 
-  // Auto-enable/disable monitoring when headphone state changes
+  // Headphone connect/disconnect — only controls monitoring AVAILABILITY.
+  // Never auto-starts monitoring. User must toggle it manually.
   const prevHeadphonesRef = useRef(null);
   useEffect(function () {
     if (prevHeadphonesRef.current === null) {
       prevHeadphonesRef.current = headphonesIn;
-      // On first run: if headphones already connected, start monitoring
-      if (headphonesIn) {
-        setTimeout(function () { startMonitoring(); }, 500);
-      }
       return;
     }
-    if (headphonesIn && !prevHeadphonesRef.current) {
-      // Headphones just connected — auto-start monitoring
-      startMonitoring();
-    } else if (!headphonesIn && prevHeadphonesRef.current) {
-      // Headphones pulled out — stop monitoring and revert to iPhone mic
+    if (!headphonesIn && prevHeadphonesRef.current) {
+      // Headphones disconnected — stop monitoring and reset mic source
       stopMonitoring();
       userPickedMicRef.current = false;
       setMicSource("builtin");
@@ -10277,13 +10274,8 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     if (isPlaying) {
       stopAll();
       setIsPlaying(false);
-      // Freeze playhead at current position — don't jump
       playheadAtRef.current = currentTime;
     } else {
-      // Start the silent audio element on first user gesture — this establishes
-      // the iOS audio session and keeps it alive in background
-      ensureSilentAudio();
-      // If a loop region is set, always start from loopIn
       const startT = (loopEnabled && loopOut > loopIn) ? loopIn : currentTime;
       doPlay(startT);
       setCurrentTime(startT);
@@ -10602,32 +10594,33 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   }, [isPlaying, projectName]);
 
   // ── App lifecycle: background / foreground handling ───────────
-  useEffect(function () {
-    const saveState = function () {
-      try {
-        sessionStorage.setItem("bf_studio_state", JSON.stringify({
-          projectName, bpm, projectKey, timeSigNum, zoom, vZoom,
-          snapToGrid, loopEnabled, loopIn, loopOut,
-          metronomeOn, showBeatGrid, micInputGain,
-          tracksMeta: tracks.map(function(t) {
-            return { id:t.id, name:t.name, type:t.type, color:t.color,
-                     isMuted:t.isMuted, isSoloed:t.isSoloed, volume:t.volume, pan:t.pan };
-          }),
-        }));
-        sessionStorage.setItem("bf_session_started", "1");
-      } catch(e) {}
-    };
+  // Uses refs so this effect never needs to re-register — stable listener.
+  const monitoringOnRef = useRef(monitoringOn);
+  useEffect(function () { monitoringOnRef.current = monitoringOn; }, [monitoringOn]);
 
+  // Keep saveStateRef always pointing at a closure with latest state
+  saveStateRef.current = function () {
+    try {
+      sessionStorage.setItem("bf_studio_state", JSON.stringify({
+        projectName, bpm, projectKey, timeSigNum, zoom, vZoom,
+        snapToGrid, loopEnabled, loopIn, loopOut,
+        metronomeOn, showBeatGrid, micInputGain,
+        tracksMeta: tracksRef.current.map(function(t) {
+          return { id:t.id, name:t.name, type:t.type, color:t.color,
+                   isMuted:t.isMuted, isSoloed:t.isSoloed, volume:t.volume, pan:t.pan };
+        }),
+      }));
+      sessionStorage.setItem("bf_session_started", "1");
+    } catch(e) {}
+  };
+
+  useEffect(function () {
     const onBackground = function () {
-      // Release mic (prevents mic-in-use indicator staying on lock screen)
-      if (monitoringOn) { stopMonitoring(); }
-      saveState();
-      // Do NOT suspend AudioContext — keep it running for background audio
+      if (monitoringOnRef.current) { stopMonitoring(); }
+      if (saveStateRef.current) saveStateRef.current();
     };
 
     const onForeground = function () {
-      // Defer resume to next tick — avoids blocking the UI thread on return
-      // which was causing the freeze
       setTimeout(function () {
         try {
           if (actxRef.current && actxRef.current.state === "suspended") {
@@ -10639,7 +10632,6 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
           if ("mediaSession" in navigator) {
             navigator.mediaSession.playbackState = isPlayingRef.current ? "playing" : "paused";
           }
-          // Re-check headphone state — route may have changed while in background
           checkHeadphones();
         } catch(e) {}
       }, 150);
@@ -10649,15 +10641,12 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       if (document.hidden) { onBackground(); } else { onForeground(); }
     };
 
-    const onPageHide = function () { saveState(); };
-
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pagehide", function () { if (saveStateRef.current) saveStateRef.current(); });
     return function () {
       document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("pagehide", onPageHide);
     };
-  }, [monitoringOn, projectName, bpm, projectKey, timeSigNum, zoom, vZoom, snapToGrid, loopEnabled, loopIn, loopOut, metronomeOn, showBeatGrid, micInputGain, tracks]);
+  }, []); // stable — reads live values via refs
 
 
   // selectedTrackId declared at top of component (Rules of Hooks)
