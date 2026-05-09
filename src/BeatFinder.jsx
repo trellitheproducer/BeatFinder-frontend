@@ -12406,7 +12406,7 @@ self.onmessage = async function(e) {
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
-      style={{ background:"#080808", height:"100%", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none", paddingTop:62, paddingBottom:72 }}
+      style={{ background:"#080808", height:"100%", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none", paddingTop:"calc(62px + env(safe-area-inset-top))", paddingBottom:72 }}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
     >
       {/* ── Overlays ── */}
@@ -12837,7 +12837,7 @@ self.onmessage = async function(e) {
       )}
 
       {/* ══ TOP BAR ══════════════════════════════════════════════ */}
-      <div style={{ display:"flex",alignItems:"center",padding:"10px 12px",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:6,zIndex:200,position:"fixed",top:0,left:0,right:0 }}>
+      <div style={{ display:"flex",alignItems:"center",padding:"10px 12px",paddingTop:"calc(10px + env(safe-area-inset-top))",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:6,zIndex:200,position:"fixed",top:0,left:0,right:0 }}>
         <button onClick={function(){
           if(!isSaved&&hasContent){
             setUnsavedAlert("exit");
