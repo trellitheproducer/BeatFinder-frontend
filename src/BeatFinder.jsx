@@ -8114,10 +8114,56 @@ function StudioScreen({ user, onExit }) {
     }
   }, []);
 
-  // ── Lazy mic permission — requested only when user clicks Record or + Vocal ──
-  // We do NOT request on mount. Request is made inside startCountIn/addVocalTrack
-  // so the orange mic indicator only appears during actual recording.
-  // Browser caches the grant so it never asks twice.
+  // ── Studio mount: immediately request mic permission + pre-warm AudioContext ──
+  // Requesting on mount (not on first record/play) means:
+  //   • iOS shows the mic permission dialog up front, not mid-session
+  //   • headset detection works immediately (iOS hides device labels until after first grant)
+  //   • monitoring and recording feel instant — no permission round-trip later
+  //   • audio session is established before any user interaction
+  // Monitoring stays OFF. Recording stays OFF. This only prepares the session.
+  useEffect(function () {
+    var cancelled = false;
+    async function init() {
+      // 1. Request mic permission — gets the grant, then releases the stream immediately
+      //    so iOS does NOT enter recording-session mode yet
+      if (!micReady) {
+        try {
+          var stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          stream.getTracks().forEach(function(t) { t.stop(); }); // release immediately
+          if (!cancelled) {
+            setMicReady(true);
+            // iOS only reveals device labels after first getUserMedia — re-enumerate now
+            setTimeout(checkHeadphones, 300);
+            setTimeout(checkHeadphones, 1200); // second pass after labels settle
+          }
+        } catch(e) {
+          if (!cancelled) {
+            setMicDenied(true);
+            if (e.name === "NotAllowedError") {
+              setError("Mic access denied. Go to Settings → Safari → Microphone → Allow.");
+            }
+          }
+        }
+      }
+      // 2. Pre-warm the playback AudioContext (no-op if already created)
+      //    Must be inside useEffect (not a user gesture) but iOS allows AudioContext
+      //    creation at any time — it just starts suspended until first resume() inside a gesture
+      if (!cancelled && (!actxRef.current || actxRef.current.state === "closed")) {
+        try {
+          actxRef.current = new (window.AudioContext || window.webkitAudioContext)({
+            latencyHint: "interactive",
+          });
+          // Start silent anchor audio now that the AudioContext exists
+          ensureSilentAudio();
+        } catch(e) {}
+      }
+    }
+    init();
+    return function() { cancelled = true; };
+  }, []); // run once on mount only
+
+  // ── Lazy mic permission — kept for backward compat, now rarely needed ──
+  // requestMicPermissionOnce is a no-op if micReady is already true from mount init
   const requestMicPermissionOnce = async function () {
     if (micReady) return true;
     try {
@@ -8460,39 +8506,31 @@ function StudioScreen({ user, onExit }) {
   };
 
   // ── Input Monitoring ──────────────────────────────────────────
-  // ZERO-LATENCY DESIGN:
-  //   • AudioContext is created once and kept alive (no re-init cost on each toggle)
-  //   • Mic stream is kept alive via micStreamRef and reused (no getUserMedia round-trip on toggle)
-  //   • No sampleRate override — OS native rate avoids hidden resampler latency
-  //   • Analyser is a side-branch off gain (not in the signal path) so it adds zero latency
-  //   • Graph: mic → merger (mono→stereo) → gain → destination
-  //                                              ↘ analyser (side branch, read-only)
-  // forceMicSource: pass "builtin" or "headset" directly to avoid reading stale state.
-  const startMonitoring = async function (forceLowLatency, forceMicSource) {
-    if (monitorSrcRef.current) return; // already wired up
-    setMonitorWarn("");
+  // DESIGN: Monitoring is a completely separate pipeline from recording.
+  //   • Own mic stream (never shared with recording micStreamRef)
+  //   • Own AudioContext (monitorCtxRef) — never touches actxRef (playback)
+  //   • Mic stream is stopped fully on stopMonitoring so iOS releases the input session
+  //   • This prevents monitoring from forcing iOS into "recording session" behaviour
+  //     which was causing the large output buffer / background playback failures
+  const monitorMicStreamRef = useRef(null); // monitoring-only mic stream, separate from recording
 
-    // No feedback gate — on iPhone, iOS routes monitoring audio to whatever output
-    // is active (headset, AirPods, speaker) automatically. Blocking based on
-    // headphone detection was causing false negatives on iOS where labels are empty
-    // until after mic permission is granted.
+  const startMonitoring = async function (forceLowLatency, forceMicSource) {
+    if (monitorSrcRef.current) return; // already running
+    setMonitorWarn("");
 
     const useMicSource = forceMicSource !== undefined ? forceMicSource : micSource;
     const audioConstraints = await buildMicConstraints(useMicSource);
 
     try {
-      // ── Reuse existing mic stream — avoids getUserMedia round-trip latency on every toggle ──
-      let stream = micStreamRef.current;
-      if (!stream || !stream.active) {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
-        micStreamRef.current = stream;
-      }
-      monitorStreamRef.current = stream;
+      // Always open a fresh dedicated stream for monitoring — never reuse recording stream
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { ...audioConstraints, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        video: false,
+      });
+      monitorMicStreamRef.current = stream;
+      monitorStreamRef.current    = stream;
 
-      // ── Reuse or create persistent monitoring AudioContext ──
-      // Never closed between sessions — eliminates ~20–50ms re-init cost on each toggle.
-      // No sampleRate override: letting the OS use its native rate (usually 44100 on iOS)
-      // avoids a hidden software resampler that adds latency.
+      // Reuse or create monitoring AudioContext
       if (!monitorCtxRef.current || monitorCtxRef.current.state === "closed") {
         monitorCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({
           latencyHint: "interactive",
@@ -8501,32 +8539,25 @@ function StudioScreen({ user, onExit }) {
       const mCtx = monitorCtxRef.current;
       if (mCtx.state === "suspended") await mCtx.resume();
 
-      const src  = mCtx.createMediaStreamSource(stream);
+      const src      = mCtx.createMediaStreamSource(stream);
       const micBoost = mCtx.createGain();
       micBoost.gain.value = micInputGainRef.current;
       const gain = mCtx.createGain();
       gain.gain.value = monitorVol;
 
-      // Analyser as a SIDE BRANCH off gain — not in the audio path, so zero added latency
       const analyser = mCtx.createAnalyser();
       analyser.fftSize = 256;
 
-      // ── Explicit mono-centre: src → splitter → merger (L=R=mono) → gain → destination ──
-      // The browser's implicit upmix can route mono only to the left channel on some iOS
-      // versions. We use a ChannelSplitter + ChannelMerger to guarantee an identical copy
-      // of the mono mic signal on BOTH L and R at equal gain — perfectly centred, no drift.
-      // Graph: src(1ch) → micBoost → splitter[0] ──→ merger[0] (L)
-      //                                        └──→ merger[1] (R)
-      //        merger(2ch) → gain → destination
-      const splitter = mCtx.createChannelSplitter(1); // force single-channel split
-      const merger   = mCtx.createChannelMerger(2);   // 2-channel output (stereo)
+      // Mono → stereo centre: prevents iOS routing mono only to left channel
+      const splitter = mCtx.createChannelSplitter(1);
+      const merger   = mCtx.createChannelMerger(2);
       src.connect(micBoost);
       micBoost.connect(splitter);
-      splitter.connect(merger, 0, 0); // mono → L
-      splitter.connect(merger, 0, 1); // mono → R (identical copy)
+      splitter.connect(merger, 0, 0);
+      splitter.connect(merger, 0, 1);
       merger.connect(gain);
       gain.connect(mCtx.destination);
-      gain.connect(analyser); // side branch — read-only, not in the output chain
+      gain.connect(analyser);
 
       monitorSrcRef.current      = src;
       monitorGainRef.current     = gain;
@@ -8536,35 +8567,33 @@ function StudioScreen({ user, onExit }) {
       monitorMergerRef.current   = merger;
       setMonitoringOn(true);
     } catch (e) {
-      monitorStreamRef.current = null;
+      monitorMicStreamRef.current = null;
+      monitorStreamRef.current    = null;
       setMonitorWarn("Could not start monitoring: " + (e.message || e.name));
     }
   };
 
   const stopMonitoring = function () {
-    // Ramp gain to zero first to avoid a click/pop
+    // Ramp gain to zero to avoid pop
     if (monitorGainRef.current && monitorCtxRef.current) {
-      monitorGainRef.current.gain.setTargetAtTime(0, monitorCtxRef.current.currentTime, 0.02);
+      try { monitorGainRef.current.gain.setTargetAtTime(0, monitorCtxRef.current.currentTime, 0.02); } catch(e) {}
     }
     setTimeout(function () {
-      // Disconnect all Web Audio nodes
-      try { monitorGainRef.current     && monitorGainRef.current.disconnect(); }     catch(e) {}
+      // Disconnect all nodes
       try { monitorSrcRef.current      && monitorSrcRef.current.disconnect(); }      catch(e) {}
+      try { monitorGainRef.current     && monitorGainRef.current.disconnect(); }     catch(e) {}
       try { monitorMicBoostRef.current && monitorMicBoostRef.current.disconnect(); } catch(e) {}
       try { monitorAnalyserRef.current && monitorAnalyserRef.current.disconnect(); } catch(e) {}
       try { monitorSplitterRef.current && monitorSplitterRef.current.disconnect(); } catch(e) {}
       try { monitorMergerRef.current   && monitorMergerRef.current.disconnect(); }   catch(e) {}
 
-      // ── Fully stop the mic stream tracks ──────────────────────────────────
-      // On iOS, any live getUserMedia track holds the audio session in "recording mode"
-      // which forces a larger output buffer and adds latency to ALL playback — including
-      // the beat. Stopping the tracks releases the session back to playback-only mode.
-      // Only do this when not actively recording.
-      if (monitorStreamRef.current && !mediaRecRef.current) {
-        monitorStreamRef.current.getTracks().forEach(function(t) { t.stop(); });
-        micStreamRef.current = null; // clear so next toggle opens a fresh stream
+      // CRITICAL: Always stop the monitoring mic tracks fully.
+      // This releases iOS from "recording session" mode back to playback-only mode.
+      // We use monitorMicStreamRef (monitoring-only) never touch recording's micStreamRef.
+      if (monitorMicStreamRef.current) {
+        monitorMicStreamRef.current.getTracks().forEach(function(t) { t.stop(); });
+        monitorMicStreamRef.current = null;
       }
-
       monitorStreamRef.current   = null;
       monitorSrcRef.current      = null;
       monitorGainRef.current     = null;
@@ -8573,7 +8602,7 @@ function StudioScreen({ user, onExit }) {
       monitorSplitterRef.current = null;
       monitorMergerRef.current   = null;
 
-      // Suspend (not close) the AudioContext so it wakes instantly on next toggle
+      // Suspend (not close) monitor context — fast wake on next toggle
       if (monitorCtxRef.current && monitorCtxRef.current.state === "running") {
         monitorCtxRef.current.suspend().catch(function(){});
       }
