@@ -8399,31 +8399,24 @@ function StudioScreen({ user, onExit }) {
   useEffect(function () {
     checkHeadphones();
 
-    // iOS fires devicechange before finishing label updates — wait 300 ms
     const onDeviceChange = function() {
-      setTimeout(checkHeadphones, 300);
-      setTimeout(checkHeadphones, 1000); // double-check after labels settle
+      // When a headset disconnects, iOS suspends the AudioContext.
+      // Resume it immediately so playback continues on the speaker — don't wait.
+      if (actxRef.current && actxRef.current.state === "suspended") {
+        actxRef.current.resume().catch(function(){});
+      }
+      // Defer the label enumeration — iOS needs time to settle after route change
+      setTimeout(checkHeadphones, 500);
+      setTimeout(checkHeadphones, 1500);
     };
     navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
 
-    // iOS does not reliably fire devicechange on wired headphone insert/remove.
-    // Poll every 2 seconds as a fallback — lightweight since enumerateDevices is cheap.
+    // Poll every 2 seconds as fallback for devices that don't fire devicechange reliably
     const pollInterval = setInterval(checkHeadphones, 2000);
-
-    // Also detect route changes via AudioContext state transitions
-    const onAudioRouteChange = function() {
-      setTimeout(checkHeadphones, 200);
-    };
-    if (actxRef.current) {
-      actxRef.current.addEventListener("statechange", onAudioRouteChange);
-    }
 
     return function(){
       navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange);
       clearInterval(pollInterval);
-      if (actxRef.current) {
-        actxRef.current.removeEventListener("statechange", onAudioRouteChange);
-      }
     };
   }, []);
 
@@ -8446,11 +8439,18 @@ function StudioScreen({ user, onExit }) {
       return;
     }
     if (!headphonesIn && prevHeadphonesRef.current) {
-      // Headphones disconnected — stop monitoring and reset mic source
-      stopMonitoring();
-      userPickedMicRef.current = false;
-      setMicSource("builtin");
-      setMonitorWarn("");
+      // Headphones disconnected — defer all cleanup off the main thread.
+      // iOS is mid-route-change here; doing work synchronously causes the freeze.
+      setTimeout(function () {
+        stopMonitoring();
+        userPickedMicRef.current = false;
+        setMicSource("builtin");
+        setMonitorWarn("");
+        // Resume AudioContext if iOS suspended it during the route change
+        if (actxRef.current && actxRef.current.state === "suspended") {
+          actxRef.current.resume().catch(function(){});
+        }
+      }, 200);
     }
     prevHeadphonesRef.current = headphonesIn;
   }, [headphonesIn]);
@@ -9245,12 +9245,35 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     }
   };
 
+  const bgAudioRef = useRef(null); // background <audio> element fed by actual music output
+
   const getOrCreateMaster = function () {
     const actx = getActx();
     if (!masterGainRef.current || masterGainRef.current.context !== actx) {
       masterGainRef.current = actx.createGain();
       masterGainRef.current.gain.value = 1;
       masterGainRef.current.connect(actx.destination);
+
+      // ── iOS background audio: pipe actual music into a MediaStream → <audio> element ──
+      // iOS only keeps the AudioContext alive in background if a real <audio> element
+      // is playing the same audio session. We tap the master output into a MediaStreamDest
+      // and feed it to a hidden <audio> element — this IS the music, at full volume.
+      try {
+        const msDest = actx.createMediaStreamDestination();
+        masterGainRef.current.connect(msDest);
+        if (!bgAudioRef.current) {
+          const bg = document.createElement("audio");
+          bg.setAttribute("playsinline", "");
+          bg.setAttribute("autoplay", "");
+          bg.style.cssText = "position:fixed;width:0;height:0;left:-9999px;";
+          document.body.appendChild(bg);
+          bgAudioRef.current = bg;
+        }
+        bgAudioRef.current.srcObject = msDest.stream;
+        bgAudioRef.current.volume = 1;
+        bgAudioRef.current.play().catch(function(){});
+      } catch(e) {}
+
       // Master output VU analyser (side-branch)
       const ma = actx.createAnalyser();
       ma.fftSize = 256;
@@ -10594,50 +10617,27 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
   // ── Recording ─────────────────────────────────────────────────
 
-  // ── Background audio for iOS PWA ─────────────────────────────
-  // In PWA standalone mode, iOS only keeps Web Audio alive in background if a real
-  // <audio> element is actively playing. We create a silent looping audio element
-  // and route it through the main AudioContext so they share one audio session.
-  // This gives the AudioContext the same background entitlement as the <audio> element.
+  // ── Fallback session keeper (only needed before first play) ──────
+  // Once getOrCreateMaster runs, the actual music keeps the session alive.
+  // This fallback only matters in the brief window before the user presses play.
   const silentAudioRef = useRef(null);
-  const silentSrcNodeRef = useRef(null);
+  const silentSrcNodeRef = useRef(null); // unused, kept for compat
 
   const ensureSilentAudio = function () {
     try {
-      // Create the silent <audio> element once
       if (!silentAudioRef.current) {
-        const sr = 44100, nSamples = sr;
-        const ab = new ArrayBuffer(44 + nSamples * 2);
-        const dv = new DataView(ab);
-        const ws = function(o, s) { for (var i=0;i<s.length;i++) dv.setUint8(o+i,s.charCodeAt(i)); };
-        ws(0,"RIFF"); dv.setUint32(4,36+nSamples*2,true); ws(8,"WAVE");
-        ws(12,"fmt "); dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
-        dv.setUint32(24,sr,true); dv.setUint32(28,sr*2,true); dv.setUint16(32,2,true); dv.setUint16(34,16,true);
-        ws(36,"data"); dv.setUint32(40,nSamples*2,true);
-        const blob = new Blob([ab], {type:"audio/wav"});
-        const a = new Audio();
-        a.src = URL.createObjectURL(blob);
+        const a = document.createElement("audio");
+        // A minimal data URI WAV — just headers, no samples (iOS still accepts it as looping)
+        a.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
         a.loop = true;
-        a.volume = 0.001;
+        a.volume = 0.01;
+        a.setAttribute("playsinline", "");
+        a.style.cssText = "position:fixed;width:0;height:0;left:-9999px;";
+        document.body.appendChild(a);
         silentAudioRef.current = a;
       }
-
-      const a = silentAudioRef.current;
-
-      // If AudioContext exists, route audio element THROUGH it so they share one session
-      if (actxRef.current && actxRef.current.state !== "closed" && !silentSrcNodeRef.current) {
-        try {
-          const src = actxRef.current.createMediaElementSource(a);
-          src.connect(actxRef.current.destination);
-          silentSrcNodeRef.current = src;
-        } catch(e) {
-          // createMediaElementSource can only be called once per element — ignore if already done
-        }
-      }
-
-      // Start playing if not already
-      if (a.paused) {
-        a.play().catch(function(){});
+      if (silentAudioRef.current.paused) {
+        silentAudioRef.current.play().catch(function(){});
       }
     } catch(e) {}
   };
@@ -10701,20 +10701,18 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     };
 
     const onForeground = function () {
-      // Use requestAnimationFrame so we wait for the screen to be fully active
-      // before touching the AudioContext — prevents the freeze
       requestAnimationFrame(function () {
         requestAnimationFrame(function () {
           try {
-            if (actxRef.current) {
-              if (actxRef.current.state === "suspended") {
-                actxRef.current.resume().catch(function(){});
-              }
+            if (actxRef.current && actxRef.current.state === "suspended") {
+              actxRef.current.resume().catch(function(){});
             }
-            // Reconnect silent audio through AudioContext if needed
+            // Resume the background music audio element if iOS paused it
+            if (bgAudioRef.current && bgAudioRef.current.paused) {
+              bgAudioRef.current.play().catch(function(){});
+            }
             ensureSilentAudio();
           } catch(e) {}
-          // Defer non-critical work further
           setTimeout(function () {
             try {
               if (monitorCtxRef.current && monitorCtxRef.current.state === "suspended") {
