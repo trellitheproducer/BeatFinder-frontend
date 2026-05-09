@@ -9245,36 +9245,52 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     }
   };
 
-  const bgAudioRef = useRef(null); // background <audio> element fed by actual music output
+  const bgAudioRef    = useRef(null); // singleton <audio> for iOS background session
+  const msDestRef     = useRef(null); // singleton MediaStreamDestination
 
   const getOrCreateMaster = function () {
     const actx = getActx();
     if (!masterGainRef.current || masterGainRef.current.context !== actx) {
       masterGainRef.current = actx.createGain();
       masterGainRef.current.gain.value = 1;
-      masterGainRef.current.connect(actx.destination);
 
-      // ── iOS background audio: pipe actual music into a MediaStream → <audio> element ──
-      // iOS only keeps the AudioContext alive in background if a real <audio> element
-      // is playing the same audio session. We tap the master output into a MediaStreamDest
-      // and feed it to a hidden <audio> element — this IS the music, at full volume.
+      // ── iOS background audio — single signal path (no duplication) ──────────
+      // master → msDest → actx.destination   (one path only)
+      // bgAudioRef plays from msDest.stream, so iOS keeps the session alive.
+      // We do NOT connect master → actx.destination directly, to prevent double audio.
       try {
-        const msDest = actx.createMediaStreamDestination();
-        masterGainRef.current.connect(msDest);
+        // Singleton MediaStreamDestination — created once per AudioContext
+        if (!msDestRef.current || msDestRef.current.context !== actx) {
+          msDestRef.current = actx.createMediaStreamDestination();
+        }
+        masterGainRef.current.connect(msDestRef.current);
+        // Route msDest back to hardware output so audio actually plays
+        msDestRef.current.connect(actx.destination);
+
+        // Singleton <audio> element — created once, never recreated
         if (!bgAudioRef.current) {
           const bg = document.createElement("audio");
           bg.setAttribute("playsinline", "");
-          bg.setAttribute("autoplay", "");
           bg.style.cssText = "position:fixed;width:0;height:0;left:-9999px;";
           document.body.appendChild(bg);
           bgAudioRef.current = bg;
         }
-        bgAudioRef.current.srcObject = msDest.stream;
-        bgAudioRef.current.volume = 1;
-        bgAudioRef.current.play().catch(function(){});
-      } catch(e) {}
+        // Only update srcObject if stream has changed — prevents restart/glitch
+        const bg = bgAudioRef.current;
+        if (bg.srcObject !== msDestRef.current.stream) {
+          bg.srcObject = msDestRef.current.stream;
+          bg.volume = 1;
+        }
+        // Only call play() if not already playing — prevents ghost layers
+        if (bg.paused) {
+          bg.play().catch(function(){});
+        }
+      } catch(e) {
+        // Fallback: direct connection if MediaStreamDestination unsupported
+        masterGainRef.current.connect(actx.destination);
+      }
 
-      // Master output VU analyser (side-branch)
+      // Master output VU analyser (side-branch, not in signal path)
       const ma = actx.createAnalyser();
       ma.fftSize = 256;
       ma.smoothingTimeConstant = 0.5;
@@ -10693,25 +10709,25 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
   useEffect(function () {
     const onBackground = function () {
-      // Stop mic — do NOT touch AudioContext or playback
+      // Release mic only — do NOT touch AudioContext, bgAudioRef, or playback state
       if (monitoringOnRef.current) { stopMonitoring(); }
       if (saveStateRef.current) saveStateRef.current();
-      // Ensure silent audio is playing so iOS keeps the audio session alive
-      ensureSilentAudio();
+      // bgAudioRef keeps playing in background on its own — no action needed
     };
 
     const onForeground = function () {
+      // Double rAF ensures screen is fully composited before audio resume
       requestAnimationFrame(function () {
         requestAnimationFrame(function () {
           try {
+            // Resume AudioContext if iOS suspended it
             if (actxRef.current && actxRef.current.state === "suspended") {
               actxRef.current.resume().catch(function(){});
             }
-            // Resume the background music audio element if iOS paused it
+            // Resume bgAudio only if iOS paused it — paused check prevents double-play
             if (bgAudioRef.current && bgAudioRef.current.paused) {
               bgAudioRef.current.play().catch(function(){});
             }
-            ensureSilentAudio();
           } catch(e) {}
           setTimeout(function () {
             try {
