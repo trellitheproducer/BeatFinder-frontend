@@ -2055,7 +2055,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
   const VIBES = [
     { label: "Hype",     q: "hard trap type beat",      emoji: "flame", color: "#EF4444" },
     { label: "Chill",    q: "chill lo fi type beat",    emoji: "chill", color: "#3B82F6" },
-    { label: "Dark",     q: "dark drill type beat",     emoji: "●", color: "#8B5CF6" },
+    { label: "Dark",     q: "dark drill type beat",     emoji: "dark_face", color: "#8B5CF6" },
     { label: "Melodic",  q: "melodic type beat",        emoji: "wave", color: "#06B6D4" },
     { label: "Romantic", q: "romantic r&b type beat",   emoji: "heart", color: "#EC4899" },
   ];
@@ -2231,8 +2231,8 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
 
         {/* 3. CONTINUE WRITING */}
         <div style={{ marginBottom: 16 }}>
-          <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
-            ✍️ CONTINUE WRITING
+          <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+            <Icon id="edit" size={12} color="#888" strokeWidth={2} /> CONTINUE WRITING
           </div>
           {lastLyric ? (
             <button
@@ -2247,9 +2247,9 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
               <div style={{
                 width: 38, height: 38, borderRadius: 10, flexShrink: 0,
                 background: "linear-gradient(135deg,#6B21A8,#C026D3)",
-                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
+                display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-
+                <Icon id="edit" size={18} color="white" strokeWidth={2} />
               </div>
               <div style={{ flex: 1, overflow: "hidden" }}>
                 <div style={{ color: "white", fontWeight: 700, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -2912,7 +2912,7 @@ function ArtistsScreen({ onPlay, savedIds, onSave }) {
           { id: "USA",     label: "🇺🇸 US"      },
           { id: "UK",      label: "🇬🇧 UK"      },
           { id: "JAMAICA", label: "🇯🇲 Jamaica"  },
-          { id: "AFRICA",  label: "Africa"   },
+          { id: "AFRICA",  label: "🇿🇦🇳🇬 Africa"   },
         ].map(r => (
           <button key={r.id} onClick={() => { setRegion(r.id); setCat("All"); }}
             style={{
@@ -3522,7 +3522,7 @@ function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial }
             <input
               value={input} onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && doSearch()}
-              placeholder="e.g. Drake, Central Cee, 🇬🇧 drill..."
+              placeholder="e.g. Drake, Central Cee, UK drill..."
               style={{ background: "none", border: "none", outline: "none", color: "white", fontSize: 15, flex: 1 }}
             />
             {input.length > 0 && (
@@ -3845,13 +3845,13 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
         <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, letterSpacing: 1, marginBottom: 14, textAlign: "center" }}>WHAT YOU UNLOCK</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
           {[
-            { icon: "note", title: "Exclusive Beats", desc: "Access member-only beats unavailable anywhere else" },
-            { icon: "download", title: "MP3 Downloads", desc: "Download and buy leases directly from producers" },
-            { icon: "edit", title: "Lyric Studio", desc: "Access exclusive member beats with AI assistance" },
-            { icon: "knobs", title: "Producer Tools", desc: "Upload beats, sell leases and get paid instantly" },
+            { icon: "note",     color: "#F59E0B", title: "Exclusive Beats", desc: "Access member-only beats unavailable anywhere else" },
+            { icon: "download", color: "#F59E0B", title: "MP3 Downloads",   desc: "Download and buy leases directly from producers" },
+            { icon: "edit",     color: "#F59E0B", title: "Lyric Studio",    desc: "Access exclusive member beats with AI assistance" },
+            { icon: "knobs",    color: "#F59E0B", title: "Producer Tools",  desc: "Upload beats, sell leases and get paid instantly" },
           ].map(v => (
             <div key={v.title} style={{ background: "#111", borderRadius: 14, padding: 14, border: "1px solid rgba(245,158,11,0.15)" }}>
-              <div style={{ fontSize: 24, marginBottom: 8 }}><AppIcon id={v.icon} size={24}/></div>
+              <div style={{ marginBottom: 10 }}><Icon id={v.icon} size={24} color={v.color} strokeWidth={1.6} /></div>
               <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 4 }}>{v.title}</div>
               <div style={{ color: "#555", fontSize: 11, lineHeight: 1.5 }}>{v.desc}</div>
             </div>
@@ -4860,7 +4860,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
           <div style={{ color: "#666", fontSize: 13, marginBottom: 16 }}>Tap any lyric to continue writing</div>
           {savedLyrics.length === 0 ? (
             <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>
-              <div style={{ fontSize: 40, marginBottom: 10 }}>✍️</div>
+            <div style={{ marginBottom: 10 }}><Icon id="edit" size={40} color="#555" strokeWidth={1.5} /></div>
               <div>No saved lyrics yet. Open a beat and tap Write Lyrics.</div>
             </div>
           ) : savedLyrics.map(function(lyric, i) {
@@ -4887,8 +4887,8 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                   </button>
                 </div>
                 <button onClick={function(){ onEditLyric(lyric, i); }}
-                  style={{ width: "100%", background: "rgba(192,38,211,0.1)", border: "1.5px solid #C026D3", borderRadius: 10, color: "#C026D3", fontWeight: 700, fontSize: 14, padding: "10px", cursor: "pointer", marginTop: 6 }}>
-                  ✍️ Continue Writing
+                  style={{ width: "100%", background: "rgba(192,38,211,0.1)", border: "1.5px solid #C026D3", borderRadius: 10, color: "#C026D3", fontWeight: 700, fontSize: 14, padding: "10px", cursor: "pointer", marginTop: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  <Icon id="edit" size={16} color="#C026D3" strokeWidth={2} /> Continue Writing
                 </button>
               </div>
             );
@@ -13629,6 +13629,7 @@ const LucideIcons = {
   rocket:     "M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09z M12 15l-3-3a22 22 0 012-3.95A12.88 12.88 0 0122 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 01-4 2z M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0 M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5",
   swirl:      "M12 22a10 10 0 100-20 10 10 0 000 20z M12 18a6 6 0 100-12 6 6 0 000 12z M12 14a2 2 0 100-4 2 2 0 000 4z",
   chill:      "M12 22a10 10 0 100-20 10 10 0 000 20z M8 14s1.5 2 4 2 4-2 4-2 M9 9h.01 M15 9h.01",
+  dark_face:  "M12 22a10 10 0 100-20 10 10 0 000 20z M8 15s1.5-2 4-2 4 2 4 2 M7.5 8.5l2 1.5 M16.5 8.5l-2 1.5",
   heart:      "M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z",
   crown:      "M12 2L9 9H3l5 4-2 7 6-4 6 4-2-7 5-4h-6L12 2z",
   wave_hand:  "M18 11V6a2 2 0 00-2-2v0a2 2 0 00-2 2v0 M14 10V4a2 2 0 00-2-2v0a2 2 0 00-2 2v2 M10 10.5V6a2 2 0 00-2-2v0a2 2 0 00-2 2v8 M6 14v0a6 6 0 006 6h2a8 8 0 008-8v-2a2 2 0 00-2-2v0a2 2 0 00-2 2v0",
