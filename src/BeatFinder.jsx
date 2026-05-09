@@ -8117,22 +8117,6 @@ function StudioScreen({ user, onExit }) {
     }
   }, []);
 
-  // ── iOS bounce/scroll lock ─────────────────────────────────────
-  // Prevent the entire page from scrolling on iOS when touching the studio.
-  // Must use { passive: false } so preventDefault() is actually honoured.
-  useEffect(function () {
-    var scrollEl = scrollRef.current;
-    function blockTouch(e) {
-      // Allow the event only if the touch target is inside the scroll container
-      if (scrollEl && scrollEl.contains(e.target)) return;
-      e.preventDefault();
-    }
-    document.addEventListener("touchmove", blockTouch, { passive: false });
-    return function () {
-      document.removeEventListener("touchmove", blockTouch, { passive: false });
-    };
-  }, []);
-
   // ── Studio mount: request mic permission only after user navigates to Studio ──
   // A 800ms delay ensures the tab transition completes before the iOS dialog appears.
   // Uses the Permissions API to check if mic is genuinely already granted,
