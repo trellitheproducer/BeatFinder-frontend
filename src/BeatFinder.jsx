@@ -8023,11 +8023,10 @@ function StudioScreen({ user, onExit }) {
   const monitorCtxRef       = useRef(null); // persistent AudioContext — never closed between sessions
   // Persistent mic stream — requested once on mount, reused for both monitoring and recording
   const micStreamRef        = useRef(null);
-  // micReady persists in localStorage — iOS caches the getUserMedia grant browser-side,
-  // so if we've asked before and got granted, we skip asking again.
-  const [micReady,      setMicReady]      = useState(function() {
-    try { return localStorage.getItem("bf_mic_granted") === "1"; } catch(e) { return false; }
-  });
+  // micReady: true if we've confirmed mic permission this session.
+  // We check the Permissions API first — if the browser shows "granted", skip the prompt.
+  // If it shows "prompt" or "denied", clear our cached flag and ask again.
+  const [micReady,      setMicReady]      = useState(false);
   const [micDenied,     setMicDenied]     = useState(false);
   // effectivePPS changes with zoom — keep a ref so lasso onMove closure can read it
   // MUST be declared here (before line 4743 uses it) to avoid "uninitialized variable" crash
@@ -8120,15 +8119,29 @@ function StudioScreen({ user, onExit }) {
 
   // ── Studio mount: request mic permission only after user navigates to Studio ──
   // A 800ms delay ensures the tab transition completes before the iOS dialog appears.
-  // If permission was already granted (bf_mic_granted in localStorage), skip the prompt
-  // but still run headphone detection and AudioContext pre-warm.
+  // Uses the Permissions API to check if mic is genuinely already granted,
+  // so we only skip the prompt when the browser has confirmed it.
   useEffect(function () {
     var cancelled = false;
     var timer = setTimeout(function () {
       if (cancelled) return;
       async function init() {
-        // 1. Mic permission — only ask if not already granted
-        if (!micReady) {
+        // 1. Check if mic permission is already granted via Permissions API
+        var alreadyGranted = false;
+        try {
+          if (navigator.permissions) {
+            var result = await navigator.permissions.query({ name: "microphone" });
+            alreadyGranted = result.state === "granted";
+          }
+        } catch(e) {
+          // Permissions API not available (some iOS versions) — fall back to localStorage
+          try { alreadyGranted = localStorage.getItem("bf_mic_granted") === "1"; } catch(e2) {}
+        }
+
+        if (alreadyGranted) {
+          if (!cancelled) { setMicReady(true); }
+        } else {
+          // Ask for permission
           try {
             var stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             stream.getTracks().forEach(function(t) { t.stop(); });
@@ -8139,13 +8152,15 @@ function StudioScreen({ user, onExit }) {
           } catch(e) {
             if (!cancelled) {
               setMicDenied(true);
+              try { localStorage.removeItem("bf_mic_granted"); } catch(e2) {}
               if (e.name === "NotAllowedError") {
                 setError("Mic access denied. Go to Settings → Safari → Microphone → Allow.");
               }
             }
           }
         }
-        // 2. Always run headphone detection (needs to run even if permission was pre-granted)
+
+        // 2. Always run headphone detection
         if (!cancelled) {
           setTimeout(checkHeadphones, 300);
           setTimeout(checkHeadphones, 1200);
@@ -8287,11 +8302,14 @@ function StudioScreen({ user, onExit }) {
       actxRef.current = new (window.AudioContext || window.webkitAudioContext)({
         latencyHint: "interactive",
       });
-      // Start the silent audio anchor the moment AudioContext is created.
-      // getActx is always called from a user gesture, so autoplay is allowed here.
+      // Connect silent audio through the new AudioContext — must happen after creation
+      // and inside a user gesture (getActx is always called from one)
+      silentSrcNodeRef.current = null; // reset so ensureSilentAudio reconnects
       ensureSilentAudio();
     }
-    if (actxRef.current.state === "suspended") actxRef.current.resume();
+    if (actxRef.current.state === "suspended") {
+      actxRef.current.resume().catch(function(){});
+    }
     return actxRef.current;
   };
 
@@ -10576,36 +10594,51 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
   // ── Recording ─────────────────────────────────────────────────
 
-  // ── Background audio: silent <audio> keeps Web Audio alive on iOS ──
+  // ── Background audio for iOS PWA ─────────────────────────────
+  // In PWA standalone mode, iOS only keeps Web Audio alive in background if a real
+  // <audio> element is actively playing. We create a silent looping audio element
+  // and route it through the main AudioContext so they share one audio session.
+  // This gives the AudioContext the same background entitlement as the <audio> element.
   const silentAudioRef = useRef(null);
+  const silentSrcNodeRef = useRef(null);
+
   const ensureSilentAudio = function () {
-    if (silentAudioRef.current && !silentAudioRef.current.paused) return;
     try {
+      // Create the silent <audio> element once
       if (!silentAudioRef.current) {
-        // Generate a proper 1-second silent WAV (iOS rejects zero-length payloads)
         const sr = 44100, nSamples = sr;
-        const buf = new ArrayBuffer(44 + nSamples * 2);
-        const v = new DataView(buf);
-        const ws = function(o, s) { for (let i=0;i<s.length;i++) v.setUint8(o+i,s.charCodeAt(i)); };
-        ws(0,"RIFF"); v.setUint32(4,36+nSamples*2,true); ws(8,"WAVE");
-        ws(12,"fmt "); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
-        v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
-        ws(36,"data"); v.setUint32(40,nSamples*2,true);
-        const blob = new Blob([buf], {type:"audio/wav"});
-        const url  = URL.createObjectURL(blob);
+        const ab = new ArrayBuffer(44 + nSamples * 2);
+        const dv = new DataView(ab);
+        const ws = function(o, s) { for (var i=0;i<s.length;i++) dv.setUint8(o+i,s.charCodeAt(i)); };
+        ws(0,"RIFF"); dv.setUint32(4,36+nSamples*2,true); ws(8,"WAVE");
+        ws(12,"fmt "); dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
+        dv.setUint32(24,sr,true); dv.setUint32(28,sr*2,true); dv.setUint16(32,2,true); dv.setUint16(34,16,true);
+        ws(36,"data"); dv.setUint32(40,nSamples*2,true);
+        const blob = new Blob([ab], {type:"audio/wav"});
         const a = new Audio();
-        a.src = url; a.loop = true; a.volume = 0.001;
-        // Self-heal: if iOS kills the audio element, restart it
-        a.addEventListener("pause", function() {
-          if (document.hidden) return; // expected when backgrounded without audio session
-          setTimeout(function() { a.play().catch(function(){}); }, 200);
-        });
-        a.addEventListener("ended", function() {
-          a.play().catch(function(){});
-        });
+        a.src = URL.createObjectURL(blob);
+        a.loop = true;
+        a.volume = 0.001;
         silentAudioRef.current = a;
       }
-      silentAudioRef.current.play().catch(function(){});
+
+      const a = silentAudioRef.current;
+
+      // If AudioContext exists, route audio element THROUGH it so they share one session
+      if (actxRef.current && actxRef.current.state !== "closed" && !silentSrcNodeRef.current) {
+        try {
+          const src = actxRef.current.createMediaElementSource(a);
+          src.connect(actxRef.current.destination);
+          silentSrcNodeRef.current = src;
+        } catch(e) {
+          // createMediaElementSource can only be called once per element — ignore if already done
+        }
+      }
+
+      // Start playing if not already
+      if (a.paused) {
+        a.play().catch(function(){});
+      }
     } catch(e) {}
   };
 
@@ -10660,30 +10693,41 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
   useEffect(function () {
     const onBackground = function () {
-      // Ensure the silent audio anchor is playing before we go to background —
-      // this is what keeps the iOS audio session alive for Web Audio playback
-      ensureSilentAudio();
+      // Stop mic — do NOT touch AudioContext or playback
       if (monitoringOnRef.current) { stopMonitoring(); }
       if (saveStateRef.current) saveStateRef.current();
+      // Ensure silent audio is playing so iOS keeps the audio session alive
+      ensureSilentAudio();
     };
 
     const onForeground = function () {
-      setTimeout(function () {
-        try {
-          // Restart silent anchor if iOS killed it while backgrounded
-          ensureSilentAudio();
-          if (actxRef.current && actxRef.current.state === "suspended") {
-            actxRef.current.resume().catch(function(){});
-          }
-          if (monitorCtxRef.current && monitorCtxRef.current.state === "suspended") {
-            monitorCtxRef.current.resume().catch(function(){});
-          }
-          if ("mediaSession" in navigator) {
-            navigator.mediaSession.playbackState = isPlayingRef.current ? "playing" : "paused";
-          }
-          checkHeadphones();
-        } catch(e) {}
-      }, 150);
+      // Use requestAnimationFrame so we wait for the screen to be fully active
+      // before touching the AudioContext — prevents the freeze
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          try {
+            if (actxRef.current) {
+              if (actxRef.current.state === "suspended") {
+                actxRef.current.resume().catch(function(){});
+              }
+            }
+            // Reconnect silent audio through AudioContext if needed
+            ensureSilentAudio();
+          } catch(e) {}
+          // Defer non-critical work further
+          setTimeout(function () {
+            try {
+              if (monitorCtxRef.current && monitorCtxRef.current.state === "suspended") {
+                monitorCtxRef.current.resume().catch(function(){});
+              }
+              if ("mediaSession" in navigator) {
+                navigator.mediaSession.playbackState = isPlayingRef.current ? "playing" : "paused";
+              }
+              checkHeadphones();
+            } catch(e) {}
+          }, 300);
+        });
+      });
     };
 
     const onVisibility = function () {
@@ -10691,7 +10735,9 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     };
 
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("pagehide", function () { if (saveStateRef.current) saveStateRef.current(); });
+    window.addEventListener("pagehide", function () {
+      if (saveStateRef.current) saveStateRef.current();
+    });
     return function () {
       document.removeEventListener("visibilitychange", onVisibility);
     };
