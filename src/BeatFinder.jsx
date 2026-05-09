@@ -3304,15 +3304,22 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
             style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
           />
           <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top,rgba(0,0,0,0.6),transparent 60%)" }} />
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div className="bf-play" style={{
-              width: 38, height: 38, borderRadius: "50%",
-              background: "linear-gradient(135deg,#C026D3,#7C3AED)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              boxShadow: "0 0 0 2px rgba(255,255,255,0.15), 0 4px 16px rgba(192,38,211,0.4)",
-            }}>
-              <span style={{ fontSize: 14, marginLeft: 3, color: "white" }}>&#9654;</span>
-            </div>
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+            <svg width="54" height="38" viewBox="0 0 72 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <filter id="neon-carousel" x="-40%" y="-40%" width="180%" height="180%">
+                  <feGaussianBlur stdDeviation="3" result="blur1"/>
+                  <feGaussianBlur stdDeviation="8" result="blur2"/>
+                  <feMerge><feMergeNode in="blur2"/><feMergeNode in="blur1"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+                <linearGradient id="ng-carousel" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#9333ea"/>
+                  <stop offset="100%" stopColor="#3b82f6"/>
+                </linearGradient>
+              </defs>
+              <rect x="3" y="3" width="66" height="46" rx="8" stroke="url(#ng-carousel)" strokeWidth="1.5" fill="black" filter="url(#neon-carousel)" opacity="0.9"/>
+              <polygon points="29,16 29,36 48,26" stroke="url(#ng-carousel)" strokeWidth="1.5" fill="none" strokeLinejoin="round" filter="url(#neon-carousel)" opacity="0.9"/>
+            </svg>
           </div>
           <button className="bf-save" onClick={e => { e.stopPropagation(); onSave(beat); }} style={{
             position: "absolute", top: 6, right: 6, width: 28, height: 28,
