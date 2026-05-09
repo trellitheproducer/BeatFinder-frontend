@@ -4912,7 +4912,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             <input value={ytLink} onChange={e => setYtLink(e.target.value)} placeholder="Beat title e.g. Dark Trap Beat" style={inp} />
             <input value={uploadGenre || ""} onChange={e => setUploadGenre(e.target.value)} placeholder="Genre e.g. Trap, R&B, Afrobeats" style={inp} />
             <input value={uploadPrice || ""} onChange={e => setUploadPrice(e.target.value)} placeholder="Price e.g. free or £9.99" style={inp} />
-            <input type="file" accept=".mp3,audio/mpeg" onChange={e => setUploadFile(e.target.files[0])}
+            <input type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac,.aiff,.opus" onChange={e => setUploadFile(e.target.files[0])}
               style={{ width: "100%", marginBottom: 12, color: "#aaa", fontSize: 14 }} />
             <button disabled={uploadLoading} onClick={async () => {
               if (!ytLink.trim() || !uploadFile) { setUploadMsg("Please fill all fields and select an MP3"); return; }
@@ -10506,6 +10506,46 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   };
 
   // ── Recording ─────────────────────────────────────────────────
+
+  // ── Background audio: silent <audio> keeps Web Audio alive on iOS ──
+  useEffect(function () {
+    // iOS suspends Web Audio when there is no active <audio> element playing.
+    // A near-silent looping audio element holds the audio session open in background.
+    const silentAudio = new Audio();
+    silentAudio.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+    silentAudio.loop = true;
+    silentAudio.volume = 0.001;
+    silentAudio.play().catch(function(){});
+    return function () { silentAudio.pause(); silentAudio.src = ""; };
+  }, []);
+
+  // ── MediaSession: lock screen controls + background playback ──
+  useEffect(function () {
+    if (!("mediaSession" in navigator)) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: projectName || "BeatFinder Studio",
+        artist: "BeatFinder",
+        album: "Studio Mode",
+      });
+      navigator.mediaSession.setActionHandler("play", function () {
+        if (actxRef.current && actxRef.current.state === "suspended") {
+          actxRef.current.resume();
+        }
+        setIsPlaying(true);
+      });
+      navigator.mediaSession.setActionHandler("pause", function () {
+        setIsPlaying(false);
+      });
+      navigator.mediaSession.setActionHandler("stop", function () {
+        setIsPlaying(false);
+        setCurrentTime(0);
+        playheadAtRef.current = 0;
+      });
+      navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+    } catch(e) {}
+  }, [isPlaying, projectName]);
+
   // ── Resume AudioContext when app returns from background ─────
   // ── Resume AudioContext when app returns from background ─────
   useEffect(function () {
@@ -10527,22 +10567,28 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
     const onVisible = function () {
       if (document.hidden) {
-        // App went to background — stop monitoring so mic is released
+        // App went to background — release mic if monitoring but keep playback running
         if (monitoringOn) { stopMonitoring(); }
         // Save full studio state so it survives an iOS background reload
         saveState();
+        // Keep AudioContext running — do NOT suspend it
+        // MediaSession keeps the audio session alive on iOS
       } else {
-        // App returned to foreground — resume AudioContext if suspended
+        // App returned to foreground — resume AudioContext if iOS suspended it
         if (actxRef.current && actxRef.current.state === "suspended") {
           actxRef.current.resume().then(function () {
             if (isPlayingRef.current) {
+              // Re-sync playhead after suspend gap
               masterStartRef.current = actxRef.current.currentTime - (playheadAtRef.current);
             }
           });
         }
-        // Also resume monitor context if it was suspended
         if (monitorCtxRef.current && monitorCtxRef.current.state === "suspended") {
           monitorCtxRef.current.resume().catch(function(){});
+        }
+        // Update MediaSession playback state
+        if ("mediaSession" in navigator) {
+          navigator.mediaSession.playbackState = isPlayingRef.current ? "playing" : "paused";
         }
       }
     };
@@ -12776,12 +12822,21 @@ self.onmessage = async function(e) {
         <button onClick={function(){ setLoopEnabled(function(v){return !v;});}} style={{ background:loopEnabled?"rgba(59,130,246,0.2)":"#141414",border:"1px solid "+(loopEnabled?"#3B82F6":"#222"),borderRadius:6,color:loopEnabled?"#3B82F6":"#555",fontSize:10,fontWeight:700,padding:"3px 8px",cursor:"pointer" }}>LOOP</button>
         <div style={{ flex:1 }} />
         <div style={{ width:1, background:"#1a1a1a", height:14, margin:"0 2px" }} />
-        {/* Input monitoring toggle */}
+        {/* Input monitoring toggle — only available when headphones/headset connected */}
         <button
-          onClick={function(){ monitoringOn ? stopMonitoring() : startMonitoring(); }}
-          style={{ display:"flex",alignItems:"center",gap:5,background:monitoringOn?"rgba(34,197,94,0.15)":"#141414",border:"1px solid "+(monitoringOn?"#22C55E":"#2a2a2a"),borderRadius:8,padding:"4px 8px",cursor:"pointer" }}
+          onClick={function(){ if (!headphonesIn) return; monitoringOn ? stopMonitoring() : startMonitoring(); }}
+          disabled={!headphonesIn}
+          title={headphonesIn ? (monitoringOn ? "Turn off monitoring" : "Turn on monitoring") : "Connect headphones or a headset to enable monitoring"}
+          style={{
+            display:"flex", alignItems:"center", gap:5,
+            background: monitoringOn ? "rgba(34,197,94,0.15)" : "#141414",
+            border: "1px solid " + (monitoringOn ? "#22C55E" : headphonesIn ? "#2a2a2a" : "#1a1a1a"),
+            borderRadius:8, padding:"4px 8px",
+            cursor: headphonesIn ? "pointer" : "not-allowed",
+            opacity: headphonesIn ? 1 : 0.35,
+          }}
         >
-          <span style={{ fontSize:13 }}><Icon id="headphones" size={16} color={monitoringOn ? "#22C55E" : "#aaa"} strokeWidth={1.8}/></span>
+          <span style={{ fontSize:13 }}><Icon id="headphones" size={16} color={monitoringOn ? "#22C55E" : headphonesIn ? "#aaa" : "#444"} strokeWidth={1.8}/></span>
           <div style={{ width:22,height:12,borderRadius:6,background:monitoringOn?"#22C55E":"#333",position:"relative",transition:"background 0.15s" }}>
             <div style={{ position:"absolute",top:2,left:monitoringOn?10:2,width:8,height:8,borderRadius:"50%",background:"white",transition:"left 0.15s" }} />
           </div>
@@ -13153,7 +13208,7 @@ userPickedMicRef.current = true;
               <div style={{ width:32,height:32,borderRadius:8,background:"rgba(59,130,246,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}><AppIcon id="note" size={20}/></div>
               <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Upload Audio</div><div style={{ color:"#555",fontSize:11 }}>Beat, vocal, any audio file</div></div>
             </div>
-            <input type="file" accept=".mp3,.wav,.m4a,.aac,audio/*" multiple onChange={function(e){handleFileUpload(e,"beat");}} style={{ display:"none" }} />
+            <input type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac,.aiff,.opus" multiple onChange={function(e){handleFileUpload(e,"beat");}} style={{ display:"none" }} />
           </label>
           <div style={{ padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer" }} onClick={function(){
             // Just create the track — recording only starts when user presses record button
