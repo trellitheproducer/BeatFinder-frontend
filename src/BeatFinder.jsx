@@ -2304,7 +2304,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
                   display: "flex", alignItems: "center", justifyContent: "center",
                   background: "rgba(0,0,0,0.4)",
                 }}>
-                  <span style={{ color: "white", fontSize: 16 }}>&#9654;</span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
                 </div>
               </div>
               <div style={{ flex: 1, overflow: "hidden" }}>
@@ -2357,7 +2357,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
                         border: "1px solid rgba(255,255,255,0.07)",
                         borderRadius: 12, padding: "12px 10px", textAlign: "center",
                       }}>
-                        <div style={{ fontSize: 18, marginBottom: 4 }}><AppIcon id={stat.icon} size={18}/></div>
+                        <div style={{ marginBottom: 4 }}><Icon id={stat.icon} size={18} color="#888" strokeWidth={1.6} /></div>
                         <div style={{ color: stat.color, fontWeight: 800, fontSize: 18, lineHeight: 1 }}>
                           {stat.value}
                         </div>
