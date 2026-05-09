@@ -8114,53 +8114,48 @@ function StudioScreen({ user, onExit }) {
     }
   }, []);
 
-  // ── Studio mount: immediately request mic permission + pre-warm AudioContext ──
-  // Requesting on mount (not on first record/play) means:
-  //   • iOS shows the mic permission dialog up front, not mid-session
-  //   • headset detection works immediately (iOS hides device labels until after first grant)
-  //   • monitoring and recording feel instant — no permission round-trip later
-  //   • audio session is established before any user interaction
-  // Monitoring stays OFF. Recording stays OFF. This only prepares the session.
+  // ── Studio mount: request mic permission only after user navigates to Studio ──
+  // StudioScreen stays mounted after first visit for background persistence,
+  // but we only request mic permission once the user has actually opened Studio.
+  // A 800ms delay ensures the tab transition is complete before the iOS dialog appears.
   useEffect(function () {
     var cancelled = false;
-    async function init() {
-      // 1. Request mic permission — gets the grant, then releases the stream immediately
-      //    so iOS does NOT enter recording-session mode yet
-      if (!micReady) {
-        try {
-          var stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-          stream.getTracks().forEach(function(t) { t.stop(); }); // release immediately
-          if (!cancelled) {
-            setMicReady(true);
-            // iOS only reveals device labels after first getUserMedia — re-enumerate now
-            setTimeout(checkHeadphones, 300);
-            setTimeout(checkHeadphones, 1200); // second pass after labels settle
-          }
-        } catch(e) {
-          if (!cancelled) {
-            setMicDenied(true);
-            if (e.name === "NotAllowedError") {
-              setError("Mic access denied. Go to Settings → Safari → Microphone → Allow.");
+    var timer = setTimeout(function () {
+      if (cancelled) return;
+      async function init() {
+        // 1. Request mic permission — grant then immediately release stream
+        //    so iOS stays in playback-only mode (not recording-session mode)
+        if (!micReady) {
+          try {
+            var stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            stream.getTracks().forEach(function(t) { t.stop(); });
+            if (!cancelled) {
+              setMicReady(true);
+              setTimeout(checkHeadphones, 300);
+              setTimeout(checkHeadphones, 1200);
+            }
+          } catch(e) {
+            if (!cancelled) {
+              setMicDenied(true);
+              if (e.name === "NotAllowedError") {
+                setError("Mic access denied. Go to Settings → Safari → Microphone → Allow.");
+              }
             }
           }
         }
+        // 2. Pre-warm playback AudioContext — stays suspended until first user gesture
+        if (!cancelled && (!actxRef.current || actxRef.current.state === "closed")) {
+          try {
+            actxRef.current = new (window.AudioContext || window.webkitAudioContext)({
+              latencyHint: "interactive",
+            });
+          } catch(e) {}
+        }
       }
-      // 2. Pre-warm the playback AudioContext (no-op if already created)
-      //    Must be inside useEffect (not a user gesture) but iOS allows AudioContext
-      //    creation at any time — it just starts suspended until first resume() inside a gesture
-      if (!cancelled && (!actxRef.current || actxRef.current.state === "closed")) {
-        try {
-          actxRef.current = new (window.AudioContext || window.webkitAudioContext)({
-            latencyHint: "interactive",
-          });
-          // Start silent anchor audio now that the AudioContext exists
-          ensureSilentAudio();
-        } catch(e) {}
-      }
-    }
-    init();
-    return function() { cancelled = true; };
-  }, []); // run once on mount only
+      init();
+    }, 800); // wait for tab transition to complete before showing iOS mic dialog
+    return function() { cancelled = true; clearTimeout(timer); };
+  }, []); // runs once on first mount — StudioScreen only mounts when user visits Studio
 
   // ── Lazy mic permission — kept for backward compat, now rarely needed ──
   // requestMicPermissionOnce is a no-op if micReady is already true from mount init
@@ -13864,6 +13859,9 @@ export default function BeatFinder() {
       return (saved && saved !== "studio") ? saved : "home";
     } catch(e) { return "home"; }
   });
+  // studioVisited: true once the user has navigated to Studio at least once this session.
+  // StudioScreen only mounts after first visit — prevents mic permission firing on page load.
+  const [studioVisited, setStudioVisited] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [artist,  setArtist]  = useState(null); // kept for compatibility
   const [user,    setUser]    = useState(null);
@@ -13975,7 +13973,7 @@ export default function BeatFinder() {
   const goTab = id => {
     setPlaying(null);
     setTab(id);
-    // Persist active tab so iOS background reload can restore it
+    if (id === "studio") setStudioVisited(true);
     try { sessionStorage.setItem("bf_tab", id); } catch(e) {}
   };
 
@@ -14086,7 +14084,7 @@ export default function BeatFinder() {
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} />}
-            {t === "studio"    && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
+            {t === "studio"    && studioVisited && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
             {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
           </div>
         ))}
