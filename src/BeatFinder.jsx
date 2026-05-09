@@ -12406,7 +12406,7 @@ self.onmessage = async function(e) {
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
-      style={{ background:"#080808", height:"100%", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none", paddingTop:"calc(62px + env(safe-area-inset-top))", paddingBottom:72 }}
+      style={{ background:"#080808", height:"100%", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none", paddingTop:"calc(98px + env(safe-area-inset-top))", paddingBottom:72 }}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
     >
       {/* ── Overlays ── */}
@@ -12900,7 +12900,7 @@ self.onmessage = async function(e) {
       {error&&<div style={{ background:"rgba(239,68,68,0.1)",borderBottom:"1px solid rgba(239,68,68,0.2)",color:"#F87171",fontSize:12,padding:"5px 16px",textAlign:"center",flexShrink:0 }}>{error}</div>}
 
       {/* Zoom / Loop bar — monitoring toggle lives here too */}
-      <div style={{ display:"flex",alignItems:"center",gap:6,padding:"4px 12px",background:"#090909",borderBottom:"1px solid #0f0f0f",flexShrink:0 }}>
+      <div style={{ display:"flex",alignItems:"center",gap:6,padding:"4px 12px",background:"#090909",borderBottom:"1px solid #0f0f0f",flexShrink:0,position:"fixed",top:"calc(62px + env(safe-area-inset-top))",left:0,right:0,zIndex:200 }}>
         {/* H-zoom label */}
         <span style={{ color:"#333",fontSize:7,fontWeight:800,letterSpacing:0.5,flexShrink:0 }}>H</span>
         <button onClick={function(){
