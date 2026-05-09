@@ -8307,8 +8307,8 @@ function StudioScreen({ user, onExit }) {
                l.includes("bluetooth")||l.includes("headset")||l.includes("wired");
       });
 
-      // 2nd check (iOS / mobile): a wired headset exposes a "Headset Microphone"
-      // audioinput that IS labelled after mic permission is granted.
+      // 2nd check (iOS): wired headset exposes a labelled "Headset Microphone" audioinput
+      // after mic permission is granted. This is the most reliable iOS signal.
       const hpByInputLabel = !hpByOutput && inputs.some(function(d){
         const l = (d.label||"").toLowerCase();
         return l.includes("headset")||l.includes("wired")||l.includes("external")||
@@ -8316,26 +8316,16 @@ function StudioScreen({ user, onExit }) {
                l.includes("bluetooth")||l.includes("headphone");
       });
 
-      // 3rd check: if labels ARE visible and there are more inputs than the built-in one,
-      // a headset mic is almost certainly present (iOS with mic permission granted).
+      // 3rd check: labels visible + more than one input = headset mic present
+      // Only applies when labels ARE populated (after mic permission granted)
       const anyLabel  = inputs.some(function(d){ return !!(d.label); });
       const hpByCount = !hpByOutput && !hpByInputLabel && anyLabel && inputs.length > 1;
 
-      // 4th check (iOS before permission OR permission just granted but labels blank):
-      // iOS exposes a SECOND audioinput entry when a wired headset is plugged in.
-      const hpByExtraInput = !hpByOutput && !hpByInputLabel && !hpByCount && inputs.length > 1;
+      // NOTE: Removed hpByLatency (iPhone reports low latency regardless of headset state)
+      // and hpByExtraInput (false positive after getUserMedia temporarily shows 2 inputs)
 
-      // 5th check: AudioContext output latency — wired headphones have <5ms,
-      // speaker has >20ms on iOS. Only valid if AudioContext already exists.
-      let hpByLatency = false;
-      if (actxRef.current && actxRef.current.state !== "closed") {
-        const latency = actxRef.current.outputLatency || actxRef.current.baseLatency || 999;
-        hpByLatency = latency < 0.015; // <15ms strongly suggests wired output
-      }
-
-      const hp = hpByOutput || hpByInputLabel || hpByCount || hpByLatency;
-      const hpLikely = hp || hpByExtraInput;
-      setHeadphonesIn(hpLikely);
+      const hp = hpByOutput || hpByInputLabel || hpByCount;
+      setHeadphonesIn(hp);
 
       // Classify mic inputs
       // iOS exposes labels like "iPhone Microphone" and "Headset Microphone" after permission.
@@ -8375,12 +8365,11 @@ function StudioScreen({ user, onExit }) {
       const mics = [
         { deviceId: builtInId || "builtin", label: builtInLabel, isBuiltIn: true },
         { deviceId: headsetId || "headset", label: headsetLabel, isBuiltIn: false,
-          detected: !!(hpByOutput || hpByInputLabel || hpByCount),  // confirmed label-match
-          likely:   hpByExtraInput,                                   // inferred from count
+          detected: hp,
         },
       ];
       setAvailableMics(mics);
-      return { headphonesConnected: hpLikely, mics };
+      return { headphonesConnected: hp, mics };
     } catch(e){ return { headphonesConnected: false, mics: [] }; }
   };
 
