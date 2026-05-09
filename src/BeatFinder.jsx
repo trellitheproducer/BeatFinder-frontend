@@ -8119,16 +8119,15 @@ function StudioScreen({ user, onExit }) {
   }, []);
 
   // ── Studio mount: request mic permission only after user navigates to Studio ──
-  // StudioScreen stays mounted after first visit for background persistence,
-  // but we only request mic permission once the user has actually opened Studio.
-  // A 800ms delay ensures the tab transition is complete before the iOS dialog appears.
+  // A 800ms delay ensures the tab transition completes before the iOS dialog appears.
+  // If permission was already granted (bf_mic_granted in localStorage), skip the prompt
+  // but still run headphone detection and AudioContext pre-warm.
   useEffect(function () {
     var cancelled = false;
     var timer = setTimeout(function () {
       if (cancelled) return;
       async function init() {
-        // 1. Request mic permission — grant then immediately release stream
-        //    so iOS stays in playback-only mode (not recording-session mode)
+        // 1. Mic permission — only ask if not already granted
         if (!micReady) {
           try {
             var stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -8136,8 +8135,6 @@ function StudioScreen({ user, onExit }) {
             if (!cancelled) {
               setMicReady(true);
               try { localStorage.setItem("bf_mic_granted", "1"); } catch(e) {}
-              setTimeout(checkHeadphones, 300);
-              setTimeout(checkHeadphones, 1200);
             }
           } catch(e) {
             if (!cancelled) {
@@ -8148,7 +8145,12 @@ function StudioScreen({ user, onExit }) {
             }
           }
         }
-        // 2. Pre-warm playback AudioContext — stays suspended until first user gesture
+        // 2. Always run headphone detection (needs to run even if permission was pre-granted)
+        if (!cancelled) {
+          setTimeout(checkHeadphones, 300);
+          setTimeout(checkHeadphones, 1200);
+        }
+        // 3. Pre-warm playback AudioContext
         if (!cancelled && (!actxRef.current || actxRef.current.state === "closed")) {
           try {
             actxRef.current = new (window.AudioContext || window.webkitAudioContext)({
@@ -8158,9 +8160,9 @@ function StudioScreen({ user, onExit }) {
         }
       }
       init();
-    }, 800); // wait for tab transition to complete before showing iOS mic dialog
+    }, 800);
     return function() { cancelled = true; clearTimeout(timer); };
-  }, []); // runs once on first mount — StudioScreen only mounts when user visits Studio
+  }, []);
 
   // ── Lazy mic permission — kept for backward compat, now rarely needed ──
   // requestMicPermissionOnce is a no-op if micReady is already true from mount init
