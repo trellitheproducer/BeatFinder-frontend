@@ -5,7 +5,13 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 // =============================================================================
 const LOADER_STYLE = `
   @media screen and (orientation: landscape) {
-    html, body { overflow: hidden; }
+  html, body {
+    overflow: hidden;
+    overscroll-behavior: none;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+  }
     #bf-portrait-lock {
       position: fixed;
       top: 0; left: 0;
@@ -13508,8 +13514,10 @@ userPickedMicRef.current = true;
           const fillH = Math.max(0, Math.min(1, vol/1.5)) * trackH;
 
           return (
-            <div style={{ position:"relative", width:28, height:trackH, flexShrink:0, cursor:"pointer" }}
+            <div style={{ position:"relative", width:28, height:trackH, flexShrink:0, cursor:"pointer", touchAction:"none" }}
               onPointerDown={onPD}
+              onTouchStart={function(e){ e.preventDefault(); }}
+              onTouchMove={function(e){ e.preventDefault(); }}
               onDoubleClick={function(){ onChange(1); }}>
               {/* Rail background */}
               <div style={{ position:"absolute", left:"50%", transform:"translateX(-50%)", top:0, bottom:0, width:4, background:"#3a3a3c", borderRadius:2 }} />
@@ -13586,6 +13594,7 @@ userPickedMicRef.current = true;
             maxHeight: "58vh",
             display: "flex",
             flexDirection: "column",
+            overflow: "hidden",
           }} onClick={function(e){ e.stopPropagation(); }}>
 
             {/* ── GB Mixer header bar ── */}
