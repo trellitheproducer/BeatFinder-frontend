@@ -8023,7 +8023,11 @@ function StudioScreen({ user, onExit }) {
   const monitorCtxRef       = useRef(null); // persistent AudioContext — never closed between sessions
   // Persistent mic stream — requested once on mount, reused for both monitoring and recording
   const micStreamRef        = useRef(null);
-  const [micReady,      setMicReady]      = useState(false);
+  // micReady persists in localStorage — iOS caches the getUserMedia grant browser-side,
+  // so if we've asked before and got granted, we skip asking again.
+  const [micReady,      setMicReady]      = useState(function() {
+    try { return localStorage.getItem("bf_mic_granted") === "1"; } catch(e) { return false; }
+  });
   const [micDenied,     setMicDenied]     = useState(false);
   // effectivePPS changes with zoom — keep a ref so lasso onMove closure can read it
   // MUST be declared here (before line 4743 uses it) to avoid "uninitialized variable" crash
@@ -8131,6 +8135,7 @@ function StudioScreen({ user, onExit }) {
             stream.getTracks().forEach(function(t) { t.stop(); });
             if (!cancelled) {
               setMicReady(true);
+              try { localStorage.setItem("bf_mic_granted", "1"); } catch(e) {}
               setTimeout(checkHeadphones, 300);
               setTimeout(checkHeadphones, 1200);
             }
@@ -8166,9 +8171,7 @@ function StudioScreen({ user, onExit }) {
       // Immediately stop — we just needed the permission grant
       stream.getTracks().forEach(function (t) { t.stop(); });
       setMicReady(true);
-      // iOS only reveals device labels (including "Headset Microphone") AFTER the
-      // first getUserMedia grant. Re-enumerate now so the headset option appears
-      // immediately if a headset is already plugged in.
+      try { localStorage.setItem("bf_mic_granted", "1"); } catch(e) {}
       setTimeout(checkHeadphones, 300);
       return true;
     } catch (e) {
@@ -8558,40 +8561,58 @@ function StudioScreen({ user, onExit }) {
   };
 
   const stopMonitoring = function () {
-    // Ramp gain to zero to avoid pop
-    if (monitorGainRef.current && monitorCtxRef.current) {
-      try { monitorGainRef.current.gain.setTargetAtTime(0, monitorCtxRef.current.currentTime, 0.02); } catch(e) {}
-    }
-    setTimeout(function () {
-      // Disconnect all nodes
-      try { monitorSrcRef.current      && monitorSrcRef.current.disconnect(); }      catch(e) {}
-      try { monitorGainRef.current     && monitorGainRef.current.disconnect(); }     catch(e) {}
-      try { monitorMicBoostRef.current && monitorMicBoostRef.current.disconnect(); } catch(e) {}
-      try { monitorAnalyserRef.current && monitorAnalyserRef.current.disconnect(); } catch(e) {}
-      try { monitorSplitterRef.current && monitorSplitterRef.current.disconnect(); } catch(e) {}
-      try { monitorMergerRef.current   && monitorMergerRef.current.disconnect(); }   catch(e) {}
-
-      // CRITICAL: Always stop the monitoring mic tracks fully.
-      // This releases iOS from "recording session" mode back to playback-only mode.
-      // We use monitorMicStreamRef (monitoring-only) never touch recording's micStreamRef.
-      if (monitorMicStreamRef.current) {
-        monitorMicStreamRef.current.getTracks().forEach(function(t) { t.stop(); });
-        monitorMicStreamRef.current = null;
-      }
-      monitorStreamRef.current   = null;
-      monitorSrcRef.current      = null;
-      monitorGainRef.current     = null;
-      monitorMicBoostRef.current = null;
-      monitorAnalyserRef.current = null;
-      monitorSplitterRef.current = null;
-      monitorMergerRef.current   = null;
-
-      // Suspend (not close) monitor context — fast wake on next toggle
-      if (monitorCtxRef.current && monitorCtxRef.current.state === "running") {
-        monitorCtxRef.current.suspend().catch(function(){});
-      }
-    }, 60);
+    // Immediately update UI state — don't wait for cleanup
     setMonitoringOn(false);
+
+    // Capture refs now before they're cleared
+    const gain      = monitorGainRef.current;
+    const src       = monitorSrcRef.current;
+    const boost     = monitorMicBoostRef.current;
+    const analyser  = monitorAnalyserRef.current;
+    const splitter  = monitorSplitterRef.current;
+    const merger    = monitorMergerRef.current;
+    const mCtx      = monitorCtxRef.current;
+    const micStream = monitorMicStreamRef.current;
+
+    // Clear refs immediately so nothing tries to reuse them
+    monitorSrcRef.current      = null;
+    monitorGainRef.current     = null;
+    monitorMicBoostRef.current = null;
+    monitorAnalyserRef.current = null;
+    monitorSplitterRef.current = null;
+    monitorMergerRef.current   = null;
+    monitorStreamRef.current   = null;
+    monitorMicStreamRef.current = null;
+
+    // Defer all actual audio cleanup off the main thread entirely.
+    // track.stop() on a disconnected hardware device can block on iOS —
+    // running it in a timeout prevents the UI freeze on headphone disconnect.
+    setTimeout(function () {
+      // Ramp gain to zero first to avoid pop
+      if (gain && mCtx && mCtx.state !== "closed") {
+        try { gain.gain.setTargetAtTime(0, mCtx.currentTime, 0.02); } catch(e) {}
+      }
+      setTimeout(function () {
+        try { src     && src.disconnect(); }     catch(e) {}
+        try { gain    && gain.disconnect(); }    catch(e) {}
+        try { boost   && boost.disconnect(); }   catch(e) {}
+        try { analyser && analyser.disconnect(); } catch(e) {}
+        try { splitter && splitter.disconnect(); } catch(e) {}
+        try { merger  && merger.disconnect(); }  catch(e) {}
+
+        // Stop mic tracks — deferred so iOS doesn't block main thread
+        if (micStream) {
+          micStream.getTracks().forEach(function(t) {
+            try { t.stop(); } catch(e) {}
+          });
+        }
+
+        // Suspend monitor context
+        if (mCtx && mCtx.state === "running") {
+          mCtx.suspend().catch(function(){});
+        }
+      }, 80);
+    }, 0);
   };
 
   useEffect(function(){
@@ -10554,27 +10575,35 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   // ── Recording ─────────────────────────────────────────────────
 
   // ── Background audio: silent <audio> keeps Web Audio alive on iOS ──
-  // Built lazily inside a user gesture so iOS autoplay policy doesn't block it.
   const silentAudioRef = useRef(null);
   const ensureSilentAudio = function () {
-    if (silentAudioRef.current) return;
+    if (silentAudioRef.current && !silentAudioRef.current.paused) return;
     try {
-      // Generate a proper 1-second silent WAV (iOS rejects zero-length payloads)
-      const sr = 44100, nSamples = sr;
-      const buf = new ArrayBuffer(44 + nSamples * 2);
-      const v = new DataView(buf);
-      const ws = function(o, s) { for (let i=0;i<s.length;i++) v.setUint8(o+i,s.charCodeAt(i)); };
-      ws(0,"RIFF"); v.setUint32(4,36+nSamples*2,true); ws(8,"WAVE");
-      ws(12,"fmt "); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
-      v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
-      ws(36,"data"); v.setUint32(40,nSamples*2,true);
-      // samples stay 0 (silent)
-      const blob = new Blob([buf], {type:"audio/wav"});
-      const url  = URL.createObjectURL(blob);
-      const a = new Audio();
-      a.src = url; a.loop = true; a.volume = 0.001;
-      a.play().catch(function(){});
-      silentAudioRef.current = a;
+      if (!silentAudioRef.current) {
+        // Generate a proper 1-second silent WAV (iOS rejects zero-length payloads)
+        const sr = 44100, nSamples = sr;
+        const buf = new ArrayBuffer(44 + nSamples * 2);
+        const v = new DataView(buf);
+        const ws = function(o, s) { for (let i=0;i<s.length;i++) v.setUint8(o+i,s.charCodeAt(i)); };
+        ws(0,"RIFF"); v.setUint32(4,36+nSamples*2,true); ws(8,"WAVE");
+        ws(12,"fmt "); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+        v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+        ws(36,"data"); v.setUint32(40,nSamples*2,true);
+        const blob = new Blob([buf], {type:"audio/wav"});
+        const url  = URL.createObjectURL(blob);
+        const a = new Audio();
+        a.src = url; a.loop = true; a.volume = 0.001;
+        // Self-heal: if iOS kills the audio element, restart it
+        a.addEventListener("pause", function() {
+          if (document.hidden) return; // expected when backgrounded without audio session
+          setTimeout(function() { a.play().catch(function(){}); }, 200);
+        });
+        a.addEventListener("ended", function() {
+          a.play().catch(function(){});
+        });
+        silentAudioRef.current = a;
+      }
+      silentAudioRef.current.play().catch(function(){});
     } catch(e) {}
   };
 
@@ -10629,6 +10658,9 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
   useEffect(function () {
     const onBackground = function () {
+      // Ensure the silent audio anchor is playing before we go to background —
+      // this is what keeps the iOS audio session alive for Web Audio playback
+      ensureSilentAudio();
       if (monitoringOnRef.current) { stopMonitoring(); }
       if (saveStateRef.current) saveStateRef.current();
     };
@@ -10636,6 +10668,8 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     const onForeground = function () {
       setTimeout(function () {
         try {
+          // Restart silent anchor if iOS killed it while backgrounded
+          ensureSilentAudio();
           if (actxRef.current && actxRef.current.state === "suspended") {
             actxRef.current.resume().catch(function(){});
           }
