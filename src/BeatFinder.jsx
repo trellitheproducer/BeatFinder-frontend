@@ -10368,7 +10368,30 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       stopAll();
       setIsPlaying(false);
       playheadAtRef.current = currentTime;
+      if ("mediaSession" in navigator) {
+        navigator.mediaSession.playbackState = "paused";
+      }
     } else {
+      // ── iOS background audio: play() MUST be called synchronously inside user gesture ──
+      // Any async delay (even 1ms) loses the gesture context and iOS blocks background privileges.
+      // bgAudioRef is the <audio> element connected to the Web Audio master output.
+      if (bgAudioRef.current && bgAudioRef.current.paused) {
+        bgAudioRef.current.play().catch(function(){});
+      }
+      if (silentAudioRef.current && silentAudioRef.current.paused) {
+        silentAudioRef.current.play().catch(function(){});
+      }
+      // Update MediaSession metadata on every play press
+      if ("mediaSession" in navigator) {
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: projectName || "BeatFinder Studio",
+            artist: "BeatFinder",
+            album: "Studio Mode",
+          });
+          navigator.mediaSession.playbackState = "playing";
+        } catch(e) {}
+      }
       const startT = (loopEnabled && loopOut > loopIn) ? loopIn : currentTime;
       doPlay(startT);
       setCurrentTime(startT);
@@ -10658,33 +10681,49 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     } catch(e) {}
   };
 
-  // ── MediaSession: lock screen controls + background playback permission ──
+  // ── MediaSession: register once on mount with all required handlers ──
+  // iOS requires previoustrack + nexttrack handlers or it kills background audio.
+  // Metadata is updated in togglePlay on each press so it's always current.
   useEffect(function () {
     if (!("mediaSession" in navigator)) return;
     try {
+      // Set initial metadata
       navigator.mediaSession.metadata = new MediaMetadata({
         title: projectName || "BeatFinder Studio",
         artist: "BeatFinder",
         album: "Studio Mode",
       });
+      // All four handlers required by iOS for background audio persistence
       navigator.mediaSession.setActionHandler("play", function () {
-        ensureSilentAudio();
+        if (bgAudioRef.current && bgAudioRef.current.paused) {
+          bgAudioRef.current.play().catch(function(){});
+        }
         if (actxRef.current && actxRef.current.state === "suspended") {
           actxRef.current.resume().catch(function(){});
         }
         setIsPlaying(true);
+        navigator.mediaSession.playbackState = "playing";
       });
       navigator.mediaSession.setActionHandler("pause", function () {
         setIsPlaying(false);
+        navigator.mediaSession.playbackState = "paused";
       });
       navigator.mediaSession.setActionHandler("stop", function () {
         setIsPlaying(false);
         setCurrentTime(0);
         playheadAtRef.current = 0;
+        navigator.mediaSession.playbackState = "paused";
       });
-      navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+      // Required dummy handlers — iOS kills background audio without these
+      navigator.mediaSession.setActionHandler("previoustrack", function () {
+        setCurrentTime(0);
+        playheadAtRef.current = 0;
+      });
+      navigator.mediaSession.setActionHandler("nexttrack", function () {
+        // No-op for studio mode
+      });
     } catch(e) {}
-  }, [isPlaying, projectName]);
+  }, []); // register once — handlers read live values via refs/setters
 
   // ── App lifecycle: background / foreground handling ───────────
   // Uses refs so this effect never needs to re-register — stable listener.
