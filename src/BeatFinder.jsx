@@ -8268,7 +8268,8 @@ function StudioScreen({ user, onExit }) {
       const hpByInputLabel = !hpByOutput && inputs.some(function(d){
         const l = (d.label||"").toLowerCase();
         return l.includes("headset")||l.includes("wired")||l.includes("external")||
-               l.includes("earphone")||l.includes("airpod")||l.includes("earbud");
+               l.includes("earphone")||l.includes("airpod")||l.includes("earbud")||
+               l.includes("bluetooth")||l.includes("headphone");
       });
 
       // 3rd check: if labels ARE visible and there are more inputs than the built-in one,
@@ -8277,13 +8278,19 @@ function StudioScreen({ user, onExit }) {
       const hpByCount = !hpByOutput && !hpByInputLabel && anyLabel && inputs.length > 1;
 
       // 4th check (iOS before permission OR permission just granted but labels blank):
-      // iOS exposes a SECOND audioinput entry when a wired headset is plugged in,
-      // even before labels are populated. Use this as a soft "probably connected" signal.
-      // We flag it separately so the UI can say "headset likely connected — tap to use".
+      // iOS exposes a SECOND audioinput entry when a wired headset is plugged in.
       const hpByExtraInput = !hpByOutput && !hpByInputLabel && !hpByCount && inputs.length > 1;
 
-      const hp = hpByOutput || hpByInputLabel || hpByCount;
-      const hpLikely = hp || hpByExtraInput; // includes the "probably" case
+      // 5th check: AudioContext output latency — wired headphones have <5ms,
+      // speaker has >20ms on iOS. Only valid if AudioContext already exists.
+      let hpByLatency = false;
+      if (actxRef.current && actxRef.current.state !== "closed") {
+        const latency = actxRef.current.outputLatency || actxRef.current.baseLatency || 999;
+        hpByLatency = latency < 0.015; // <15ms strongly suggests wired output
+      }
+
+      const hp = hpByOutput || hpByInputLabel || hpByCount || hpByLatency;
+      const hpLikely = hp || hpByExtraInput;
       setHeadphonesIn(hpLikely);
 
       // Classify mic inputs
@@ -8335,31 +8342,62 @@ function StudioScreen({ user, onExit }) {
 
   useEffect(function () {
     checkHeadphones();
+
     // iOS fires devicechange before finishing label updates — wait 300 ms
-    // so enumerateDevices returns populated labels on the re-check.
-    const onDeviceChange = function() { setTimeout(checkHeadphones, 300); };
+    const onDeviceChange = function() {
+      setTimeout(checkHeadphones, 300);
+      setTimeout(checkHeadphones, 1000); // double-check after labels settle
+    };
     navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
-    return function(){ navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange); };
+
+    // iOS does not reliably fire devicechange on wired headphone insert/remove.
+    // Poll every 2 seconds as a fallback — lightweight since enumerateDevices is cheap.
+    const pollInterval = setInterval(checkHeadphones, 2000);
+
+    // Also detect route changes via AudioContext state transitions
+    const onAudioRouteChange = function() {
+      setTimeout(checkHeadphones, 200);
+    };
+    if (actxRef.current) {
+      actxRef.current.addEventListener("statechange", onAudioRouteChange);
+    }
+
+    return function(){
+      navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange);
+      clearInterval(pollInterval);
+      if (actxRef.current) {
+        actxRef.current.removeEventListener("statechange", onAudioRouteChange);
+      }
+    };
   }, []);
 
   // Re-scan as soon as mic permission is granted — iOS only reveals device labels
   // (e.g. "iPhone Microphone", "Headset Microphone") after the first getUserMedia call.
   // Without this, headphonesIn stays false even when a headset is already plugged in.
   useEffect(function () {
-    if (micReady) { setTimeout(checkHeadphones, 400); }
+    if (micReady) {
+      setTimeout(checkHeadphones, 400);
+      setTimeout(checkHeadphones, 1500); // second pass after iOS settles labels
+    }
   }, [micReady]);
 
-  // When headphones are pulled out mid-session, revert to iPhone mic.
-  // We do NOT auto-switch TO headset on plug-in — user picks that manually.
-  // This prevents the dropdown showing "Headset Mic" on studio open.
+  // Auto-enable/disable monitoring when headphone state changes
   const prevHeadphonesRef = useRef(null);
   useEffect(function () {
     if (prevHeadphonesRef.current === null) {
       prevHeadphonesRef.current = headphonesIn;
+      // On first run: if headphones already connected, start monitoring
+      if (headphonesIn) {
+        setTimeout(function () { startMonitoring(); }, 500);
+      }
       return;
     }
-    if (!headphonesIn && prevHeadphonesRef.current) {
-      // Headphones pulled out — revert to iPhone mic
+    if (headphonesIn && !prevHeadphonesRef.current) {
+      // Headphones just connected — auto-start monitoring
+      startMonitoring();
+    } else if (!headphonesIn && prevHeadphonesRef.current) {
+      // Headphones pulled out — stop monitoring and revert to iPhone mic
+      stopMonitoring();
       userPickedMicRef.current = false;
       setMicSource("builtin");
       setMonitorWarn("");
@@ -10242,6 +10280,9 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       // Freeze playhead at current position — don't jump
       playheadAtRef.current = currentTime;
     } else {
+      // Start the silent audio element on first user gesture — this establishes
+      // the iOS audio session and keeps it alive in background
+      ensureSilentAudio();
       // If a loop region is set, always start from loopIn
       const startT = (loopEnabled && loopOut > loopIn) ? loopIn : currentTime;
       doPlay(startT);
@@ -10508,18 +10549,31 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   // ── Recording ─────────────────────────────────────────────────
 
   // ── Background audio: silent <audio> keeps Web Audio alive on iOS ──
-  useEffect(function () {
-    // iOS suspends Web Audio when there is no active <audio> element playing.
-    // A near-silent looping audio element holds the audio session open in background.
-    const silentAudio = new Audio();
-    silentAudio.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
-    silentAudio.loop = true;
-    silentAudio.volume = 0.001;
-    silentAudio.play().catch(function(){});
-    return function () { silentAudio.pause(); silentAudio.src = ""; };
-  }, []);
+  // Built lazily inside a user gesture so iOS autoplay policy doesn't block it.
+  const silentAudioRef = useRef(null);
+  const ensureSilentAudio = function () {
+    if (silentAudioRef.current) return;
+    try {
+      // Generate a proper 1-second silent WAV (iOS rejects zero-length payloads)
+      const sr = 44100, nSamples = sr;
+      const buf = new ArrayBuffer(44 + nSamples * 2);
+      const v = new DataView(buf);
+      const ws = function(o, s) { for (let i=0;i<s.length;i++) v.setUint8(o+i,s.charCodeAt(i)); };
+      ws(0,"RIFF"); v.setUint32(4,36+nSamples*2,true); ws(8,"WAVE");
+      ws(12,"fmt "); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+      v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+      ws(36,"data"); v.setUint32(40,nSamples*2,true);
+      // samples stay 0 (silent)
+      const blob = new Blob([buf], {type:"audio/wav"});
+      const url  = URL.createObjectURL(blob);
+      const a = new Audio();
+      a.src = url; a.loop = true; a.volume = 0.001;
+      a.play().catch(function(){});
+      silentAudioRef.current = a;
+    } catch(e) {}
+  };
 
-  // ── MediaSession: lock screen controls + background playback ──
+  // ── MediaSession: lock screen controls + background playback permission ──
   useEffect(function () {
     if (!("mediaSession" in navigator)) return;
     try {
@@ -10529,8 +10583,9 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         album: "Studio Mode",
       });
       navigator.mediaSession.setActionHandler("play", function () {
+        ensureSilentAudio();
         if (actxRef.current && actxRef.current.state === "suspended") {
-          actxRef.current.resume();
+          actxRef.current.resume().catch(function(){});
         }
         setIsPlaying(true);
       });
@@ -10546,8 +10601,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     } catch(e) {}
   }, [isPlaying, projectName]);
 
-  // ── Resume AudioContext when app returns from background ─────
-  // ── Resume AudioContext when app returns from background ─────
+  // ── App lifecycle: background / foreground handling ───────────
   useEffect(function () {
     const saveState = function () {
       try {
@@ -10556,53 +10610,55 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
           snapToGrid, loopEnabled, loopIn, loopOut,
           metronomeOn, showBeatGrid, micInputGain,
           tracksMeta: tracks.map(function(t) {
-            return { id: t.id, name: t.name, type: t.type, color: t.color,
-                     isMuted: t.isMuted, isSoloed: t.isSoloed,
-                     volume: t.volume, pan: t.pan };
+            return { id:t.id, name:t.name, type:t.type, color:t.color,
+                     isMuted:t.isMuted, isSoloed:t.isSoloed, volume:t.volume, pan:t.pan };
           }),
         }));
         sessionStorage.setItem("bf_session_started", "1");
       } catch(e) {}
     };
 
-    const onVisible = function () {
-      if (document.hidden) {
-        // App went to background — release mic if monitoring but keep playback running
-        if (monitoringOn) { stopMonitoring(); }
-        // Save full studio state so it survives an iOS background reload
-        saveState();
-        // Keep AudioContext running — do NOT suspend it
-        // MediaSession keeps the audio session alive on iOS
-      } else {
-        // App returned to foreground — resume AudioContext if iOS suspended it
-        if (actxRef.current && actxRef.current.state === "suspended") {
-          actxRef.current.resume().then(function () {
-            if (isPlayingRef.current) {
-              // Re-sync playhead after suspend gap
-              masterStartRef.current = actxRef.current.currentTime - (playheadAtRef.current);
-            }
-          });
-        }
-        if (monitorCtxRef.current && monitorCtxRef.current.state === "suspended") {
-          monitorCtxRef.current.resume().catch(function(){});
-        }
-        // Update MediaSession playback state
-        if ("mediaSession" in navigator) {
-          navigator.mediaSession.playbackState = isPlayingRef.current ? "playing" : "paused";
-        }
-      }
+    const onBackground = function () {
+      // Release mic (prevents mic-in-use indicator staying on lock screen)
+      if (monitoringOn) { stopMonitoring(); }
+      saveState();
+      // Do NOT suspend AudioContext — keep it running for background audio
     };
-    // pagehide fires just before iOS discards the page — most reliable save point
+
+    const onForeground = function () {
+      // Defer resume to next tick — avoids blocking the UI thread on return
+      // which was causing the freeze
+      setTimeout(function () {
+        try {
+          if (actxRef.current && actxRef.current.state === "suspended") {
+            actxRef.current.resume().catch(function(){});
+          }
+          if (monitorCtxRef.current && monitorCtxRef.current.state === "suspended") {
+            monitorCtxRef.current.resume().catch(function(){});
+          }
+          if ("mediaSession" in navigator) {
+            navigator.mediaSession.playbackState = isPlayingRef.current ? "playing" : "paused";
+          }
+          // Re-check headphone state — route may have changed while in background
+          checkHeadphones();
+        } catch(e) {}
+      }, 150);
+    };
+
+    const onVisibility = function () {
+      if (document.hidden) { onBackground(); } else { onForeground(); }
+    };
+
     const onPageHide = function () { saveState(); };
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onVisible);
+
+    document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("pagehide", onPageHide);
     return function () {
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pagehide", onPageHide);
     };
   }, [monitoringOn, projectName, bpm, projectKey, timeSigNum, zoom, vZoom, snapToGrid, loopEnabled, loopIn, loopOut, metronomeOn, showBeatGrid, micInputGain, tracks]);
+
 
   // selectedTrackId declared at top of component (Rules of Hooks)
 
