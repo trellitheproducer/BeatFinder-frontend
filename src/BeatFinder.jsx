@@ -1450,7 +1450,7 @@ function RhymeFinder({ onClose, onInsert }) {
     }}>
       <div style={{ padding: "12px 16px 10px", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <div style={{ color: "#06B6D4", fontWeight: 800, fontSize: 13 }}>{"🎯"} Rhyme Finder</div>
+          <div style={{ color: "#06B6D4", fontWeight: 800, fontSize: 13 }}><AppIcon id="target" size={20}/> Rhyme Finder</div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer" }}>✕</button>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -1629,7 +1629,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
           borderRadius: 20, color: "#06B6D4", fontWeight: 800,
           fontSize: 12, padding: "8px 14px", cursor: "pointer",
         }}>
-          {"🎯"} Rhyme Finder
+          <AppIcon id="target" size={20}/> Rhyme Finder
         </button>
       </div>
     </div>
@@ -1720,7 +1720,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
             display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
           }}
         >
-          {savedIds.has(beat.videoId) ? "🔖 Saved to Favourites" : "🔖 Save to Favourites"}
+          {savedIds.has(beat.videoId) ? "Saved to Favourites" : "Save to Favourites"}
         </button>
         {isArtistPro ? (
           <>
@@ -1761,7 +1761,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
               display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
             }}
           >
-            {"🔐"} Purchase plan to write lyrics
+            <AppIcon id="lockkey" size={20}/> Purchase plan to write lyrics
           </button>
         )}
 
@@ -1800,7 +1800,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
           lineHeight: 1.5,
           textAlign: "center",
         }}>
-          {"🎵"} To use this beat in Studio Mode, purchase or obtain a valid license from the creator and upload the MP3/WAV file.
+          <AppIcon id="note" size={20}/> To use this beat in Studio Mode, purchase or obtain a valid license from the creator and upload the MP3/WAV file.
         </div>
 
       </div>
@@ -1833,7 +1833,7 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
             style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transform: "scale(1.02)" }} />
         ) : (
           <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg,#1a1a2e," + accentClr + "44)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: 40, opacity: 0.3 }}>{"🎵"}</span>
+            <span style={{ fontSize: 40, opacity: 0.3 }}><AppIcon id="note" size={20}/></span>
           </div>
         )}
         {/* Gradient overlay */}
@@ -1852,7 +1852,7 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
                 <stop offset="100%" stopColor="#3b82f6"/>
               </linearGradient>
             </defs>
-            <rect x="3" y="3" width="66" height="46" rx="8" stroke="url(#ng-main)" strokeWidth="1.5" fill="none" filter="url(#neon-main)" opacity="0.9"/>
+            <rect x="3" y="3" width="66" height="46" rx="8" stroke="url(#ng-main)" strokeWidth="1.5" fill="black" filter="url(#neon-main)" opacity="0.9"/>
             <polygon points="29,16 29,36 48,26" stroke="url(#ng-main)" strokeWidth="1.5" fill="none" strokeLinejoin="round" filter="url(#neon-main)" opacity="0.9"/>
           </svg>
         </div>
@@ -1860,7 +1860,7 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
         {(featured || exclusive) && (
           <div style={{ position: "absolute", top: 10, left: 12 }}>
             <div style={{ background: featured ? "linear-gradient(135deg,#C026D3,#7C3AED)" : "linear-gradient(135deg,#F59E0B,#EF4444)", borderRadius: 20, padding: "4px 12px", fontSize: 10, color: "white", fontWeight: 800, letterSpacing: 0.5 }}>
-              {featured ? "⭐ FEATURED" : "🔒 EXCLUSIVE"}
+              {featured ? "★ FEATURED" : "EXCLUSIVE"}
             </div>
           </div>
         )}
@@ -2053,11 +2053,11 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
   const [producerStats,  setProducerStats]  = useState(null);
 
   const VIBES = [
-    { label: "Hype",     q: "hard trap type beat",      emoji: "🔥", color: "#EF4444" },
-    { label: "Chill",    q: "chill lo fi type beat",    emoji: "😌", color: "#3B82F6" },
+    { label: "Hype",     q: "hard trap type beat",      emoji: "flame", color: "#EF4444" },
+    { label: "Chill",    q: "chill lo fi type beat",    emoji: "chill", color: "#3B82F6" },
     { label: "Dark",     q: "dark drill type beat",     emoji: "●", color: "#8B5CF6" },
-    { label: "Melodic",  q: "melodic type beat",        emoji: "🌊", color: "#06B6D4" },
-    { label: "Romantic", q: "romantic r&b type beat",   emoji: "💜", color: "#EC4899" },
+    { label: "Melodic",  q: "melodic type beat",        emoji: "wave", color: "#06B6D4" },
+    { label: "Romantic", q: "romantic r&b type beat",   emoji: "heart", color: "#EC4899" },
   ];
 
   // Derive top genre from recent searches stored in localStorage
@@ -2130,7 +2130,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
   // BeatFinder Rank - based on saves count (gamified)
   var savedCount = savedIds ? savedIds.size : 0;
   var rank = savedCount >= 50 ? "Top 1%" : savedCount >= 30 ? "Top 5%" : savedCount >= 20 ? "Top 10%" : savedCount >= 10 ? "Top 25%" : savedCount >= 5 ? "Top 50%" : "Rising";
-  var rankEmoji = savedCount >= 30 ? "👑" : savedCount >= 10 ? "⭐" : "🔥";
+  var rankEmoji = savedCount >= 30 ? "★★★" : savedCount >= 10 ? "★★" : "★";
   var streak = Math.min(savedCount + (savedLyrics ? savedLyrics.length : 0), 99);
 
   var firstName = user && user.name ? user.name.split(" ")[0] : "";
@@ -2157,7 +2157,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
             YOUR WORKSPACE
           </div>
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, lineHeight: 1.2 }}>
-            {"Welcome back" + (firstName ? ", " + firstName : "") + " 👋"}
+            {"Welcome back" + (firstName ? ", " + firstName : "") + "!"}
           </div>
           {isProducer && (
             <div style={{ color: "#C026D3", fontSize: 12, fontWeight: 600, marginTop: 3 }}>Producer Pro</div>
@@ -2167,7 +2167,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
         {/* 1. YOUR VIBE RIGHT NOW */}
         <div style={{ marginBottom: 16 }}>
           <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
-            {"🎯"} YOUR VIBE RIGHT NOW
+            <AppIcon id="target" size={20}/> YOUR VIBE RIGHT NOW
           </div>
           <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
             {VIBES.map(function(v) {
@@ -2187,7 +2187,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
                     fontWeight: 700, fontSize: 12, display: "flex", alignItems: "center", gap: 5,
                     transition: "all 0.15s ease",
                   }}>
-                  <span style={{ fontSize: 13 }}>{v.emoji}</span>
+                  <Icon id={v.emoji} size={14} color={isActive ? v.color : "#777"} />
                   {v.label}
                 </button>
               );
@@ -2201,7 +2201,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
         {/* 2. TOP GENRE */}
         <div style={{ marginBottom: 16 }}>
           <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
-            {"🔥"} YOUR TOP GENRE
+            <AppIcon id="flame" size={20}/> YOUR TOP GENRE
           </div>
           {topGenre ? (
             <button
@@ -2281,7 +2281,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
         {/* 4. BEAT OF THE DAY */}
         <div style={{ marginBottom: isProducer ? 16 : 0 }}>
           <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
-            {"🎵"} BEAT OF THE DAY
+            <AppIcon id="note" size={20}/> BEAT OF THE DAY
           </div>
           {botdLoading ? (
             <div style={{ color: "#444", fontSize: 13, padding: "10px 0" }}>Finding your beat...</div>
@@ -2341,15 +2341,15 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
             {/* 5. PRODUCER EARNINGS SNAPSHOT */}
             <div style={{ marginBottom: 16 }}>
               <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
-                {"💰"} PRODUCER EARNINGS SNAPSHOT
+                <AppIcon id="money" size={20}/> PRODUCER EARNINGS SNAPSHOT
               </div>
               {producerStats ? (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   {[
-                    { label: "Beats Uploaded",  value: producerStats.totalBeats,     color: "#C026D3", icon: "🎵" },
-                    { label: "Total Downloads",  value: producerStats.totalDownloads, color: "#3B82F6", icon: "⬇️" },
-                    { label: "Total Revenue",    value: "£" + producerStats.totalRevenue, color: "#22C55E", icon: "💸" },
-                    { label: "Leases Sold",      value: producerStats.recentSales,   color: "#F59E0B", icon: "📝" },
+                    { label: "Beats Uploaded",  value: producerStats.totalBeats,     color: "#C026D3", icon: "note" },
+                    { label: "Total Downloads",  value: producerStats.totalDownloads, color: "#3B82F6", icon: "download" },
+                    { label: "Total Revenue",    value: "£" + producerStats.totalRevenue, color: "#22C55E", icon: "moneyfly" },
+                    { label: "Leases Sold",      value: producerStats.recentSales,   color: "#F59E0B", icon: "edit" },
                   ].map(function(stat) {
                     return (
                       <div key={stat.label} style={{
@@ -2357,7 +2357,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
                         border: "1px solid rgba(255,255,255,0.07)",
                         borderRadius: 12, padding: "12px 10px", textAlign: "center",
                       }}>
-                        <div style={{ fontSize: 18, marginBottom: 4 }}>{stat.icon}</div>
+                        <div style={{ fontSize: 18, marginBottom: 4 }}><AppIcon id={stat.icon} size={18}/></div>
                         <div style={{ color: stat.color, fontWeight: 800, fontSize: 18, lineHeight: 1 }}>
                           {stat.value}
                         </div>
@@ -2379,7 +2379,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
             {/* 6. BEATFINDER RANK */}
             <div>
               <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 10 }}>
-                {"🏆"} YOUR BEATFINDER RANK
+                <AppIcon id="trophy" size={20}/> YOUR BEATFINDER RANK
               </div>
               <div style={{
                 background: "linear-gradient(135deg,rgba(192,38,211,0.12),rgba(245,158,11,0.12))",
@@ -2426,7 +2426,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
     {
       title: "Find Your Sound",
       sub: "Millions of type beats - one tap away",
-      emoji: "🎵",
+      emoji: "note",
       grad: "linear-gradient(135deg,#12002a 0%,#3b0070 60%,#C026D3 100%)",
       cta: "Explore Beats",
       btnColor: "rgba(192,38,211,0.5)",
@@ -2435,7 +2435,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
     {
       title: "Write & Save Lyrics",
       sub: "Write lyrics whilst beats play & save to your profile",
-      emoji: "🎵",
+      emoji: "note",
       grad: "linear-gradient(135deg,#001a0a 0%,#003318 40%,#065f2f 75%,#16A34A 100%)",
       cta: "Write Lyrics",
       lyricsSlide: true,
@@ -2445,7 +2445,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
     {
       title: "Rhyme Finder",
       sub: "Find perfect rhymes & multi-syllable rhymes while you write",
-      emoji: "🎵",
+      emoji: "note",
       grad: "linear-gradient(135deg,#1a0a00 0%,#3d1800 40%,#7c3500 75%,#EA580C 100%)",
       cta: "Try It Now",
       lyricsSlide: true,
@@ -2455,7 +2455,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
     {
       title: "Discover Rising Producers",
       sub: "Tap in with producers worldwide",
-      emoji: "🎵",
+      emoji: "note",
       grad: "linear-gradient(135deg,#001230 0%,#002a70 60%,#3B82F6 100%)",
       cta: "Find Producers",
       btnColor: "rgba(59,130,246,0.5)",
@@ -2465,7 +2465,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
     {
       title: "Sell Your Beats",
       sub: "Upload, price, and earn on every lease",
-      emoji: "🎵",
+      emoji: "note",
       grad: "linear-gradient(135deg,#180800 0%,#3a1500 60%,#F59E0B 100%)",
       cta: "Go Producer Pro",
       btnColor: "rgba(245,158,11,0.5)",
@@ -2474,7 +2474,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
     {
       title: "Record in the Studio",
       sub: "Create projects, record vocals over any beat & export your mix",
-      emoji: "🎵",
+      emoji: "note",
       grad: "linear-gradient(135deg,#0a001a 0%,#1a0033 40%,#4c0080 75%,#7C3AED 100%)",
       cta: "Open Studio",
       studioSlide: true,
@@ -2485,12 +2485,12 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
   ];
 
   const GENRES = [
-    { label: "Trap",       q: "trap type beat",       color: "#C026D3", emoji: "🔥" },
-    { label: "UK Drill",   q: "uk drill type beat",   color: "#3B82F6", emoji: "🎯" },
-    { label: "R&B",        q: "rnb type beat",        color: "#F59E0B", emoji: "🎵" },
-    { label: "Afrobeat",   q: "afrobeat type beat",   color: "#22C55E", emoji: "🌍" },
-    { label: "Melodic",    q: "melodic type beat",    color: "#818CF8", emoji: "🌊" },
-    { label: "Dancehall",  q: "dancehall riddim",     color: "#EC4899", emoji: "🎪" },
+    { label: "Trap",       q: "trap type beat",       color: "#C026D3", emoji: "flame" },
+    { label: "UK Drill",   q: "uk drill type beat",   color: "#3B82F6", emoji: "target" },
+    { label: "R&B",        q: "rnb type beat",        color: "#F59E0B", emoji: "note" },
+    { label: "Afrobeat",   q: "afrobeat type beat",   color: "#22C55E", emoji: "globe" },
+    { label: "Melodic",    q: "melodic type beat",    color: "#818CF8", emoji: "wave" },
+    { label: "Dancehall",  q: "dancehall riddim",     color: "#EC4899", emoji: "festival" },
   ];
 
   const [heroPaused, setHeroPaused] = useState(false);
@@ -2526,7 +2526,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
   const SectionHead = ({ emoji, title, sub }) => (
     <div style={{ paddingLeft: 16, marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-        <span style={{ fontSize: 18, lineHeight: 1 }}>{emoji}</span>
+        <AppIcon id={emoji} size={18} />
         <span style={{ color: "white", fontWeight: 800, fontSize: 16,
           fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>{title}</span>
       </div>
@@ -2562,8 +2562,8 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
           {/* Large bg emoji */}
           <div style={{
             position: "absolute", right: -8, top: -12,
-            fontSize: 90, opacity: 0.1, lineHeight: 1, userSelect: "none",
-          }}>{slide.emoji}</div>
+            opacity: 0.1, lineHeight: 1, userSelect: "none",
+          }}><Icon id={slide.emoji} size={90} color="white" /></div>
 
           <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: 800,
             letterSpacing: 2.5, marginBottom: 8 }}>BEATFINDER</div>
@@ -2609,7 +2609,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
             borderRadius: 16, padding: "13px 16px",
             display: "flex", alignItems: "center", gap: 14,
           }}>
-            <div style={{ fontSize: 28 }}>{"🔒"}</div>
+            <div style={{ fontSize: 28 }}><AppIcon id="lock" size={20}/></div>
             <div style={{ flex: 1 }}>
               <div style={{ color: "white", fontWeight: 800, fontSize: 14, marginBottom: 2 }}>
                 Unlock Pro
@@ -2634,7 +2634,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
 
       {/* Genre chips */}
       <div style={{ marginBottom: 28 }}>
-        <SectionHead emoji="🎯" title="BROWSE BY GENRE" />
+        <SectionHead emoji="target" title="BROWSE BY GENRE" />
         <div className="bf-carousel" style={{ overflowX: "auto", scrollbarWidth: "none",
           WebkitOverflowScrolling: "touch", paddingLeft: 16 }}>
           <div style={{ display: "flex", gap: 10, paddingRight: 16 }}>
@@ -2645,7 +2645,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
                 border: "1.5px solid " + g.color + "44",
                 borderRadius: 50, padding: "9px 18px", cursor: "pointer",
               }}>
-                <span style={{ fontSize: 15 }}>{g.emoji}</span>
+                <Icon id={g.emoji} size={15} color={g.color} />
                 <span style={{ color: "white", fontWeight: 700, fontSize: 13,
                   whiteSpace: "nowrap" }}>{g.label}</span>
               </div>
@@ -2727,7 +2727,7 @@ function FeaturedCarousel({ savedIds, onSave, onPlay }) {
                         <stop offset="100%" stopColor="#3b82f6"/>
                       </linearGradient>
                     </defs>
-                    <rect x="3" y="3" width="66" height="46" rx="8" stroke="url(#ng-grid)" strokeWidth="1.5" fill="none" filter="url(#neon-grid)" opacity="0.9"/>
+                    <rect x="3" y="3" width="66" height="46" rx="8" stroke="url(#ng-grid)" strokeWidth="1.5" fill="black" filter="url(#neon-grid)" opacity="0.9"/>
                     <polygon points="29,16 29,36 48,26" stroke="url(#ng-grid)" strokeWidth="1.5" fill="none" strokeLinejoin="round" filter="url(#neon-grid)" opacity="0.9"/>
                   </svg>
                 </div>
@@ -2739,7 +2739,7 @@ function FeaturedCarousel({ savedIds, onSave, onPlay }) {
                   background: isSaved ? "rgba(192,38,211,0.9)" : "rgba(0,0,0,0.65)",
                   color: isSaved ? "white" : "rgba(255,255,255,0.6)",
                   boxShadow: isSaved ? "0 0 10px rgba(192,38,211,0.5)" : "none",
-                }}>{"🔖"}</button>
+                }}><AppIcon id="bookmark" size={20}/></button>
               </div>
               <div style={{ padding: "10px 12px 12px" }}>
                 <div style={{
@@ -2812,7 +2812,7 @@ function TrendingStrip({ savedIds, onSave, onPlay }) {
                         <stop offset="100%" stopColor="#3b82f6"/>
                       </linearGradient>
                     </defs>
-                    <rect x="3" y="3" width="66" height="46" rx="8" stroke="url(#ng-trend)" strokeWidth="1.5" fill="none" filter="url(#neon-trend)" opacity="0.9"/>
+                    <rect x="3" y="3" width="66" height="46" rx="8" stroke="url(#ng-trend)" strokeWidth="1.5" fill="black" filter="url(#neon-trend)" opacity="0.9"/>
                     <polygon points="29,16 29,36 48,26" stroke="url(#ng-trend)" strokeWidth="1.5" fill="none" strokeLinejoin="round" filter="url(#neon-trend)" opacity="0.9"/>
                   </svg>
                 </div>
@@ -2831,7 +2831,7 @@ function TrendingStrip({ savedIds, onSave, onPlay }) {
                   justifyContent: "center", fontSize: 12,
                   background: isSaved ? "rgba(192,38,211,0.9)" : "rgba(0,0,0,0.65)",
                   color: isSaved ? "white" : "rgba(255,255,255,0.5)",
-                }}>{"🔖"}</button>
+                }}><AppIcon id="bookmark" size={20}/></button>
               </div>
               <div style={{ padding: "8px 10px 10px" }}>
                 <div style={{
@@ -2903,7 +2903,7 @@ function ArtistsScreen({ onPlay, savedIds, onSave }) {
         />
       </div>
       <div style={{ background: "#1a1a1a", borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, marginBottom: 12, border: "1px solid #222" }}>
-        <span style={{ color: "#555" }}>{"🔍"}</span>
+        <span style={{ color: "#555" }}><AppIcon id="search" size={20}/></span>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search artists"
           style={{ background: "none", border: "none", outline: "none", color: "white", fontSize: 15, flex: 1 }} />
       </div>
@@ -2912,7 +2912,7 @@ function ArtistsScreen({ onPlay, savedIds, onSave }) {
           { id: "USA",     label: "🇺🇸 US"      },
           { id: "UK",      label: "🇬🇧 UK"      },
           { id: "JAMAICA", label: "🇯🇲 Jamaica"  },
-          { id: "AFRICA",  label: "🌍 Africa"   },
+          { id: "AFRICA",  label: "Africa"   },
         ].map(r => (
           <button key={r.id} onClick={() => { setRegion(r.id); setCat("All"); }}
             style={{
@@ -3147,7 +3147,7 @@ function BeatLeaseCard({ beat, user }) {
           cursor: loading ? "not-allowed" : "pointer",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
         }}>
-          {loading ? "Loading..." : "🎵 Buy Lease - " + beat.price}
+          {loading ? "Loading..." : "Buy Lease - " + beat.price}
         </button>
       )}
     </div>
@@ -3179,7 +3179,7 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
   const header = (
     <div style={{ padding: "20px 0 16px" }}>
       <div style={{ background: "linear-gradient(135deg,#1C1917,rgba(245,158,11,0.2))", borderRadius: 16, padding: "24px 20px", marginBottom: 20, border: "1.5px solid rgba(245,158,11,0.3)" }}>
-        <div style={{ color: "#F59E0B", fontSize: 13, fontWeight: 800, marginBottom: 6 }}>{"🎵"} PRODUCER BEATS</div>
+        <div style={{ color: "#F59E0B", fontSize: 13, fontWeight: 800, marginBottom: 6 }}><AppIcon id="note" size={20}/> PRODUCER BEATS</div>
         <div style={{ color: "white", fontSize: 26, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
           Download MP3s
         </div>
@@ -3209,7 +3209,7 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
     <div style={{ padding: "0 16px 100px" }}>
       {header}
       <div style={{ textAlign: "center", padding: "60px 0" }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>{"🎛"}</div>
+        <div style={{ fontSize: 48, marginBottom: 16 }}><AppIcon id="knobs" size={20}/></div>
         <div style={{ color: "white", fontWeight: 800, fontSize: 17, marginBottom: 8 }}>
           No beats have been uploaded yet.
         </div>
@@ -3373,7 +3373,7 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
   const SectionHeader = ({ emoji, title, subtitle, color }) => (
     <div style={{ marginBottom: 14, paddingLeft: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-        <span style={{ fontSize: 20 }}>{emoji}</span>
+        <AppIcon id={emoji} size={20} />
         <div style={{ color: color || "#C026D3", fontWeight: 800, fontSize: 16, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>{title}</div>
       </div>
       {subtitle && <div style={{ color: "#555", fontSize: 12, marginLeft: 28 }}>{subtitle}</div>}
@@ -3398,7 +3398,7 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
       </div>
 
       
-      <SectionHeader emoji="🔥" title="TRENDING ON YOUTUBE" subtitle="1M+ views, sorted by most viewed" color="#F59E0B" />
+      <SectionHeader emoji="flame" title="TRENDING ON YOUTUBE" subtitle="1M+ views, sorted by most viewed" color="#F59E0B" />
       {tLoading ? <LoadingRow /> : (
         <div className="bf-carousel" style={{ overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch", paddingLeft: 16, paddingBottom: 4, marginBottom: 32 }}>
           <div style={{ display: "flex", gap: 12, paddingRight: 16 }}>
@@ -3411,7 +3411,7 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
       )}
 
       
-      <SectionHeader emoji="🚀" title="RISING PRODUCERS" subtitle="New uploads from producers" color="#22C55E" />
+      <SectionHeader emoji="rocket" title="RISING PRODUCERS" subtitle="New uploads from producers" color="#22C55E" />
       {rLoading ? <LoadingRow /> : (
         <div style={{ overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch", paddingLeft: 16, paddingBottom: 4, marginBottom: 32 }}>
           <div style={{ display: "flex", gap: 12, paddingRight: 16 }}>
@@ -3429,7 +3429,7 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
       )}
 
       
-      <SectionHeader emoji="🎯" title="FRESH UPLOADS" subtitle="Newest beats uploaded recently" color="#06B6D4" />
+      <SectionHeader emoji="target" title="FRESH UPLOADS" subtitle="Newest beats uploaded recently" color="#06B6D4" />
       {fLoading ? <LoadingRow /> : (
         <div style={{ overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch", paddingLeft: 16, paddingBottom: 4, marginBottom: 32 }}>
           <div style={{ display: "flex", gap: 12, paddingRight: 16 }}>
@@ -3518,7 +3518,7 @@ function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial }
 
         <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
           <div style={{ flex: 1, background: "#1a1a1a", borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, border: "1px solid #333" }}>
-        <span style={{ color: "#555" }}>{"🔍"}</span>
+        <span style={{ color: "#555" }}><AppIcon id="search" size={20}/></span>
             <input
               value={input} onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && doSearch()}
@@ -3596,7 +3596,7 @@ function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial }
 
           
           <div style={{ textAlign: "center", paddingTop: 20, color: "#444" }}>
-            <div style={{ fontSize: 44, marginBottom: 12 }}>{"🎵"}</div>
+            <div style={{ fontSize: 44, marginBottom: 12 }}><AppIcon id="note" size={20}/></div>
             <div style={{ fontSize: 14, color: "#555", lineHeight: 1.8 }}>
               Search any artist or tap a genre above<br />
               to find type beats instantly
@@ -3674,7 +3674,7 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) 
 
   if (!user) return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "60vh", padding: 24, textAlign: "center" }}>
-      <div style={{ fontSize: 64, marginBottom: 20 }}>{"🔖"}</div>
+      <div style={{ fontSize: 64, marginBottom: 20 }}><AppIcon id="bookmark" size={20}/></div>
       <div style={{ color: "white", fontSize: 22, fontWeight: 800, marginBottom: 8 }}>Your Beat Library</div>
       <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 28 }}>
         Create an account to save beats,<br />build collections and sync across devices.
@@ -3741,10 +3741,10 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) 
       
       {list.length === 0 ? (
         <div style={{ textAlign: "center", paddingTop: 60 }}>
-          <div style={{ fontSize: 56, marginBottom: 16 }}>{"🔖"}</div>
+          <div style={{ fontSize: 56, marginBottom: 16 }}><AppIcon id="bookmark" size={20}/></div>
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 8 }}>No beats saved yet</div>
           <div style={{ color: "#555", fontSize: 14, lineHeight: 1.8, marginBottom: 24 }}>
-            Tap the {"🔖"} bookmark icon on any beat<br />to start building your library
+            Tap the <AppIcon id="bookmark" size={20}/> bookmark icon on any beat<br />to start building your library
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
             {["Browse Artists", "Check Trending", "Search a Vibe"].map(t => (
@@ -3833,7 +3833,7 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
     <div style={{ paddingBottom: 100, overflowY: "auto" }}>
       
       <div style={{ background: "linear-gradient(160deg,#1a0a00,#2d1500,#1C1917)", padding: "32px 20px 24px", textAlign: "center", borderBottom: "1px solid rgba(245,158,11,0.15)" }}>
-        <div style={{ fontSize: 44, marginBottom: 10 }}>{"🔒"}</div>
+        <div style={{ fontSize: 44, marginBottom: 10 }}><AppIcon id="lock" size={20}/></div>
         <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 34, letterSpacing: 3, color: "#F59E0B", marginBottom: 6 }}>MEMBERS ONLY</div>
         <div style={{ color: "#aaa", fontSize: 14, lineHeight: 1.6, maxWidth: 300, margin: "0 auto" }}>
           Join the BeatFinder community and unlock the full producer ecosystem
@@ -3845,13 +3845,13 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
         <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, letterSpacing: 1, marginBottom: 14, textAlign: "center" }}>WHAT YOU UNLOCK</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
           {[
-            { icon: "🎵", title: "Exclusive Beats", desc: "Access member-only beats unavailable anywhere else" },
-            { icon: "⬇️", title: "MP3 Downloads", desc: "Download and buy leases directly from producers" },
-            { icon: "✍️", title: "Lyric Studio", desc: "Access exclusive member beats with AI assistance" },
-            { icon: "🎛", title: "Producer Tools", desc: "Upload beats, sell leases and get paid instantly" },
+            { icon: "note", title: "Exclusive Beats", desc: "Access member-only beats unavailable anywhere else" },
+            { icon: "download", title: "MP3 Downloads", desc: "Download and buy leases directly from producers" },
+            { icon: "edit", title: "Lyric Studio", desc: "Access exclusive member beats with AI assistance" },
+            { icon: "knobs", title: "Producer Tools", desc: "Upload beats, sell leases and get paid instantly" },
           ].map(v => (
             <div key={v.title} style={{ background: "#111", borderRadius: 14, padding: 14, border: "1px solid rgba(245,158,11,0.15)" }}>
-              <div style={{ fontSize: 24, marginBottom: 8 }}>{v.icon}</div>
+              <div style={{ fontSize: 24, marginBottom: 8 }}><AppIcon id={v.icon} size={24}/></div>
               <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 4 }}>{v.title}</div>
               <div style={{ color: "#555", fontSize: 11, lineHeight: 1.5 }}>{v.desc}</div>
             </div>
@@ -3863,8 +3863,8 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
           <div style={{ color: "#888", fontWeight: 700, fontSize: 12, letterSpacing: 1, marginBottom: 12, textAlign: "center" }}>CHOOSE YOUR PLAN</div>
           <div style={{ display: "flex", gap: 10 }}>
             {[
-              { label: "🎤 Artist Pro", price: "£4.99/mo", color: "#F59E0B", perks: ["Write lyrics to beats", "Save unlimited beats", "Exclusive member beats", "Download MP3s", "Purchase leases", "Bookmark unlimited beats"] },
-              { label: "🎛 Producer Pro", price: "£8.99/mo", color: "#C026D3", perks: ["Everything in Artist Pro", "Upload & sell beats", "Sell MP3 leases", "Download stats", "Verified badge", "Featured in rotation"] },
+              { label: "Artist Pro", price: "£4.99/mo", color: "#F59E0B", perks: ["Write lyrics to beats", "Save unlimited beats", "Exclusive member beats", "Download MP3s", "Purchase leases", "Bookmark unlimited beats"] },
+              { label: "Producer Pro", price: "£8.99/mo", color: "#C026D3", perks: ["Everything in Artist Pro", "Upload & sell beats", "Sell MP3 leases", "Download stats", "Verified badge", "Featured in rotation"] },
             ].map(p => (
               <div key={p.label} style={{ flex: 1, background: "#111", border: "1.5px solid " + p.color, borderRadius: 14, padding: "14px 12px", textAlign: "left" }}>
                 <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>{p.label}</div>
@@ -3889,12 +3889,12 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
         <div style={{ background: "#111", borderRadius: 14, padding: "14px 16px", border: "1px solid #1e1e1e", marginBottom: 20 }}>
           <div style={{ color: "#555", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>WHY PRODUCERS LOVE IT</div>
           {[
-            { icon: "▭", text: "Get paid instantly via Stripe" },
-            { icon: "🎵", text: "Your beats reach real artists daily" },
-            { icon: "▦", text: "Track downloads and sales" },
+            { icon: "stripe", text: "Get paid instantly via Stripe" },
+            { icon: "note", text: "Your beats reach real artists daily" },
+            { icon: "grid", text: "Track downloads and sales" },
           ].map(r => (
             <div key={r.text} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, color: "#888", fontSize: 13 }}>
-              <span>{r.icon}</span>
+              <Icon id={r.icon} size={14} color="#888" />
               <span>{r.text}</span>
             </div>
           ))}
@@ -3911,7 +3911,7 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
         <div style={{ background: "linear-gradient(135deg,#1C1917,rgba(245,158,11,0.12))", borderRadius: 16, padding: "20px", marginBottom: 18, border: "1.5px solid rgba(245,158,11,0.3)" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
-              <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>{"🔒"} MEMBERS ONLY</div>
+              <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, marginBottom: 4, letterSpacing: 1 }}><AppIcon id="lock" size={20}/> MEMBERS ONLY</div>
               <div style={{ color: "white", fontSize: 24, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>Members Area</div>
               <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>Exclusive beats and downloadable MP3s</div>
             </div>
@@ -3924,7 +3924,7 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
         
         <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
           <button onClick={() => setTab("beats")} style={{ flex: 1, padding: "12px", borderRadius: 12, fontWeight: 800, fontSize: 14, cursor: "pointer", border: tab === "beats" ? "2px solid #F59E0B" : "1.5px solid #333", background: tab === "beats" ? "rgba(245,158,11,0.15)" : "transparent", color: tab === "beats" ? "#F59E0B" : "#666" }}>
-            {"🔥"} Exclusive Beats
+            <AppIcon id="flame" size={20}/> Exclusive Beats
           </button>
           <button onClick={() => setTab("mp3s")} style={{ flex: 1, padding: "12px", borderRadius: 12, fontWeight: 800, fontSize: 14, cursor: "pointer", border: tab === "mp3s" ? "2px solid #C026D3" : "1.5px solid #333", background: tab === "mp3s" ? "rgba(192,38,211,0.15)" : "transparent", color: tab === "mp3s" ? "#C026D3" : "#666" }}>
             ⬇️ MP3 Downloads
@@ -3977,7 +3977,7 @@ function LyricCard({ lyric, lyricIndex, onDelete, onEditLyric }) {
           </div>
           {lyric.beatTitle && (
             <div style={{ color: "#C026D3", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {"🎵"} {lyric.beatTitle}
+              <AppIcon id="note" size={20}/> {lyric.beatTitle}
             </div>
           )}
           <div style={{ color: "#555", fontSize: 11, marginTop: 3 }}>
@@ -4016,20 +4016,20 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave }) {
 
   if (loading) return (
     <div style={{ textAlign: "center", padding: "80px 24px", color: "#555" }}>
-      <div style={{ fontSize: 36, marginBottom: 10 }}>{"👤"}</div>
+      <div style={{ fontSize: 36, marginBottom: 10 }}><AppIcon id="profile" size={20}/></div>
       <div style={{ fontSize: 13 }}>Loading profile...</div>
     </div>
   );
 
   if (error || !profile) return (
     <div style={{ textAlign: "center", padding: "80px 24px", color: "#555" }}>
-      <div style={{ fontSize: 36, marginBottom: 10 }}>{"👤"}</div>
+      <div style={{ fontSize: 36, marginBottom: 10 }}><AppIcon id="profile" size={20}/></div>
       <div style={{ fontSize: 15, color: "#888" }}>Profile not found</div>
       <button onClick={onBack} style={{ marginTop: 20, background: "#1a1a1a", border: "1px solid #333", borderRadius: 12, color: "white", padding: "10px 24px", cursor: "pointer" }}>Go Back</button>
     </div>
   );
 
-  const planLabel = profile.plan === "producer" ? "⭐ Producer Pro" : profile.plan === "artist" ? "🎤 Artist Pro" : null;
+  const planLabel = profile.plan === "producer" ? "Producer Pro" : profile.plan === "artist" ? "Artist Pro" : null;
   const planColor = profile.plan === "producer" ? "#C026D3" : "#F59E0B";
 
   const handleDownload = async (beat) => {
@@ -4064,7 +4064,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave }) {
 
       {profile.beats && profile.beats.length > 0 && (
         <div style={{ padding: "0 16px" }}>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 14 }}>{"🎵"} Beats by {profile.username}</div>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 14 }}><AppIcon id="note" size={20}/> Beats by {profile.username}</div>
           {profile.beats.map(beat => (
             <div key={beat.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(245,158,11,0.2)" }}>
               <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{beat.title}</div>
@@ -4083,7 +4083,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave }) {
 
       {(!profile.beats || profile.beats.length === 0) && (
         <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
-      <div style={{ fontSize: 36, marginBottom: 10 }}>{"👤"}</div>
+      <div style={{ fontSize: 36, marginBottom: 10 }}><AppIcon id="profile" size={20}/></div>
           <div style={{ fontSize: 14 }}>No beats uploaded yet</div>
         </div>
       )}
@@ -4219,14 +4219,14 @@ function MyUploadsSection({ user }) {
 
   return (
     <div>
-      <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>{"🎛"} My Uploaded Beats</div>
+      <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}><AppIcon id="knobs" size={20}/> My Uploaded Beats</div>
       <div style={{ color: "#666", fontSize: 13, marginBottom: 16 }}>Edit or delete your uploaded beats.</div>
 
       {msg && <div style={{ color: msg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, marginBottom: 12, textAlign: "center", fontWeight: 600 }}>{msg}</div>}
 
       {beats.length === 0 && (
         <div style={{ background: "#111", borderRadius: 14, padding: 20, textAlign: "center", border: "1px solid #222" }}>
-      <div style={{ fontSize: 36, marginBottom: 10 }}>{"👤"}</div>
+      <div style={{ fontSize: 36, marginBottom: 10 }}><AppIcon id="profile" size={20}/></div>
           <div style={{ color: "#555", fontSize: 14 }}>No beats uploaded yet.</div>
         </div>
       )}
@@ -4452,7 +4452,7 @@ function ResetPasswordScreen({ token, onDone }) {
         </>
       ) : (
         <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>{"🎛"}</div>
+        <div style={{ fontSize: 48, marginBottom: 16 }}><AppIcon id="knobs" size={20}/></div>
           <div style={{ color: "#22C55E", fontWeight: 800, fontSize: 18, marginBottom: 8 }}>Password Reset!</div>
           <div style={{ color: "#888", fontSize: 14, marginBottom: 24 }}>You can now log in with your new password.</div>
           <button onClick={onDone} style={{ background: "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: "14px 40px", fontSize: 16, cursor: "pointer" }}>
@@ -4526,7 +4526,7 @@ function ForgotPasswordScreen({ onBack }) {
         </>
       ) : (
         <div style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 14, padding: 20, textAlign: "center" }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>{"📂"}</div>
+          <div style={{ fontSize: 40, marginBottom: 12 }}><AppIcon id="folder" size={20}/></div>
           <div style={{ color: "#22C55E", fontWeight: 800, fontSize: 16, marginBottom: 8 }}>Email Sent!</div>
           <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7 }}>
             Check your inbox at <span style={{ color: "white", fontWeight: 600 }}>{email}</span> for a password reset link. It expires in 1 hour.
@@ -4596,11 +4596,11 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
   const PLANS = [
     {
-      id: "artist", label: "🎤 Artist Pro", price: "4.99",
+      id: "artist", label: "Artist Pro", price: "4.99",
       perks: ["Access Exclusive Members area","Bookmark unlimited beats","Artist verified badge","Personalised recommendations"],
     },
     {
-      id: "producer", label: "🎛 Producer Pro", price: "8.99",
+      id: "producer", label: "Producer Pro", price: "8.99",
       perks: ["Everything in Artist Pro","Upload beats to Home featured","Featured in rotation","Producer verified badge","Analytics"],
     },
   ];
@@ -4638,7 +4638,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
     if (mode === "forgot") return <ForgotPasswordScreen onBack={() => setMode("login")} />;
     if (mode === "landing") return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "75vh", padding: 32, textAlign: "center" }}>
-          <div style={{ fontSize: 56, marginBottom: 16 }}>{"🔖"}</div>
+          <div style={{ fontSize: 56, marginBottom: 16 }}><AppIcon id="bookmark" size={20}/></div>
         <div style={{ color: "white", fontSize: 24, fontWeight: 800, marginBottom: 8 }}>My Profile</div>
         <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 32 }}>Log in to access your saved beats, lyrics, and pro features.</div>
         <button onClick={() => setMode("signup")} style={{ width: "100%", maxWidth: 320, background: "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: "pointer", marginBottom: 14 }}>
@@ -4767,7 +4767,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         {user.username && <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>@{user.username}</div>}
         <div style={{ marginTop: 8 }}>
           {user.isPro && <span style={{ display: "inline-block", background: "rgba(192,38,211,0.2)", border: "1px solid #C026D3", borderRadius: 20, padding: "4px 14px", color: "#C026D3", fontWeight: 800, fontSize: 12, marginRight: 6 }}>⭐ Producer Pro</span>}
-          {user.isArtistPro && !user.isPro && <span style={{ display: "inline-block", background: "rgba(245,158,11,0.2)", border: "1px solid #F59E0B", borderRadius: 20, padding: "4px 14px", color: "#F59E0B", fontWeight: 800, fontSize: 12 }}>{"🎤"} Artist Pro</span>}
+          {user.isArtistPro && !user.isPro && <span style={{ display: "inline-block", background: "rgba(245,158,11,0.2)", border: "1px solid #F59E0B", borderRadius: 20, padding: "4px 14px", color: "#F59E0B", fontWeight: 800, fontSize: 12 }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
         </div>
       </div>
 
@@ -4777,16 +4777,16 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
           
           {user.isArtistPro && (
             <div style={{ marginBottom: 20 }}>
-              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>{"🎤"} ARTIST TOOLS</div>
+              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}><AppIcon id="vocalmic" size={20}/> ARTIST TOOLS</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {[
                   
-                  { id: "lyrics",  icon: "✍️", label: "My Lyrics",    desc: savedLyrics.length + " saved",    color: "#C026D3" },
-                  { id: "members", icon: "🎵", label: "Members Area", desc: "Exclusive beats",                 color: "#F59E0B" },
+                  { id: "lyrics",  icon: "edit", label: "My Lyrics",    desc: savedLyrics.length + " saved",    color: "#C026D3" },
+                  { id: "members", icon: "note", label: "Members Area", desc: "Exclusive beats",                 color: "#F59E0B" },
                 ].map(item => (
                   <button key={item.id} onClick={() => goSection(item.id)}
                     style={{ background: "#111", borderRadius: 14, padding: "16px 12px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
-                    <div style={{ fontSize: 24, marginBottom: 8 }}>{item.icon}</div>
+                    <div style={{ fontSize: 24, marginBottom: 8 }}><AppIcon id={item.icon} size={24}/></div>
                     <div style={{ color: "white", fontWeight: 700, fontSize: 14 }}>{item.label}</div>
                     <div style={{ color: item.color, fontSize: 12, marginTop: 3 }}>{item.desc}</div>
                   </button>
@@ -4815,17 +4815,17 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
           
           {user.isPro && (
             <div style={{ marginBottom: 20 }}>
-              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>{"🎹"} PRODUCER TOOLS</div>
+              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}><AppIcon id="piano" size={20}/> PRODUCER TOOLS</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {[
-                  { id: "upload",  icon: "⬆️", label: "Upload Beat",  desc: "Add new beat",       color: "#C026D3" },
-                  { id: "manage",  icon: "🎛", label: "My Uploads",   desc: uploads.length + " beats", color: "#F59E0B" },
-                  { id: "stripe",  icon: "▭", label: "Stripe Payouts", desc: producerStats?.stripeConnected ? "Connected" : "Not connected", color: "#22C55E" },
-                  { id: "stats",   icon: "▦", label: "Analytics",    desc: producerStats ? producerStats.totalDownloads + " downloads" : "Loading...", color: "#818CF8" },
+                  { id: "upload",  icon: "upload", label: "Upload Beat",  desc: "Add new beat",       color: "#C026D3" },
+                  { id: "manage",  icon: "knobs", label: "My Uploads",   desc: uploads.length + " beats", color: "#F59E0B" },
+                  { id: "stripe",  icon: "stripe", label: "Stripe Payouts", desc: producerStats?.stripeConnected ? "Connected" : "Not connected", color: "#22C55E" },
+                  { id: "stats",   icon: "grid", label: "Analytics",    desc: producerStats ? producerStats.totalDownloads + " downloads" : "Loading...", color: "#818CF8" },
                 ].map(item => (
                   <button key={item.id} onClick={() => goSection(item.id)}
                     style={{ background: "#111", borderRadius: 14, padding: "16px 12px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
-                    <div style={{ fontSize: 24, marginBottom: 8 }}>{item.icon}</div>
+                    <div style={{ fontSize: 24, marginBottom: 8 }}><AppIcon id={item.icon} size={24}/></div>
                     <div style={{ color: "white", fontWeight: 700, fontSize: 14 }}>{item.label}</div>
                     <div style={{ color: item.color, fontSize: 12, marginTop: 3 }}>{item.desc}</div>
                   </button>
@@ -5393,19 +5393,52 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
   const HDelayPlugin  = function(p){ return _HDelayPlugin(p); };
   const TRottenPlugin = function(p){ return _TRottenMasterPlugin(p); };
   const BandpassPlugin = function(p){ return _BandpassPlugin(p); };
+  // Phosphor-style plugin icons — each tailored to its FX type
+  function PhosphorPluginIcon({ id, color = "#888", size = 22 }) {
+    const paths = {
+      // Parametric EQ — frequency curve with nodes
+      "ph-eq": "M3 18 Q6 6 9 12 Q12 18 15 8 Q18 -2 21 10",
+      // Compressor — waveform being squashed
+      "ph-compress": "M3 12h3 M6 12 L8 6 L10 18 L12 8 L14 16 L16 12h5 M18 7 L21 12 L18 17",
+      // Reverb — expanding wave rings
+      "ph-reverb": "M12 12m-2 0a2 2 0 104 0 2 2 0 10-4 0 M8.5 8.5a5 5 0 017 7 M5.5 5.5a9 9 0 0113 13 M2.5 2.5a13 13 0 0119 19",
+      // Pitch — music note with arrow up
+      "ph-pitch": "M9 17V6l8-2v11 M9 17a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z M17 15a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z M19 3l3 3-3 3 M22 6h-5",
+      // Noise Gate — gate/threshold line with cut
+      "ph-gate": "M3 12h4 M7 12 L9 6 L11 18 L13 6 L15 18 L17 12h4 M3 7h2 M3 17h2 M19 7h2 M19 17h2",
+      // Doubler — two overlapping waveforms
+      "ph-doubler": "M3 9 Q6 4 9 9 Q12 14 15 9 Q18 4 21 9 M3 15 Q6 10 9 15 Q12 20 15 15 Q18 10 21 15",
+      // Delay — clock with echo lines
+      "ph-delay": "M12 22a10 10 0 100-20 10 10 0 000 20z M12 7v5l3 2 M4 12H1 M1 9l3 3-3 3",
+      // Master — crown / broadcast tower
+      "ph-master": "M2 20h20 M12 4 L4 14h16z M9 14v6 M15 14v6 M12 4v10",
+      // Bandpass — bandpass filter curve
+      "ph-bandpass": "M2 18 Q4 18 6 14 Q8 6 12 6 Q16 6 18 14 Q20 18 22 18",
+    };
+    const d = paths[id];
+    if (!d) return null;
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+        stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"
+        style={{ display:"block" }}>
+        {d.split(/\s+(?=M)/).map(function(seg, i) { return <path key={i} d={seg} />; })}
+      </svg>
+    );
+  }
+
   const [showPluginPicker, setShowPluginPicker] = React.useState(false);
   const chain = fx.pluginChain || [];
 
   const ALL_PLUGINS = [
     { key:"eq",           label:"Pro EQ",              sub:"5-Band · Drag handles",        icon:"▦", color:"#0ea5e9" },
-    { key:"compressor",   label:"Compressor",          sub:"Dynamics processor",            icon:"🎚", color:"#7C3AED" },
-    { key:"reverb",       label:"Convolution Reverb",  sub:"Room simulation",               icon:"🌊", color:"#C026D3" },
-    { key:"pitch",        label:"Auto-Tune / Pitch",   sub:"Pitch processor v2",            icon:"🎵", color:"#9333EA" },
-    { key:"noiseremover", label:"Noise Remover",       sub:"RNNoise · AI denoising",        icon:"🎙", color:"#10B981" },
-    { key:"doubler",      label:"Vocal Doubler",        sub:"Stereo width · Haas effect",     icon:"🔊", color:"#F59E0B" },
+    { key:"compressor",   label:"Compressor",          sub:"Dynamics processor",            icon:"fader", color:"#7C3AED" },
+    { key:"reverb",       label:"Convolution Reverb",  sub:"Room simulation",               icon:"wave", color:"#C026D3" },
+    { key:"pitch",        label:"Auto-Tune / Pitch",   sub:"Pitch processor v2",            icon:"note", color:"#9333EA" },
+    { key:"noiseremover", label:"Noise Remover",       sub:"RNNoise · AI denoising",        icon:"mic", color:"#10B981" },
+    { key:"doubler",      label:"Vocal Doubler",        sub:"Stereo width · Haas effect",     icon:"speaker", color:"#F59E0B" },
     { key:"hdelay",       label:"H-Delay",              sub:"Tape · BPM sync · Analog",       icon:"◷", color:"#E85D04" },
-    { key:"trotten",      label:"T-Rotten Master",      sub:"Mastering · Analog warmth",       icon:"🎛", color:"#C8762A" },
-    { key:"bandpass",     label:"GRM Bandpass",         sub:"Dual 6th-order · Resonance",      icon:"🎛", color:"#00b4d8" },
+    { key:"trotten",      label:"T-Rotten Master",      sub:"Mastering · Analog warmth",       icon:"knobs", color:"#C8762A" },
+    { key:"bandpass",     label:"GRM Bandpass",         sub:"Dual 6th-order · Resonance",      icon:"knobs", color:"#00b4d8" },
   ];
 
   const addPlugin = function(key) {
@@ -5433,15 +5466,15 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
   const [flCat, setFlCat] = React.useState("ALL");
 
   const FL_PLUGINS = [
-    { key:"eq",           label:"Parametric EQ",      sub:"5-Band",          icon:"↗", color:"#00b4d8", cat:"EQ",       tag:"MIXER" },
-    { key:"compressor",   label:"Compressor",          sub:"Dynamics",        icon:"⚡", color:"#7c3aed", cat:"DYNAMICS", tag:"EFFECT" },
-    { key:"reverb",       label:"Reverb",              sub:"Room sim",        icon:"🌀", color:"#0891b2", cat:"REVERB",   tag:"EFFECT" },
-    { key:"pitch",        label:"Newtone / Pitch",     sub:"Pitch v2",        icon:"🎙", color:"#db2777", cat:"PITCH",    tag:"EFFECT" },
-    { key:"noiseremover", label:"Noise Gate AI",       sub:"RNNoise",         icon:"🔇", color:"#059669", cat:"DYNAMICS", tag:"UTILITY" },
-    { key:"doubler",      label:"Doubler",             sub:"Haas / Width",    icon:"↔️", color:"#d97706", cat:"UTILITY",  tag:"MIXER"  },
-    { key:"hdelay",       label:"T-Delay",             sub:"Tape · BPM sync", icon:"🕣", color:"#ea580c", cat:"UTILITY",  tag:"EFFECT" },
-    { key:"trotten",      label:"T-Rotten Master 19",  sub:"Analog warmth",   icon:"🎛", color:"#854d0e", cat:"DYNAMICS", tag:"MASTER" },
-    { key:"bandpass",     label:"GRM Bandpass",        sub:"Dual 6th-order",  icon:"🎛", color:"#0e7490", cat:"EQ",       tag:"FILTER" },
+    { key:"eq",           label:"Parametric EQ",      sub:"5-Band",          icon:"ph-eq",          color:"#00b4d8", cat:"EQ",       tag:"MIXER"  },
+    { key:"compressor",   label:"Compressor",          sub:"Dynamics",        icon:"ph-compress",    color:"#7c3aed", cat:"DYNAMICS", tag:"EFFECT" },
+    { key:"reverb",       label:"Reverb",              sub:"Room sim",        icon:"ph-reverb",      color:"#0891b2", cat:"REVERB",   tag:"EFFECT" },
+    { key:"pitch",        label:"Newtone / Pitch",     sub:"Pitch v2",        icon:"ph-pitch",       color:"#db2777", cat:"PITCH",    tag:"EFFECT" },
+    { key:"noiseremover", label:"Noise Gate AI",       sub:"RNNoise",         icon:"ph-gate",        color:"#059669", cat:"DYNAMICS", tag:"UTILITY" },
+    { key:"doubler",      label:"Doubler",             sub:"Haas / Width",    icon:"ph-doubler",     color:"#d97706", cat:"UTILITY",  tag:"MIXER"  },
+    { key:"hdelay",       label:"T-Delay",             sub:"Tape · BPM sync", icon:"ph-delay",       color:"#ea580c", cat:"UTILITY",  tag:"EFFECT" },
+    { key:"trotten",      label:"T-Rotten Master 19",  sub:"Analog warmth",   icon:"ph-master",      color:"#854d0e", cat:"DYNAMICS", tag:"MASTER" },
+    { key:"bandpass",     label:"GRM Bandpass",        sub:"Dual 6th-order",  icon:"ph-bandpass",    color:"#0e7490", cat:"EQ",       tag:"FILTER" },
   ];
 
   const visiblePlugins = FL_PLUGINS.filter(function(p){
@@ -5562,14 +5595,13 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
                     </span>
                   </div>
 
-                  {/* Icon — monochrome */}
+                  {/* Icon — Phosphor-style per-plugin SVG */}
                   <div style={{
                     width:42, height:42, flexShrink:0,
                     background:"rgba(255,255,255,0.03)",
                     borderRight:"1px solid rgba(255,255,255,0.04)",
                     display:"flex", alignItems:"center", justifyContent:"center",
-                    fontSize:17, filter:"grayscale(1) brightness(0.6)",
-                  }}>{p.icon}</div>
+                  }}><PhosphorPluginIcon id={p.icon} color={already ? "#2a2a2a" : p.color} /></div>
 
                   {/* Name + sub */}
                   <div style={{ flex:1, padding:"10px 12px", minWidth:0 }}>
@@ -5632,7 +5664,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
           background:"#111", border:"1px solid #1e1e1e",
           display:"flex", alignItems:"center", justifyContent:"center",
           fontSize:24,
-        }}>{"🎛"}</div>
+        }}><AppIcon id="knobs" size={20}/></div>
         <div style={{ color:"#333", fontWeight:800, fontSize:13, letterSpacing:1 }}>EMPTY CHAIN</div>
         <div style={{ color:"#252525", fontSize:11, lineHeight:1.6, maxWidth:220 }}>
           Open the plugin database below to load effects into this chain
@@ -6474,7 +6506,7 @@ function _BandpassPlugin({ fx, upd, Knob }) {
           display:"flex", alignItems:"center", justifyContent:"center",
           fontSize:14, boxShadow: on ? "0 0 10px rgba(0,229,255,0.4)" : "none",
           transition:"all 0.2s",
-        }}>{"🎛"}</div>
+        }}><AppIcon id="knobs" size={20}/></div>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ color:"#e0e0e0", fontWeight:800, fontSize:12, lineHeight:1 }}>GRM Bandpass</div>
           <div style={{ color:"#2a4a50", fontSize:9, marginTop:2, fontWeight:600, letterSpacing:0.5 }}>
@@ -6708,7 +6740,7 @@ function _TRottenMasterPlugin({ fx, upd }) {
               MASTERING<br/>PROCESSOR
             </div>
             <div style={{ marginTop:5, opacity:0.25 }}>
-              <div style={{ fontSize:22, filter:"sepia(100%) saturate(40%) brightness(55%)" }}>{"💀"}</div>
+              <div style={{ fontSize:22, filter:"sepia(100%) saturate(40%) brightness(55%)" }}><AppIcon id="skull" size={20}/></div>
             </div>
           </div>
 
@@ -7307,7 +7339,7 @@ function _HDelayPlugin({ fx, upd, Knob }) {
 
         {/* ── Mode selector ── */}
         <div style={{ display:"flex", gap:5, marginBottom:12 }}>
-          {[["digital","⚡ Digital"],["tape","📼 Tape"],["ping","🔀 Ping-Pong"]].map(function([m,l]){
+          {[["digital","Digital"],["tape","Tape"],["ping","Ping-Pong"]].map(function([m,l]){
             return <button key={m} onClick={function(){ upd("hdelay",{mode:m}); }} style={modeBtnStyle(m)}>{l}</button>;
           })}
         </div>
@@ -8253,8 +8285,8 @@ function StudioScreen({ user, onExit }) {
       // index 1+ = external/headset on iOS when a headset is present).
       let builtInId   = null;
       let headsetId   = null;
-      let builtInLabel = "▭ iPhone Mic";
-      let headsetLabel = "🎙 Headset Mic";
+      let builtInLabel = "📱 iPhone Mic";
+      let headsetLabel = "🎧 Headset Mic";
 
       inputs.forEach(function(d, idx) {
         if (!d.deviceId) return;
@@ -8269,10 +8301,10 @@ function StudioScreen({ user, onExit }) {
           // Labels available — use keyword classification
           if (isHeadset && !headsetId) {
             headsetId   = d.deviceId;
-            headsetLabel = "🎙 " + (d.label.length < 30 ? d.label : "Headset Mic");
+            headsetLabel = "🎧 " + (d.label.length < 30 ? d.label : "Headset Mic");
           } else if ((isBuiltIn || (!isHeadset && !builtInId)) && !builtInId) {
             builtInId   = d.deviceId;
-            builtInLabel = "▭ " + (d.label.includes("iPhone") ? "iPhone Mic" : (d.label.length < 30 ? d.label : "iPhone Mic"));
+            builtInLabel = "📱 " + (d.label.includes("iPhone") ? "iPhone Mic" : (d.label.length < 30 ? d.label : "iPhone Mic"));
           }
         } else {
           // No labels yet (pre-permission) — assume index 0 = built-in, index 1 = headset
@@ -12241,7 +12273,7 @@ self.onmessage = async function(e) {
       {unsavedAlert && (
         <div style={{ position:"absolute",inset:0,zIndex:8000,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:"32px" }}>
           <div style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:320,textAlign:"center" }}>
-            <div style={{ fontSize:36,marginBottom:12 }}>{"💾"}</div>
+            <div style={{ fontSize:36,marginBottom:12 }}><AppIcon id="save" size={20}/></div>
             <div style={{ color:"white",fontWeight:800,fontSize:18,marginBottom:10 }}>Save before leaving?</div>
             <div style={{ color:"#888",fontSize:14,marginBottom:28,lineHeight:1.6 }}>Your project has unsaved changes.</div>
             <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
@@ -12654,7 +12686,7 @@ self.onmessage = async function(e) {
         <div style={{ position:"absolute",top:58,right:52,zIndex:6000 }} onClick={function(e){ e.stopPropagation(); }}>
           <div style={{ background:"#0d0d0d",border:"1px solid #2a2a2a",borderRadius:14,overflow:"hidden",minWidth:200,boxShadow:"0 8px 40px rgba(0,0,0,0.9)" }}>
             {[
-              {label:"💾  Save",         fn:function(){setShowProjMenu(false);saveProject();}},
+              {label:"Save",         fn:function(){setShowProjMenu(false);saveProject();}},
               {label:"▤  Save As…",     fn:function(){setShowProjMenu(false);setTimeout(function(){const n=window.prompt("Save as:",projectName+" (copy)");if(n){setProjectName(n);setIsSaved(false);setTimeout(saveProject,50);}},50);}},
               {label:"✏️  Rename",       fn:function(){setShowProjMenu(false);setRenamingProj(true);}},
               {label:"▤  All Projects", fn:function(){setShowProjMenu(false);setTimeout(function(){setShowProjects(true);},50);}},
@@ -12742,7 +12774,7 @@ self.onmessage = async function(e) {
           onClick={function(){ monitoringOn ? stopMonitoring() : startMonitoring(); }}
           style={{ display:"flex",alignItems:"center",gap:5,background:monitoringOn?"rgba(34,197,94,0.15)":"#141414",border:"1px solid "+(monitoringOn?"#22C55E":"#2a2a2a"),borderRadius:8,padding:"4px 8px",cursor:"pointer" }}
         >
-          <span style={{ fontSize:13 }}>{"🎧"}</span>
+          <span style={{ fontSize:13 }}><Icon id="headphones" size={16} color={monitoringOn ? "#22C55E" : "#aaa"} strokeWidth={1.8}/></span>
           <div style={{ width:22,height:12,borderRadius:6,background:monitoringOn?"#22C55E":"#333",position:"relative",transition:"background 0.15s" }}>
             <div style={{ position:"absolute",top:2,left:monitoringOn?10:2,width:8,height:8,borderRadius:"50%",background:"white",transition:"left 0.15s" }} />
           </div>
@@ -12765,9 +12797,8 @@ userPickedMicRef.current = true;
           title="Choose microphone source"
           style={{ background:"#141414", border:"1px solid #2a2a2a", borderRadius:6, color:"#aaa", fontSize:9, fontWeight:700, padding:"3px 5px", cursor:"pointer", outline:"none", maxWidth:130 }}
         >
-          <option value="builtin">▭ iPhone Mic</option>
-          <option value="headset">{"🎙"} Headset Mic</option>
-
+          <option value="builtin">📱 iPhone Mic</option>
+          <option value="headset">🎧 Headset Mic</option>
         </select>
       </div>
       {monitorWarn && <div style={{ background:"rgba(245,158,11,0.1)",borderBottom:"1px solid rgba(245,158,11,0.2)",color:"#F59E0B",fontSize:11,padding:"4px 16px",textAlign:"center",flexShrink:0 }}>{monitorWarn}</div>}
@@ -13112,7 +13143,7 @@ userPickedMicRef.current = true;
           <div style={{ padding:"10px 16px 6px",color:"#555",fontSize:10,fontWeight:700 }}>ADD TO PROJECT</div>
           <label style={{ display:"block",cursor:"pointer" }}>
             <div style={{ padding:"12px 16px",display:"flex",alignItems:"center",gap:12,borderBottom:"1px solid #1a1a1a" }}>
-              <div style={{ width:32,height:32,borderRadius:8,background:"rgba(59,130,246,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{"🎵"}</div>
+              <div style={{ width:32,height:32,borderRadius:8,background:"rgba(59,130,246,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}><AppIcon id="note" size={20}/></div>
               <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Upload Audio</div><div style={{ color:"#555",fontSize:11 }}>Beat, vocal, any audio file</div></div>
             </div>
             <input type="file" accept=".mp3,.wav,.m4a,.aac,audio/*" multiple onChange={function(e){handleFileUpload(e,"beat");}} style={{ display:"none" }} />
@@ -13125,7 +13156,7 @@ userPickedMicRef.current = true;
             setSelectedTrackId(newId);
             setShowAddMenu(false);
           }}>
-            <div style={{ width:32,height:32,borderRadius:8,background:"rgba(239,68,68,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{"🎙"}</div>
+            <div style={{ width:32,height:32,borderRadius:8,background:"rgba(239,68,68,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}><AppIcon id="mic" size={20}/></div>
             <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Record Vocals</div><div style={{ color:"#555",fontSize:11 }}>Record new take</div></div>
           </div>
         </div>
@@ -13519,7 +13550,7 @@ userPickedMicRef.current = true;
       <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"calc(8px + env(safe-area-inset-bottom))",flexShrink:0,zIndex:50 }}>
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
           <div style={{ width:40,height:40,borderRadius:10,background:showMixer?"rgba(139,92,246,0.2)":"#141414",border:"1px solid "+(showMixer?"#8B5CF6":"#222"),display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer" }} onClick={function(){ setShowMixer(function(v){return !v;}); }}>
-            <span style={{ fontSize:14 }}>{"🎚"}</span>
+            <span style={{ fontSize:14 }}><Icon id="fader" size={18} color={showMixer ? "#8B5CF6" : "#aaa"} strokeWidth={1.8}/></span>
           </div>
           <button onClick={rewind} style={{ width:36,height:36,borderRadius:8,background:"#141414",border:"1px solid #222",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
@@ -13545,18 +13576,107 @@ userPickedMicRef.current = true;
 
 
 const NAV = [
-  { id: "home",      label: "Home",    icon: "🏠" },
-  { id: "artists",   label: "Artists", icon: "▦"  },
-  { id: "trending",  label: "Trending",icon: "🔥" },
-  { id: "search",    label: "Search",  icon: "🔍" },
-  { id: "saved",     label: "Saved",   icon: "🔖" },
-  { id: "exclusive", label: "Members", icon: "🔒" },
-  { id: "profile",   label: "Profile", icon: "👤" },
-  { id: "studio",    label: "Studio",  icon: "🎙" },
+  { id: "home",      label: "Home",    icon: "home" },
+  { id: "artists",   label: "Artists", icon: "artists" },
+  { id: "trending",  label: "Trending",icon: "trending" },
+  { id: "search",    label: "Search",  icon: "search" },
+  { id: "saved",     label: "Saved",   icon: "saved" },
+  { id: "exclusive", label: "Members", icon: "members" },
+  { id: "profile",   label: "Profile", icon: "profile" },
+  { id: "studio",    label: "Studio",  icon: "studio" },
 ];
 
 // =============================================================================
-// ROOT APP
+// ICON SYSTEM — Lucide icons unified across nav + app
+// Usage: <Icon id="music" size={20} color="#fff" strokeWidth={1.5} />
+// =============================================================================
+const LucideIcons = {
+  // Nav
+  home:       "M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z M9 22V12h6v10",
+  artists:    "M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z",
+  trending:   "M13 2c0 0-7 6-7 12a7 7 0 0014 0c0-3.5-2-7-3-9 0 2.5-1.5 4-2.5 5.5C14.5 8.5 13 5 13 2z",
+  search:     "M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z",
+  saved:      "M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z",
+  members:    "M18 11V8a6 6 0 00-12 0v3 M5 11h14a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2v-7a2 2 0 012-2z M12 15v3",
+  profile:    "M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2 M12 11a4 4 0 100-8 4 4 0 000 8z",
+  studio:     "M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z M19 10v2a7 7 0 01-14 0v-2 M12 19v4 M8 23h8",
+  // App icons
+  note:       "M9 18V5l12-2v13 M9 18a3 3 0 11-6 0 3 3 0 016 0z M21 16a3 3 0 11-6 0 3 3 0 016 0z",
+  knobs:      "M12 3v1m0 16v1M3 12h1m16 0h1m-2.636-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707M17.657 17.657l.707.707 M12 8a4 4 0 100 8 4 4 0 000-8z",
+  bookmark:   "M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z",
+  lock:       "M18 11V8a6 6 0 00-12 0v3 M5 11h14a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2v-7a2 2 0 012-2z M12 15v3",
+  lockkey:    "M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4",
+  mic:        "M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z M19 10v2a7 7 0 01-14 0v-2 M12 19v4 M8 23h8",
+  vocalmic:   "M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z M19 10v2a7 7 0 01-14 0v-2 M12 19v4 M8 23h8",
+  headphones: "M3 18v-6a9 9 0 0118 0v6 M21 19a2 2 0 01-2 2h-1a2 2 0 01-2-2v-3a2 2 0 012-2h3z M3 19a2 2 0 002 2h1a2 2 0 002-2v-3a2 2 0 00-2-2H3z",
+  piano:      "M9 18H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-4 M9 18v4 M15 18v4 M9 6v6 M15 6v6 M12 6v3",
+  fader:      "M4 21V14 M4 10V3 M12 21v-7 M12 10V3 M20 21v-4 M20 13V3 M1 14h6 M9 10h6 M17 13h6",
+  flame:      "M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 002.5 2.5z",
+  target:     "M12 22a10 10 0 100-20 10 10 0 000 20z M12 18a6 6 0 100-12 6 6 0 000 12z M12 14a2 2 0 100-4 2 2 0 000 4z",
+  wave:       "M2 12 C5 8 7 16 10 12 C13 8 15 16 18 12 C21 8 22 12 22 12",
+  globe:      "M12 2a10 10 0 100 20A10 10 0 0012 2z M2 12h20 M12 2a15.3 15.3 0 010 20 M12 2a15.3 15.3 0 000 20",
+  star:       "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z",
+  trophy:     "M8 21h8 M12 17v4 M7 4H4a1 1 0 000 2c0 5.5 3.5 10.7 8 11 4.5-.3 8-5.5 8-11a1 1 0 000-2h-3 M7 4h10v7a5 5 0 01-10 0V4z",
+  save:       "M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z M17 21v-8H7v8 M7 3v5h8",
+  folder:     "M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z",
+  edit:       "M12 20h9 M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z",
+  tape:       "M21 16a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h14a2 2 0 012 2z M9 12a3 3 0 100-6 3 3 0 000 6z M15 12a3 3 0 100-6 3 3 0 000 6z",
+  shuffle:    "M16 3h5v5 M4 20L21 3 M21 16v5h-5 M15 15l6 6 M4 4l5 5",
+  speaker:    "M11 5L6 9H2v6h4l5 4V5z M19.07 4.93a10 10 0 010 14.14 M15.54 8.46a5 5 0 010 7.07",
+  mute:       "M11 5L6 9H2v6h4l5 4V5z M23 9l-6 6 M17 9l6 6",
+  clock:      "M12 22a10 10 0 100-20 10 10 0 000 20z M12 6v6l4 2",
+  skull:      "M12 2a6 6 0 016 6 6 6 0 01-3.2 5.3V16H9.2v-2.7A6 6 0 016 8a6 6 0 016-6z M9 21h6 M10 17v4 M14 17v4",
+  rocket:     "M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09z M12 15l-3-3a22 22 0 012-3.95A12.88 12.88 0 0122 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 01-4 2z M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0 M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5",
+  swirl:      "M12 22a10 10 0 100-20 10 10 0 000 20z M12 18a6 6 0 100-12 6 6 0 000 12z M12 14a2 2 0 100-4 2 2 0 000 4z",
+  chill:      "M12 22a10 10 0 100-20 10 10 0 000 20z M8 14s1.5 2 4 2 4-2 4-2 M9 9h.01 M15 9h.01",
+  heart:      "M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z",
+  crown:      "M12 2L9 9H3l5 4-2 7 6-4 6 4-2-7 5-4h-6L12 2z",
+  wave_hand:  "M18 11V6a2 2 0 00-2-2v0a2 2 0 00-2 2v0 M14 10V4a2 2 0 00-2-2v0a2 2 0 00-2 2v2 M10 10.5V6a2 2 0 00-2-2v0a2 2 0 00-2 2v8 M6 14v0a6 6 0 006 6h2a8 8 0 008-8v-2a2 2 0 00-2-2v0a2 2 0 00-2 2v0",
+  money:      "M12 1v22 M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6",
+  moneyfly:   "M12 1v22 M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6",
+  writing:    "M12 20h9 M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z",
+  lightning:  "M13 2L3 14h9l-1 8 10-12h-9l1-8z",
+  warning:    "M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z M12 9v4 M12 17h.01",
+  festival:   "M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22",
+  check:      "M20 6L9 17l-5-5",
+  download:   "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4 M7 10l5 5 5-5 M12 15V3",
+  upload:     "M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4 M17 8l-5-5-5 5 M12 3v12",
+  grid:       "M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z",
+  bars:       "M18 20V10 M12 20V4 M6 20v-6",
+  stripe:     "M21 4H3a2 2 0 00-2 2v12a2 2 0 002 2h18a2 2 0 002-2V6a2 2 0 00-2-2z M1 10h22",
+  eq:         "M4 21V14 M4 10V3 M12 21v-7 M12 10V3 M20 21v-4 M20 13V3 M1 14h6 M9 10h6 M17 13h6",
+};
+
+function Icon({ id, size = 20, color = "currentColor", strokeWidth = 1.8, style: extra = {}, className = "" }) {
+  const def = LucideIcons[id];
+  if (!def) return null;
+  // Split compound path strings into individual paths at each top-level M command
+  const segments = def.trim().split(/\s+(?=M)/);
+  return (
+    <svg
+      width={size} height={size} viewBox="0 0 24 24"
+      fill="none" stroke={color} strokeWidth={strokeWidth}
+      strokeLinecap="round" strokeLinejoin="round"
+      style={{ display: "inline-block", verticalAlign: "middle", flexShrink: 0, ...extra }}
+      className={className}
+    >
+      {segments.map(function(d, i) { return <path key={i} d={d} />; })}
+    </svg>
+  );
+}
+
+// Aliases for backwards compat
+function AppIcon({ id, size = 20, style: extraStyle = {} }) {
+  return <Icon id={id} size={size} color="currentColor" style={extraStyle} />;
+}
+
+function NavIcon({ id, size = 22, active, activeColor }) {
+  const iconId = id === "exclusive" ? "members" : id;
+  const color = active ? activeColor : "#666";
+  const filter = active ? `drop-shadow(0 0 5px ${activeColor})` : "none";
+  return <Icon id={iconId} size={size} color={color} strokeWidth={active ? 2.2 : 1.6} style={{ filter, transition: "filter 0.2s ease" }} />;
+}
+
 // =============================================================================
 // =============================================================================
 // SPLASH SCREEN
@@ -13789,7 +13909,7 @@ export default function BeatFinder() {
             borderRadius: 20, padding: 28, width: "100%", maxWidth: 340,
             textAlign: "center",
           }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 44, marginBottom: 14 }}>{"🔖"}</div>
+            <div style={{ fontSize: 44, marginBottom: 14 }}><AppIcon id="bookmark" size={20}/></div>
             <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 8 }}>
               Save Your Beats
             </div>
@@ -13906,12 +14026,7 @@ export default function BeatFinder() {
                     pointerEvents: "none",
                   }} />
                 )}
-                <span style={{
-                  fontSize: 17,
-                  filter: isActive ? "drop-shadow(0 0 6px " + activeColor + ")" : "none",
-                  transition: "filter 0.2s ease",
-                  lineHeight: 1,
-                }}>{n.icon}</span>
+                <NavIcon id={n.id} size={22} active={isActive} activeColor={activeColor} />
                 <span style={{
                   fontSize: 9, fontWeight: isActive ? 800 : 600,
                   letterSpacing: isActive ? 0.3 : 0,
