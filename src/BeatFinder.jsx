@@ -50,6 +50,9 @@ const LOADER_STYLE = `
   input[type=range]::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:#9333ea; border:none; cursor:pointer; }
   .nr-slider::-webkit-slider-thumb { background:#10B981 !important; box-shadow:0 0 6px rgba(16,185,129,0.6) !important; }
   .nr-slider::-moz-range-thumb { background:#10B981 !important; }
+  .vol-slider::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px; border-radius:50%; background:#22C55E; box-shadow:0 0 8px rgba(34,197,94,0.7); cursor:pointer; }
+  .vol-slider::-moz-range-thumb { width:18px; height:18px; border-radius:50%; background:#22C55E; border:none; cursor:pointer; }
+  input[type=range]::-webkit-slider-runnable-track { background:transparent; }
   .bf-spinner {
     width: 44px; height: 44px; border-radius: 50%;
     border: 3px solid rgba(192,38,211,0.15);
@@ -1678,20 +1681,52 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
 // FULL-SCREEN PLAYER
 // =============================================================================
 function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, savedLyrics, onEditLyric, onGoMembers }) {
-  const [ytVol, setYtVol] = React.useState(80); // 0–100, YouTube default is 100
-  const iframeRef = React.useRef(null);
+  const [ytVol, setYtVol] = React.useState(80);
+  const ytPlayerRef = React.useRef(null); // YT.Player instance
+  const divIdRef    = React.useRef("yt-player-" + beat.videoId);
 
-  const sendVolume = React.useCallback(function(v) {
-    // YouTube IFrame API postMessage protocol
-    try {
-      const msg = JSON.stringify({ event: "command", func: "setVolume", args: [v] });
-      iframeRef.current && iframeRef.current.contentWindow.postMessage(msg, "*");
-    } catch(e) {}
-  }, []);
+  // Load YouTube IFrame API once, create Player on ready
+  React.useEffect(function() {
+    const divId = divIdRef.current;
+
+    function createPlayer() {
+      if (ytPlayerRef.current) { try { ytPlayerRef.current.destroy(); } catch(e){} }
+      ytPlayerRef.current = new window.YT.Player(divId, {
+        videoId: beat.videoId,
+        playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1 },
+        events: {
+          onReady: function(ev) { ev.target.setVolume(80); },
+        },
+      });
+    }
+
+    if (window.YT && window.YT.Player) {
+      createPlayer();
+    } else {
+      // Inject the API script if not already present
+      if (!document.getElementById("yt-iframe-api")) {
+        const s = document.createElement("script");
+        s.id  = "yt-iframe-api";
+        s.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(s);
+      }
+      // YT calls this global when ready
+      const prev = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = function() {
+        if (prev) prev();
+        createPlayer();
+      };
+    }
+
+    return function() {
+      try { if (ytPlayerRef.current) ytPlayerRef.current.destroy(); } catch(e) {}
+      ytPlayerRef.current = null;
+    };
+  }, [beat.videoId]);
 
   const handleVolume = function(v) {
     setYtVol(v);
-    sendVolume(v);
+    try { if (ytPlayerRef.current && ytPlayerRef.current.setVolume) ytPlayerRef.current.setVolume(v); } catch(e) {}
   };
 
   return (
@@ -1722,16 +1757,8 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
           <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>{beat.channel}</div>
         </div>
       </div>
-      <iframe
-        ref={iframeRef}
-        key={beat.videoId}
-        src={embedUrl(beat.videoId)}
-        width="100%" height="220"
-        style={{ display: "block", border: "none", background: "#000", flexShrink: 0 }}
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-        allowFullScreen
-        title={beat.title}
-      />
+      {/* YouTube IFrame API mounts here — replaces itself with an iframe */}
+      <div id={divIdRef.current} style={{ width: "100%", height: 220, background: "#000", flexShrink: 0 }} />
       {/* ── VU meter + volume slider ── */}
       <div style={{ padding: "8px 16px 10px", background: "#060606", borderBottom: "1px solid #111", flexShrink: 0 }}>
         {/* VU meter row */}
@@ -1744,26 +1771,25 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
         </div>
         {/* Volume slider row */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {/* Mute icon */}
           <div style={{ color: ytVol === 0 ? "#EF4444" : "#555", flexShrink: 0 }}>
-            <AppIcon id={ytVol === 0 ? "mute" : "speaker"} size={14} />
+            <AppIcon id={ytVol === 0 ? "mute" : "speaker"} size={15} />
           </div>
-          {/* Slider */}
-          <div style={{ flex: 1, position: "relative", height: 20, display: "flex", alignItems: "center" }}>
-            {/* Track background */}
-            <div style={{ position: "absolute", left: 0, right: 0, height: 3, borderRadius: 2, background: "#1a1a1a" }} />
-            {/* Fill */}
-            <div style={{ position: "absolute", left: 0, width: ytVol + "%", height: 3, borderRadius: 2,
-              background: ytVol > 85 ? "linear-gradient(90deg,#22C55E,#F59E0B,#EF4444)" : ytVol > 60 ? "linear-gradient(90deg,#22C55E,#86EFAC)" : "#22C55E",
-              transition: "width 0.05s, background 0.2s" }} />
-            <input type="range" min={0} max={100} step={1} value={ytVol}
-              onChange={function(e){ handleVolume(parseInt(e.target.value)); }}
-              style={{ position: "relative", zIndex: 1, width: "100%", appearance: "none", WebkitAppearance: "none",
-                background: "transparent", height: 20, cursor: "pointer", margin: 0 }} />
-          </div>
-          {/* Max icon */}
+          <input type="range" min={0} max={100} step={1} value={ytVol}
+            onChange={function(e){ handleVolume(parseInt(e.target.value)); }}
+            className="vol-slider"
+            style={{
+              flex: 1,
+              height: 4,
+              borderRadius: 2,
+              cursor: "pointer",
+              appearance: "none",
+              WebkitAppearance: "none",
+              outline: "none",
+              touchAction: "none",
+              background: "linear-gradient(90deg, #22C55E " + ytVol + "%, #222 " + ytVol + "%)",
+            }} />
           <div style={{ color: "#555", flexShrink: 0 }}>
-            <AppIcon id="speaker" size={16} />
+            <AppIcon id="speaker" size={17} />
           </div>
         </div>
       </div>
