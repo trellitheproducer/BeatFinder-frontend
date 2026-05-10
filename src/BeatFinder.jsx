@@ -46,6 +46,8 @@ const LOADER_STYLE = `
   *::-webkit-scrollbar { display: none; }
   .bf-save    { transition: transform 0.18s cubic-bezier(0.34,1.56,0.64,1), color 0.15s ease; }
   .bf-save:active { transform: scale(1.3); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:#9333ea; box-shadow:0 0 6px rgba(147,51,234,0.6); cursor:pointer; }
+  input[type=range]::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:#9333ea; border:none; cursor:pointer; }
   .bf-spinner {
     width: 44px; height: 44px; border-radius: 50%;
     border: 3px solid rgba(192,38,211,0.15);
@@ -6003,13 +6005,20 @@ function _OceanPlugin({ fx, upd, Knob }) {
 }
 
 function _AppleXPlugin({ fx, upd, Knob }) {
-  const on     = !!fx.applex?.on;
-  const speed  = fx.applex?.speed  ?? 0.5;
-  const depth  = fx.applex?.depth  ?? 1.0;
-  const pitchKey = fx.applex?.key  ?? "C";
-  const NOTES  = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  const on       = !!fx.applex?.on;
+  const speed    = fx.applex?.speed ?? 0.5;   // 0–1 stored internally
+  const depth    = fx.applex?.depth ?? 1.0;
+  const pitchKey = fx.applex?.key   ?? "C";
+  const NOTES    = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+  // Convert stored 0–1 speed to display ms (0ms = robotic, 400ms = natural)
+  const speedMs  = Math.round(speed * 400);
+  const speedLabel = speedMs === 0 ? "INSTANT" : speedMs < 80 ? "FAST" : speedMs < 200 ? "NATURAL" : "SLOW";
+  const speedColor = speedMs === 0 ? "#ff453a" : speedMs < 80 ? "#ff9f43" : speedMs < 200 ? "#30d158" : "#4a9eff";
+
   return (
     <div style={{ background:"linear-gradient(180deg,#130a22 0%,#0d0618 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (on ? "#9333ea" : "#2a2a2a"), boxShadow: on ? "0 0 20px rgba(147,51,234,0.2), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+      {/* Header */}
       <div style={{ backgroundImage:"linear-gradient(180deg,#1e0f35,#160a28)", padding:"8px 14px", borderBottom:"1px solid #2a1545", display:"flex", alignItems:"center", gap:8 }}>
         <div style={{ flex:1 }}>
           <div style={{ color:"#c084fc", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>APPLEX AUTO-TUNE</div>
@@ -6020,17 +6029,53 @@ function _AppleXPlugin({ fx, upd, Knob }) {
           <button onClick={function(){ upd("applex",{on:!on}); }} style={{ background: on ? "linear-gradient(180deg,#7c3aed,#6d28d9)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (on ? "#9333ea" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1 }}>{on ? "ON" : "OFF"}</button>
         </div>
       </div>
-      <div style={{ padding:"12px 14px", opacity:on?1:0.4, transition:"opacity 0.2s" }}>
-        {/* Key selector */}
-        <div style={{ display:"flex", gap:3, marginBottom:10, flexWrap:"wrap" }}>
+
+      <div style={{ padding:"12px 14px", opacity:on?1:0.4, transition:"opacity 0.2s", pointerEvents:on?"auto":"none" }}>
+
+        {/* Key / root note selector */}
+        <div style={{ fontSize:8, fontWeight:700, color:"#4a2a6e", letterSpacing:2, fontFamily:"monospace", marginBottom:5 }}>ROOT KEY</div>
+        <div style={{ display:"flex", gap:3, marginBottom:12, flexWrap:"wrap" }}>
           {NOTES.map(function(n){
             const active = pitchKey === n;
-            return <button key={n} onClick={function(){ upd("applex",{key:n}); }} style={{ flex:1, minWidth:22, padding:"4px 2px", background: active ? "#7c3aed" : "#0f0f18", border:"1px solid "+(active?"#9333ea":"#1e1e2a"), borderRadius:5, color: active?"white":"#4c1d95", fontSize:8, fontWeight:800, cursor:"pointer" }}>{n}</button>;
+            return <button key={n} onClick={function(){ upd("applex",{key:n}); }} style={{ flex:1, minWidth:22, padding:"5px 2px", background: active ? "#7c3aed" : "#0f0f18", border:"1px solid "+(active?"#9333ea":"#1e1e2a"), borderRadius:5, color: active?"white":"#4c1d95", fontSize:8, fontWeight:800, cursor:"pointer", transition:"all 0.12s" }}>{n}</button>;
           })}
         </div>
-        <div style={{ display:"flex", justifyContent:"space-around", padding:"4px 0" }}>
-          <Knob label="SPEED" value={speed} min={0} max={1} step={0.01} unit="" color="#9333ea" onChange={function(v){ upd("applex",{speed:v}); }} />
-          <Knob label="DEPTH" value={depth} min={0} max={1} step={0.01} unit="" color="#c084fc" onChange={function(v){ upd("applex",{depth:v}); }} />
+
+        {/* Retune Speed slider */}
+        <div style={{ marginBottom:12 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+            <div style={{ fontSize:8, fontWeight:700, color:"#4a2a6e", letterSpacing:2, fontFamily:"monospace" }}>RETUNE SPEED</div>
+            <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+              <span style={{ fontSize:9, fontWeight:800, color:speedColor, fontFamily:"monospace" }}>{speedMs}ms</span>
+              <span style={{ fontSize:7, fontWeight:700, color:speedColor, background:speedColor+"22", borderRadius:3, padding:"1px 5px", letterSpacing:1 }}>{speedLabel}</span>
+            </div>
+          </div>
+          {/* Slider track */}
+          <div style={{ position:"relative", height:20, display:"flex", alignItems:"center" }}>
+            <div style={{ position:"absolute", left:0, right:0, height:3, borderRadius:2, background:"#1e0f35" }} />
+            <div style={{ position:"absolute", left:0, width:(speed*100)+"%", height:3, borderRadius:2, background:"linear-gradient(90deg,#ff453a,#9333ea)", transition:"width 0.05s" }} />
+            <input type="range" min={0} max={1} step={0.01} value={speed}
+              onChange={function(e){ upd("applex",{speed:parseFloat(e.target.value)}); }}
+              style={{ position:"relative", zIndex:1, width:"100%", appearance:"none", WebkitAppearance:"none", background:"transparent", height:20, cursor:"pointer", margin:0 }} />
+          </div>
+          {/* Labels */}
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:3 }}>
+            <span style={{ fontSize:7, color:"#ff453a", fontFamily:"monospace", fontWeight:700 }}>ROBOTIC</span>
+            <span style={{ fontSize:7, color:"#30d158", fontFamily:"monospace", fontWeight:700 }}>MUSICAL</span>
+            <span style={{ fontSize:7, color:"#4a9eff", fontFamily:"monospace", fontWeight:700 }}>SUBTLE</span>
+          </div>
+        </div>
+
+        {/* Depth knob */}
+        <div style={{ display:"flex", justifyContent:"center", alignItems:"center", gap:16, padding:"4px 0" }}>
+          <Knob label="DEPTH" value={depth} min={0} max={1} step={0.01} unit="%" color="#c084fc" onChange={function(v){ upd("applex",{depth:v}); }} />
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:7, color:"#3b1a5e", fontFamily:"monospace", lineHeight:1.7 }}>
+              <div>0ms = T-Pain / robotic snap</div>
+              <div>50–150ms = natural pop</div>
+              <div>300ms+ = subtle correction</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -9501,6 +9546,18 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       live.pitchFormant = formant;
     }
 
+    // ── AppleX Auto-Tune — live param updates ──
+    if (live.applex) {
+      const NOTE_MAP_AX = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
+      const applexOn = !!(fx.applex && fx.applex.on);
+      const awn = live.applex.awn;
+      // If turned off: set mode=0 (bypass/passthrough), speed=0 for instant reset
+      awn.parameters.get('mode').value  = applexOn ? 1 : 0;
+      awn.parameters.get('speed').value = applexOn ? (fx.applex.speed ?? 0.5) : 0;
+      awn.parameters.get('root').value  = applexOn ? (NOTE_MAP_AX[fx.applex.key || 'C'] || 0) : 0;
+      awn.parameters.get('scale').value = 4095; // always chromatic for AppleX
+    }
+
     // ── Reverb wet/dry ──
     if (live.reverb) {
       const revOn = !!(fx.reverb && fx.reverb.on);
@@ -9872,22 +9929,27 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         liveNodes.ocean = { dryG, wetG, preDelay, lpf };
       }
 
-      // ── AppleX Auto-Tune — chromatic pitch snap using existing pitch worklet ──
+      // ── AppleX Auto-Tune — real-time pitch correction via pitch-shift-processor ──
       {
         const applexOn = !!(fx.applex && fx.applex.on);
-        // AppleX reuses the pitch worklet infrastructure with chromatic snapping
-        // The worklet receives isAutoTune=1 and rootNote=0 (chromatic = snaps to any semitone)
         if (applexOn && pitchWorkletReadyRef.current) {
           try {
-            const awn = new AudioWorkletNode(actx, "pitch-processor");
-            awn.parameters.get("pitch").value = 1.0; // no shift, just correction
-            awn.parameters.get("isAutoTune").value = 1;
-            awn.parameters.get("rootNote").value = NOTE_MAP[fx.applex.key || "C"] || 0;
+            const NOTE_MAP_AX = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
+            const awn = new AudioWorkletNode(actx, 'pitch-shift-processor');
+            // mode=1 → autotune (pitch detection + chromatic snap)
+            awn.parameters.get('mode').value    = 1;
+            awn.parameters.get('pitch').value   = 1.0; // no manual shift
+            // speed: UI is 0–1 (0=instant/robotic, 1=slow/natural); map to 0–0.8 for worklet
+            awn.parameters.get('speed').value   = fx.applex.speed ?? 0.5;
+            awn.parameters.get('formant').value = 0.5; // moderate formant preservation
+            awn.parameters.get('root').value    = NOTE_MAP_AX[fx.applex.key || 'C'] || 0;
+            awn.parameters.get('scale').value   = 4095; // chromatic — snap to any semitone
             awn.connect(node); node = awn;
             liveNodes.applex = { awn };
-          } catch(e) { /* worklet not available, bypass */ }
+          } catch(e) { liveNodes.applex = null; }
+        } else {
+          liveNodes.applex = null;
         }
-        if (!liveNodes.applex) liveNodes.applex = null;
       }
 
       // ── 5-band parametric EQ — always built; bypass = unity gain when off ──
