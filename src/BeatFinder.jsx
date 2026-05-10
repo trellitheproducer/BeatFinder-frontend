@@ -10220,28 +10220,8 @@ function StudioScreen({ user, onExit }) {
       // All DSP (echo cancellation, noise suppression, AGC) stays OFF — raw clean signal.
       // Post-processing is handled by the Noise Remover FX plugin instead.
       const recConstraints = await buildMicConstraints(micSource);
-      // Wait for monitor context to fully close and iOS to release the audio session.
-      // Without this wait, the OS hardware ducker activates between the two streams
-      // causing the mic level to drop on the second recording.
-      await new Promise(function(resolve){ setTimeout(resolve, 200); });
       // Always open a fresh stream for recording — never reuse the monitoring stream.
-      // The monitoring stream may have been opened with different constraints (different
-      // mic source, stale deviceId) and reusing it gives degraded or wrong-source audio.
-      // Force all AGC/processing OFF at the hardware level.
-      // On iOS, having a second AudioContext (monitor) active while recording causes
-      // the OS to activate its hardware ducker which reduces mic gain. Adding these
-      // constraints to the raw getUserMedia call prevents that at the driver level.
-      const hardConstraints = Object.assign({}, recConstraints, {
-        echoCancellation:  false,
-        noiseSuppression:  false,
-        autoGainControl:   false,
-        googAutoGainControl:        false,
-        googEchoCancellation:       false,
-        googNoiseSuppression:       false,
-        googHighpassFilter:         false,
-        googTypingNoiseDetection:   false,
-      });
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: hardConstraints });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: recConstraints });
 
       const actx    = getActx();
       const srcNode = actx.createMediaStreamSource(stream);
@@ -10260,6 +10240,25 @@ function StudioScreen({ user, onExit }) {
       recSplitter.connect(recMerger, 0, 1);
       recMerger.connect(analyser);
 
+      // ── Route mic through Web Audio graph → MediaStreamDestination ───────
+      // KEY FIX FOR MIC DUCKING: MediaRecorder must capture from a stream that
+      // belongs to the SAME AudioContext as playback. When MediaRecorder captures
+      // the raw getUserMedia stream directly, iOS treats it as a competing audio
+      // session and activates its hardware ducker on the mic input, reducing
+      // recording level whenever other audio is playing.
+      // By routing mic → Web Audio → createMediaStreamDestination, everything
+      // shares one AudioContext = one iOS audio session = no ducking.
+      let recStream = stream; // fallback if MediaStreamDestination unavailable
+      let recDest = null;
+      try {
+        recDest = actx.createMediaStreamDestination();
+        recMerger.connect(recDest);
+        recStream = recDest.stream;
+      } catch(destErr) {
+        // createMediaStreamDestination not supported — record raw stream (iOS < 14.5)
+        console.warn("[BeatFinder] MediaStreamDestination unavailable, using raw stream");
+      }
+
       setRecTrail([]);
       chunksRef.current = [];
 
@@ -10274,7 +10273,7 @@ function StudioScreen({ user, onExit }) {
       const mime = CODEC_PREFS.find(function(m){ return MediaRecorder.isTypeSupported(m); }) || "";
 
       // 256kbps for best possible recording quality (Opus handles this very efficiently)
-      const mr = new MediaRecorder(stream, {
+      const mr = new MediaRecorder(recStream, {
         mimeType:          mime || undefined,
         audioBitsPerSecond: 256000,
       });
@@ -10286,6 +10285,7 @@ function StudioScreen({ user, onExit }) {
       mr.onstop = async function () {
         stream.getTracks().forEach(function (t) { t.stop(); });
         try { analyser.disconnect(); } catch(e) {}
+        try { if (recDest) recDest.disconnect(); } catch(e) {}
         try { srcNode.disconnect(); } catch(e) {}
         try { micInputBoost.disconnect(); } catch(e) {}
         
@@ -12756,41 +12756,74 @@ userPickedMicRef.current = true;
                       const isSel  = selectedClipId === clip.id;
                       const pps    = effectivePPS;
                       return (
-                        <div key={clip.id+"_handles"} style={{ position:"absolute", left:clipL, top:3, width:clipW, height:TRACK_H-6, pointerEvents:"none", zIndex:3 }}>
-                          {/* Left */}
-                          <div data-trimhandle="left" style={{ position:"absolute", left:-10, top:0, bottom:0, width:28, cursor:"ew-resize", display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"all", touchAction:"none", zIndex:10 }}
+                        // Trim handle container — positioned at clip left edge, width=clipW
+                        // Handles extend OUTSIDE the clip using negative left/right so they sit
+                        // on the outer edges of the waveform block, not inside it.
+                        <div key={clip.id+"_handles"} style={{ position:"absolute", left:clipL, top:0, width:clipW, height:TRACK_H, pointerEvents:"none", zIndex:20 }}>
+                          {/* ── LEFT trim handle — sits just outside the left edge ── */}
+                          <div data-trimhandle="left"
+                            style={{ position:"absolute", left:-18, top:0, bottom:0, width:20,
+                              cursor:"col-resize", pointerEvents:"all", touchAction:"none",
+                              display:"flex", alignItems:"center", justifyContent:"flex-end" }}
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
                               const x0=e.clientX, ts0=trimS, cs0=clip.startTime||0;
-                              const mv=function(me){ const d=(me.clientX-x0)/pps; const ts=Math.max(0,Math.min(ts0+d,trimE-0.05)); updateClip(track.id,clip.id,{trimStart:+ts.toFixed(4),startTime:Math.max(0,+(cs0+(ts-ts0)).toFixed(4))}); };
+                              const mv=function(me){
+                                const d=(me.clientX-x0)/pps;
+                                const ts=Math.max(0,Math.min(ts0+d,trimE-0.05));
+                                updateClip(track.id,clip.id,{trimStart:+ts.toFixed(4),startTime:Math.max(0,+(cs0+(ts-ts0)).toFixed(4))});
+                              };
                               const up=function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
                               document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
                             }}
                             onTouchStart={function(e){
                               e.stopPropagation(); e.preventDefault();
                               const x0=e.touches[0].clientX, ts0=trimS, cs0=clip.startTime||0;
-                              const mv=function(te){ e.preventDefault(); const d=(te.touches[0].clientX-x0)/pps; const ts=Math.max(0,Math.min(ts0+d,trimE-0.05)); updateClip(track.id,clip.id,{trimStart:+ts.toFixed(4),startTime:Math.max(0,+(cs0+(ts-ts0)).toFixed(4))}); };
+                              const mv=function(ev){
+                                ev.preventDefault();
+                                const d=(ev.touches[0].clientX-x0)/pps;
+                                const ts=Math.max(0,Math.min(ts0+d,trimE-0.05));
+                                updateClip(track.id,clip.id,{trimStart:+ts.toFixed(4),startTime:Math.max(0,+(cs0+(ts-ts0)).toFixed(4))});
+                              };
                               const up=function(){ document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
                               document.addEventListener("touchmove",mv,{passive:false}); document.addEventListener("touchend",up,{passive:true});
                             }}
-                          ><div style={{ width:6, height:32, borderRadius:3, background:track.color, opacity:1, boxShadow:"0 0 8px "+track.color+"cc" }} /></div>
-                          {/* Right */}
-                          <div data-trimhandle="right" style={{ position:"absolute", right:-10, top:0, bottom:0, width:28, cursor:"ew-resize", display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"all", touchAction:"none", zIndex:10 }}
+                          >
+                            <div style={{ width:5, height:TRACK_H*0.7, borderRadius:"3px 0 0 3px",
+                              background:track.color, boxShadow:"0 0 8px "+track.color,
+                              borderRight:"2px solid "+track.color }} />
+                          </div>
+                          {/* ── RIGHT trim handle — sits just outside the right edge ── */}
+                          <div data-trimhandle="right"
+                            style={{ position:"absolute", right:-18, top:0, bottom:0, width:20,
+                              cursor:"col-resize", pointerEvents:"all", touchAction:"none",
+                              display:"flex", alignItems:"center", justifyContent:"flex-start" }}
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
                               const x0=e.clientX, te0=trimE;
-                              const mv=function(me){ const te=Math.max(trimS+0.05,Math.min(te0+(me.clientX-x0)/pps,bufDur)); updateClip(track.id,clip.id,{trimEnd:+te.toFixed(4)}); };
+                              const mv=function(me){
+                                const te=Math.max(trimS+0.05,Math.min(te0+(me.clientX-x0)/pps,bufDur));
+                                updateClip(track.id,clip.id,{trimEnd:+te.toFixed(4)});
+                              };
                               const up=function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
                               document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
                             }}
                             onTouchStart={function(e){
                               e.stopPropagation(); e.preventDefault();
                               const x0=e.touches[0].clientX, te0=trimE;
-                              const mv=function(te){ e.preventDefault(); const newTE=Math.max(trimS+0.05,Math.min(te0+(te.touches[0].clientX-x0)/pps,bufDur)); updateClip(track.id,clip.id,{trimEnd:+newTE.toFixed(4)}); };
+                              const mv=function(ev){
+                                ev.preventDefault();
+                                const newTE=Math.max(trimS+0.05,Math.min(te0+(ev.touches[0].clientX-x0)/pps,bufDur));
+                                updateClip(track.id,clip.id,{trimEnd:+newTE.toFixed(4)});
+                              };
                               const up=function(){ document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
                               document.addEventListener("touchmove",mv,{passive:false}); document.addEventListener("touchend",up,{passive:true});
                             }}
-                          ><div style={{ width:6, height:32, borderRadius:3, background:track.color, opacity:1, boxShadow:"0 0 8px "+track.color+"cc" }} /></div>
+                          >
+                            <div style={{ width:5, height:TRACK_H*0.7, borderRadius:"0 3px 3px 0",
+                              background:track.color, boxShadow:"0 0 8px "+track.color,
+                              borderLeft:"2px solid "+track.color }} />
+                          </div>
                         </div>
                       );
                     })}
