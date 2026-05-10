@@ -8118,17 +8118,17 @@ function StudioScreen({ user, onExit }) {
   }, []);
 
   // Prevent iOS from bouncing/scrolling the whole page in Studio.
-  // Only the timeline scrollRef is allowed to scroll — everything else is blocked.
+  // Only the timeline scrollRef and mixer panel are allowed to scroll — everything else is blocked.
   const studioRootRef = useRef(null);
+  const mixerPanelRef = useRef(null);
   useEffect(function () {
     function onTouchMove(e) {
-      // Walk up from the touch target — if it's inside scrollRef, allow it
       var el = e.target;
       while (el) {
         if (el === scrollRef.current) return; // inside timeline — allow
+        if (mixerPanelRef.current && el === mixerPanelRef.current) return; // inside mixer — allow
         el = el.parentElement;
       }
-      // Outside timeline — block page scroll/bounce
       e.preventDefault();
     }
     document.addEventListener("touchmove", onTouchMove, { passive: false });
@@ -13599,7 +13599,7 @@ userPickedMicRef.current = true;
         }
 
         return (
-          <div style={{
+          <div ref={mixerPanelRef} style={{
             background: GB_BG,
             borderTop: "1px solid "+GB_BORDER,
             flexShrink: 0,
