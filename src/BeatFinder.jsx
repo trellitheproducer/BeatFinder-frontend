@@ -8117,23 +8117,6 @@ function StudioScreen({ user, onExit }) {
     }
   }, []);
 
-  // Block ALL touchmove on the document to prevent iOS page bounce.
-  // Only allow touchmove inside the entire timeline/arrangement area (lassoContainerRef).
-  // Faders/knobs use pointerdown/pointermove so they still work independently.
-  const mixerPanelRef = useRef(null);
-  useEffect(function () {
-    function onTouchMove(e) {
-      // Allow touchmove anywhere inside the timeline arrangement area
-      if (lassoContainerRef.current && lassoContainerRef.current.contains(e.target)) return;
-      // Block everywhere else — kills iOS page bounce
-      e.preventDefault();
-    }
-    document.addEventListener("touchmove", onTouchMove, { passive: false });
-    return function () {
-      document.removeEventListener("touchmove", onTouchMove, { passive: false });
-    };
-  }, []);
-
   // ── Studio mount: request mic permission only after user navigates to Studio ──
   // A 800ms delay ensures the tab transition completes before the iOS dialog appears.
   // Uses the Permissions API to check if mic is genuinely already granted,
@@ -13596,7 +13579,7 @@ userPickedMicRef.current = true;
         }
 
         return (
-          <div ref={mixerPanelRef} style={{
+          <div style={{
             background: GB_BG,
             borderTop: "1px solid "+GB_BORDER,
             flexShrink: 0,
