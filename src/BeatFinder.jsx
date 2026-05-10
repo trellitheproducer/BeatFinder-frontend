@@ -14858,12 +14858,12 @@ export default function BeatFinder() {
 
       {searchProfile && (
         <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "#0a0a0a", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
-          <div style={{ padding: "16px 16px 0" }}>
+          <div style={{ padding: "60px 16px 0" }}>
             <button onClick={function() { setSearchProfile(null); }}
-              style={{ background: "none", border: "none", color: "#C026D3", fontWeight: 700,
-                fontSize: 14, cursor: "pointer", padding: 0,
-                display: "flex", alignItems: "center", gap: 6 }}>
-              &#8592; Back to Search
+              style={{ background: "none", border: "none", color: "white",
+                fontSize: 28, cursor: "pointer", padding: "8px 8px 8px 0",
+                lineHeight: 1, minWidth: 44, minHeight: 44 }}>
+              &#8592;
             </button>
           </div>
           <PublicProfileScreen
