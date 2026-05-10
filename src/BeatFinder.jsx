@@ -10865,21 +10865,13 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
           return;
         }
 
-        // ── Downmix to true mono ───────────────────────────────────────────
+        // ── Downmix to true mono (synchronous JS — no OfflineAudioContext to avoid
+        //    async interference with live AudioContext on iOS) ────────────────────
         // iOS MediaRecorder sometimes produces a 2-channel (stereo) buffer even
         // when channelCount:1 was requested — the right channel is often silent
         // or carries a phase-shifted copy, causing audio to pan hard left on playback.
-        // Downmix to 1 channel here so recordings always play back centered.
         if (buf && buf.numberOfChannels > 1) {
           try {
-            const offCtx = new OfflineAudioContext(1, buf.length, buf.sampleRate);
-            const src2   = offCtx.createBufferSource();
-            src2.buffer  = buf;
-            src2.connect(offCtx.destination);
-            src2.start(0);
-            buf = await offCtx.startRendering();
-          } catch (monoErr) {
-            // If OfflineAudioContext downmix fails, do it manually in JS
             const monoData = new Float32Array(buf.length);
             const nc = buf.numberOfChannels;
             for (let c = 0; c < nc; c++) {
@@ -10891,7 +10883,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
             const monoBuf = getActx().createBuffer(1, buf.length, buf.sampleRate);
             monoBuf.copyToChannel(monoData, 0);
             buf = monoBuf;
-          }
+          } catch (monoErr) { /* keep stereo if downmix fails */ }
         }
 
         if (!buf || buf.duration < 0.05) {
@@ -10971,6 +10963,17 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
             color: VOCAL_COLORS[tracks.filter(function(t){return t.type==="vocal";}).length % VOCAL_COLORS.length],
             clips: [newClip],
           });
+        }
+        // Restore all track gain states — decodeAudioData and getUserMedia can cause
+        // iOS to duck/suspend the AudioContext, discarding scheduled gain values.
+        // Re-apply before stopAll so the next doPlay starts with correct volumes.
+        const liveActx = actxRef.current;
+        if (liveActx && liveActx.state === "suspended") {
+          try { await liveActx.resume(); } catch(e) {}
+        }
+        if (isPlayingRef.current) {
+          applyGains(tracksRef.current);
+          if (masterGainRef.current) masterGainRef.current.gain.value = masterVolume;
         }
         // Stop playback now that decoding is done — safe to tear down audio graph here
         stopAll();
