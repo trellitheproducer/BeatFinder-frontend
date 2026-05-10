@@ -12407,7 +12407,7 @@ self.onmessage = async function(e) {
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
-      style={{ background:"#080808", height:"100dvh", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
+      style={{ background:"#080808", height:"calc(100dvh - env(safe-area-inset-top))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
     >
       {/* ── Overlays ── */}
@@ -14168,7 +14168,7 @@ export default function BeatFinder() {
             display: tab === t ? "block" : "none",
             overflowY: t === "studio" ? "hidden" : "auto",
             height: t === "studio"
-              ? "calc(100dvh - env(safe-area-inset-top))"
+              ? "100dvh"
               : "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))",
             WebkitOverflowScrolling: "touch",
             overscrollBehavior: "none",
