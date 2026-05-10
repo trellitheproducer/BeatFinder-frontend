@@ -5220,35 +5220,36 @@ function WaveformCanvas({ audioBuffer, color, width, height, playedFraction, dim
       return;
     }
 
-    // Mix down all channels to mono so waveform always shows regardless of
-    // whether iOS decoded the recording as mono or stereo.
+    // Downsample to at most 4096 points first — makes peak compute instant
+    // regardless of file length (a 3-min file at 44.1kHz = 8M samples; capped at 4096).
     const nc  = audioBuffer.numberOfChannels;
-    const sr  = audioBuffer.sampleRate;
-    let raw;
-    if (nc === 1) {
-      raw = audioBuffer.getChannelData(0);
-    } else {
-      const len = audioBuffer.length;
-      raw = new Float32Array(len);
-      for (let c = 0; c < nc; c++) {
-        const ch = audioBuffer.getChannelData(c);
-        for (let i = 0; i < len; i++) raw[i] += ch[i] / nc;
+    const totalLen = audioBuffer.length;
+    const MAX_PTS = 4096;
+    const step = Math.max(1, Math.floor(totalLen / MAX_PTS));
+    const dsLen = Math.ceil(totalLen / step);
+    const raw = new Float32Array(dsLen);
+    for (let c = 0; c < nc; c++) {
+      const ch = audioBuffer.getChannelData(c);
+      for (let i = 0; i < dsLen; i++) {
+        const idx = Math.min(i * step, ch.length - 1);
+        raw[i] += Math.abs(ch[idx]) / nc;
       }
     }
 
-    // Only draw the trimmed region of the buffer
-    const tS = Math.max(0, (trimStart || 0) * sr);
-    const tE = Math.min(raw.length, ((trimEnd !== undefined && trimEnd !== null) ? trimEnd : audioBuffer.duration) * sr);
+    // Only draw the trimmed region of the downsampled buffer
+    const dur = audioBuffer.duration;
+    const tS = Math.max(0, Math.floor(((trimStart || 0) / dur) * dsLen));
+    const tE = Math.min(dsLen, Math.ceil((((trimEnd !== undefined && trimEnd !== null) ? trimEnd : dur) / dur) * dsLen));
     const regionLen = Math.max(1, tE - tS);
     const spp = regionLen / W;
 
-    // Pre-compute peaks from the trimmed region only
+    // Pre-compute peaks from the downsampled region
     const peaks = new Float32Array(W);
     for (let px = 0; px < W; px++) {
       const s = Math.floor(tS + px * spp);
       const e = Math.min(Math.floor(tS + (px + 1) * spp) + 1, tE);
       let pk = 0;
-      for (let i = s; i < e; i++) { const v = Math.abs(raw[i]); if (v > pk) pk = v; }
+      for (let i = s; i < e; i++) { if (raw[i] > pk) pk = raw[i]; }
       peaks[px] = pk;
     }
 
@@ -5396,6 +5397,8 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
   const CompPlugin   = function(p){ return _CompPlugin(p); };
   const ReverbPlugin = function(p){ return _ReverbPlugin(p); };
   const PitchPlugin  = function(p){ return _PitchPlugin(p); };
+  const OceanPlugin  = function(p){ return _OceanPlugin(p); };
+  const AppleXPlugin = function(p){ return _AppleXPlugin(p); };
   const NoiseRemoverPlugin = function(p){ return _NoiseRemoverPlugin(p); };
   const DoublerPlugin = function(p){ return _DoublerPlugin(p); };
   const HDelayPlugin  = function(p){ return _HDelayPlugin(p); };
@@ -5441,7 +5444,8 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"eq",           label:"Pro EQ",              sub:"5-Band · Drag handles",        icon:"▦", color:"#0ea5e9" },
     { key:"compressor",   label:"Compressor",          sub:"Dynamics processor",            icon:"fader", color:"#7C3AED" },
     { key:"reverb",       label:"Convolution Reverb",  sub:"Room simulation",               icon:"wave", color:"#C026D3" },
-    { key:"pitch",        label:"Auto-Tune / Pitch",   sub:"Pitch processor v2",            icon:"note", color:"#9333EA" },
+    { key:"ocean",        label:"Ocean Reverb",        sub:"Deep · Lush · Atmospheric",     icon:"wave", color:"#0891b2" },
+    { key:"applex",       label:"AppleX Auto-Tune",    sub:"Chromatic pitch correction",    icon:"note", color:"#9333EA" },
     { key:"noiseremover", label:"Noise Remover",       sub:"RNNoise · AI denoising",        icon:"mic", color:"#10B981" },
     { key:"doubler",      label:"Vocal Doubler",        sub:"Stereo width · Haas effect",     icon:"speaker", color:"#F59E0B" },
     { key:"hdelay",       label:"H-Delay",              sub:"Tape · BPM sync · Analog",       icon:"◷", color:"#E85D04" },
@@ -5477,7 +5481,8 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"eq",           label:"Parametric EQ",      sub:"5-Band",          icon:"ph-eq",          color:"#00b4d8", cat:"EQ",       tag:"MIXER"  },
     { key:"compressor",   label:"Compressor",          sub:"Dynamics",        icon:"ph-compress",    color:"#7c3aed", cat:"DYNAMICS", tag:"EFFECT" },
     { key:"reverb",       label:"Reverb",              sub:"Room sim",        icon:"ph-reverb",      color:"#0891b2", cat:"REVERB",   tag:"EFFECT" },
-    { key:"pitch",        label:"Newtone / Pitch",     sub:"Pitch v2",        icon:"ph-pitch",       color:"#db2777", cat:"PITCH",    tag:"EFFECT" },
+    { key:"ocean",        label:"Ocean Reverb",        sub:"Lush · Deep",     icon:"ph-reverb",      color:"#0369a1", cat:"REVERB",   tag:"EFFECT" },
+    { key:"applex",       label:"AppleX",              sub:"Auto-Tune",       icon:"ph-pitch",       color:"#9333ea", cat:"PITCH",    tag:"EFFECT" },
     { key:"noiseremover", label:"Noise Gate AI",       sub:"RNNoise",         icon:"ph-gate",        color:"#059669", cat:"DYNAMICS", tag:"UTILITY" },
     { key:"doubler",      label:"Doubler",             sub:"Haas / Width",    icon:"ph-doubler",     color:"#d97706", cat:"UTILITY",  tag:"MIXER"  },
     { key:"hdelay",       label:"T-Delay",             sub:"Tape · BPM sync", icon:"ph-delay",       color:"#ea580c", cat:"UTILITY",  tag:"EFFECT" },
@@ -5711,8 +5716,11 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
           {/* Reverb plugin */}
           {key === "reverb" && <ReverbPlugin fx={fx} upd={upd} ReverbViz={ReverbViz} Knob={Knob} />}
 
-          {/* Pitch / Autotune plugin */}
-          {key === "pitch" && <PitchPlugin fx={fx} upd={upd} Knob={Knob} />}
+          {/* Ocean Reverb plugin */}
+          {key === "ocean" && <OceanPlugin fx={fx} upd={upd} Knob={Knob} />}
+
+          {/* AppleX Auto-Tune plugin */}
+          {key === "applex" && <AppleXPlugin fx={fx} upd={upd} Knob={Knob} />}
 
           {/* Noise Remover plugin */}
           {key === "noiseremover" && <NoiseRemoverPlugin fx={fx} upd={upd} Knob={Knob} />}
@@ -5962,6 +5970,67 @@ function _ReverbPlugin({ fx, upd, ReverbViz, Knob }) {
             <Knob label="ROOM" value={fx.reverb?.roomSize??0.8} min={0.1} max={1} step={0.01} unit="%" color="#C026D3" onChange={function(v){ upd("reverb",{roomSize:v}); }} />
             <Knob label="PRE-DLY" value={fx.reverb?.preDelay??0} min={0} max={100} step={1} unit="ms" color="#8B5CF6" onChange={function(v){ upd("reverb",{preDelay:v}); }} />
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function _OceanPlugin({ fx, upd, Knob }) {
+  const on = !!fx.ocean?.on;
+  return (
+    <div style={{ background:"linear-gradient(180deg,#0a1628 0%,#061020 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (on ? "#0891b2" : "#2a2a2a"), boxShadow: on ? "0 0 20px rgba(8,145,178,0.2), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+      <div style={{ backgroundImage:"linear-gradient(180deg,#0f2035,#091828)", padding:"8px 14px", borderBottom:"1px solid #0e2a3a", display:"flex", alignItems:"center", gap:8 }}>
+        <div style={{ flex:1 }}>
+          <div style={{ color:"#38bdf8", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>OCEAN REVERB</div>
+          <div style={{ color:"#0c3347", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>DEEP · LUSH · ATMOSPHERIC</div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <div style={{ width:8, height:8, borderRadius:"50%", background: on ? "#0891b2" : "#1a1a1a", boxShadow: on ? "0 0 6px #0891b2, 0 0 14px rgba(8,145,178,0.5)" : "none", transition:"all 0.2s" }} />
+          <button onClick={function(){ upd("ocean",{on:!on}); }} style={{ background: on ? "linear-gradient(180deg,#0369a1,#075985)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (on ? "#0891b2" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1 }}>{on ? "ON" : "OFF"}</button>
+        </div>
+      </div>
+      <div style={{ padding:"12px 14px", opacity:on?1:0.4, transition:"opacity 0.2s" }}>
+        <div style={{ display:"flex", justifyContent:"space-around", padding:"4px 0" }}>
+          <Knob label="WET"    value={fx.ocean?.wet??0.35}      min={0} max={1}   step={0.01} unit="%" color="#0891b2" onChange={function(v){ upd("ocean",{wet:v}); }} />
+          <Knob label="SIZE"   value={fx.ocean?.roomSize??1.0}  min={0.5} max={2} step={0.01} unit="%" color="#0891b2" onChange={function(v){ upd("ocean",{roomSize:v}); }} />
+          <Knob label="DAMP"   value={fx.ocean?.damp??0.6}      min={0} max={1}   step={0.01} unit="%" color="#38bdf8" onChange={function(v){ upd("ocean",{damp:v}); }} />
+          <Knob label="PRE-DLY" value={fx.ocean?.preDelay??20}  min={0} max={150} step={1}    unit="ms" color="#38bdf8" onChange={function(v){ upd("ocean",{preDelay:v}); }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function _AppleXPlugin({ fx, upd, Knob }) {
+  const on     = !!fx.applex?.on;
+  const speed  = fx.applex?.speed  ?? 0.5;
+  const depth  = fx.applex?.depth  ?? 1.0;
+  const pitchKey = fx.applex?.key  ?? "C";
+  const NOTES  = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  return (
+    <div style={{ background:"linear-gradient(180deg,#130a22 0%,#0d0618 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (on ? "#9333ea" : "#2a2a2a"), boxShadow: on ? "0 0 20px rgba(147,51,234,0.2), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+      <div style={{ backgroundImage:"linear-gradient(180deg,#1e0f35,#160a28)", padding:"8px 14px", borderBottom:"1px solid #2a1545", display:"flex", alignItems:"center", gap:8 }}>
+        <div style={{ flex:1 }}>
+          <div style={{ color:"#c084fc", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>APPLEX AUTO-TUNE</div>
+          <div style={{ color:"#3b1a5e", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>CHROMATIC PITCH CORRECTION</div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <div style={{ width:8, height:8, borderRadius:"50%", background: on ? "#9333ea" : "#1a1a1a", boxShadow: on ? "0 0 6px #9333ea, 0 0 14px rgba(147,51,234,0.5)" : "none", transition:"all 0.2s" }} />
+          <button onClick={function(){ upd("applex",{on:!on}); }} style={{ background: on ? "linear-gradient(180deg,#7c3aed,#6d28d9)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (on ? "#9333ea" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1 }}>{on ? "ON" : "OFF"}</button>
+        </div>
+      </div>
+      <div style={{ padding:"12px 14px", opacity:on?1:0.4, transition:"opacity 0.2s" }}>
+        {/* Key selector */}
+        <div style={{ display:"flex", gap:3, marginBottom:10, flexWrap:"wrap" }}>
+          {NOTES.map(function(n){
+            const active = pitchKey === n;
+            return <button key={n} onClick={function(){ upd("applex",{key:n}); }} style={{ flex:1, minWidth:22, padding:"4px 2px", background: active ? "#7c3aed" : "#0f0f18", border:"1px solid "+(active?"#9333ea":"#1e1e2a"), borderRadius:5, color: active?"white":"#4c1d95", fontSize:8, fontWeight:800, cursor:"pointer" }}>{n}</button>;
+          })}
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-around", padding:"4px 0" }}>
+          <Knob label="SPEED" value={speed} min={0} max={1} step={0.01} unit="" color="#9333ea" onChange={function(v){ upd("applex",{speed:v}); }} />
+          <Knob label="DEPTH" value={depth} min={0} max={1} step={0.01} unit="" color="#c084fc" onChange={function(v){ upd("applex",{depth:v}); }} />
         </div>
       </div>
     </div>
@@ -7940,6 +8009,7 @@ function StudioScreen({ user, onExit }) {
   const [savedProjects,setSavedProjects]= useState([]);
   const [saveStatus,   setSaveStatus]   = useState("");
   const [error,        setError]        = useState("");
+  const [isDecodingFile, setIsDecodingFile] = useState(false);
   const [countIn,      setCountIn]      = useState(0);
   const [exporting,    setExporting]    = useState(false);
   const [exportMsg,    setExportMsg]    = useState("");
@@ -8696,13 +8766,43 @@ function StudioScreen({ user, onExit }) {
   };
 
   // Move playhead div directly — no React re-render, no jitter
+  // Always uses effectivePPSRef.current so it's accurate even in stale closures.
   const updatePlayheadDOM = function (t, scrollLeft) {
     const ph = playheadRef.current;
     if (!ph) return;
+    const pps = effectivePPSRef.current;
     const sl = scrollLeft !== undefined ? scrollLeft : (scrollRef.current ? scrollRef.current.scrollLeft : 0);
-    // lassoContainerRef spans both sidebar + right panel, so offset by SIDEBAR_W at t=0
-    const px = SIDEBAR_W + t * effectivePPS - sl;
+    const px = SIDEBAR_W + t * pps - sl;
     ph.style.left = px + "px";
+  };
+
+  // ── syncUItoTime ──────────────────────────────────────────────
+  // Single source of truth for updating playhead + scroll when NOT in the RAF loop.
+  // Call this at the end of any seek, rewind, skip, or pause operation.
+  // Mirrors the 75%-pin logic from the RAF loop so paused seeks feel identical.
+  const syncUItoTime = function (t) {
+    const pps = effectivePPSRef.current;
+    // Write all position refs
+    playheadAtRef.current = t;
+    liveTimeRef.current   = t;
+    setCurrentTime(t);
+    const el = scrollRef.current;
+    if (!el) return;
+    const viewW      = el.clientWidth;
+    const playheadPx = t * pps;                    // content-space position
+    const pinAt      = viewW * 0.75;               // same threshold as RAF loop
+    const targetSL   = playheadPx - pinAt;
+    // Scroll forward to keep playhead at 75% pin once it crosses that mark
+    if (targetSL > el.scrollLeft) {
+      el.scrollLeft = Math.max(0, targetSL);
+    }
+    // If playhead is offscreen to the left, snap it back into view
+    const playheadViewX = playheadPx - el.scrollLeft;
+    if (playheadViewX < 0) {
+      el.scrollLeft = Math.max(0, playheadPx - pinAt);
+    }
+    // Finally draw the playhead at its exact pixel position
+    updatePlayheadDOM(t, el.scrollLeft);
   };
 
   // ── RAF playback loop ─────────────────────────────────────────
@@ -9413,6 +9513,21 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       // Note: room size changes the IR buffer — requires a brief rebuild only when roomSize changes
       // For smooth real-time feel, we defer that to the next play() call. Wet/dry is instant.
     }
+
+    // ── Ocean Reverb — live wet/dry and damping ──
+    if (live.ocean) {
+      const oceanOn = !!(fx.ocean && fx.ocean.on);
+      const wet = oceanOn ? (fx.ocean.wet || 0.35) : 0;
+      live.ocean.wetG.gain.setTargetAtTime(wet,     now, T);
+      live.ocean.dryG.gain.setTargetAtTime(1 - wet, now, T);
+      if (oceanOn && fx.ocean.preDelay !== undefined) {
+        live.ocean.preDelay.delayTime.setTargetAtTime(fx.ocean.preDelay / 1000, now, T);
+      }
+      if (oceanOn && fx.ocean.damp !== undefined && live.ocean.lpf) {
+        const freq = 800 + (1 - fx.ocean.damp) * 7200;
+        live.ocean.lpf.frequency.setTargetAtTime(freq, now, T);
+      }
+    }
     // ── H-Delay — live param morphing ──
     if (live.hdelay && fx.hdelay !== undefined) {
       const hd      = fx.hdelay || {};
@@ -9723,6 +9838,56 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         split.connect(dryG); split.connect(preDelay);
         node = split;
         liveNodes.reverb = { dryG, wetG, preDelay, conv };
+      }
+
+      // ── Ocean Reverb — deeper/longer with damping lowpass on wet signal ──
+      {
+        const sr = actx.sampleRate;
+        const oceanOn = !!(fx.ocean && fx.ocean.on);
+        const preDelaySec = oceanOn ? (fx.ocean.preDelay || 20) / 1000 : 0.02;
+        const roomSize = oceanOn ? Math.min(2, fx.ocean.roomSize || 1.0) : 1.0;
+        const len = Math.round(sr * roomSize * 4); // longer tail than standard reverb
+        const ir = actx.createBuffer(2, len, sr);
+        for (let ch=0;ch<2;ch++){
+          const d = ir.getChannelData(ch);
+          for (let i=0;i<len;i++) d[i] = (Math.random()*2-1)*Math.pow(1-i/len, 1.8); // gentler decay
+        }
+        const conv = actx.createConvolver(); conv.buffer = ir;
+        // Damping: lowpass on wet signal for dark oceanic character
+        const damp = oceanOn ? (fx.ocean.damp || 0.6) : 0.6;
+        const lpf = actx.createBiquadFilter();
+        lpf.type = "lowpass";
+        lpf.frequency.value = 800 + (1 - damp) * 7200; // damp=1 → 800Hz, damp=0 → 8000Hz
+        lpf.Q.value = 0.5;
+        const preDelay = actx.createDelay(0.3); preDelay.delayTime.value = preDelaySec;
+        const wetVal = oceanOn ? (fx.ocean.wet || 0.35) : 0;
+        const dryG = actx.createGain(); dryG.gain.value = 1 - wetVal;
+        const wetG = actx.createGain(); wetG.gain.value = wetVal;
+        const mix  = actx.createGain();
+        dryG.connect(mix); wetG.connect(mix); mix.connect(node);
+        preDelay.connect(conv); conv.connect(lpf); lpf.connect(wetG);
+        const split = actx.createGain(); split.gain.value = 1;
+        split.connect(dryG); split.connect(preDelay);
+        node = split;
+        liveNodes.ocean = { dryG, wetG, preDelay, lpf };
+      }
+
+      // ── AppleX Auto-Tune — chromatic pitch snap using existing pitch worklet ──
+      {
+        const applexOn = !!(fx.applex && fx.applex.on);
+        // AppleX reuses the pitch worklet infrastructure with chromatic snapping
+        // The worklet receives isAutoTune=1 and rootNote=0 (chromatic = snaps to any semitone)
+        if (applexOn && pitchWorkletReadyRef.current) {
+          try {
+            const awn = new AudioWorkletNode(actx, "pitch-processor");
+            awn.parameters.get("pitch").value = 1.0; // no shift, just correction
+            awn.parameters.get("isAutoTune").value = 1;
+            awn.parameters.get("rootNote").value = NOTE_MAP[fx.applex.key || "C"] || 0;
+            awn.connect(node); node = awn;
+            liveNodes.applex = { awn };
+          } catch(e) { /* worklet not available, bypass */ }
+        }
+        if (!liveNodes.applex) liveNodes.applex = null;
       }
 
       // ── 5-band parametric EQ — always built; bypass = unity gain when off ──
@@ -10385,25 +10550,16 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
   const togglePlay = function () {
     if (isPlaying) {
-      // Capture exact position from live RAF ref before stopping
+      // Capture exact live position before tearing down audio graph
       const exactT = liveTimeRef.current > 0 ? liveTimeRef.current : currentTime;
       stopAll();
       setIsPlaying(false);
-      playheadAtRef.current = exactT;
-      liveTimeRef.current   = exactT;
-      setCurrentTime(exactT);
-      // Freeze playhead DOM exactly where it stopped
-      if (scrollRef.current) updatePlayheadDOM(exactT, scrollRef.current.scrollLeft);
+      // Freeze everything — playhead stays exactly where audio stopped
+      syncUItoTime(exactT);
     } else {
-      // Resume from playheadAtRef — always accurate, never stale React state
+      // Resume from the synced position — playheadAtRef was written by syncUItoTime
       const startT = playheadAtRef.current;
-      // Scroll view to playhead position so it's visible immediately on resume
-      if (scrollRef.current) {
-        scrollRef.current.scrollLeft = Math.max(0, startT * effectivePPS);
-        updatePlayheadDOM(startT, scrollRef.current.scrollLeft);
-      }
       doPlay(startT);
-      setCurrentTime(startT);
       setIsPlaying(true);
     }
   };
@@ -10411,15 +10567,47 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   const rewind = function () {
     stopAll();
     setIsPlaying(false);
-    const t = loopEnabled ? loopIn : 0;
-    setCurrentTime(t);
-    playheadAtRef.current = t;
-    liveTimeRef.current   = t;
     masterStartRef.current = 0;
-    // Scroll to start and snap playhead DOM immediately
-    if (scrollRef.current) {
-      scrollRef.current.scrollLeft = Math.max(0, t * effectivePPS);
-      updatePlayheadDOM(t, scrollRef.current.scrollLeft);
+    const t = loopEnabled ? loopIn : 0;
+    // Always scroll back to start so the ruler shows bar 1
+    if (scrollRef.current) scrollRef.current.scrollLeft = 0;
+    syncUItoTime(t);
+  };
+
+  const skipToEnd = function () {
+    const furthest = tracks.reduce(function(acc, t) {
+      const clips = t.clips || (t.audioBuffer ? [{startTime:t.startTime||0, duration:t.audioBuffer.duration, trimEnd:t.audioBuffer.duration}] : []);
+      const trackEnd = clips.reduce(function(tAcc, cl) {
+        const end = (cl.startTime||0) + ((cl.trimEnd||cl.duration||0) - (cl.trimStart||0));
+        return end > tAcc ? end : tAcc;
+      }, 0);
+      return trackEnd > acc ? trackEnd : acc;
+    }, 0);
+    const endT = loopEnabled && loopOut > loopIn ? loopOut : furthest || 0;
+    syncUItoTime(endT);
+  };
+
+  const SEEK_STEP = 5; // seconds per tap
+
+  const seekBack = function () {
+    const wasPlaying = isPlayingRef.current;
+    const curT = liveTimeRef.current > 0 ? liveTimeRef.current : playheadAtRef.current || 0;
+    const newT = Math.max(0, curT - SEEK_STEP);
+    syncUItoTime(newT);
+    if (wasPlaying) {
+      setIsPlaying(false);
+      doPlay(newT).then(function() { setIsPlaying(true); });
+    }
+  };
+
+  const seekForward = function () {
+    const wasPlaying = isPlayingRef.current;
+    const curT = liveTimeRef.current > 0 ? liveTimeRef.current : playheadAtRef.current || 0;
+    const newT = curT + SEEK_STEP;
+    syncUItoTime(newT);
+    if (wasPlaying) {
+      setIsPlaying(false);
+      doPlay(newT).then(function() { setIsPlaying(true); });
     }
   };
 
@@ -10542,6 +10730,8 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   const defaultEffects = function () {
     return {
       reverb:     { on:false, wet:0.25, roomSize:0.8 },
+      ocean:      { on:false, wet:0.35, roomSize:1.0, damp:0.6, preDelay:20 },
+      applex:     { on:false, key:"C", speed:0.5, depth:1.0 },
       eq:         { on:false, low:0, mid:0, high:0 },
       compressor: { on:false, threshold:-24, ratio:4, attack:0.003, release:0.25 },
       trotten:    { on:false, eqLow:0, eqMid:0, eqHigh:0, eqLowT:"shelf", eqMidT:"bell", eqHighT:"shelf", compThr:-15, compAmt:50, compMode:"auto", tapeDrv:5, tapeSat:5, tapeMode:"modern", limCeil:-0.5, limRel:0.5, limMode:"truepeak", inputGain:0, outputGain:0 },
@@ -10646,36 +10836,48 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     const files = Array.from(e.target.files);
     if (!files.length) return;
     setError("");
+    setShowAddMenu(false);
+    // Grab AudioContext synchronously inside the user-gesture
     const actx = getActx();
+    // Ensure it's running — await the resume so it's truly ready before decode
+    try { await actx.resume(); } catch(err) {}
     for (const file of files) {
       const url  = URL.createObjectURL(file);
       const name = file.name.replace(/\.[^.]+$/, "");
       try {
         const ab  = await file.arrayBuffer();
-        // Resume actx if iOS suspended it during the async file read
-        if (actx.state === "suspended") { try { await actx.resume(); } catch(err) {} }
-        const buf = await actx.decodeAudioData(ab.slice(0));
-        // Resume again after decode — iOS can suspend during decodeAudioData too
-        if (actx.state === "suspended") { try { await actx.resume(); } catch(err) {} }
+        const buf = await actx.decodeAudioData(ab);
         const tId = Date.now() + Math.random();
-        addTrackObj({
+        const newTrack = {
           id: tId, name, type: type || "beat",
           isMuted: false, isSoloed: false,
-          color: type === "beat" ? "#C026D3" : VOCAL_COLORS[tracks.filter(function(t){return t.type==="vocal";}).length % VOCAL_COLORS.length],
+          volume: 1, pan: 0,
+          effects: defaultEffects(),
+          color: type === "beat" ? "#C026D3" : VOCAL_COLORS[tracksRef.current.filter(function(t){return t.type==="vocal";}).length % VOCAL_COLORS.length],
           clips: [{ id:tId+"_c0", audioBuffer:buf, url, startTime:0, duration:buf.duration,
             trimStart:0, trimEnd:buf.duration, label:"Main", active:true }],
-        });
+        };
+        setTracks(function(prev){ return [...prev, newTrack]; });
+        setIsSaved(false);
         if (type === "beat") { setProjectName(name); setLoopOut(buf.duration); }
-        // Re-apply all existing track gains — decodeAudioData can cause iOS to
-        // suspend/resume the AudioContext which discards scheduled gain values
         if (isPlayingRef.current) {
-          applyGains(tracksRef.current);
-          if (masterGainRef.current) masterGainRef.current.gain.value = masterVolume;
+          setTimeout(function() {
+            applyGains(tracksRef.current);
+            if (masterGainRef.current) masterGainRef.current.gain.value = masterVolume;
+          }, 0);
         }
-      } catch (e2) { setError("Could not decode: " + file.name); }
+        // After React paints the new track row, nudge the playhead DOM into place
+        // so the clip is visible without needing to press play first
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            syncUItoTime(playheadAtRef.current);
+          });
+        });
+      } catch (e2) {
+        console.error("[Upload error]", e2);
+        setError("Could not load: " + file.name + " — " + (e2 && e2.message ? e2.message : String(e2)));
+      }
     }
-    setShowAddMenu(false);
-    // Reset input so the same file(s) can be re-selected
     e.target.value = "";
   };
 
@@ -13904,26 +14106,36 @@ userPickedMicRef.current = true;
       })()}
 
       {/* ══ TRANSPORT ════════════════════════════════════════════ */}
-      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"max(env(safe-area-inset-bottom), 16px)",flexShrink:0,zIndex:50 }}>
-        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
-          <div style={{ width:40,height:40,borderRadius:10,background:showMixer?"rgba(139,92,246,0.2)":"#141414",border:"1px solid "+(showMixer?"#8B5CF6":"#222"),display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer" }} onClick={function(){ setShowMixer(function(v){return !v;}); }}>
-            <span style={{ fontSize:14 }}><Icon id="fader" size={18} color={showMixer ? "#8B5CF6" : "#aaa"} strokeWidth={1.8}/></span>
+      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 12px",paddingBottom:"max(env(safe-area-inset-bottom), 16px)",flexShrink:0,zIndex:50 }}>
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:6 }}>
+          {/* Mixer toggle */}
+          <div style={{ width:36,height:36,borderRadius:10,background:showMixer?"rgba(139,92,246,0.2)":"#141414",border:"1px solid "+(showMixer?"#8B5CF6":"#222"),display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0 }} onClick={function(){ setShowMixer(function(v){return !v;}); }}>
+            <Icon id="fader" size={18} color={showMixer ? "#8B5CF6" : "#aaa"} strokeWidth={1.8}/>
           </div>
-          <button onClick={rewind} style={{ width:36,height:36,borderRadius:8,background:"#141414",border:"1px solid #222",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+          {/* Skip to Start */}
+          <button onClick={rewind} title="Skip to start" style={{ width:32,height:32,borderRadius:8,background:"#141414",border:"1px solid #222",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="white"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
           </button>
-          <button onClick={function(){ if(isRecording)stopRecording();else startCountIn(selectedTrackId); }} disabled={countIn>0} style={{ width:52,height:52,borderRadius:"50%",background:isRecording?"#EF4444":"linear-gradient(135deg,#EF4444,#DC2626)",border:isRecording?"3px solid rgba(239,68,68,0.5)":"3px solid rgba(239,68,68,0.2)",cursor:countIn>0?"not-allowed":"pointer",opacity:countIn>0?0.4:1,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:isRecording?"0 0 20px rgba(239,68,68,0.5)":"none" }}>
-            {isRecording?<div style={{ width:16,height:16,background:"white",borderRadius:3 }} />:<div style={{ width:20,height:20,background:"white",borderRadius:"50%" }} />}
+          {/* Rewind –5s */}
+          <button onClick={seekBack} title="Rewind 5s" style={{ width:32,height:32,borderRadius:8,background:"#141414",border:"1px solid #222",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="white"><path d="M12.5 8.5 7 12l5.5 3.5V8.5z"/><path d="M19.5 8.5 14 12l5.5 3.5V8.5z"/></svg>
           </button>
-          <button onClick={togglePlay} style={{ width:40,height:40,borderRadius:"50%",background:"linear-gradient(135deg,#C026D3,#7C3AED)",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>
-            {isPlaying?<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>:<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>}
+          {/* Record */}
+          <button onClick={function(){ if(isRecording)stopRecording();else startCountIn(selectedTrackId); }} disabled={countIn>0} style={{ width:48,height:48,borderRadius:"50%",background:isRecording?"#EF4444":"linear-gradient(135deg,#EF4444,#DC2626)",border:isRecording?"3px solid rgba(239,68,68,0.5)":"3px solid rgba(239,68,68,0.2)",cursor:countIn>0?"not-allowed":"pointer",opacity:countIn>0?0.4:1,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:isRecording?"0 0 20px rgba(239,68,68,0.5)":"none",flexShrink:0 }}>
+            {isRecording?<div style={{ width:14,height:14,background:"white",borderRadius:3 }} />:<div style={{ width:18,height:18,background:"white",borderRadius:"50%" }} />}
           </button>
-          <div style={{ width:40,height:40,borderRadius:10,background:"#141414",border:"1px solid #222",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center" }}>
-            <span style={{ color:"#555",fontSize:9,fontWeight:800,lineHeight:1 }}>{Math.round(zoom*100)}%</span>
-            <span style={{ color:"#333",fontSize:7 }}>H·ZOOM</span>
-            <span style={{ color:"#444",fontSize:8,fontWeight:700,lineHeight:1,marginTop:1 }}>{Math.round(vZoom*100)}%</span>
-            <span style={{ color:"#292929",fontSize:6 }}>V·ZOOM</span>
-          </div>
+          {/* Play / Pause */}
+          <button onClick={togglePlay} style={{ width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,#C026D3,#7C3AED)",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+            {isPlaying?<svg width="15" height="15" viewBox="0 0 24 24" fill="white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>:<svg width="15" height="15" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>}
+          </button>
+          {/* Fast Forward +5s */}
+          <button onClick={seekForward} title="Fast forward 5s" style={{ width:32,height:32,borderRadius:8,background:"#141414",border:"1px solid #222",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="white"><path d="M11.5 8.5 17 12l-5.5 3.5V8.5z"/><path d="M4.5 8.5 10 12 4.5 15.5V8.5z"/></svg>
+          </button>
+          {/* Skip to End */}
+          <button onClick={skipToEnd} title="Skip to end" style={{ width:32,height:32,borderRadius:8,background:"#141414",border:"1px solid #222",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="white"><path d="M16 6h2v12h-2zm-2.5 6L5 6v12z"/></svg>
+          </button>
         </div>
       </div>
 
