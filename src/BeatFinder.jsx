@@ -12406,7 +12406,7 @@ self.onmessage = async function(e) {
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
-      style={{ background:"#080808", height:"100dvh", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
+      style={{ background:"#080808", height:"calc(100dvh - env(safe-area-inset-top))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
     >
       {/* ── Overlays ── */}
@@ -13744,7 +13744,7 @@ userPickedMicRef.current = true;
       })()}
 
       {/* ══ TRANSPORT ════════════════════════════════════════════ */}
-      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"calc(4px + env(safe-area-inset-bottom))",flexShrink:0,zIndex:50 }}>
+      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"calc(10px + env(safe-area-inset-bottom))",flexShrink:0,zIndex:50 }}>
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
           <div style={{ width:40,height:40,borderRadius:10,background:showMixer?"rgba(139,92,246,0.2)":"#141414",border:"1px solid "+(showMixer?"#8B5CF6":"#222"),display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer" }} onClick={function(){ setShowMixer(function(v){return !v;}); }}>
             <span style={{ fontSize:14 }}><Icon id="fader" size={18} color={showMixer ? "#8B5CF6" : "#aaa"} strokeWidth={1.8}/></span>
@@ -14141,7 +14141,7 @@ export default function BeatFinder() {
             display: tab === t ? "block" : "none",
             overflowY: t === "studio" ? "hidden" : "auto",
             height: t === "studio"
-              ? "calc(100dvh - env(safe-area-inset-bottom))"
+              ? "100dvh"
               : "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))",
             WebkitOverflowScrolling: "touch",
           }}>
