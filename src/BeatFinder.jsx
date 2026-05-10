@@ -7862,7 +7862,7 @@ function StudioScreen({ user, onExit }) {
   const [bpm,          setBpm]          = useState(120);
   const [timeSigNum,   setTimeSigNum]   = useState(4);
   const [zoom,         setZoom]         = useState(0.1); // start at 10% H-zoom
-  const [vZoom,        setVZoom]        = useState(1);   // vertical track-height zoom — start at 100%
+  const [vZoom,        setVZoom]        = useState(0.99); // vertical track-height zoom — start at 100%
 
   const TRACK_H     = Math.round(92 * vZoom); // each track row height — scales with vertical zoom
   const [snapToGrid,   setSnapToGrid]   = useState(true);
@@ -7883,6 +7883,7 @@ function StudioScreen({ user, onExit }) {
   const [selBox,       setSelBox]       = useState(null);  // {x,y,w,h} in px relative to scroll container
   const [selClipIds,   setSelClipIds]   = useState(new Set()); // selected clip ids
   const selBoxRef      = useRef(null);   // live drag state {startX,startY,scrollX}
+  const trimActiveRef   = useRef(false);  // true while a trim drag is in progress
   const longPressRef   = useRef(null);   // setTimeout handle for long-press detection
   const [showSettings, setShowSettings] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
@@ -10776,14 +10777,16 @@ function StudioScreen({ user, onExit }) {
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const adx = Math.abs(dx);
+      const ady = Math.abs(dy);
       pinchRef.current = {
-        // full distance (legacy — still used for the pivot anchor)
         dist: Math.sqrt(dx * dx + dy * dy),
-        // per-axis distances for independent scaling
-        distX: Math.abs(dx),
-        distY: Math.abs(dy),
+        distX: adx,
+        distY: ady,
+        // Lock axis at gesture start — whichever span is larger wins
+        axis: adx >= ady ? "H" : "V",
         zoom:  zoomRef.current,
-        vZoom: vZoom,        // snapshot current v-zoom at gesture start
+        vZoom: vZoom,
         midX,
         scrollLeft: el.scrollLeft,
       };
@@ -10796,20 +10799,17 @@ function StudioScreen({ user, onExit }) {
       const absDx = Math.abs(dx);
       const absDy = Math.abs(dy);
 
-      // ── Horizontal zoom (H-zoom) ─────────────────────────────
-      if (pinchRef.current.distX > 4) {   // only when gesture has meaningful H span
-        const newZoom = Math.min(32, Math.max(0.05,
+      // ── Lock to dominant axis — H and V never zoom simultaneously ──
+      const axis = pinchRef.current.axis;
+      if (axis === "H" && pinchRef.current.distX > 4) {
+        const newZoom = Math.min(1, Math.max(0.1,
           +(pinchRef.current.zoom * absDx / pinchRef.current.distX).toFixed(3)));
-        // Anchor scroll to pinch midpoint
         const ratio  = newZoom / pinchRef.current.zoom;
         const pivotX = pinchRef.current.midX - el.getBoundingClientRect().left + pinchRef.current.scrollLeft;
         el.scrollLeft = Math.max(0, pivotX * ratio - (pinchRef.current.midX - el.getBoundingClientRect().left));
         setZoom(newZoom);
-      }
-
-      // ── Vertical zoom (V-zoom) ───────────────────────────────
-      if (pinchRef.current.distY > 4) {   // only when gesture has meaningful V span
-        const newVZoom = Math.min(4, Math.max(0.4,
+      } else if (axis === "V" && pinchRef.current.distY > 4) {
+        const newVZoom = Math.min(0.99, Math.max(0.46,
           +(pinchRef.current.vZoom * absDy / pinchRef.current.distY).toFixed(3)));
         setVZoom(newVZoom);
       }
@@ -12387,7 +12387,7 @@ self.onmessage = async function(e) {
         <button onClick={function(){
           setZoom(function(z){
             // Exponential zoom-out: each tap multiplies by ~0.7 so steps feel even at all levels
-            const next = Math.max(0.05, parseFloat((z * 0.7).toFixed(3)));
+            const next = Math.max(0.1, parseFloat((z * 0.7).toFixed(3)));
             // Anchor scroll so playhead stays in view after zoom
             requestAnimationFrame(function(){
               const el = scrollRef.current;
@@ -12401,12 +12401,12 @@ self.onmessage = async function(e) {
           });
         }} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:16,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>−</button>
         <span style={{ color:"#555",fontSize:10,fontFamily:"monospace",width:38,textAlign:"center" }}>
-          {zoom >= 1 ? Math.round(zoom * 100) + "%" : Math.round(zoom * 100) + "%"}
+          {Math.round((zoom - 0.1) / (1 - 0.1) * 100) + "%"}
         </span>
         <button onClick={function(){
           setZoom(function(z){
             // Exponential zoom-in: each tap multiplies by ~1.4
-            const next = Math.min(32, parseFloat((z * 1.4).toFixed(3)));
+            const next = Math.min(1, parseFloat((z * 1.4).toFixed(3)));
             requestAnimationFrame(function(){
               const el = scrollRef.current;
               if (!el) return;
@@ -12422,15 +12422,15 @@ self.onmessage = async function(e) {
         {/* Vertical zoom controls — identical behaviour to horizontal, scales track row heights */}
         <span style={{ color:"#333",fontSize:7,fontWeight:800,letterSpacing:0.5,flexShrink:0 }}>V</span>
         <button onClick={function(){
-          setVZoom(function(v){ return Math.max(0.4, parseFloat((v * 0.7).toFixed(3))); });
+          setVZoom(function(v){ return Math.max(0.46, parseFloat((v * 0.7).toFixed(3))); });
         }} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:12,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }} title="Vertical zoom out">
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 2v9M2 6.5h9" stroke="#888" strokeWidth="1.6" strokeLinecap="round"/><path d="M3.5 9.5 9.5 3.5" stroke="transparent" strokeWidth="0"/><path d="M4 9h5" stroke="#888" strokeWidth="1.6" strokeLinecap="round"/></svg>
         </button>
         <span style={{ color:"#555",fontSize:9,fontFamily:"monospace",width:32,textAlign:"center" }}>
-          {Math.round(vZoom * 100)}%
+          {Math.round((vZoom - 0.46) / (0.99 - 0.46) * 100) + "%"}
         </span>
         <button onClick={function(){
-          setVZoom(function(v){ return Math.min(4, parseFloat((v * 1.4).toFixed(3))); });
+          setVZoom(function(v){ return Math.min(0.99, parseFloat((v * 1.4).toFixed(3))); });
         }} style={{ background:"#141414",border:"1px solid #222",borderRadius:5,color:"#888",fontSize:12,width:24,height:24,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }} title="Vertical zoom in">
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 2v9M2 6.5h9" stroke="#888" strokeWidth="1.6" strokeLinecap="round"/></svg>
         </button>
@@ -12600,7 +12600,7 @@ userPickedMicRef.current = true;
               overscrollBehavior:"none",
               scrollbarWidth:"thin", scrollbarColor:"#2a2a2a #0a0a0a",
             }}
-            onTouchMove={function(e){ if (!selBoxRef.current) e.stopPropagation(); }}
+            onTouchMove={function(e){ if (!selBoxRef.current && !trimActiveRef.current) e.stopPropagation(); }}
             onScroll={function(e){
               // Sync sidebar vertical scroll
               if (sidebarRowsRef.current) {
@@ -12745,7 +12745,7 @@ userPickedMicRef.current = true;
                       })}
                     </div>{/* end inner mask */}
 
-                    {/* ── TRIM HANDLES — in outer overflow:visible div, positioned to match clip bodies ── */}
+                    {/* ── TRIM HANDLES ── */}
                     {clips.map(function(clip){
                       if (!clip.audioBuffer) return null;
                       const trimS  = clip.trimStart || 0;
@@ -12753,31 +12753,35 @@ userPickedMicRef.current = true;
                       const clipW  = Math.max(20, (trimE - trimS) * effectivePPS);
                       const clipL  = Math.max(0, (clip.startTime || 0) * effectivePPS);
                       const bufDur = clip.audioBuffer ? clip.audioBuffer.duration : (clip.duration || 2);
-                      const isSel  = selectedClipId === clip.id;
                       const pps    = effectivePPS;
+
+                      // Shared trim start: set ref so scroll container lets touchmove through
+                      const startTrim = function() { trimActiveRef.current = true; };
+                      const endTrim   = function() { trimActiveRef.current = false; };
+
                       return (
-                        // Trim handle container — positioned at clip left edge, width=clipW
-                        // Handles extend OUTSIDE the clip using negative left/right so they sit
-                        // on the outer edges of the waveform block, not inside it.
                         <div key={clip.id+"_handles"} style={{ position:"absolute", left:clipL, top:0, width:clipW, height:TRACK_H, pointerEvents:"none", zIndex:20 }}>
-                          {/* ── LEFT trim handle — sits just outside the left edge ── */}
+
+                          {/* LEFT handle */}
                           <div data-trimhandle="left"
-                            style={{ position:"absolute", left:-18, top:0, bottom:0, width:20,
+                            style={{ position:"absolute", left:-22, top:0, bottom:0, width:26,
                               cursor:"col-resize", pointerEvents:"all", touchAction:"none",
                               display:"flex", alignItems:"center", justifyContent:"flex-end" }}
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
+                              startTrim();
                               const x0=e.clientX, ts0=trimS, cs0=clip.startTime||0;
                               const mv=function(me){
                                 const d=(me.clientX-x0)/pps;
                                 const ts=Math.max(0,Math.min(ts0+d,trimE-0.05));
                                 updateClip(track.id,clip.id,{trimStart:+ts.toFixed(4),startTime:Math.max(0,+(cs0+(ts-ts0)).toFixed(4))});
                               };
-                              const up=function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
+                              const up=function(){ endTrim(); document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
                               document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
                             }}
                             onTouchStart={function(e){
                               e.stopPropagation(); e.preventDefault();
+                              startTrim();
                               const x0=e.touches[0].clientX, ts0=trimS, cs0=clip.startTime||0;
                               const mv=function(ev){
                                 ev.preventDefault();
@@ -12785,45 +12789,49 @@ userPickedMicRef.current = true;
                                 const ts=Math.max(0,Math.min(ts0+d,trimE-0.05));
                                 updateClip(track.id,clip.id,{trimStart:+ts.toFixed(4),startTime:Math.max(0,+(cs0+(ts-ts0)).toFixed(4))});
                               };
-                              const up=function(){ document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
-                              document.addEventListener("touchmove",mv,{passive:false}); document.addEventListener("touchend",up,{passive:true});
+                              const up=function(){ endTrim(); document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
+                              document.addEventListener("touchmove",mv,{passive:false});
+                              document.addEventListener("touchend",up,{passive:true});
                             }}
                           >
-                            <div style={{ width:5, height:TRACK_H*0.7, borderRadius:"3px 0 0 3px",
-                              background:track.color, boxShadow:"0 0 8px "+track.color,
-                              borderRight:"2px solid "+track.color }} />
+                            <div style={{ width:6, height:TRACK_H*0.75, borderRadius:"3px 0 0 3px",
+                              background:track.color, boxShadow:"0 0 10px "+track.color }} />
                           </div>
-                          {/* ── RIGHT trim handle — sits just outside the right edge ── */}
+
+                          {/* RIGHT handle */}
                           <div data-trimhandle="right"
-                            style={{ position:"absolute", right:-18, top:0, bottom:0, width:20,
+                            style={{ position:"absolute", right:-22, top:0, bottom:0, width:26,
                               cursor:"col-resize", pointerEvents:"all", touchAction:"none",
                               display:"flex", alignItems:"center", justifyContent:"flex-start" }}
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
+                              startTrim();
                               const x0=e.clientX, te0=trimE;
                               const mv=function(me){
                                 const te=Math.max(trimS+0.05,Math.min(te0+(me.clientX-x0)/pps,bufDur));
                                 updateClip(track.id,clip.id,{trimEnd:+te.toFixed(4)});
                               };
-                              const up=function(){ document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
+                              const up=function(){ endTrim(); document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
                               document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
                             }}
                             onTouchStart={function(e){
                               e.stopPropagation(); e.preventDefault();
+                              startTrim();
                               const x0=e.touches[0].clientX, te0=trimE;
                               const mv=function(ev){
                                 ev.preventDefault();
                                 const newTE=Math.max(trimS+0.05,Math.min(te0+(ev.touches[0].clientX-x0)/pps,bufDur));
                                 updateClip(track.id,clip.id,{trimEnd:+newTE.toFixed(4)});
                               };
-                              const up=function(){ document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
-                              document.addEventListener("touchmove",mv,{passive:false}); document.addEventListener("touchend",up,{passive:true});
+                              const up=function(){ endTrim(); document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
+                              document.addEventListener("touchmove",mv,{passive:false});
+                              document.addEventListener("touchend",up,{passive:true});
                             }}
                           >
-                            <div style={{ width:5, height:TRACK_H*0.7, borderRadius:"0 3px 3px 0",
-                              background:track.color, boxShadow:"0 0 8px "+track.color,
-                              borderLeft:"2px solid "+track.color }} />
+                            <div style={{ width:6, height:TRACK_H*0.75, borderRadius:"0 3px 3px 0",
+                              background:track.color, boxShadow:"0 0 10px "+track.color }} />
                           </div>
+
                         </div>
                       );
                     })}
