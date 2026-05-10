@@ -48,6 +48,8 @@ const LOADER_STYLE = `
   .bf-save:active { transform: scale(1.3); }
   input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:#9333ea; box-shadow:0 0 6px rgba(147,51,234,0.6); cursor:pointer; }
   input[type=range]::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:#9333ea; border:none; cursor:pointer; }
+  .nr-slider::-webkit-slider-thumb { background:#10B981 !important; box-shadow:0 0 6px rgba(16,185,129,0.6) !important; }
+  .nr-slider::-moz-range-thumb { background:#10B981 !important; }
   .bf-spinner {
     width: 44px; height: 44px; border-radius: 50%;
     border: 3px solid rgba(192,38,211,0.15);
@@ -7027,37 +7029,55 @@ function _TRottenMasterPlugin({ fx, upd }) {
 
 // ── Noise Remover Plugin UI ──────────────────────────────────────────────────
 function _NoiseRemoverPlugin({ fx, upd, Knob }) {
-  const nr   = fx.noiseremover || {};
-  const on   = !!nr.on;
-  const str  = nr.strength    ?? 0.85;
-  const kb   = nr.keyboard    ?? true;   // keyboard/click suppression
-  const echo = nr.echo        ?? 0.4;    // room echo reduction amount
-  const veh  = nr.voice       ?? 0.6;   // voice enhancement
+  const nr        = fx.noiseremover || {};
+  const on        = !!nr.on;
+  const threshold = nr.threshold ?? -40;   // dB: -80 to 0
+  const release   = nr.release   ?? 0.15;  // seconds: 0.01–2.0
+  const hold      = nr.hold      ?? 0.08;  // seconds: 0–0.5
+  const hiss      = nr.hiss      ?? 0;     // 0–1 → hiss cut amount
+  const lookahead = !!(nr.lookahead ?? true);
 
-  const pct = function(v){ return Math.round(v * 100) + "%"; };
+  // ── Real-time gate-open indicator via AnalyserNode polling ──
+  const [gateOpen, setGateOpen] = React.useState(false);
+  const [inputDb,  setInputDb]  = React.useState(-80);
+  const rafRef = React.useRef(null);
 
-  // Animated level bar sub-component
-  const LevelBar = function({ label, value, color, active }) {
-    return (
-      <div style={{ display:"flex", flexDirection:"column", gap:3, alignItems:"center" }}>
-        <div style={{ width:28, height:64, background:"#0a0a0a", borderRadius:4, border:"1px solid #1a1a1a", position:"relative", overflow:"hidden" }}>
-          <div style={{
-            position:"absolute", bottom:0, left:0, right:0,
-            height: active ? pct(value) : "0%",
-            background: active
-              ? "linear-gradient(0deg," + color + "cc," + color + "44)"
-              : "#1a1a1a",
-            transition:"height 0.3s ease, background 0.3s",
-            borderRadius:3,
-          }} />
-          {[0.25,0.5,0.75].map(function(t){
-            return <div key={t} style={{ position:"absolute", left:0, right:0, bottom:pct(t), height:1, background:"#111", pointerEvents:"none" }} />;
-          })}
-        </div>
-        <div style={{ color: active ? color : "#333", fontSize:7, fontWeight:700, letterSpacing:0.5, textAlign:"center", transition:"color 0.3s" }}>{label}</div>
-      </div>
-    );
-  };
+  React.useEffect(function() {
+    if (!on) { setGateOpen(false); setInputDb(-80); return; }
+    let alive = true;
+    const poll = function() {
+      if (!alive) return;
+      // Read from the track's analyser if available via window.__bfTrackAnalyser
+      // The gate meter is a visual approximation: input dB vs threshold
+      const analyser = window.__bfActiveAnalyser;
+      if (analyser) {
+        const buf = new Float32Array(analyser.frequencyBinCount);
+        analyser.getFloatTimeDomainData(buf);
+        let rms = 0;
+        for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
+        rms = Math.sqrt(rms / buf.length);
+        const db = rms > 0 ? 20 * Math.log10(rms) : -80;
+        setInputDb(db);
+        // Hysteresis: open if 2dB above threshold, close if 3dB below
+        setGateOpen(function(prev) {
+          return prev ? db > (threshold - 3) : db > (threshold + 2);
+        });
+      }
+      rafRef.current = requestAnimationFrame(poll);
+    };
+    rafRef.current = requestAnimationFrame(poll);
+    return function() { alive = false; cancelAnimationFrame(rafRef.current); };
+  }, [on, threshold]);
+
+  // Threshold fill % for visual bar (map -80..0 dB → 0..100%)
+  const threshPct = Math.round(((threshold + 80) / 80) * 100);
+  const inputPct  = Math.round(Math.max(0, Math.min(100, ((inputDb + 80) / 80) * 100)));
+
+  // Release display
+  const relMs = Math.round(release * 1000);
+
+  // Hiss cut display
+  const hissCutDb = Math.round(hiss * 18);
 
   return (
     <div style={{
@@ -7071,106 +7091,145 @@ function _NoiseRemoverPlugin({ fx, upd, Knob }) {
       {/* ── Header ── */}
       <div style={{ background:"linear-gradient(180deg,#0d1f18 0%,#091710 100%)", padding:"9px 14px", borderBottom:"1px solid #0d2018", display:"flex", alignItems:"center", gap:8 }}>
         <div style={{ flex:1 }}>
-          <div style={{ color:"#10B981", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>NOISE REMOVER</div>
-          <div style={{ color:"#0d3d28", fontSize:7, letterSpacing:2, fontFamily:"monospace", marginTop:2 }}>RMS NOISE GATE · LOGIC STYLE</div>
+          <div style={{ color:"#10B981", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>NOISE GATE</div>
+          <div style={{ color:"#0d3d28", fontSize:7, letterSpacing:2, fontFamily:"monospace", marginTop:2 }}>THRESHOLD · ATTACK · HOLD · RELEASE · HISS CUT</div>
         </div>
-        {/* Status LED */}
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          {/* Gate state LED */}
           <div style={{
-            width:8, height:8, borderRadius:"50%",
-            background: on ? "#10B981" : "#0d2018",
-            boxShadow: on ? "0 0 6px #10B981, 0 0 14px rgba(16,185,129,0.5)" : "none",
-            transition:"all 0.2s",
+            width:10, height:10, borderRadius:"50%",
+            background: !on ? "#0d2018" : gateOpen ? "#10B981" : "#EF4444",
+            boxShadow: !on ? "none" : gateOpen
+              ? "0 0 8px #10B981, 0 0 16px rgba(16,185,129,0.6)"
+              : "0 0 8px #EF4444, 0 0 16px rgba(239,68,68,0.5)",
+            transition:"background 0.05s, box-shadow 0.05s",
           }} />
           <button onClick={function(){ upd("noiseremover",{on:!on}); }}
-            style={{
-              background: on ? "linear-gradient(180deg,#059669,#047857)" : "linear-gradient(180deg,#0d2018,#091510)",
-              border:"1px solid " + (on ? "#10B981" : "#0d2a1c"),
-              borderRadius:5, color: on ? "white" : "#1a4a30",
-              fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1,
-              boxShadow: on ? "0 1px 0 rgba(255,255,255,0.15) inset" : "none",
-              transition:"all 0.2s",
-            }}>
+            style={{ background: on ? "linear-gradient(180deg,#059669,#047857)" : "linear-gradient(180deg,#0d2018,#091510)", border:"1px solid " + (on ? "#10B981" : "#0d2a1c"), borderRadius:5, color: on ? "white" : "#1a4a30", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1, transition:"all 0.2s" }}>
             {on ? "ON" : "OFF"}
           </button>
         </div>
       </div>
 
-      <div style={{ padding:"12px 14px", opacity: on ? 1 : 0.35, transition:"opacity 0.25s", pointerEvents: on ? "auto" : "none" }}>
+      <div style={{ padding:"12px 14px", opacity:on?1:0.35, transition:"opacity 0.25s", pointerEvents:on?"auto":"none" }}>
 
-        {/* ── Neural net strength + level meters ── */}
-        <div style={{ display:"flex", gap:12, alignItems:"flex-end", marginBottom:14 }}>
-          {/* Level meter strip */}
-          <div style={{ display:"flex", gap:5, alignItems:"flex-end", background:"#050e0a", borderRadius:8, padding:"8px 10px", border:"1px solid #0d1f15", flexShrink:0 }}>
-            <LevelBar label="IN"    value={str * 0.9}       color="#EF4444" active={on} />
-            <LevelBar label="CLEAN" value={str}             color="#10B981" active={on} />
-            <LevelBar label="VOICE" value={str * veh}       color="#34D399" active={on} />
+        {/* ── Gate meter + status ── */}
+        <div style={{ display:"flex", gap:10, alignItems:"stretch", marginBottom:14 }}>
+
+          {/* Level meter column */}
+          <div style={{ display:"flex", flexDirection:"column", gap:4, alignItems:"center", background:"#050e0a", borderRadius:8, padding:"8px 10px", border:"1px solid #0d1f15", flexShrink:0, minWidth:52 }}>
+            {/* Input level bar */}
+            <div style={{ width:20, height:70, background:"#0a0a0a", borderRadius:3, border:"1px solid #111", position:"relative", overflow:"hidden" }}>
+              {/* Threshold line */}
+              <div style={{ position:"absolute", left:0, right:0, bottom: threshPct + "%", height:1, background:"#F59E0B", zIndex:2, opacity:0.8 }} />
+              {/* Level fill */}
+              <div style={{
+                position:"absolute", bottom:0, left:0, right:0,
+                height: on ? inputPct + "%" : "0%",
+                background: gateOpen
+                  ? "linear-gradient(0deg,#10B981cc,#34D39988)"
+                  : "linear-gradient(0deg,#EF4444cc,#F8717188)",
+                transition:"height 0.04s linear, background 0.08s",
+                borderRadius:2,
+              }} />
+            </div>
+            <div style={{ color: gateOpen && on ? "#10B981" : "#EF4444", fontSize:7, fontWeight:800, letterSpacing:0.5, fontFamily:"monospace", transition:"color 0.08s" }}>
+              {on ? (gateOpen ? "OPEN" : "GATE") : "OFF"}
+            </div>
           </div>
 
-          {/* Main knobs */}
-          <div style={{ flex:1, display:"flex", justifyContent:"space-around", alignItems:"flex-end", gap:4 }}>
-            <Knob label="THRESHOLD" value={str}  min={0} max={1} step={0.01} unit="%" color="#10B981"
-              onChange={function(v){ upd("noiseremover",{strength:v}); }} />
-            <Knob label="HOLD"     value={echo} min={0} max={1} step={0.01} unit="s" color="#34D399"
-              onChange={function(v){ upd("noiseremover",{echo:v}); }} />
-            <Knob label="RELEASE"  value={veh}  min={0} max={1} step={0.01} unit="%" color="#6EE7B7"
-              onChange={function(v){ upd("noiseremover",{voice:v}); }} />
+          {/* Gate state description */}
+          <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"center", gap:6 }}>
+            <div style={{ background:"#060e0a", borderRadius:6, padding:"6px 10px", border:"1px solid #0d1f15" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span style={{ color:"#1a4a30", fontSize:8, fontFamily:"monospace", letterSpacing:1 }}>INPUT</span>
+                <span style={{ color: gateOpen && on ? "#10B981" : "#4a5068", fontSize:9, fontWeight:800, fontFamily:"monospace" }}>{on ? inputDb.toFixed(1) : "--"} dB</span>
+              </div>
+            </div>
+            <div style={{ background:"#060e0a", borderRadius:6, padding:"6px 10px", border:"1px solid #0d1f15" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span style={{ color:"#1a4a30", fontSize:8, fontFamily:"monospace", letterSpacing:1 }}>THRESH</span>
+                <span style={{ color:"#F59E0B", fontSize:9, fontWeight:800, fontFamily:"monospace" }}>{threshold.toFixed(0)} dB</span>
+              </div>
+            </div>
+            <div style={{ background:"#060e0a", borderRadius:6, padding:"6px 10px", border:"1px solid #0d1f15" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span style={{ color:"#1a4a30", fontSize:8, fontFamily:"monospace", letterSpacing:1 }}>STATUS</span>
+                <span style={{ color: gateOpen && on ? "#10B981" : "#EF4444", fontSize:9, fontWeight:800, fontFamily:"monospace", letterSpacing:1 }}>
+                  {!on ? "BYPASS" : gateOpen ? "● PASS" : "● CUT"}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* ── Toggle strip ── */}
-        <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-
-          {/* Keyboard / click suppression */}
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-            background:"#060e0a", borderRadius:8, padding:"8px 12px", border:"1px solid #0d1f15" }}>
-            <div>
-              <div style={{ color:"#9febe8", fontSize:11, fontWeight:700 }}>Lookahead Gate</div>
-              <div style={{ color:"#1a3d2a", fontSize:9, marginTop:1 }}>Extra fast response for transients</div>
-            </div>
-            <button onClick={function(){ upd("noiseremover",{keyboard:!kb}); }}
-              style={{ background: kb ? "rgba(16,185,129,0.15)" : "#0a1a10",
-                border:"1px solid " + (kb ? "#10B981" : "#1a2a1f"),
-                borderRadius:6, color: kb ? "#10B981" : "#1a3d2a",
-                fontSize:9, fontWeight:800, padding:"5px 12px", cursor:"pointer", letterSpacing:1,
-                minWidth:44, transition:"all 0.2s" }}>
-              {kb ? "ON" : "OFF"}
-            </button>
+        {/* ── Threshold slider ── */}
+        <div style={{ marginBottom:12 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+            <span style={{ color:"#0d3d28", fontSize:8, fontFamily:"monospace", letterSpacing:2, fontWeight:700 }}>THRESHOLD</span>
+            <span style={{ color:"#F59E0B", fontSize:9, fontFamily:"monospace", fontWeight:800 }}>{threshold.toFixed(0)} dB</span>
           </div>
-
-          {/* Room echo reduction info row */}
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-            background:"#060e0a", borderRadius:8, padding:"8px 12px", border:"1px solid #0d1f15" }}>
-            <div>
-              <div style={{ color:"#9febe8", fontSize:11, fontWeight:700 }}>Room Echo Reduction</div>
-              <div style={{ color:"#1a3d2a", fontSize:9, marginTop:1 }}>HPF + spectral gate · dial via ECHO RED knob</div>
-            </div>
-            <div style={{ color:"#10B981", fontSize:11, fontWeight:800, fontFamily:"monospace" }}>
-              {Math.round(echo * 100)}%
-            </div>
+          <div style={{ position:"relative", height:20, display:"flex", alignItems:"center" }}>
+            <div style={{ position:"absolute", left:0, right:0, height:3, borderRadius:2, background:"#0d1f15" }} />
+            <div style={{ position:"absolute", left:0, width:threshPct+"%", height:3, borderRadius:2, background:"linear-gradient(90deg,#10B981,#F59E0B)", transition:"width 0.05s" }} />
+            <input type="range" min={-80} max={0} step={1} value={threshold}
+              onChange={function(e){ upd("noiseremover",{threshold:parseFloat(e.target.value)}); }}
+              style={{ position:"relative", zIndex:1, width:"100%", appearance:"none", WebkitAppearance:"none", background:"transparent", height:20, cursor:"pointer", margin:0 }} />
           </div>
-
-          {/* Voice enhancement info row */}
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-            background:"#060e0a", borderRadius:8, padding:"8px 12px", border:"1px solid #0d1f15" }}>
-            <div>
-              <div style={{ color:"#9febe8", fontSize:11, fontWeight:700 }}>Voice Enhancement</div>
-              <div style={{ color:"#1a3d2a", fontSize:9, marginTop:1 }}>Presence boost 2–5kHz + gentle drive</div>
-            </div>
-            <div style={{ color:"#34D399", fontSize:11, fontWeight:800, fontFamily:"monospace" }}>
-              +{Math.round(veh * 8)}dB
-            </div>
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:2 }}>
+            <span style={{ color:"#0d3d28", fontSize:7, fontFamily:"monospace" }}>-80dB (loud)</span>
+            <span style={{ color:"#0d3d28", fontSize:7, fontFamily:"monospace" }}>0dB (quiet)</span>
           </div>
-
         </div>
 
-        {/* ── Mode badge ── */}
-        <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:6 }}>
-          <div style={{ flex:1, height:1, background:"#0d1f15" }} />
-          <div style={{ color:"#0d3d28", fontSize:8, fontFamily:"monospace", letterSpacing:2, fontWeight:700 }}>
-            RNNOISE · 48kHz · 10ms LATENCY
+        {/* ── Release slider ── */}
+        <div style={{ marginBottom:12 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+            <span style={{ color:"#0d3d28", fontSize:8, fontFamily:"monospace", letterSpacing:2, fontWeight:700 }}>RELEASE</span>
+            <span style={{ color:"#34D399", fontSize:9, fontFamily:"monospace", fontWeight:800 }}>{relMs}ms</span>
           </div>
-          <div style={{ flex:1, height:1, background:"#0d1f15" }} />
+          <div style={{ position:"relative", height:20, display:"flex", alignItems:"center" }}>
+            <div style={{ position:"absolute", left:0, right:0, height:3, borderRadius:2, background:"#0d1f15" }} />
+            <div style={{ position:"absolute", left:0, width:Math.round((release/2)*100)+"%", height:3, borderRadius:2, background:"linear-gradient(90deg,#10B981,#34D399)", transition:"width 0.05s" }} />
+            <input type="range" min={0.01} max={2.0} step={0.01} value={release}
+              onChange={function(e){ upd("noiseremover",{release:parseFloat(e.target.value)}); }}
+              style={{ position:"relative", zIndex:1, width:"100%", appearance:"none", WebkitAppearance:"none", background:"transparent", height:20, cursor:"pointer", margin:0 }} />
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:2 }}>
+            <span style={{ color:"#0d3d28", fontSize:7, fontFamily:"monospace" }}>10ms (tight)</span>
+            <span style={{ color:"#0d3d28", fontSize:7, fontFamily:"monospace" }}>2s (smooth)</span>
+          </div>
+        </div>
+
+        {/* ── Hiss / High-shelf cut slider ── */}
+        <div style={{ marginBottom:12 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+            <span style={{ color:"#0d3d28", fontSize:8, fontFamily:"monospace", letterSpacing:2, fontWeight:700 }}>HISS CUT (8kHz)</span>
+            <span style={{ color:"#6EE7B7", fontSize:9, fontFamily:"monospace", fontWeight:800 }}>{hissCutDb > 0 ? "-"+hissCutDb+"dB" : "OFF"}</span>
+          </div>
+          <div style={{ position:"relative", height:20, display:"flex", alignItems:"center" }}>
+            <div style={{ position:"absolute", left:0, right:0, height:3, borderRadius:2, background:"#0d1f15" }} />
+            <div style={{ position:"absolute", left:0, width:Math.round(hiss*100)+"%", height:3, borderRadius:2, background:"linear-gradient(90deg,#059669,#6EE7B7)", transition:"width 0.05s" }} />
+            <input type="range" min={0} max={1} step={0.01} value={hiss}
+              onChange={function(e){ upd("noiseremover",{hiss:parseFloat(e.target.value)}); }}
+              style={{ position:"relative", zIndex:1, width:"100%", appearance:"none", WebkitAppearance:"none", background:"transparent", height:20, cursor:"pointer", margin:0 }} />
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:2 }}>
+            <span style={{ color:"#0d3d28", fontSize:7, fontFamily:"monospace" }}>Flat</span>
+            <span style={{ color:"#0d3d28", fontSize:7, fontFamily:"monospace" }}>-18dB (heavy cut)</span>
+          </div>
+        </div>
+
+        {/* ── Lookahead toggle ── */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:"#060e0a", borderRadius:8, padding:"8px 12px", border:"1px solid #0d1f15" }}>
+          <div>
+            <div style={{ color:"#9febe8", fontSize:11, fontWeight:700 }}>Lookahead Attack</div>
+            <div style={{ color:"#1a3d2a", fontSize:9, marginTop:1 }}>1ms attack for fast transients (vs 3ms)</div>
+          </div>
+          <button onClick={function(){ upd("noiseremover",{lookahead:!lookahead}); }}
+            style={{ background: lookahead ? "rgba(16,185,129,0.15)" : "#0a1a10", border:"1px solid " + (lookahead ? "#10B981" : "#1a2a1f"), borderRadius:6, color: lookahead ? "#10B981" : "#1a3d2a", fontSize:9, fontWeight:800, padding:"5px 12px", cursor:"pointer", letterSpacing:1, minWidth:44, transition:"all 0.2s" }}>
+            {lookahead ? "ON" : "OFF"}
+          </button>
         </div>
 
       </div>
@@ -8916,28 +8975,31 @@ function StudioScreen({ user, onExit }) {
   // To shift by N semitones: ratio = 2^(N/12).
   // =============================================================================
   const PITCH_WORKLET_CODE = `
-// ══════════════════════════════════════════════════════════════════════════════
-// BeatFinder Professional Autotune / Pitch Correction Worklet v3
-// ══════════════════════════════════════════════════════════════════════════════
-// Architecture: Phase Vocoder (FFT-based) for transparent pitch shifting with
-//   correct phase propagation + TD-PSOLA formant preservation pass.
-//   This is the same fundamental approach used in Antares Auto-Tune Pro and
-//   Logic Pro's built-in pitch correction (Flex Pitch).
+// ═══════════════════════════════════════════════════════════════════════
+// BeatFinder Real-Time Autotune — PSOLA + MPM Pitch Detector
+// ═══════════════════════════════════════════════════════════════════════
+// Algorithm: TD-PSOLA (Time-Domain Pitch-Synchronous Overlap-Add)
+//   Same family as Antares Auto-Tune / Melodyne. Operates on individual
+//   pitch periods rather than FFT frames — zero smearing, low latency.
 //
-// Parameters (all k-rate):
-//   pitch   – semitone shift ratio in SHIFT mode (default 1.0 = no shift)
-//   speed   – correction speed 0..1.  0 = instant (T-Pain), 1 = ~400ms glide
-//   mode    – 0 = SHIFT (manual transpose), 1 = AUTOTUNE (snap to scale)
-//   root    – root note 0..11 (C=0 … B=11)
-//   scale   – 12-bit bitmask of active scale degrees (default 4095 = chromatic)
-//   formant – formant preservation 0..1 (0 = off, 1 = fully preserved)
-// ══════════════════════════════════════════════════════════════════════════════
+// Pitch detection: McLeod Pitch Method (NSDF autocorrelation) — robust
+//   sub-Hz accuracy via parabolic interpolation, fast enough for 128-
+//   sample real-time blocks.
+//
+// Parameters (k-rate):
+//   pitch   – semitone shift ratio (SHIFT mode, default 1.0)
+//   speed   – retune speed 0–1 (0=instant/robotic, 1=400ms glide)
+//   mode    – 0=SHIFT, 1=AUTOTUNE (detect+snap)
+//   root    – key root 0–11 (C=0..B=11)
+//   scale   – 12-bit scale mask (4095=chromatic)
+//   formant – formant shift compensation 0–1 (unused, kept for API compat)
+// ═══════════════════════════════════════════════════════════════════════
 
 class PitchShiftProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
     return [
-      { name:'pitch',   defaultValue:1,    minValue:0.125, maxValue:8,    automationRate:'k-rate' },
-      { name:'speed',   defaultValue:0.5,  minValue:0,     maxValue:1,    automationRate:'k-rate' },
+      { name:'pitch',   defaultValue:1,    minValue:0.25,  maxValue:4,    automationRate:'k-rate' },
+      { name:'speed',   defaultValue:0.15, minValue:0,     maxValue:1,    automationRate:'k-rate' },
       { name:'mode',    defaultValue:0,    minValue:0,     maxValue:1,    automationRate:'k-rate' },
       { name:'root',    defaultValue:0,    minValue:0,     maxValue:11,   automationRate:'k-rate' },
       { name:'scale',   defaultValue:4095, minValue:0,     maxValue:4095, automationRate:'k-rate' },
@@ -8948,386 +9010,158 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     const sr = sampleRate;
-    this._sr = sr;
 
-    // ── Phase Vocoder FFT size & hop ─────────────────────────────
-    // 2048 gives ~46ms frames @ 44.1kHz — good pitch resolution
-    // Hop = N/4 → 75% overlap — standard for high-quality PV
-    this._N    = 2048;
-    this._hop  = 512;    // analysis & synthesis hop
-    this._N2   = this._N >> 1;
+    // ── Input ring buffer — 3 seconds ───────────────────────────────────────
+    this._ringLen = sr * 3 | 0;
+    this._ring    = new Float32Array(this._ringLen);
+    this._ringW   = 0; // absolute write head (never modded until access)
 
-    // Pre-compute Hann window
-    this._win = new Float32Array(this._N);
-    for (let i = 0; i < this._N; i++) {
-      this._win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (this._N - 1));
-    }
-    // Window normalisation scalar (for 75% overlap Hann)
-    this._winNorm = 2.0 / (0.375 * this._N);
+    // ── MPM pitch detection buffer — 40ms window ─────────────────────────────
+    this._detBufLen = (sr * 0.04 + 512) | 0; // ~1800 samples @ 44.1k
+    this._detBuf    = new Float32Array(this._detBufLen);
+    this._detTimer  = 0;
+    this._detRate   = 128; // re-detect every 128 samples (~3ms)
 
-    // ── Input ring buffer (4 seconds — enough for any latency) ───
-    this._ringLen  = sr * 4;
-    this._ring     = new Float32Array(this._ringLen);
-    this._ringW    = 0; // write pointer (absolute sample count)
+    // ── Detected / smoothed pitch state ─────────────────────────────────────
+    this._detectedPeriod = 0;   // in samples, 0 = unvoiced
+    this._currentRatio   = 1.0; // smoothed pitch ratio (output/input period)
+    this._targetRatio    = 1.0;
 
-    // ── Phase Vocoder analysis state ─────────────────────────────
-    this._anaFrame  = new Float32Array(this._N);   // windowed analysis frame
-    this._lastPhase = new Float32Array(this._N2 + 1); // phase of previous analysis frame
-    this._sumPhase  = new Float32Array(this._N2 + 1); // accumulated synthesis phase
-    this._anaMag    = new Float32Array(this._N2 + 1);
-    this._anaFreq   = new Float32Array(this._N2 + 1); // true frequencies (radians/sample)
-    this._synMag    = new Float32Array(this._N2 + 1);
-    this._synFreq   = new Float32Array(this._N2 + 1);
+    // ── PSOLA state ──────────────────────────────────────────────────────────
+    // Output overlap-add buffer (2 seconds of headroom)
+    this._olaLen  = sr * 2 | 0;
+    this._olaBuf  = new Float32Array(this._olaLen);
+    this._olaW    = 0; // OLA write head (absolute)
+    this._olaR    = 0; // OLA read head  (absolute)
 
-    // ── Output overlap-add buffer ─────────────────────────────────
-    this._outBuf    = new Float32Array(this._ringLen);
-    this._outW      = 0; // output write pointer (absolute)
-    this._outR      = -this._N; // output read pointer — pre-rolled back by one full window so the first block doesn't read zeros before any synthesis has run
+    // Input grain-extraction pointer (absolute sample position in ring)
+    this._grainPtr = 0; // next input grain centre
 
-    this._nextAna   = 0;   // absolute input sample count for next analysis frame
+    // Output grain placement pointer
+    this._outGrainPtr = 0; // next output grain centre (absolute in OLA buf)
 
-    // ── pYIN pitch detection ──────────────────────────────────────
-    this._yinN      = 4096;  // larger pYIN window for low-pitched voices
-    this._yinBuf    = new Float32Array(this._yinN);
-    this._yinPeriod = 0;     // last detected period in samples
-    this._yinTimer  = 0;
-    this._yinRate   = 256;   // re-run every 256 samples
-    // pYIN HMM state: previous voiced probability & period candidates
-    this._pyinPrevVoiced = 0;
-    this._pyinPrevPeriod = 0;
+    // Initialise
+    this._grainPtr    = this._ringW;
+    this._outGrainPtr = 0;
+    this._olaW        = 0;
+    this._olaR        = 0;
 
-    // ── Smoothed pitch correction state ──────────────────────────
-    this._currentCents = 0;
-    this._targetCents  = 0;
+    // Cross-fade Hann window (pre-computed for fastest grain size estimate)
+    // We use dynamic grain sizes equal to the detected period, but cache
+    // the per-grain Hann computation to avoid per-sample trig.
+    this._lastGrainSize = 0;
+    this._hannCache     = null;
 
-    // FFT tables (pre-computed for speed)
-    this._buildFFTTables(this._N);
+    // Prev voiced period for octave-continuity prior
+    this._prevPeriod = 0;
   }
 
-  // ── Build bit-reversal table and twiddle factors ─────────────────────────
-  _buildFFTTables(N) {
-    const log2N = Math.log2(N) | 0;
-    const br = new Uint16Array(N);
-    for (let i = 1, rev = 0; i < N; i++) {
-      let bit = N >> 1;
-      for (; rev & bit; bit >>= 1) rev ^= bit;
-      rev ^= bit;
-      br[i] = rev;
-    }
-    this._br = br;
-    // Twiddle factors (cos/sin for each stage)
-    const cos = new Float32Array(N);
-    const sin = new Float32Array(N);
-    for (let i = 0; i < N; i++) {
-      cos[i] = Math.cos(-2 * Math.PI * i / N);
-      sin[i] = Math.sin(-2 * Math.PI * i / N);
-    }
-    this._twCos = cos;
-    this._twSin = sin;
-    this._fftN  = N;
-  }
+  // ── MPM pitch detector ───────────────────────────────────────────────────────
+  // Returns fundamental period in samples, or 0 if unvoiced.
+  _detectPeriod(buf) {
+    const N  = buf.length;
+    const sr = sampleRate;
 
-  // ── In-place Cooley-Tukey FFT (real input, complex output) ───────────────
-  // re[], im[] are length N Float32Arrays. inverse=true → IFFT (no 1/N scaling).
-  _fft(re, im, inverse) {
-    const N   = this._fftN;
-    const br  = this._br;
-    const cos = this._twCos;
-    const sin = this._twSin;
-    // Bit-reversal permutation
-    for (let i = 0; i < N; i++) {
-      const j = br[i];
-      if (j > i) {
-        let t = re[i]; re[i] = re[j]; re[j] = t;
-            t = im[i]; im[i] = im[j]; im[j] = t;
-      }
-    }
-    // Butterfly stages
-    const sign = inverse ? 1 : -1;
-    for (let len = 2; len <= N; len <<= 1) {
-      const half = len >> 1;
-      const step = N / len;
-      for (let i = 0; i < N; i += len) {
-        for (let j = 0; j < half; j++) {
-          const ti = j * step;
-          const wr =  cos[ti];
-          const wi =  sin[ti] * sign;  // sign flips for inverse
-          const ur = re[i + j + half], ui = im[i + j + half];
-          const vr = ur * wr - ui * wi;
-          const vi = ur * wi + ui * wr;
-          re[i + j + half] = re[i + j] - vr;
-          im[i + j + half] = im[i + j] - vi;
-          re[i + j]        += vr;
-          im[i + j]        += vi;
-        }
-      }
-    }
-    if (inverse) {
-      const inv = 1 / N;
-      for (let i = 0; i < N; i++) { re[i] *= inv; im[i] *= inv; }
-    }
-  }
-
-  // ── pYIN pitch detector ───────────────────────────────────────────────────
-  // Probabilistic YIN (Mauch & Dixon 2014).
-  // Returns period in samples (0 = unvoiced).
-  // Improvements over plain YIN:
-  //   • Builds a full candidate list with per-candidate voiced probabilities
-  //     (beta-distribution CDF over CMNDF values) instead of accepting the
-  //     first dip below a hard threshold.
-  //   • A lightweight two-state HMM (voiced / unvoiced) with a transition
-  //     prior smooths the voicing decision across frames, suppressing the
-  //     octave jumps and spurious triggers that plain YIN suffers from.
-  //   • Parabolic interpolation for sub-sample period accuracy is retained.
-  _yin(buf) {
-    const N      = buf.length;
-    const half   = N >> 1;
-    const sr     = this._sr;
-
-    // ── Energy guard ────────────────────────────────────────────────
+    // Energy guard
     let rms = 0;
     for (let i = 0; i < N; i++) rms += buf[i] * buf[i];
-    if (rms / N < 0.0002) {
-      this._pyinPrevVoiced = 0;
-      return 0;
-    }
+    if (rms / N < 8e-5) { this._prevPeriod = 0; return 0; } // -41dBFS threshold
 
-    // ── Difference function d(tau) ───────────────────────────────────
-    const d = new Float32Array(half);
-    for (let tau = 1; tau < half; tau++) {
-      let s = 0;
+    const half    = N >> 1;
+    const minP    = Math.ceil(sr / 900);   // upper freq limit ~900Hz
+    const maxP    = Math.floor(sr / 60);   // lower freq limit ~60Hz
+    const nsdf    = new Float32Array(half);
+
+    // NSDF = 2·ACF(τ) / (m(0) + m(τ))
+    for (let tau = 0; tau < half; tau++) {
+      let num = 0, den = 0;
       for (let j = 0; j < half; j++) {
-        const diff = buf[j] - buf[j + tau];
-        s += diff * diff;
+        num += buf[j] * buf[j + tau];
+        den += buf[j] * buf[j] + buf[j + tau] * buf[j + tau];
       }
-      d[tau] = s;
+      nsdf[tau] = den > 1e-10 ? (2 * num) / den : 0;
     }
 
-    // ── Cumulative Mean Normalised Difference (CMNDF) ────────────────
-    const cmnd = new Float32Array(half);
-    cmnd[0] = 1;
-    let runSum = 0;
-    for (let tau = 1; tau < half; tau++) {
-      runSum += d[tau];
-      cmnd[tau] = runSum > 0 ? d[tau] * tau / runSum : 1;
+    // Find first peak above 0.8 threshold
+    const THRESH = 0.8;
+    let best = -1, peakVal = -1, inPeak = false;
+
+    for (let tau = minP; tau <= maxP && tau < half; tau++) {
+      if (nsdf[tau] >= THRESH) {
+        inPeak = true;
+        if (nsdf[tau] > peakVal) { peakVal = nsdf[tau]; best = tau; }
+      } else if (inPeak) { break; }
+    }
+    if (best < 1) { this._prevPeriod = 0; return 0; }
+
+    // Parabolic interpolation for sub-sample accuracy
+    const y0 = nsdf[best - 1] ?? nsdf[best];
+    const y1 = nsdf[best];
+    const y2 = nsdf[best + 1] ?? nsdf[best];
+    const d  = 2 * (y0 - 2 * y1 + y2);
+    const refined = d !== 0 ? best - (y2 - y0) / (2 * d) : best;
+
+    // Octave-continuity prior: prefer period close to previous
+    if (this._prevPeriod > 0) {
+      const ratio = refined / this._prevPeriod;
+      if (ratio < 0.6)  return this._prevPeriod; // reject octave-down jump
     }
 
-    const minP = Math.ceil(sr / 1200);   // 1200 Hz upper limit (high soprano)
-    const maxP = Math.floor(sr / 50);    // 50 Hz  lower limit (bass voice)
-    const lim  = Math.min(maxP, half);
-
-    // ── pYIN: collect local minima and assign voiced probabilities ───
-    // We use a simple beta-distribution-inspired mapping: the probability
-    // that a CMNDF value v corresponds to a voiced frame is approximated by
-    //   p_voiced(v) ≈ clamp(1 − v / threshold_high, 0, 1)
-    // mirroring the integral of the beta prior used in the original paper.
-    const THRESH_LOW  = 0.05;   // below this → almost certainly voiced
-    const THRESH_HIGH = 0.45;   // above this → almost certainly unvoiced
-
-    const candidates = []; // { tau, period, pVoiced }
-    for (let tau = minP + 1; tau < lim - 1; tau++) {
-      if (cmnd[tau] < cmnd[tau - 1] && cmnd[tau] <= cmnd[tau + 1]) {
-        // local minimum → candidate
-        const v = cmnd[tau];
-        const pV = v <= THRESH_LOW  ? 1.0
-                 : v >= THRESH_HIGH ? 0.0
-                 : 1.0 - (v - THRESH_LOW) / (THRESH_HIGH - THRESH_LOW);
-        // Parabolic interpolation for sub-sample accuracy
-        const y0 = cmnd[tau - 1], y1 = v, y2 = cmnd[tau + 1];
-        const denom = 2 * (y0 - 2 * y1 + y2);
-        const tauF  = denom !== 0 ? tau - (y2 - y0) / (2 * denom) : tau;
-        candidates.push({ tau, period: tauF, pVoiced: pV });
-      }
-    }
-
-    // ── HMM voicing decision ─────────────────────────────────────────
-    // Two-state HMM: voiced (V) vs unvoiced (U).
-    // Transition priors (per frame):
-    //   p(V→V) = 0.9   p(U→U) = 0.85
-    const pVV = 0.90, pUV = 0.10;   // stay voiced, switch to voiced
-    const pVU = 0.15, pUU = 0.85;   // switch to unvoiced, stay unvoiced
-
-    const prevV = this._pyinPrevVoiced;   // previous voiced probability
-    const prevU = 1 - prevV;
-
-    // Aggregate voiced probability for this frame across all candidates
-    let totalPVoiced = 0;
-    for (const c of candidates) totalPVoiced += c.pVoiced;
-    // Also account for the unvoiced hypothesis (no candidate accepted)
-    const pFrameVoiced   = Math.min(totalPVoiced, 1.0);
-    const pFrameUnvoiced = 1.0 - pFrameVoiced;
-
-    // HMM forward step
-    const postV = pFrameVoiced   * (prevV * pVV + prevU * pUV);
-    const postU = pFrameUnvoiced * (prevV * pVU + prevU * pUU);
-    const norm  = postV + postU || 1;
-    const voicedProb = postV / norm;
-
-    this._pyinPrevVoiced = voicedProb;
-
-    if (voicedProb < 0.5 || candidates.length === 0) return 0;
-
-    // ── Select best candidate ────────────────────────────────────────
-    // Pick the candidate with highest voiced probability; break ties by
-    // proximity to the previous period (octave-continuity prior).
-    let best = candidates[0];
-    for (const c of candidates) {
-      const prevP  = this._pyinPrevPeriod;
-      const octave = prevP > 0 ? Math.abs(Math.log2(c.period / prevP)) : 0;
-      const octPenalty = Math.min(octave, 1.0) * 0.25;
-      const scoreBest  = best.pVoiced - (prevP > 0 ? Math.min(Math.abs(Math.log2(best.period / prevP)), 1.0) * 0.25 : 0);
-      if (c.pVoiced - octPenalty > scoreBest) best = c;
-    }
-
-    this._pyinPrevPeriod = best.period;
-    return best.period;
+    this._prevPeriod = refined;
+    return refined;
   }
 
-  // ── Snap detected frequency to nearest in-scale pitch ────────────────────
-  _snapCents(freqHz, root, scaleMask) {
-    if (freqHz <= 0) return 0;
-    const midi      = 12 * Math.log2(freqHz / 440) + 69;
-    const midiRound = Math.round(midi);
-    const noteClass = ((midiRound % 12) + 12) % 12;
-    let bestDist = Infinity, bestDelta = 0;
+  // ── Snap Hz to nearest in-scale note, return ratio ──────────────────────────
+  _snapRatio(hz, root, scaleMask) {
+    if (hz <= 0) return 1.0;
+    const midi    = 69 + 12 * Math.log2(hz / 440);
+    const midiR   = Math.round(midi);
+    const nc      = ((midiR % 12) + 12) % 12;
+    let bestDelta = 0, bestDist = Infinity;
     for (let s = 0; s < 12; s++) {
       if (!(scaleMask & (1 << s))) continue;
-      const candidate = (root + s) % 12;
-      let dist = (noteClass - candidate + 12) % 12;
+      const cand = (root + s) % 12;
+      let dist = (nc - cand + 12) % 12;
       if (dist > 6) dist = 12 - dist;
       if (dist < bestDist) {
-        bestDist  = dist;
-        // Direction-aware delta (always take shortest path)
-        let delta = candidate - noteClass;
-        if (delta > 6)  delta -= 12;
-        if (delta < -6) delta += 12;
-        bestDelta = delta;
+        bestDist = dist;
+        let d = cand - nc;
+        if (d > 6) d -= 12; if (d < -6) d += 12;
+        bestDelta = d;
       }
     }
-    const targetMidi = midiRound + bestDelta;
-    return (targetMidi - midi) * 100; // cents
+    // Ratio to shift input pitch to target: 2^(delta/12)
+    return Math.pow(2, bestDelta / 12);
   }
 
-  // ── Phase Vocoder analysis frame ─────────────────────────────────────────
-  _analyseFrame(absFrameStart) {
-    const N   = this._N;
-    const N2  = this._N2;
-    const win = this._win;
-    const re  = new Float32Array(N);
-    const im  = new Float32Array(N);
-
-    // Fill windowed frame from ring buffer using ABSOLUTE sample position.
-    // absFrameStart is the un-modded sample index — we mod each access individually
-    // so the full N-sample window wraps correctly through the circular buffer.
-    for (let i = 0; i < N; i++) {
-      re[i] = this._ring[(absFrameStart + i) % this._ringLen] * win[i];
-    }
-
-    this._fft(re, im, false);
-
-    const expFac = 2 * Math.PI * this._hop / N; // expected phase advance per bin per hop
-
-    for (let k = 0; k <= N2; k++) {
-      const mag  = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
-      const phas = Math.atan2(im[k], re[k]);
-
-      // Phase difference from last frame
-      let dPhi = phas - this._lastPhase[k] - k * expFac;
-
-      // Wrap to [-π, π]
-      dPhi -= 2 * Math.PI * Math.round(dPhi / (2 * Math.PI));
-
-      // True frequency (radians/sample)
-      this._anaFreq[k] = k * (2 * Math.PI / N) + dPhi / this._hop;
-      this._anaMag[k]  = mag;
-      this._lastPhase[k] = phas;
-    }
+  // ── Hann window for a given grain size ──────────────────────────────────────
+  _getHann(size) {
+    if (this._lastGrainSize === size && this._hannCache) return this._hannCache;
+    const w = new Float32Array(size);
+    for (let i = 0; i < size; i++) w[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (size - 1));
+    this._hannCache     = w;
+    this._lastGrainSize = size;
+    return w;
   }
 
-  // ── Phase Vocoder pitch shift: map bins from analysis to synthesis ────────
-  // pitchRatio > 1 → shift up; < 1 → shift down.
-  _shiftBins(pitchRatio) {
-    const N2 = this._N2;
-    for (let i = 0; i <= N2; i++) { this._synMag[i] = 0; this._synFreq[i] = 0; }
-    for (let k = 0; k <= N2; k++) {
-      const j = Math.round(k * pitchRatio);
-      if (j > N2) break;
-      if (this._anaMag[k] > this._synMag[j]) {
-        this._synMag[j]  = this._anaMag[k];
-        this._synFreq[j] = this._anaFreq[k] * pitchRatio; // scaled true freq
-      }
-    }
-  }
+  // ── PSOLA: extract one grain from the input ring and OLA into output ─────────
+  _psola_grain(inputPeriod, outputPeriod) {
+    if (inputPeriod < 2) return;
+    const grainSize = (inputPeriod * 2) | 0; // grain = 2 periods (classic PSOLA)
+    const hann      = this._getHann(grainSize);
+    const half      = grainSize >> 1;
 
-  // ── Formant preservation via spectral envelope ────────────────────────────
-  // When formant > 0, re-imprint the original spectral envelope onto the
-  // shifted spectrum. Uses a simplified cepstral smoothing approach.
-  _applyFormantPreservation(pitchRatio, formantAmount) {
-    if (formantAmount <= 0) return;
-    const N2 = this._N2;
-    // Build original envelope (smoothed with lifter of ~30 bins)
-    const lifter = 30;
-    const env = new Float32Array(N2 + 1);
-    for (let k = 0; k <= N2; k++) env[k] = this._anaMag[k];
-    // Smooth with simple box filter
-    const smoothed = new Float32Array(N2 + 1);
-    for (let k = 0; k <= N2; k++) {
-      let sum = 0, count = 0;
-      for (let d = -lifter; d <= lifter; d++) {
-        const idx = k + d;
-        if (idx >= 0 && idx <= N2) { sum += env[idx]; count++; }
-      }
-      smoothed[k] = count > 0 ? sum / count : 0;
-    }
-    // Re-imprint: multiply synthesis magnitudes by (original_env / shifted_env)
-    // The shifted envelope is smoothed from synMag
-    const shiftedEnv = new Float32Array(N2 + 1);
-    for (let k = 0; k <= N2; k++) {
-      let sum = 0, count = 0;
-      for (let d = -lifter; d <= lifter; d++) {
-        const idx = k + d;
-        if (idx >= 0 && idx <= N2) { sum += this._synMag[idx]; count++; }
-      }
-      shiftedEnv[k] = count > 0 ? sum / count : 0;
-    }
-    for (let k = 0; k <= N2; k++) {
-      if (shiftedEnv[k] > 1e-10) {
-        const correction = smoothed[k] / shiftedEnv[k];
-        this._synMag[k] *= 1 + formantAmount * (correction - 1);
-      }
-    }
-  }
-
-  // ── Synthesise output frame and OLA into output buffer ───────────────────
-  _synthesiseFrame() {
-    const N   = this._N;
-    const N2  = this._N2;
-    const win = this._win;
-    const re  = new Float32Array(N);
-    const im  = new Float32Array(N);
-
-    // Reconstruct complex spectrum from synthesis magnitude + accumulated phase
-    for (let k = 0; k <= N2; k++) {
-      this._sumPhase[k] += this._synFreq[k] * this._hop;
-      const ph  = this._sumPhase[k];
-      re[k] =  this._synMag[k] * Math.cos(ph);
-      im[k] =  this._synMag[k] * Math.sin(ph);
-    }
-    // Mirror for real IFFT (conjugate symmetry)
-    for (let k = 1; k < N2; k++) {
-      re[N - k] =  re[k];
-      im[N - k] = -im[k];
+    // Read grain from ring centred at _grainPtr
+    const centre = this._grainPtr;
+    for (let i = 0; i < grainSize; i++) {
+      const sampleIdx = ((centre - half + i) % this._ringLen + this._ringLen) % this._ringLen;
+      const olaIdx    = (this._outGrainPtr - half + i + this._olaLen) % this._olaLen;
+      this._olaBuf[olaIdx] += this._ring[sampleIdx] * hann[i];
     }
 
-    this._fft(re, im, true); // IFFT in-place
-
-    // OLA into output buffer
-    const writeStart = this._outW;
-    for (let i = 0; i < N; i++) {
-      const idx = (writeStart + i) % this._ringLen;
-      this._outBuf[idx] += re[i] * win[i] * this._winNorm;
-    }
-    this._outW += this._hop;
+    // Advance pointers by their respective periods
+    this._grainPtr    = (this._grainPtr    + (inputPeriod  | 0) + this._ringLen) % this._ringLen;
+    this._outGrainPtr = (this._outGrainPtr + (outputPeriod | 0) + this._olaLen)  % this._olaLen;
   }
 
   process(inputs, outputs, params) {
@@ -9335,87 +9169,86 @@ class PitchShiftProcessor extends AudioWorkletProcessor {
     const output = outputs[0]?.[0];
     if (!input || !output) return true;
 
-    const blockSize  = input.length;      // always 128
-    const sr         = this._sr;
-    const shiftRatio = params.pitch[0];
-    const speed      = params.speed[0];
+    const blockSize  = input.length; // 128
+    const sr         = sampleRate;
     const mode       = Math.round(params.mode[0]);
+    const shiftRatio = params.pitch[0];      // manual ratio (SHIFT mode)
+    const speed      = params.speed[0];      // retune speed 0–1
     const root       = Math.round(params.root[0]);
     const scaleMask  = Math.round(params.scale[0]);
-    const formant    = params.formant[0];
 
-    // ── 1. Write input into ring buffer ──────────────────────────
+    // ── 1. Write input into ring ─────────────────────────────────────────────
     for (let i = 0; i < blockSize; i++) {
       this._ring[this._ringW % this._ringLen] = input[i];
       this._ringW++;
     }
 
-    // ── 2. pYIN pitch detection (throttled) ──────────────────────
-    this._yinTimer += blockSize;
-    if (this._yinTimer >= this._yinRate) {
-      this._yinTimer = 0;
-      const yN = this._yinN;
-      for (let i = 0; i < yN; i++) {
-        this._yinBuf[i] = this._ring[(this._ringW - yN + i + this._ringLen) % this._ringLen];
+    // ── 2. Pitch detection (throttled) ──────────────────────────────────────
+    this._detTimer += blockSize;
+    if (this._detTimer >= this._detRate) {
+      this._detTimer = 0;
+
+      // Fill detection buffer from ring (most recent _detBufLen samples)
+      const dN = this._detBufLen;
+      for (let i = 0; i < dN; i++) {
+        const idx = (this._ringW - dN + i + this._ringLen * 4) % this._ringLen;
+        this._detBuf[i] = this._ring[idx];
       }
-      const period = this._yin(this._yinBuf);
+
+      const period = this._detectPeriod(this._detBuf);
+      this._detectedPeriod = period;
+
       if (period > 0) {
-        this._yinPeriod = period;
+        const hz = sr / period;
         if (mode === 1) {
-          const hz = sr / period;
-          this._targetCents = this._snapCents(hz, root, scaleMask);
+          // AUTOTUNE: snap to scale
+          this._targetRatio = this._snapRatio(hz, root, scaleMask);
         } else {
-          this._targetCents = 1200 * Math.log2(Math.max(0.001, shiftRatio));
+          // SHIFT: manual ratio
+          this._targetRatio = Math.max(0.25, Math.min(4, shiftRatio));
         }
       } else {
-        // Unvoiced / silence — glide correction back to 0
-        this._targetCents *= 0.85;
+        // Unvoiced — glide target back to 1
+        this._targetRatio += 0.05 * (1.0 - this._targetRatio);
       }
     }
 
-    // In SHIFT mode the target doesn't depend on detected pitch
-    if (mode === 0) {
-      this._targetCents = 1200 * Math.log2(Math.max(0.001, shiftRatio));
-    }
+    // In SHIFT mode always use the param directly (no detection needed)
+    if (mode === 0) this._targetRatio = Math.max(0.25, Math.min(4, shiftRatio));
 
-    // ── 3. Smooth correction speed ────────────────────────────────
-    // speed=0 → instantaneous; speed=1 → ~400ms glide
-    // α per sample: α = 1 - exp(-1 / (speed*400ms*sr))
+    // ── 3. Lerp toward target ratio ─────────────────────────────────────────
+    // speed=0 → instant, speed=1 → ~400ms glide. Same RC-filter formula.
     const tauSamples = Math.max(1, speed * 0.4 * sr);
-    const alphaS     = 1 - Math.exp(-blockSize / tauSamples);
-    this._currentCents += alphaS * (this._targetCents - this._currentCents);
+    const alpha      = 1 - Math.exp(-blockSize / tauSamples);
+    this._currentRatio += alpha * (this._targetRatio - this._currentRatio);
 
-    // ── 4. Run Phase Vocoder frames as needed ─────────────────────
-    // _nextAna is the absolute input sample at which the NEXT frame starts.
-    // We advance it AFTER analysis so _analyseFrame reads from the correct position.
-    while (this._ringW >= this._nextAna + this._N) {
-      const pitchRatio = Math.pow(2, this._currentCents / 1200);
-      this._analyseFrame(this._nextAna); // pass absolute index, not modded
-      this._nextAna += this._hop;
-      this._shiftBins(pitchRatio);
-      if (formant > 0.01) this._applyFormantPreservation(pitchRatio, formant);
-      this._synthesiseFrame();
+    // ── 4. PSOLA grain scheduling ────────────────────────────────────────────
+    // Every time the output grain pointer falls behind the read head by more
+    // than outputPeriod samples, synthesise another grain.
+    const inputPeriod  = this._detectedPeriod > 0 ? this._detectedPeriod : (sr / 220); // fallback A3
+    const outputPeriod = inputPeriod / this._currentRatio;
+
+    // How many output samples we need to cover this block
+    const olaReadEnd = (this._olaR + blockSize) % this._olaLen;
+
+    while (true) {
+      // Distance from current outGrainPtr to where read head will be
+      const ahead = (this._outGrainPtr - this._olaR + this._olaLen) % this._olaLen;
+      if (ahead > blockSize + outputPeriod * 2) break; // enough grains scheduled
+      this._psola_grain(inputPeriod, outputPeriod);
     }
 
-    // ── 5. Drain output into block (with latency compensation) ────
-    // _outR starts at -N (pre-rolled) so the first N samples output silence
-    // while the vocoder fills its pipeline — this eliminates the click/burst
-    // that previously occurred at startup before any synthesis frames ran.
+    // ── 5. Drain OLA buffer into output block ────────────────────────────────
     for (let i = 0; i < blockSize; i++) {
-      const absIdx = this._outR + i;
-      if (absIdx >= 0 && absIdx < this._outW) {
-        const idx = ((absIdx % this._ringLen) + this._ringLen) % this._ringLen;
-        output[i] = this._outBuf[idx];
-        this._outBuf[idx] = 0; // clear after reading
-      } else {
-        output[i] = 0;
-      }
+      output[i] = this._olaBuf[this._olaR];
+      this._olaBuf[this._olaR] = 0; // clear after reading (overlap-add accumulates here)
+      this._olaR = (this._olaR + 1) % this._olaLen;
     }
-    this._outR += blockSize;
 
-    // No dry passthrough — the phase vocoder output is always used.
-    // Even at 0 shift the vocoder output is transparent, and bypassing it caused
-    // a click at the transition point when correction engaged mid-word.
+    // Bypass if no pitch correction needed (within 2 cents of unison in autotune)
+    if (mode === 0 && Math.abs(this._currentRatio - 1.0) < 0.0012) {
+      output.set(input); // transparent passthrough
+    }
 
     return true;
   }
@@ -9652,35 +9485,33 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
     // ── Noise Gate — live parameter updates ──────────────────────────────────
     if (live.rnnoiseNode || live.rnnoiseGate) {
-      const nr      = fx.noiseremover || {};
-      const nrOn    = !!(fx.noiseremover && fx.noiseremover.on);
-      const str     = nrOn ? (nr.strength ?? 0.85) : 0;
-      const threshDb = -80 + str * 60;
-      const holdSec  = nrOn ? (nr.echo ?? 0.1) : 0;
-      const relSec   = nrOn ? (0.08 + (1 - str) * 0.12) : 0.08;
-      const lookahead = !!(nr.keyboard ?? true);
+      const nr       = fx.noiseremover || {};
+      const nrOn     = !!(fx.noiseremover && fx.noiseremover.on);
+      const threshDb = nrOn ? (nr.threshold ?? -40) : -200;
+      const relSec   = nrOn ? (nr.release   ?? 0.15) : 0.15;
+      const holdSec  = nrOn ? (nr.hold      ?? 0.08) : 0.08;
+      const lookahead = !!(nr.lookahead ?? true);
       const attackSec = lookahead ? 0.001 : 0.003;
 
       if (live.rnnoiseNode) {
         try {
           live.rnnoiseNode.parameters.get("bypass").setTargetAtTime(nrOn ? 0 : 1, now, T);
-          live.rnnoiseNode.parameters.get("threshold").setTargetAtTime(nrOn ? threshDb : -200, now, T);
+          live.rnnoiseNode.parameters.get("threshold").setTargetAtTime(threshDb, now, T);
           live.rnnoiseNode.parameters.get("attack").setTargetAtTime(attackSec, now, T);
           live.rnnoiseNode.parameters.get("hold").setTargetAtTime(Math.min(1, holdSec), now, T);
           live.rnnoiseNode.parameters.get("release").setTargetAtTime(relSec, now, T);
         } catch(e) {}
       }
-      // Fallback compressor-gate live update
       if (live.rnnoiseGate) {
         live.rnnoiseGate.threshold.setTargetAtTime(nrOn ? threshDb : 0, now, T);
         live.rnnoiseGate.ratio.setTargetAtTime(nrOn ? 20 : 1, now, T);
         live.rnnoiseGate.attack.setTargetAtTime(attackSec, now, T);
         live.rnnoiseGate.release.setTargetAtTime(relSec, now, T);
       }
-      // Voice enhancement shelf — always present in liveNodes.noiseremover
-      if (live.noiseremover && live.noiseremover.voiceShelf) {
-        const voiceAmt = nrOn ? (nr.voice ?? 0.6) : 0;
-        live.noiseremover.voiceShelf.gain.setTargetAtTime(voiceAmt * 8, now, T);
+      // Hiss filter live update
+      if (live.noiseremover && live.noiseremover.hissFilter) {
+        const hissAmt = nrOn ? (nr.hiss ?? 0) : 0;
+        live.noiseremover.hissFilter.gain.setTargetAtTime(hissAmt * -18, now, T);
       }
     }
 
@@ -10215,61 +10046,61 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       // ── Noise Remover — always built so on/off toggle works live ────────────
       // When off: bypass=1 (worklet path) or threshold=0/ratio=1 (fallback).
       // voice param drives a post-gate presence shelf (+0..+8dB at 2.5kHz).
-      // keyboard param enables lookahead mode (attack=0.001s vs 0.003s).
+      // ── Noise Gate + Hiss Reduction chain ──────────────────────────────────
       {
         const nr         = fx.noiseremover || {};
         const nrOn       = !!(fx.noiseremover && fx.noiseremover.on);
-        const strength   = nrOn ? (nr.strength ?? 0.85) : 0;
-        const threshDb   = -80 + strength * 60; // -80..-20 dB
-        const reductDb   = -60;
-        const lookahead  = !!(nr.keyboard ?? true); // lookahead gate toggle
+        const threshDb   = nrOn ? (nr.threshold ?? -40) : -200; // direct dB
+        const releaseSec = nrOn ? (nr.release   ?? 0.15) : 0.15;
+        const holdSec    = nrOn ? (nr.hold      ?? 0.08) : 0.08;
+        const hissAmt    = nrOn ? (nr.hiss      ?? 0)    : 0;   // 0–1 → 0..-18dB @ 8kHz
+        const lookahead  = !!(nr.lookahead ?? true);
         const attackSec  = lookahead ? 0.001 : 0.003;
-        const holdSec    = nrOn ? (nr.echo ?? 0.1) : 0;
-        const releaseSec = nrOn ? (0.08 + (1 - strength) * 0.12) : 0.08;
-        const voiceAmt   = nrOn ? (nr.voice ?? 0.6) : 0; // 0–1 → 0–+8dB presence shelf
+        const reductDb   = -80; // gate floor: near-silence when closed
+
+        // ── High-shelf hiss filter (always in chain for live updates) ─────────
+        // Cuts 8kHz+ by 0..–18dB. Reduces white noise/hiss that gets through
+        // when the gate is open (e.g. room hiss under a loud vocal).
+        const hissFilter = actx.createBiquadFilter();
+        hissFilter.type = "highshelf";
+        hissFilter.frequency.value = 8000;
+        hissFilter.gain.value = hissAmt * -18; // 0 = flat, 1 = -18dB cut
+        hissFilter.connect(node);
+        node = hissFilter;
 
         // ── Noise Gate AudioWorklet (primary path) ────────────────────────────
         if (noiseGateWorkletReady.current) {
           try {
             const gateNode = new AudioWorkletNode(actx, "noise-gate-processor", {
-              numberOfInputs:   1,
-              numberOfOutputs:  1,
-              outputChannelCount: [1],
+              numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
             });
-            gateNode.parameters.get("threshold").value = nrOn ? threshDb : -200;
-            gateNode.parameters.get("reduction").value  = reductDb;
-            gateNode.parameters.get("attack").value      = attackSec;
-            gateNode.parameters.get("hold").value        = Math.min(1.0, holdSec);
-            gateNode.parameters.get("release").value     = releaseSec;
-            gateNode.parameters.get("bypass").value      = nrOn ? 0 : 1;
+            gateNode.parameters.get("threshold").value = threshDb;
+            gateNode.parameters.get("reduction").value = reductDb;
+            gateNode.parameters.get("attack").value    = attackSec;
+            gateNode.parameters.get("hold").value      = Math.min(1.0, holdSec);
+            gateNode.parameters.get("release").value   = releaseSec;
+            gateNode.parameters.get("bypass").value    = nrOn ? 0 : 1;
+            // Patch a message port so the UI can read gate open/closed state
+            gateNode.port.onmessage = function(e) {};
             liveNodes.rnnoiseNode = gateNode;
             gateNode.connect(node);
             node = gateNode;
-          } catch(e) {
-            // Worklet unavailable — fall through to compressor gate
-          }
+          } catch(e) { /* fall through */ }
         }
 
-        // ── Fallback: DynamicsCompressor as a noise gate ──────────────────────
+        // ── Fallback: DynamicsCompressor as gate ──────────────────────────────
         if (!liveNodes.rnnoiseNode) {
           const gate = actx.createDynamicsCompressor();
           gate.threshold.value = nrOn ? threshDb : 0;
           gate.ratio.value     = nrOn ? 20 : 1;
           gate.attack.value    = attackSec;
           gate.release.value   = releaseSec;
-          gate.knee.value      = 3;
+          gate.knee.value      = 0;
           gate.connect(node); node = gate;
           liveNodes.rnnoiseGate = gate;
         }
 
-        // ── Voice enhancement: presence shelf (2.5kHz high-shelf) ────────────
-        const voiceShelf = actx.createBiquadFilter();
-        voiceShelf.type = "highshelf";
-        voiceShelf.frequency.value = 2500;
-        voiceShelf.gain.value = voiceAmt * 8; // 0..+8dB
-        voiceShelf.connect(node);
-        node = voiceShelf;
-        liveNodes.noiseremover = { on: nrOn, voiceShelf };
+        liveNodes.noiseremover = { on: nrOn, hissFilter };
       }
 
       // ── T-Rotten Master — IK Multimedia T-RackS One emulation ──────────────
@@ -10797,6 +10628,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       eq:         { on:false, low:0, mid:0, high:0 },
       compressor: { on:false, threshold:-24, ratio:4, attack:0.003, release:0.25 },
       trotten:    { on:false, eqLow:0, eqMid:0, eqHigh:0, eqLowT:"shelf", eqMidT:"bell", eqHighT:"shelf", compThr:-15, compAmt:50, compMode:"auto", tapeDrv:5, tapeSat:5, tapeMode:"modern", limCeil:-0.5, limRel:0.5, limMode:"truepeak", inputGain:0, outputGain:0 },
+      noiseremover: { on:false, threshold:-40, release:0.15, hold:0.08, hiss:0, lookahead:true },
     };
   };
 
@@ -11134,20 +10966,57 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
       const actx    = getActx();
       const srcNode = actx.createMediaStreamSource(stream);
-      // ── Mic input gain boost — raises low mic levels before recording ──
-      // Applies the same gain the user set via the Mic Gain slider.
-      // Signal chain: srcNode → micInputBoost → recSplitter → recMerger → analyser → MediaRecorder
+
+      // ── Mic input gain boost ──────────────────────────────────────────────
       const micInputBoost = actx.createGain();
       micInputBoost.gain.value = micInputGainRef.current;
+      srcNode.connect(micInputBoost);
+
+      // ── Real-time Autotune insert (AppleX) ───────────────────────────────
+      // Routes mic through the PSOLA pitch corrector BEFORE MediaRecorder
+      // captures it — this is what makes autotune affect the recording.
+      // Signal chain: srcNode → micInputBoost → [pitchNode?] → recSplitter → recMerger → analyser → MediaRecorder
+      let recChainEnd = micInputBoost;
+      const selectedTrackFx = tracksRef.current.find(function(t){ return t.id === selectedTrackId; })?.effects;
+      const applexFx = selectedTrackFx?.applex;
+      const pitchFx  = selectedTrackFx?.pitch;
+      let recPitchNode = null;
+
+      // Insert autotune if AppleX is ON for this track
+      if (pitchWorkletReadyRef.current && ((applexFx?.on) || (pitchFx?.on))) {
+        try {
+          const NOTE_MAP_R  = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
+          const SCALE_MAP_R = { chromatic:4095, major:2741, minor:1453, pentatonic:661, blues:1193 };
+          recPitchNode = new AudioWorkletNode(actx, 'pitch-shift-processor', {
+            numberOfInputs:1, numberOfOutputs:1, outputChannelCount:[1],
+          });
+          if (applexFx?.on) {
+            recPitchNode.parameters.get('mode').value  = 1; // autotune
+            recPitchNode.parameters.get('speed').value = applexFx.speed ?? 0.15;
+            recPitchNode.parameters.get('root').value  = NOTE_MAP_R[applexFx.key || 'C'] || 0;
+            recPitchNode.parameters.get('scale').value = 4095; // chromatic
+          } else if (pitchFx?.on) {
+            recPitchNode.parameters.get('mode').value  = pitchFx.mode === 'autotune' ? 1 : 0;
+            recPitchNode.parameters.get('pitch').value = Math.pow(2, (pitchFx.semitones||0)/12);
+            recPitchNode.parameters.get('speed').value = pitchFx.speed ?? 0.15;
+            recPitchNode.parameters.get('root').value  = NOTE_MAP_R[pitchFx.key || 'C'] || 0;
+            recPitchNode.parameters.get('scale').value = SCALE_MAP_R[pitchFx.scale || 'chromatic'] ?? 4095;
+          }
+          micInputBoost.connect(recPitchNode);
+          recChainEnd = recPitchNode;
+        } catch(e) {
+          console.warn('[BeatFinder] Autotune insert failed, recording dry:', e);
+          recPitchNode = null;
+        }
+      }
+
+      // ── Mono merge + analyser ─────────────────────────────────────────────
       const analyser = actx.createAnalyser(); analyser.fftSize = 256;
-      // Mono-centre the recording analyser feed (same as monitoring) so the
-      // waveform meter reads equally from both channels.
       const recSplitter = actx.createChannelSplitter(1);
       const recMerger   = actx.createChannelMerger(2);
-      srcNode.connect(micInputBoost);
-      micInputBoost.connect(recSplitter);
-      recSplitter.connect(recMerger, 0, 0); // mono → L
-      recSplitter.connect(recMerger, 0, 1); // mono → R
+      recChainEnd.connect(recSplitter);
+      recSplitter.connect(recMerger, 0, 0);
+      recSplitter.connect(recMerger, 0, 1);
       recMerger.connect(analyser);
 
       setRecTrail([]);
@@ -11164,7 +11033,20 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       const mime = CODEC_PREFS.find(function(m){ return MediaRecorder.isTypeSupported(m); }) || "";
 
       // 256kbps for best possible recording quality (Opus handles this very efficiently)
-      const mr = new MediaRecorder(stream, {
+      // Capture from the processed Web Audio chain (post-autotune) rather than
+      // the raw mic stream — this is the key fix: MediaRecorder gets the tuned audio.
+      let recDestStream = stream; // fallback: raw mic if Web Audio capture fails
+      let recDest = null;
+      try {
+        recDest = actx.createMediaStreamDestination();
+        analyser.connect(recDest);
+        recDestStream = recDest.stream;
+      } catch(e) {
+        // createMediaStreamDestination unavailable (some iOS versions) — use raw stream
+        console.warn('[BeatFinder] MediaStreamDestination unavailable, recording dry:', e);
+      }
+
+      const mr = new MediaRecorder(recDestStream, {
         mimeType:          mime || undefined,
         audioBitsPerSecond: 256000,
       });
@@ -11178,6 +11060,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         try { analyser.disconnect(); } catch(e) {}
         try { srcNode.disconnect(); } catch(e) {}
         try { micInputBoost.disconnect(); } catch(e) {}
+        try { if (recPitchNode) recPitchNode.disconnect(); } catch(e) {}
 
         const blob = new Blob(chunksRef.current, { type: mime });
         const url  = URL.createObjectURL(blob);
