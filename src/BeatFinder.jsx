@@ -5284,8 +5284,8 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               try {
                 const fd = new FormData();
                 fd.append("file", file);
-                const token = localStorage.getItem("bf_token") || "";
-                const res = await fetch("/api/auth/avatar", {
+                const token = getToken() || "";
+                const res = await fetch(API_BASE + "/api/auth/avatar", {
                   method: "POST",
                   headers: { Authorization: "Bearer " + token },
                   body: fd,
