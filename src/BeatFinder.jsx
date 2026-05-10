@@ -3446,170 +3446,282 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
 // SEARCH SCREEN
 // =============================================================================
 function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial }) {
-  const [input,   setInput]   = useState("");
-  const [active,  setActive]  = useState(null);
+  var [input, setInput] = useState("");
+  var [active, setActive] = useState(null);
+  var [searchTab, setSearchTab] = useState("beats");
+  var [peopleQuery, setPeopleQuery] = useState("");
+  var [peopleResults, setPeopleResults] = useState([]);
+  var [peopleLoading, setPeopleLoading] = useState(false);
+  var [viewingProfile, setViewingProfile] = useState(null);
+  var [recents, setRecents] = useState(function() {
+    try { return JSON.parse(localStorage.getItem("bf_recents") || "[]"); } catch(e) { return []; }
+  });
 
-  useEffect(() => {
+  useEffect(function() {
     if (initialQuery) {
       setInput(initialQuery);
       setActive(initialQuery);
       if (onClearInitial) onClearInitial();
     }
   }, [initialQuery]);
-  const [recents, setRecents] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("bf_recents") || "[]"); } catch { return []; }
-  });
 
-  const doSearch = (term) => {
-    const q = (term || input).trim();
+  function searchPeople(q) {
+    if (!q.trim()) { setPeopleResults([]); return; }
+    setPeopleLoading(true);
+    apiFetch("/api/auth/search?q=" + encodeURIComponent(q.trim()))
+      .then(function(r) { setPeopleResults(r || []); setPeopleLoading(false); })
+      .catch(function() { setPeopleResults([]); setPeopleLoading(false); });
+  }
+
+  function doSearch(term) {
+    var q = (term || input).trim();
     if (!q) return;
     setActive(q);
     setInput(q);
-    // Save to recents
-    setRecents(prev => {
-      const next = [q, ...prev.filter(r => r.toLowerCase() !== q.toLowerCase())].slice(0, 6);
-      try { localStorage.setItem("bf_recents", JSON.stringify(next)); } catch {}
+    setRecents(function(prev) {
+      var next = [q].concat(prev.filter(function(r) { return r.toLowerCase() !== q.toLowerCase(); })).slice(0, 6);
+      try { localStorage.setItem("bf_recents", JSON.stringify(next)); } catch(e) {}
       return next;
     });
-  };
+  }
 
-  const clearRecents = () => {
+  function clearRecents() {
     setRecents([]);
-    try { localStorage.removeItem("bf_recents"); } catch {}
-  };
+    try { localStorage.removeItem("bf_recents"); } catch(e) {}
+  }
 
-  const POPULAR = [
-    "Drake", "Travis Scott", "Lil Baby", "Central Cee",
-    "Afrobeat", "UK Drill", "Melodic Trap", "Polo G",
-  ];
-
-  const GENRES = [
-    { label: "Rap",      q: "Rap Type Beat" },
-    { label: "Drill",    q: "UK Drill Type Beat" },
-    { label: "R&B",      q: "R&B Type Beat" },
+  var POPULAR = ["Drake", "Travis Scott", "Lil Baby", "Central Cee", "Afrobeat", "UK Drill", "Melodic Trap", "Polo G"];
+  var GENRES = [
+    { label: "Rap", q: "Rap Type Beat" },
+    { label: "Drill", q: "UK Drill Type Beat" },
+    { label: "R&B", q: "R&B Type Beat" },
     { label: "Afrobeat", q: "Afrobeat Type Beat" },
-    { label: "Melodic",  q: "Melodic Type Beat" },
-    { label: "Trap",     q: "Trap Type Beat" },
-    { label: "Dancehall",q: "Dancehall Riddim" },
-    { label: "Sad",      q: "Sad Type Beat" },
+    { label: "Melodic", q: "Melodic Type Beat" },
+    { label: "Trap", q: "Trap Type Beat" },
+    { label: "Dancehall", q: "Dancehall Riddim" },
+    { label: "Sad", q: "Sad Type Beat" },
   ];
 
-  const Chip = ({ label, onPress, color }) => (
-    <button onClick={onPress} style={{
-      flexShrink: 0, padding: "7px 14px", borderRadius: 20, cursor: "pointer",
-      border: "1.5px solid " + (color || "#2a2a2a"),
-      background: color ? "rgba(192,38,211,0.1)" : "#111",
-      color: color || "#888", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap",
-    }}>
-      {label}
-    </button>
-  );
+  function Chip({ label, onPress, color }) {
+    return (
+      <button onClick={onPress} style={{
+        flexShrink: 0, padding: "7px 14px", borderRadius: 20, cursor: "pointer",
+        border: "1.5px solid " + (color || "#2a2a2a"),
+        background: color ? "rgba(192,38,211,0.1)" : "#111",
+        color: color || "#888", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap",
+      }}>
+        {label}
+      </button>
+    );
+  }
+
+  if (viewingProfile) {
+    return (
+      <div style={{ paddingBottom: 100 }}>
+        <button onClick={function() { setViewingProfile(null); }}
+          style={{ background: "none", border: "none", color: "#C026D3", fontWeight: 700,
+            fontSize: 14, cursor: "pointer", padding: "16px 16px 0",
+            display: "flex", alignItems: "center", gap: 6 }}>
+          &#8592; Back to Search
+        </button>
+        <PublicProfileScreen
+          username={viewingProfile}
+          onBack={function() { setViewingProfile(null); }}
+          onPlay={onPlay} savedIds={savedIds} onSave={onSave} currentUser={null} />
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: "0 16px 100px" }}>
       <div style={{ padding: "20px 0 10px" }}>
-        <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, display:"flex", alignItems:"center", gap:10 }}><AppIcon id="search" size={26} />Discover Beats
+        <div style={{ color: "white", fontSize: 28, fontWeight: 800,
+          fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1,
+          display: "flex", alignItems: "center", gap: 10 }}>
+          <AppIcon id="search" size={26} />Search
         </div>
-        <div style={{ color: "#888", fontSize: 13, marginBottom: 14 }}>Search any artist, genre or vibe</div>
 
-        <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-          <div style={{ flex: 1, background: "#1a1a1a", borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, border: "1px solid #333" }}>
-        <span style={{ color: "#555" }}><AppIcon id="search" size={20}/></span>
-            <input
-              value={input} onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && doSearch()}
-              placeholder="e.g. Drake, Central Cee, UK drill..."
-              style={{ background: "none", border: "none", outline: "none", color: "white", fontSize: 15, flex: 1 }}
-            />
-            {input.length > 0 && (
-              <button onClick={() => { setInput(""); setActive(null); }} style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer", padding: 0, lineHeight: 1 }}>
-                &#10005;
+        <div style={{ display: "flex", gap: 0, marginBottom: 16,
+          background: "#111", borderRadius: 12, padding: 4 }}>
+          {[{ id: "beats", label: "Beats" }, { id: "people", label: "People" }].map(function(t) {
+            return (
+              <button key={t.id} onClick={function() { setSearchTab(t.id); }}
+                style={{ flex: 1, padding: "9px 0", borderRadius: 9, fontWeight: 700,
+                  fontSize: 14, cursor: "pointer", border: "none",
+                  background: searchTab === t.id ? "#C026D3" : "transparent",
+                  color: searchTab === t.id ? "white" : "#555" }}>
+                {t.label}
               </button>
+            );
+          })}
+        </div>
+
+        {searchTab === "people" && (
+          <div>
+            <div style={{ background: "#1a1a1a", borderRadius: 12, padding: "10px 14px",
+              display: "flex", alignItems: "center", gap: 10,
+              border: "1px solid #333", marginBottom: 16 }}>
+              <span style={{ color: "#555" }}><AppIcon id="search" size={20} /></span>
+              <input
+                value={peopleQuery}
+                onChange={function(e) { setPeopleQuery(e.target.value); searchPeople(e.target.value); }}
+                placeholder="Search by username or name..."
+                style={{ background: "none", border: "none", outline: "none",
+                  color: "white", fontSize: 15, flex: 1 }}
+              />
+              {peopleQuery.length > 0 && (
+                <button onClick={function() { setPeopleQuery(""); setPeopleResults([]); }}
+                  style={{ background: "none", border: "none", color: "#555",
+                    fontSize: 18, cursor: "pointer", padding: 0 }}>
+                  &#10005;
+                </button>
+              )}
+            </div>
+
+            {peopleLoading && (
+              <div style={{ textAlign: "center", padding: "30px 0", color: "#555", fontSize: 14 }}>
+                Searching...
+              </div>
+            )}
+
+            {!peopleLoading && peopleResults.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {peopleResults.map(function(u) {
+                  return (
+                    <button key={u.username}
+                      onClick={function() { setViewingProfile(u.username); }}
+                      style={{ background: "none", border: "none", borderBottom: "1px solid #111",
+                        padding: "12px 0", cursor: "pointer", textAlign: "left",
+                        display: "flex", alignItems: "center", gap: 14, width: "100%" }}>
+                      <div style={{ width: 48, height: 48, borderRadius: "50%", flexShrink: 0,
+                        background: "linear-gradient(135deg,#6B21A8,#C026D3)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        color: "white", fontWeight: 800, fontSize: 18, overflow: "hidden" }}>
+                        {u.avatarUrl
+                          ? <img src={u.avatarUrl} alt={u.username} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          : (u.username || u.name || "?")[0].toUpperCase()}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{u.username || u.name}</span>
+                          {u.plan === "producer" && <VerifiedBadge size={14} />}
+                        </div>
+                        <div style={{ color: "#555", fontSize: 13, marginTop: 1 }}>{u.name}</div>
+                      </div>
+                      <span style={{ color: "#333", fontSize: 20 }}>&#8250;</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {!peopleLoading && peopleQuery && peopleResults.length === 0 && (
+              <div style={{ textAlign: "center", padding: "40px 0" }}>
+                <div style={{ color: "#444", fontSize: 15 }}>No users found</div>
+                <div style={{ color: "#333", fontSize: 13, marginTop: 6 }}>Try a different username</div>
+              </div>
+            )}
+
+            {!peopleQuery && (
+              <div style={{ textAlign: "center", padding: "40px 0" }}>
+                <div style={{ color: "#444", fontSize: 15 }}>Find people on BeatFinder</div>
+                <div style={{ color: "#333", fontSize: 13, marginTop: 6 }}>
+                  Search by username to discover artists and producers
+                </div>
+              </div>
             )}
           </div>
-          <button onClick={() => doSearch()} style={{ background: "#C026D3", border: "none", borderRadius: 12, color: "white", fontWeight: 800, padding: "10px 18px", fontSize: 14, cursor: "pointer" }}>
-            Go
-          </button>
-        </div>
+        )}
 
-        
-        <div style={{ overflowX: "auto", scrollbarWidth: "none", marginBottom: 20 }}>
-          <div style={{ display: "flex", gap: 8, paddingBottom: 4 }}>
-            {GENRES.map(g => (
-              <button key={g.label} onClick={() => doSearch(g.q)} style={{
-                flexShrink: 0, padding: "6px 14px", borderRadius: 20, cursor: "pointer",
-                border: "1.5px solid #2a2a2a", background: "#111",
-                color: "#888", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap",
-              }}>
-                {g.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {!active ? (
-        <div>
-          
-          {recents.length > 0 && (
-            <div style={{ marginBottom: 28 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <div style={{ color: "#aaa", fontWeight: 700, fontSize: 13 }}>Recent Searches</div>
-                <button onClick={clearRecents} style={{ background: "none", border: "none", color: "#555", fontSize: 12, cursor: "pointer" }}>Clear</button>
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {recents.map(r => (
-                  <button key={r} onClick={() => doSearch(r)} style={{
-                    padding: "7px 14px", borderRadius: 20, cursor: "pointer",
-                    border: "1.5px solid #1e1e1e", background: "#111",
-                    color: "#ccc", fontWeight: 600, fontSize: 13,
-                    display: "flex", alignItems: "center", gap: 6,
-                  }}>
-                    <span style={{ fontSize: 11, color: "#555" }}>&#128337;</span>
-                    {r}
+        {searchTab === "beats" && (
+          <div>
+            <div style={{ color: "#888", fontSize: 13, marginBottom: 14 }}>Search any artist, genre or vibe</div>
+            <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+              <div style={{ flex: 1, background: "#1a1a1a", borderRadius: 12, padding: "10px 14px",
+                display: "flex", alignItems: "center", gap: 10, border: "1px solid #333" }}>
+                <span style={{ color: "#555" }}><AppIcon id="search" size={20} /></span>
+                <input
+                  value={input}
+                  onChange={function(e) { setInput(e.target.value); }}
+                  onKeyDown={function(e) { if (e.key === "Enter") doSearch(); }}
+                  placeholder="e.g. Drake, Central Cee, UK drill..."
+                  style={{ background: "none", border: "none", outline: "none",
+                    color: "white", fontSize: 15, flex: 1 }}
+                />
+                {input.length > 0 && (
+                  <button onClick={function() { setInput(""); setActive(null); }}
+                    style={{ background: "none", border: "none", color: "#555",
+                      fontSize: 18, cursor: "pointer", padding: 0, lineHeight: 1 }}>
+                    &#10005;
                   </button>
-                ))}
+                )}
               </div>
+              <button onClick={function() { doSearch(); }}
+                style={{ background: "#C026D3", border: "none", borderRadius: 12,
+                  color: "white", fontWeight: 800, padding: "10px 18px",
+                  fontSize: 14, cursor: "pointer" }}>
+                Search
+              </button>
             </div>
-          )}
 
-          
-          <div style={{ marginBottom: 28 }}>
-            <div style={{ color: "#aaa", fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Popular Searches</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {POPULAR.map(p => (
-                <button key={p} onClick={() => doSearch(p)} style={{
-                  padding: "7px 14px", borderRadius: 20, cursor: "pointer",
-                  border: "1.5px solid rgba(192,38,211,0.3)",
-                  background: "rgba(192,38,211,0.08)",
-                  color: "#C026D3", fontWeight: 700, fontSize: 13,
-                }}>
-                  {p}
-                </button>
-              ))}
-            </div>
-          </div>
+            {!active && (
+              <div>
+                {recents.length > 0 && (
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between",
+                      alignItems: "center", marginBottom: 10 }}>
+                      <div style={{ color: "#666", fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>RECENT</div>
+                      <button onClick={clearRecents}
+                        style={{ background: "none", border: "none", color: "#555",
+                          fontSize: 12, cursor: "pointer" }}>
+                        Clear
+                      </button>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {recents.map(function(r) {
+                        return <Chip key={r} label={r} onPress={function() { doSearch(r); }} />;
+                      })}
+                    </div>
+                  </div>
+                )}
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ color: "#666", fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>POPULAR</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {POPULAR.map(function(p) {
+                      return <Chip key={p} label={p} onPress={function() { doSearch(p); }} color="#C026D3" />;
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: "#666", fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>GENRES</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {GENRES.map(function(g) {
+                      return <Chip key={g.label} label={g.label} onPress={function() { doSearch(g.q); }} />;
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
 
-          
-          <div style={{ textAlign: "center", paddingTop: 20, color: "#444" }}>
-            <div style={{ fontSize: 44, marginBottom: 12 }}><AppIcon id="note" size={20}/></div>
-            <div style={{ fontSize: 14, color: "#555", lineHeight: 1.8 }}>
-              Search any artist or tap a genre above<br />
-              to find type beats instantly
-            </div>
+            {active && (
+              <div>
+                <div style={{ display: "flex", alignItems: "center",
+                  justifyContent: "space-between", marginBottom: 16 }}>
+                  <div style={{ color: "white", fontWeight: 700, fontSize: 15 }}>
+                    Results for "{active}"
+                  </div>
+                  <button onClick={function() { setActive(null); setInput(""); }}
+                    style={{ background: "none", border: "none", color: "#C026D3",
+                      fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                    Clear
+                  </button>
+                </div>
+                <BeatFeed artistName={active} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
+              </div>
+            )}
           </div>
-        </div>
-      ) : (
-        <div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-            <div style={{ color: "white", fontWeight: 700, fontSize: 15 }}>Results for "{active}"</div>
-            <button onClick={() => { setActive(null); setInput(""); }} style={{ background: "none", border: "none", color: "#C026D3", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
-              Clear
-            </button>
-          </div>
-          <BeatFeed artistName={active} savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -5475,86 +5587,46 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 padding: "13px 16px", color: "white", fontSize: 15, outline: "none", boxSizing: "border-box" }} />
           </div>
 
-          {/* Social links — with proper brand icons + tap to open */}
-          <div style={{ background: "#111", borderRadius: 14, border: "1px solid #1e1e1e", marginBottom: 16, overflow: "hidden" }}>
+          {/* Social links - all in one grouped card */}
+          <div style={{ background: "#111", borderRadius: 14, border: "1px solid #1e1e1e", marginBottom: 24, overflow: "hidden" }}>
             {[
-              {
-                key: "instagram", label: "Instagram", val: instagram, set: setInstagram,
-                placeholder: "instagram.com/yourhandle",
-                icon: (
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                    <defs><linearGradient id="ig" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stopColor="#f09433"/><stop offset="25%" stopColor="#e6683c"/><stop offset="50%" stopColor="#dc2743"/><stop offset="75%" stopColor="#cc2366"/><stop offset="100%" stopColor="#bc1888"/></linearGradient></defs>
-                    <rect x="2" y="2" width="20" height="20" rx="5" ry="5" fill="url(#ig)"/>
-                    <circle cx="12" cy="12" r="4.5" stroke="white" strokeWidth="1.5" fill="none"/>
-                    <circle cx="17.5" cy="6.5" r="1.2" fill="white"/>
-                  </svg>
-                ),
-              },
-              {
-                key: "tiktok", label: "TikTok", val: tiktok, set: setTiktok,
-                placeholder: "tiktok.com/@yourhandle",
-                icon: (
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
-                    <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.93a8.16 8.16 0 0 0 4.77 1.52V7.01a4.85 4.85 0 0 1-1-.32z"/>
-                  </svg>
-                ),
-              },
-            ].map((s, i, arr) => (
-              <div key={s.key} style={{ borderBottom: i < arr.length - 1 ? "1px solid #1a1a1a" : "none" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px" }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: "#1a1a1a", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    {s.icon}
+              { key: "instagram", label: "Instagram", val: instagram, set: setInstagram, placeholder: "instagram.com/yourhandle",
+                icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><defs><linearGradient id="igs" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stopColor="#f09433"/><stop offset="50%" stopColor="#dc2743"/><stop offset="100%" stopColor="#bc1888"/></linearGradient></defs><rect x="2" y="2" width="20" height="20" rx="5" fill="url(#igs)"/><circle cx="12" cy="12" r="4.5" stroke="white" strokeWidth="1.5" fill="none"/><circle cx="17.5" cy="6.5" r="1.2" fill="white"/></svg>) },
+              { key: "tiktok", label: "TikTok", val: tiktok, set: setTiktok, placeholder: "tiktok.com/@yourhandle",
+                icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.34 6.34 0 0 0-6.13 6.33 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.93a8.16 8.16 0 0 0 4.77 1.52V7.01a4.85 4.85 0 0 1-1-.32z"/></svg>) },
+              { key: "spotify", label: "Spotify", val: spotify, set: setSpotify, placeholder: "open.spotify.com/artist/...",
+                icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#1DB954"/><path d="M8 15.5c2.5-1 5.5-1 8 0" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none"/><path d="M7 12.5c3-1.2 7-1.2 10 0" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none"/><path d="M6.5 9.5c3.5-1.3 8-1.3 11 0" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none"/></svg>) },
+              { key: "appleMusic", label: "Apple Music", val: appleMusic, set: setAppleMusic, placeholder: "music.apple.com/artist/...",
+                icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="2" y="2" width="20" height="20" rx="5" fill="#fc3c44"/><path d="M16 7v6.5a2.5 2.5 0 1 1-1.5-2.3V8.5L10 9.5V15a2.5 2.5 0 1 1-1.5-2.3V8l7.5-1z" fill="white"/></svg>) },
+              { key: "youtube", label: "YouTube", val: youtube, set: setYoutube, placeholder: "youtube.com/@yourchannel",
+                icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="2" y="5" width="20" height="14" rx="4" fill="#FF0000"/><polygon points="10,8.5 16,12 10,15.5" fill="white"/></svg>) },
+              { key: "website", label: "Website", val: website, set: setWebsite, placeholder: "yourwebsite.com",
+                icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>) },
+            ].map(function(s, i, arr) {
+              return (
+                <div key={s.key} style={{ borderBottom: i < arr.length - 1 ? "1px solid #1a1a1a" : "none" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px" }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 10, background: "#1a1a1a",
+                      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {s.icon}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: "white", fontWeight: 600, fontSize: 14 }}>{s.label}</div>
+                      <input value={s.val} onChange={function(e) { s.set(e.target.value); }}
+                        placeholder={s.placeholder}
+                        style={{ background: "none", border: "none", color: s.val ? "#C026D3" : "#555",
+                          fontSize: 12, outline: "none", width: "100%", padding: 0, marginTop: 2 }} />
+                    </div>
+                    {s.val ? (
+                      <button onClick={function() { var url = s.val.startsWith("http") ? s.val : "https://" + s.val; window.open(url, "_blank"); }}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "#555", fontSize: 18, padding: 4, flexShrink: 0 }}>
+                        &#8250;
+                      </button>
+                    ) : null}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ color: "white", fontWeight: 600, fontSize: 14 }}>{s.label}</div>
-                    <input value={s.val} onChange={e => s.set(e.target.value)}
-                      placeholder={s.placeholder}
-                      style={{ background: "none", border: "none", color: s.val ? "#C026D3" : "#555", fontSize: 12,
-                        outline: "none", width: "100%", padding: 0, marginTop: 2 }} />
-                  </div>
-                  {s.val && (
-                    <button onClick={() => { const url = s.val.startsWith("http") ? s.val : "https://" + s.val; window.open(url, "_blank"); }}
-                      style={{ background: "none", border: "none", cursor: "pointer", color: "#555", fontSize: 18, padding: 4, flexShrink: 0 }}>›</button>
-                  )}
                 </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Spotify */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>Spotify</div>
-            <input value={spotify} onChange={e => setSpotify(e.target.value)}
-              placeholder="Add profile URL"
-              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
-                padding: "13px 16px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
-          </div>
-
-          {/* Apple Music */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>Apple Music</div>
-            <input value={appleMusic} onChange={e => setAppleMusic(e.target.value)}
-              placeholder="Add Apple Music URL"
-              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
-                padding: "13px 16px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
-          </div>
-
-          {/* YouTube */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>YouTube</div>
-            <input value={youtube} onChange={e => setYoutube(e.target.value)}
-              placeholder="Add channel URL"
-              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
-                padding: "13px 16px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
-          </div>
-
-          {/* Website */}
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>Website</div>
-            <input value={website} onChange={e => setWebsite(e.target.value)}
-              placeholder="Add URL"
-              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
-                padding: "13px 16px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              );
+            })}
           </div>
 
           {/* About / Bio */}
