@@ -558,6 +558,7 @@ function LogicTrackHeader({
       onPointerMove={function(e) {
         if (isDragging) onDragMove && onDragMove(e);
       }}
+      onTouchMove={function(e){ e.stopPropagation(); }}
       style={{
         width:"100%", height:"100%",
         display:"flex", flexDirection:"column",
@@ -7631,7 +7632,7 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
         onMouseUp={function(){dragging.current=null;}}
         onMouseLeave={function(){dragging.current=null;setTip(null);}}
         onTouchMove={function(e){
-          e.preventDefault();
+          e.preventDefault(); e.stopPropagation();
           const b=dragging.current; if(!b||!svgRef.current) return;
           const r=svgRef.current.getBoundingClientRect();
           const px=e.touches[0].clientX-r.left, py=e.touches[0].clientY-r.top;
@@ -7777,7 +7778,7 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
   const eq5 = { hpfFreq:80,hpfQ:0.707,lowFreq:200,low:0,lowQ:0.707,midFreq:1000,mid:0,midQ:1.41,highFreq:8000,high:0,highQ:0.707,lpfFreq:18000,lpfQ:0.707,...fx.eq };
 
   return (
-    <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto" }} onClick={function(e){ e.stopPropagation(); }}>
+    <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto" }} onClick={function(e){ e.stopPropagation(); }} onTouchMove={function(e){ e.stopPropagation(); }}>
       <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0, position:"sticky", top:0, zIndex:10 }}>
         <div style={{ width:8, height:8, borderRadius:"50%", background:trackColor, marginRight:8 }} />
         <span style={{ color:"white", fontWeight:800, fontSize:14, flex:1 }}>{trackName} — Effects</span>
@@ -12407,8 +12408,19 @@ self.onmessage = async function(e) {
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
-      style={{ background:"#080808", height:"calc(100dvh - env(safe-area-inset-top))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
+      style={{ background:"#080808", height:"100dvh", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
+      onTouchMove={function(e){
+        // Only allow touchmove inside the DAW scroll container — block everything else
+        // This prevents the toolbars, header, and transport from being dragged
+        var el = e.target;
+        var allowed = false;
+        while (el && el !== e.currentTarget) {
+          if (el === scrollRef.current) { allowed = true; break; }
+          el = el.parentElement;
+        }
+        if (!allowed) e.preventDefault();
+      }}
     >
       {/* ── Overlays ── */}
       {exporting && (
@@ -13118,6 +13130,7 @@ userPickedMicRef.current = true;
               overscrollBehavior:"none",
               scrollbarWidth:"thin", scrollbarColor:"#2a2a2a #0a0a0a",
             }}
+            onTouchMove={function(e){ e.stopPropagation(); }}
             onScroll={function(e){
               // Sync sidebar vertical scroll via translateY
               if (sidebarRowsRef.current) {
@@ -13613,7 +13626,7 @@ userPickedMicRef.current = true;
             maxHeight: "58vh",
             display: "flex",
             flexDirection: "column",
-          }} onClick={function(e){ e.stopPropagation(); }}>
+          }} onClick={function(e){ e.stopPropagation(); }} onTouchMove={function(e){ e.stopPropagation(); }}>
 
             {/* ── GB Mixer header bar ── */}
             <div style={{
@@ -14157,7 +14170,7 @@ export default function BeatFinder() {
       )}
 
       {publicProfile && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "#0a0a0a", overflowY: "auto", overscrollBehavior: "none", paddingTop: "env(safe-area-inset-top)" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "#0a0a0a", overflowY: "auto", overscrollBehavior: "none", paddingTop: "env(safe-area-inset-top)" }} onTouchMove={function(e){ e.stopPropagation(); }}>
           <PublicProfileScreen username={publicProfile} onBack={() => setPublicProfile(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />
         </div>
       )}
@@ -14168,11 +14181,13 @@ export default function BeatFinder() {
             display: tab === t ? "block" : "none",
             overflowY: t === "studio" ? "hidden" : "auto",
             height: t === "studio"
-              ? "100dvh"
+              ? "calc(100dvh - env(safe-area-inset-bottom))"
               : "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))",
             WebkitOverflowScrolling: "touch",
             overscrollBehavior: "none",
-          }}>
+          }}
+          onTouchMove={t !== "studio" ? function(e){ e.stopPropagation(); } : undefined}
+          >
             {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
@@ -14183,7 +14198,7 @@ export default function BeatFinder() {
           </div>
         ))}
         {tab === "profile" && (
-          <div style={{ overflowY: "auto", height: "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))", WebkitOverflowScrolling: "touch", overscrollBehavior: "none" }}>
+          <div style={{ overflowY: "auto", height: "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))", WebkitOverflowScrolling: "touch", overscrollBehavior: "none" }} onTouchMove={function(e){ e.stopPropagation(); }}>
             <ProfileScreen key={user ? user.id : "guest"} user={user} setUser={setUser} onLogout={() => { AuthAPI.logout(); setUser(null); }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} />
           </div>
         )}
