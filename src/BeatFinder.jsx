@@ -8208,12 +8208,32 @@ function StudioScreen({ user, onExit }) {
   effectivePPSRef.current = effectivePPS; // keep ref in sync for lasso closure
   const spb          = 60 / bpm;
   const spBar        = spb * timeSigNum;
-  const totalDur = Math.max(60, currentTime + 30, ...tracks.map(function(t){
+
+  // ── Dynamic timeline width ────────────────────────────────────────────────
+  // 1. Find the furthest endpoint across all clips (startTime + trimmed duration)
+  const clipsFurthestEnd = tracks.reduce(function(acc, t) {
     const clips = t.clips || (t.audioBuffer ? [{startTime:t.startTime||0, duration:t.audioBuffer.duration, trimEnd:t.audioBuffer.duration}] : []);
-    return Math.max(0, ...clips.map(function(cl){ return (cl.startTime||0)+((cl.trimEnd||cl.duration||0)-(cl.trimStart||0)); }));
-  }));
-  const totalW       = totalDur * effectivePPS + 300;
-  const numBars      = Math.ceil(totalDur / spBar) + 2;
+    const trackEnd = clips.reduce(function(tAcc, cl) {
+      const end = (cl.startTime||0) + ((cl.trimEnd||cl.duration||0) - (cl.trimStart||0));
+      return end > tAcc ? end : tAcc;
+    }, 0);
+    return trackEnd > acc ? trackEnd : acc;
+  }, 0);
+  // 2. During recording, extend by live elapsed recording time so the scrollable
+  //    area expands in real-time as the take grows (recDurRef updates every RAF tick)
+  const recExtension = isRecording ? recDurRef.current : 0;
+  // 3. Combine: max of clip end, playhead position (so timeline always shows where we are),
+  //    and live recording extension — then add 10s buffer so playhead never hits the wall
+  const BUFFER_SECS = 10;
+  const totalDur = Math.max(
+    60,                                       // minimum 60s always visible
+    clipsFurthestEnd + BUFFER_SECS,           // clips + 10s breathing room
+    currentTime + BUFFER_SECS,               // playhead always has 10s ahead
+    (recExtension > 0 ? currentTime + recExtension + BUFFER_SECS : 0) // live recording
+  );
+  // 4. Convert to pixels — zoom-aware so width stays correct at any zoom level
+  const totalW   = totalDur * effectivePPS;
+  const numBars  = Math.ceil(totalDur / spBar) + 2;
   // Beat tracks always get purple/magenta. Vocal tracks cycle through bright high-contrast colours.
   const COLORS       = ["#3B82F6","#22C55E","#F59E0B","#EC4899","#8B5CF6","#06B6D4","#EF4444","#F97316"];
   const VOCAL_COLORS = ["#38BDF8","#34D399","#FB923C","#F472B6","#A78BFA","#22D3EE","#F87171","#FBBF24"];
@@ -13180,7 +13200,7 @@ userPickedMicRef.current = true;
             }}
           >
           {/* Inner content — wide enough for whole project, no sidebar width needed */}
-          <div style={{ minWidth: totalW + 400, position:"relative" }}>
+          <div style={{ minWidth: totalW, position:"relative" }}>
 
             {/* ── RULER ROW — sticky top ── */}
             <div style={{ position:"sticky", top:0, zIndex:25, height:RULER_H, background:"#0c0c0c", borderBottom:"1px solid #1a1a1a" }}>
