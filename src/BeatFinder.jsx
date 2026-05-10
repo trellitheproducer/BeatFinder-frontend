@@ -2112,7 +2112,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
             {"Welcome back" + (firstName ? ", " + firstName : "") + "!"}
           </div>
           {isProducer && (
-            <div style={{ color: "#C026D3", fontSize: 12, fontWeight: 600, marginTop: 3 }}>Producer Pro</div>
+            <div style={{ display:"inline-flex", alignItems:"center", gap:5, color: "#C026D3", fontSize: 12, fontWeight: 700, marginTop: 3 }}><VerifiedBadge size={14} /> Producer Pro</div>
           )}
         </div>
 
@@ -3943,7 +3943,7 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave, onSignUp
             <AppIcon id="flame" size={20}/> Exclusive Beats
           </button>
           <button onClick={() => setTab("mp3s")} style={{ flex: 1, padding: "12px", borderRadius: 12, fontWeight: 800, fontSize: 14, cursor: "pointer", border: tab === "mp3s" ? "2px solid #C026D3" : "1.5px solid #333", background: tab === "mp3s" ? "rgba(192,38,211,0.15)" : "transparent", color: tab === "mp3s" ? "#C026D3" : "#666" }}>
-            ⬇️ MP3 Downloads
+            <AppIcon id="download" size={16} /> MP3 Downloads
           </button>
         </div>
       </div>
@@ -3983,9 +3983,9 @@ function LyricCard({ lyric, lyricIndex, onDelete, onEditLyric }) {
         <div style={{
           width: 44, height: 44, borderRadius: 12, flexShrink: 0,
           background: "linear-gradient(135deg,#6B21A8,#C026D3)",
-          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20,
+          display: "flex", alignItems: "center", justifyContent: "center",
         }}>
-
+          <AppIcon id="writing" size={20} style={{ color: "white" }} />
         </div>
         <div style={{ flex: 1, overflow: "hidden" }}>
           <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -4823,7 +4823,11 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         <div style={{ color: "#666", fontSize: 13 }}>{user.email}</div>
         {user.username && <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>@{user.username}</div>}
         <div style={{ marginTop: 8 }}>
-          {user.isPro && <span style={{ display: "inline-block", background: "rgba(192,38,211,0.2)", border: "1px solid #C026D3", borderRadius: 20, padding: "4px 14px", color: "#C026D3", fontWeight: 800, fontSize: 12, marginRight: 6 }}>⭐ Producer Pro</span>}
+          {user.isPro && (
+            <span style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 14px", color:"#C026D3", fontWeight:800, fontSize:12, marginRight:6 }}>
+              <VerifiedBadge size={18} /> Producer Pro
+            </span>
+          )}
           {user.isArtistPro && !user.isPro && <span style={{ display: "inline-block", background: "rgba(245,158,11,0.2)", border: "1px solid #F59E0B", borderRadius: 20, padding: "4px 14px", color: "#F59E0B", fontWeight: 800, fontSize: 12 }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
         </div>
       </div>
@@ -4861,7 +4865,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                         <div style={{ color: "white", fontWeight: 600, fontSize: 13 }}>{lyric.title || "Untitled"}</div>
                         <div style={{ color: "#555", fontSize: 11, marginTop: 2 }}>{lyric.beatTitle}</div>
                       </div>
-                      <span style={{ color: "#C026D3", fontSize: 16 }}>&#9654;</span>
+                      <span style={{ color: "#C026D3" }}><AppIcon id="writing" size={16} /></span>
                     </div>
                   ))}
                 </div>
@@ -8055,6 +8059,52 @@ function GBVUBars({ analyserNode, active }) {
     </div>
   );
 }
+
+// =============================================================================
+// VERIFIED BADGE — blue-to-purple gradient seal with white checkmark
+// Matches the Instagram/X-style verification badge design
+// =============================================================================
+function VerifiedBadge({ size = 20 }) {
+  const id = "vbg";
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none"
+      style={{ display:"inline-block", verticalAlign:"middle", flexShrink:0 }}>
+      <defs>
+        <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%"   stopColor="#4F8EF7"/>
+          <stop offset="100%" stopColor="#C026D3"/>
+        </linearGradient>
+      </defs>
+      {/* 8-pointed rounded seal shape */}
+      <path fill={"url(#"+id+")"}
+        d="M50 4
+           C53 4 58 10 62 10
+           C66 10 72 6 75 8
+           C78 10 77 17 80 20
+           C83 23 90 24 91 28
+           C92 32 87 37 87 41
+           C87 45 92 50 91 54
+           C90 58 83 59 80 62
+           C77 65 79 72 76 75
+           C73 78 66 76 62 78
+           C58 80 54 86 50 86
+           C46 86 42 80 38 78
+           C34 76 27 78 24 75
+           C21 72 23 65 20 62
+           C17 59 10 58 9 54
+           C8 50 13 45 13 41
+           C13 37 8 32 9 28
+           C10 24 17 23 20 20
+           C23 17 22 10 25 8
+           C28 6 34 10 38 10
+           C42 10 47 4 50 4Z"/>
+      {/* White checkmark */}
+      <path d="M31 50 L43 63 L69 37"
+        stroke="white" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    </svg>
+  );
+}
+
 
 function StudioScreen({ user, onExit }) {
 
