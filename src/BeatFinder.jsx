@@ -13006,7 +13006,7 @@ userPickedMicRef.current = true;
           Ruler uses position:sticky,top:0 — always visible.
           One scrollLeft drives everything — zero sync bugs.
       ══════════════════════════════════════════════════════════════════════ */}
-      <div ref={lassoContainerRef} style={{ flex:1, minHeight:0, overflow:"hidden", position:"relative" }}>
+      <div ref={lassoContainerRef} style={{ flex:1, minHeight:0, overflow:"clip", position:"relative" }}>
 
         {/* Playhead — position updated directly via DOM ref, no React re-render = smooth */}
         <div
@@ -13744,7 +13744,7 @@ userPickedMicRef.current = true;
       })()}
 
       {/* ══ TRANSPORT ════════════════════════════════════════════ */}
-      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"calc(8px + env(safe-area-inset-bottom))",flexShrink:0,zIndex:50 }}>
+      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"calc(4px + env(safe-area-inset-bottom))",flexShrink:0,zIndex:50 }}>
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
           <div style={{ width:40,height:40,borderRadius:10,background:showMixer?"rgba(139,92,246,0.2)":"#141414",border:"1px solid "+(showMixer?"#8B5CF6":"#222"),display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer" }} onClick={function(){ setShowMixer(function(v){return !v;}); }}>
             <span style={{ fontSize:14 }}><Icon id="fader" size={18} color={showMixer ? "#8B5CF6" : "#aaa"} strokeWidth={1.8}/></span>
@@ -14204,9 +14204,9 @@ export default function BeatFinder() {
                 style={{
                   flex: 1, background: isStudio && isActive ? "rgba(34,197,94,0.08)" : "none",
                   border: "none", cursor: "pointer",
-                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 4,
                   color: isActive ? activeColor : locked ? "#F59E0B44" : "#444",
-                  position: "relative", paddingTop: 8,
+                  position: "relative", paddingTop: 8, paddingBottom: 6,
                   transition: "color 0.2s ease",
                   borderRadius: isStudio ? 0 : 0,
                 }}>
