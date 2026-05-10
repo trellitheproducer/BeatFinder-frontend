@@ -42,7 +42,8 @@
       html, body {
         width: 100%;
         background: #0a0a0a;
-        overscroll-behavior: none;    /* kill rubber-band bounce */
+        overscroll-behavior: none;
+        overflow: hidden;
       }
 
       #root {
@@ -57,6 +58,27 @@
         width: 0;
         height: 0;
       }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // Block body-level touchmove (stops iOS standalone rubber-band)
+      // but allow it through on elements that are actually scrollable
+      document.body.addEventListener('touchmove', function(e) {
+        var el = e.target;
+        while (el && el !== document.body) {
+          var style = window.getComputedStyle(el);
+          var overflowY = style.overflowY;
+          var overflowX = style.overflowX;
+          var canScrollY = (overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight;
+          var canScrollX = (overflowX === 'auto' || overflowX === 'scroll') && el.scrollWidth > el.clientWidth;
+          if (canScrollY || canScrollX) return; // let it scroll
+          el = el.parentElement;
+        }
+        e.preventDefault(); // no scrollable parent found — block it
+      }, { passive: false });
+    </script>
     </style>
   </head>
   <body>
