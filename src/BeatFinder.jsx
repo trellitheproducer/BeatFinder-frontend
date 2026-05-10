@@ -7969,6 +7969,7 @@ function StudioScreen({ user, onExit }) {
   const [draggingReg,  setDraggingReg]  = useState(null);
   const [showMixer,    setShowMixer]     = useState(false);
   const [fxTrackId,    setFxTrackId]     = useState(null);
+  const [masterVolume, setMasterVolume]  = useState(1); // independent master fader 0..1.5
   const fxUpdRef = useRef(null); // stable ref so memoized FX panel always calls latest upd
   const [showTakes,    setShowTakes]     = useState(null);
   const [trimmingClip, setTrimmingClip]  = useState(null);
@@ -9251,7 +9252,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     const actx = getActx();
     if (!masterGainRef.current || masterGainRef.current.context !== actx) {
       masterGainRef.current = actx.createGain();
-      masterGainRef.current.gain.value = 1;
+      masterGainRef.current.gain.value = masterVolume;
       masterGainRef.current.connect(actx.destination);
       // Master output VU analyser (side-branch)
       const ma = actx.createAnalyser();
@@ -9262,6 +9263,13 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     }
     return masterGainRef.current;
   };
+
+  // Keep masterGainRef in sync with masterVolume state at all times
+  React.useEffect(function() {
+    if (masterGainRef.current) {
+      masterGainRef.current.gain.value = masterVolume;
+    }
+  }, [masterVolume]);
 
   // Apply mute/solo/volume/pan to all live gain nodes without restarting playback
   const applyGains = function (updatedTracks) {
@@ -11092,6 +11100,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     const onMove = function(te) {
       if (!selBoxRef.current) return;
       te.preventDefault();
+      te.stopPropagation();
       const tx = te.touches[0].clientX;
       const ty = te.touches[0].clientY;
       const sx = getLaneScrollX();
@@ -13079,8 +13088,9 @@ userPickedMicRef.current = true;
             </div>
 
             {/* Track header rows — scroll vertically in sync with main area */}
-            <div ref={sidebarRowsRef} style={{ flex:1, overflowY:"hidden", overflowX:"hidden" }}>
-              {tracks.map(function(track, trackIdx){
+            <div style={{ flex:1, overflow:"hidden", position:"relative" }}>
+              <div ref={sidebarRowsRef} style={{ position:"absolute", top:0, left:0, right:0 }}>
+                {tracks.map(function(track, trackIdx){
                 const isRec   = isRecording && recTrackId === track.id;
                 const isBeingDragged = reorderDragId === track.id;
                 const isDropTgt = reorderDropIdx === trackIdx && reorderDragId !== null && reorderDragId !== track.id;
@@ -13116,6 +13126,7 @@ userPickedMicRef.current = true;
                 <button onClick={function(e){ e.stopPropagation(); setShowAddMenu(function(v){return !v;}); }} style={{ width:"100%", height:"100%", background:"transparent", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
                   <span style={{ color:showAddMenu?"#C026D3":"#444", fontSize:24, fontWeight:300 }}>+</span>
                 </button>
+              </div>
               </div>
             </div>
           </div>
@@ -13643,7 +13654,7 @@ userPickedMicRef.current = true;
             </div>
 
             {/* ── Channel strip scroll area ── */}
-            <div style={{ overflowX:"auto", overflowY:"hidden", WebkitOverflowScrolling:"touch", flex:1, minHeight:0 }}>
+            <div style={{ overflowX:"auto", overflowY:"hidden", WebkitOverflowScrolling:"touch", overscrollBehavior:"contain", flex:1, minHeight:0 }}>
               <div style={{ display:"flex", gap:0, minWidth:"max-content", padding:"10px 8px 0" }}>
 
                 {tracks.map(function(t, ti){
@@ -13739,11 +13750,9 @@ userPickedMicRef.current = true;
                   );
                 })}
 
-                {/* ── Master strip ── */}
+                {/* ── Master strip — independent master gain, does NOT touch track volumes ── */}
                 {(function(){
-                  const masterVol = tracks.length > 0
-                    ? tracks.reduce(function(s,t){ return s+(t.volume??1); },0)/tracks.length
-                    : 1;
+                  const masterDb = masterVolume <= 0 ? "−∞" : (20*Math.log10(masterVolume)).toFixed(1);
                   return (
                     <div style={{
                       width: STRIP_W+4,
@@ -13755,17 +13764,15 @@ userPickedMicRef.current = true;
                       <div style={{ height:38, display:"flex", alignItems:"center", justifyContent:"center" }}>
                         <span style={{ color:"#636366", fontSize:8, fontWeight:700, letterSpacing:1 }}>MST</span>
                       </div>
-                      {/* Master fader */}
+                      {/* Master fader — only changes masterVolume, never touches tracks */}
                       <div style={{ display:"flex", alignItems:"flex-start", gap:3, paddingBottom:6 }}>
-                        <GBFader vol={masterVol} color="#e5e5ea" muted={false}
-                          onChange={function(v){
-                            tracks.forEach(function(t){ updateTrack(t.id,{volume:v}); });
-                          }} />
+                        <GBFader vol={masterVolume} color="#e5e5ea" muted={false}
+                          onChange={function(v){ setMasterVolume(v); }} />
                         <GBVUBars analyserNode={masterAnalyserRef.current} active={isPlaying} />
                       </div>
                       {/* dB */}
                       <div style={{ fontSize:8,fontWeight:700,color:"#ebebf599",marginBottom:4 }}>
-                        {(20*Math.log10(Math.max(0.001,masterVol))).toFixed(1)} dB
+                        {masterDb} dB
                       </div>
                       {/* Spacer where M/S would be */}
                       <div style={{ height:26 }} />
