@@ -10588,7 +10588,11 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       const name = file.name.replace(/\.[^.]+$/, "");
       try {
         const ab  = await file.arrayBuffer();
+        // Resume actx if iOS suspended it during the async file read
+        if (actx.state === "suspended") { try { await actx.resume(); } catch(err) {} }
         const buf = await actx.decodeAudioData(ab.slice(0));
+        // Resume again after decode — iOS can suspend during decodeAudioData too
+        if (actx.state === "suspended") { try { await actx.resume(); } catch(err) {} }
         const tId = Date.now() + Math.random();
         addTrackObj({
           id: tId, name, type: type || "beat",
@@ -10598,6 +10602,12 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
             trimStart:0, trimEnd:buf.duration, label:"Main", active:true }],
         });
         if (type === "beat") { setProjectName(name); setLoopOut(buf.duration); }
+        // Re-apply all existing track gains — decodeAudioData can cause iOS to
+        // suspend/resume the AudioContext which discards scheduled gain values
+        if (isPlayingRef.current) {
+          applyGains(tracksRef.current);
+          if (masterGainRef.current) masterGainRef.current.gain.value = masterVolume;
+        }
       } catch (e2) { setError("Could not decode: " + file.name); }
     }
     setShowAddMenu(false);
@@ -13409,6 +13419,14 @@ userPickedMicRef.current = true;
             addTrackObj({ id:newId, name:"Vocal "+vocalN, type:"vocal", isMuted:false, isSoloed:false, clips:[], color:VOCAL_COLORS[vocalN % VOCAL_COLORS.length] });
             setSelectedTrackId(newId);
             setShowAddMenu(false);
+            // Re-apply all gain states — adding a track triggers a re-render which
+            // can cause iOS to reset scheduled gain values on live audio nodes
+            if (isPlayingRef.current) {
+              setTimeout(function() {
+                applyGains(tracksRef.current);
+                if (masterGainRef.current) masterGainRef.current.gain.value = masterVolume;
+              }, 0);
+            }
           }}>
             <div style={{ width:32,height:32,borderRadius:8,background:"rgba(239,68,68,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}><AppIcon id="mic" size={20}/></div>
             <div><div style={{ color:"white",fontWeight:700,fontSize:13 }}>Record Vocals</div><div style={{ color:"#555",fontSize:11 }}>Record new take</div></div>
