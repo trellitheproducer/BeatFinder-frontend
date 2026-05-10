@@ -3445,7 +3445,7 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
 // =============================================================================
 // SEARCH SCREEN
 // =============================================================================
-function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial, currentUser }) {
+function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial, currentUser, onViewProfile }) {
   var [input, setInput] = useState("");
   var [active, setActive] = useState(null);
   var [searchTab, setSearchTab] = useState("beats");
@@ -3515,22 +3515,13 @@ function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial, 
     );
   }
 
-  if (viewingProfile) {
-    return (
-      <div style={{ paddingBottom: 100 }}>
-        <button onClick={function() { setViewingProfile(null); }}
-          style={{ background: "none", border: "none", color: "#C026D3", fontWeight: 700,
-            fontSize: 14, cursor: "pointer", padding: "16px 16px 0",
-            display: "flex", alignItems: "center", gap: 6 }}>
-          &#8592; Back to Search
-        </button>
-        <PublicProfileScreen
-          username={viewingProfile}
-          onBack={function() { setViewingProfile(null); }}
-          onPlay={onPlay} savedIds={savedIds} onSave={onSave} currentUser={currentUser} />
-      </div>
-    );
-  }
+  // Delegate profile viewing to parent so nav bar can be hidden
+  React.useEffect(function() {
+    if (viewingProfile && onViewProfile) {
+      onViewProfile(viewingProfile);
+      setViewingProfile(null);
+    }
+  }, [viewingProfile]);
 
   return (
     <div style={{ padding: "0 16px 100px" }}>
@@ -4160,7 +4151,7 @@ function LyricCard({ lyric, lyricIndex, onDelete, onEditLyric }) {
 // =============================================================================
 // PUBLIC PROFILE SCREEN
 // =============================================================================
-function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, currentUser, onMessage }) {
+function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, currentUser, onMessage, hideBack }) {
   const [profile,   setProfile]   = useState(null);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState(null);
@@ -4219,9 +4210,9 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
   return (
     <div style={{ paddingBottom: 100 }}>
-      {onBack && (
+      {onBack && !hideBack && (
         <div style={{ padding: "16px 16px 0", display: "flex", alignItems: "center" }}>
-          <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 24, cursor: "pointer", padding: 0 }}>←</button>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 24, cursor: "pointer", padding: 0 }}>&#8592;</button>
         </div>
       )}
 
@@ -14670,6 +14661,7 @@ export default function BeatFinder() {
   const [editingLyric,  setEditingLyric]  = useState(null);
   const [editingIndex,  setEditingIndex]  = useState(null);
   const [publicProfile, setPublicProfile] = useState(null);
+  const [searchProfile, setSearchProfile] = useState(null);
   const [showMessages,  setShowMessages]  = useState(false);
   const [messageThread, setMessageThread] = useState(null); // username to DM
   const [savedLyrics,   setSavedLyrics]   = useState(() => {
@@ -14842,7 +14834,7 @@ export default function BeatFinder() {
             {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => setShowMessages(true)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
-            {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} currentUser={user} />}
+            {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} currentUser={user} onViewProfile={function(u) { setSearchProfile(u); }} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
             {t === "studio"    && studioVisited && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
             {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onSignUp={() => { setAuthStartMode("signup"); setShowAuthWall(true); setWelcomeDone(false); }} />}
@@ -14863,6 +14855,24 @@ export default function BeatFinder() {
           </div>
         )}
       </div>
+
+      {searchProfile && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "#0a0a0a", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+          <div style={{ padding: "16px 16px 0" }}>
+            <button onClick={function() { setSearchProfile(null); }}
+              style={{ background: "none", border: "none", color: "#C026D3", fontWeight: 700,
+                fontSize: 14, cursor: "pointer", padding: 0,
+                display: "flex", alignItems: "center", gap: 6 }}>
+              &#8592; Back to Search
+            </button>
+          </div>
+          <PublicProfileScreen
+            username={searchProfile}
+            onBack={function() { setSearchProfile(null); }}
+            onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} currentUser={user}
+            hideBack={true} />
+        </div>
+      )}
 
       {lyricsOpen && <LyricsNotepad beat={lyricsBeat} onClose={() => { setLyricsOpen(false); setEditingLyric(null); setEditingIndex(null); }} onSaveLyric={handleSaveLyric} initialLyric={editingLyric} lyricIndex={editingIndex} user={user} />}
       {playing && (
