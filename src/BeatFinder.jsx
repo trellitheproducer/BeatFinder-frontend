@@ -162,51 +162,84 @@ function useAnalyser(analyserNode, isActive) {
 }
 
 // Animated VU meter for the YouTube Player (no direct audio access – driven by animation)
-function PlayerVUMeter({ isPlaying }) {
-  const [bars, setBars] = React.useState(() => Array(12).fill(0));
+function PlayerVUMeter({ isPlaying, volume = 80 }) {
+  const NUM_BARS = 14;
+  // Envelope per bar: {level, peak, peakHold}
+  const envRef = React.useRef(
+    Array.from({ length: NUM_BARS }, (_, i) => ({
+      level: 0, peak: 0, peakHold: 0,
+      // Each bar has its own frequency/phase so they're fully independent
+      freq:  0.0008 + i * 0.00055 + Math.random() * 0.0003,
+      phase: Math.random() * Math.PI * 2,
+      // Low-mids (bars 3-7) are naturally louder — mimics real music spectrum
+      bias:  i < 2 ? 0.38 : i < 7 ? 0.62 : i < 10 ? 0.48 : 0.30,
+    }))
+  );
+  const [display, setDisplay] = React.useState(() => Array(NUM_BARS).fill(0));
   const rafRef = React.useRef(null);
-  const tRef   = React.useRef(0);
+  const lastTs  = React.useRef(0);
 
   React.useEffect(() => {
     if (!isPlaying) {
       cancelAnimationFrame(rafRef.current);
-      setBars(Array(12).fill(0));
+      // Fast decay to silence
+      setDisplay(Array(NUM_BARS).fill(0));
+      envRef.current.forEach(e => { e.level = 0; e.peak = 0; e.peakHold = 0; });
       return;
     }
-    const animate = (ts) => {
-      tRef.current = ts;
-      setBars(prev => prev.map((_, i) => {
-        // Each bar oscillates at a different frequency with some randomness
-        const base  = 0.35 + 0.45 * Math.abs(Math.sin(ts * 0.001 * (0.7 + i * 0.13) + i));
-        const noise = (Math.random() - 0.5) * 0.18;
-        return Math.max(0, Math.min(1, base + noise));
-      }));
-      rafRef.current = requestAnimationFrame(animate);
+    const tick = (ts) => {
+      const dt = Math.min(ts - lastTs.current, 64); // cap at 64ms
+      lastTs.current = ts;
+
+      const ATTACK  = 1 - Math.exp(-dt / 8);   // ~8ms attack
+      const DECAY   = 1 - Math.exp(-dt / 80);  // ~80ms decay
+      const PEAK_D  = 1 - Math.exp(-dt / 600); // ~600ms peak hold decay
+
+      envRef.current.forEach(e => {
+        // Target: sine wave + random transient spikes
+        const sine   = 0.5 + 0.5 * Math.sin(ts * e.freq + e.phase);
+        const spike  = Math.random() < 0.04 ? Math.random() * 0.5 : 0; // 4% chance transient
+        const volScale = volume / 100;
+        const target = Math.min(1, (e.bias + sine * (1 - e.bias) * 0.7 + spike) * volScale);
+
+        if (target > e.level) {
+          e.level += ATTACK  * (target - e.level);
+        } else {
+          e.level += DECAY   * (target - e.level);
+        }
+        // Peak hold
+        if (e.level > e.peak) { e.peak = e.level; e.peakHold = ts + 1200; }
+        else if (ts > e.peakHold) { e.peak += PEAK_D * (e.level - e.peak); }
+      });
+
+      setDisplay(envRef.current.map(e => e.level));
+      rafRef.current = requestAnimationFrame(tick);
     };
-    rafRef.current = requestAnimationFrame(animate);
+    lastTs.current = performance.now();
+    rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   }, [isPlaying]);
 
-  const clipping = bars.some(b => b > 0.92);
+  const clipping = display.some(v => v > 0.92);
 
   return (
     <div style={{
-      display: "flex", alignItems: "flex-end", gap: 3,
-      height: 40, padding: "6px 10px",
-      background: "rgba(0,0,0,0.5)",
+      display: "flex", alignItems: "flex-end", gap: 2,
+      height: 36, padding: "4px 8px",
+      background: "rgba(0,0,0,0.6)",
       borderRadius: 8,
-      border: "1px solid " + (clipping ? "rgba(239,68,68,0.5)" : "rgba(255,255,255,0.08)"),
+      border: "1px solid " + (clipping ? "rgba(239,68,68,0.6)" : "rgba(255,255,255,0.07)"),
     }}>
-      {bars.map((v, i) => {
+      {display.map((v, i) => {
         const isClip = v > 0.92;
-        const color  = isClip ? "#EF4444" : v > 0.75 ? "#F59E0B" : "#22C55E";
+        const color  = isClip ? "#EF4444" : v > 0.78 ? "#F59E0B" : v > 0.55 ? "#86EFAC" : "#22C55E";
+        const h      = isPlaying ? Math.max(2, v * 28) : 2;
         return (
           <div key={i} style={{
             flex: 1, borderRadius: 2,
-            background: isPlaying ? color : "#1a1a1a",
-            height: isPlaying ? Math.max(3, v * 28) : 3,
-            transition: "height 0.05s ease, background 0.1s",
-            boxShadow: isPlaying ? "0 0 4px " + color + "88" : "none",
+            background: isPlaying ? color : "#111",
+            height: h,
+            boxShadow: isPlaying && v > 0.4 ? "0 0 5px " + color + "99" : "none",
           }} />
         );
       })}
@@ -950,7 +983,7 @@ const GRAD = [
 ];
 const initials = n => n.split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase();
 const watchUrl  = id => `https://www.youtube.com/watch?v=${id}`;
-const embedUrl  = id => `https://www.youtube.com/embed/${id}?autoplay=1&playsinline=1&rel=0&modestbranding=1`;
+const embedUrl  = id => `https://www.youtube.com/embed/${id}?autoplay=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1`;
 
 // =============================================================================
 // ARTIST DATABASE
@@ -1645,6 +1678,22 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
 // FULL-SCREEN PLAYER
 // =============================================================================
 function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, savedLyrics, onEditLyric, onGoMembers }) {
+  const [ytVol, setYtVol] = React.useState(80); // 0–100, YouTube default is 100
+  const iframeRef = React.useRef(null);
+
+  const sendVolume = React.useCallback(function(v) {
+    // YouTube IFrame API postMessage protocol
+    try {
+      const msg = JSON.stringify({ event: "command", func: "setVolume", args: [v] });
+      iframeRef.current && iframeRef.current.contentWindow.postMessage(msg, "*");
+    } catch(e) {}
+  }, []);
+
+  const handleVolume = function(v) {
+    setYtVol(v);
+    sendVolume(v);
+  };
+
   return (
     <div style={{
       position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, background: "#000",
@@ -1674,6 +1723,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
         </div>
       </div>
       <iframe
+        ref={iframeRef}
         key={beat.videoId}
         src={embedUrl(beat.videoId)}
         width="100%" height="220"
@@ -1682,14 +1732,39 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
         allowFullScreen
         title={beat.title}
       />
-      {/* ── Audio Level Meter (YouTube iframe – driven by animation) ── */}
-      <div style={{ padding: "8px 16px", background: "#060606", borderBottom: "1px solid #111", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      {/* ── VU meter + volume slider ── */}
+      <div style={{ padding: "8px 16px 10px", background: "#060606", borderBottom: "1px solid #111", flexShrink: 0 }}>
+        {/* VU meter row */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
           <div style={{ color: "#333", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, fontFamily: "monospace", whiteSpace: "nowrap" }}>OUTPUT</div>
           <div style={{ flex: 1 }}>
-            <PlayerVUMeter isPlaying={true} />
+            <PlayerVUMeter isPlaying={true} volume={ytVol} />
           </div>
-          <div style={{ color: "#22C55E", fontSize: 8, fontWeight: 700, letterSpacing: 1, fontFamily: "monospace" }}>0dB</div>
+          <div style={{ color: "#22C55E", fontSize: 8, fontWeight: 700, letterSpacing: 1, fontFamily: "monospace" }}>{ytVol}%</div>
+        </div>
+        {/* Volume slider row */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {/* Mute icon */}
+          <div style={{ color: ytVol === 0 ? "#EF4444" : "#555", flexShrink: 0 }}>
+            <AppIcon id={ytVol === 0 ? "mute" : "speaker"} size={14} />
+          </div>
+          {/* Slider */}
+          <div style={{ flex: 1, position: "relative", height: 20, display: "flex", alignItems: "center" }}>
+            {/* Track background */}
+            <div style={{ position: "absolute", left: 0, right: 0, height: 3, borderRadius: 2, background: "#1a1a1a" }} />
+            {/* Fill */}
+            <div style={{ position: "absolute", left: 0, width: ytVol + "%", height: 3, borderRadius: 2,
+              background: ytVol > 85 ? "linear-gradient(90deg,#22C55E,#F59E0B,#EF4444)" : ytVol > 60 ? "linear-gradient(90deg,#22C55E,#86EFAC)" : "#22C55E",
+              transition: "width 0.05s, background 0.2s" }} />
+            <input type="range" min={0} max={100} step={1} value={ytVol}
+              onChange={function(e){ handleVolume(parseInt(e.target.value)); }}
+              style={{ position: "relative", zIndex: 1, width: "100%", appearance: "none", WebkitAppearance: "none",
+                background: "transparent", height: 20, cursor: "pointer", margin: 0 }} />
+          </div>
+          {/* Max icon */}
+          <div style={{ color: "#555", flexShrink: 0 }}>
+            <AppIcon id="speaker" size={16} />
+          </div>
         </div>
       </div>
       <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
