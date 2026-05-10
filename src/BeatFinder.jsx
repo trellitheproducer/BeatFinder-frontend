@@ -8014,6 +8014,11 @@ function StudioScreen({ user, onExit }) {
   const isPlayingRef    = useRef(false);
   const tracksRef       = useRef([]);  // always mirrors tracks — gives doPlay a fresh snapshot
   const saveStateRef    = useRef(null); // updated each render so lifecycle effect always saves fresh state
+  // ── Auto-scroll control ───────────────────────────────────────────────────
+  const userScrolledAt  = useRef(null);  // timestamp of last manual scroll — null = auto-scroll active
+  const autoScrollRaf   = useRef(null);  // rAF handle for the auto-scroll module
+  const liveTimeRef     = useRef(0);     // exact playhead time updated every RAF tick — used by stop
+  const scrollSeekTimer = useRef(null);  // timer to resume playback after scroll-while-playing
 
   // ── Input monitoring refs ──────────────────────────────────────
   const monitorStreamRef    = useRef(null);
@@ -8694,8 +8699,9 @@ function StudioScreen({ user, onExit }) {
   const updatePlayheadDOM = function (t, scrollLeft) {
     const ph = playheadRef.current;
     if (!ph) return;
-    const sl  = scrollLeft !== undefined ? scrollLeft : (scrollRef.current ? scrollRef.current.scrollLeft : 0);
-    const px  = SIDEBAR_W + t * effectivePPS - sl;
+    const sl = scrollLeft !== undefined ? scrollLeft : (scrollRef.current ? scrollRef.current.scrollLeft : 0);
+    // lassoContainerRef spans both sidebar + right panel, so offset by SIDEBAR_W at t=0
+    const px = SIDEBAR_W + t * effectivePPS - sl;
     ph.style.left = px + "px";
   };
 
@@ -8704,25 +8710,44 @@ function StudioScreen({ user, onExit }) {
   useEffect(function () {
     if (!isPlaying) { cancelAnimationFrame(animRef.current); return; }
     var lastUIUpdate = 0;
+
     const tick = function (ts) {
       const actx = actxRef.current;
       if (!actx) return;
       const elapsed = actx.currentTime - masterStartRef.current;
       const t       = playheadAtRef.current + elapsed;
-      // Drive scroll + update playhead directly on DOM — no React re-render per frame
+      liveTimeRef.current = t;
+
       const el = scrollRef.current;
       if (el) {
-        el.scrollLeft = Math.max(0, t * effectivePPS);
+        const viewW          = el.clientWidth;
+        const playheadPx     = t * effectivePPS;         // playhead in content space
+        const playheadViewX  = playheadPx - el.scrollLeft; // playhead within viewport
+
+        // Only auto-scroll if the user isn't manually scrolling
+        if (userScrolledAt.current === null) {
+          // Scroll forward to keep playhead at 75% of viewport once it hits that mark
+          const pinAt    = viewW * 0.75;
+          const targetSL = playheadPx - pinAt;
+          if (targetSL > el.scrollLeft) {
+            el.scrollLeft = targetSL;
+          }
+          // If playhead goes out of view entirely (e.g. after rewind), snap it back immediately
+          if (playheadViewX < 0 || playheadViewX > viewW) {
+            el.scrollLeft = Math.max(0, playheadPx - pinAt);
+          }
+        }
+
+        // Always draw playhead at its true audio position regardless of scroll
         updatePlayheadDOM(t, el.scrollLeft);
       }
-      // Update timer display at ~10fps — the FX panel is memoized so it won't
-      // re-render on these ticks, but reducing frequency cuts overall React work.
+
       if (!lastUIUpdate || ts - lastUIUpdate > 100) {
         setCurrentTime(t);
         lastUIUpdate = ts;
       }
+
       if (loopEnabled && loopOut > loopIn && t >= loopOut) {
-        // Restart audio from loopIn, then let the RAF keep ticking
         stopAll();
         doPlay(loopIn);
         setCurrentTime(loopIn);
@@ -9595,6 +9620,8 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   // ── Stop all audio nodes — hard stop, no glitch ──────────────
   const stopAll = function () {
     cancelAnimationFrame(animRef.current);
+    if (scrollSeekTimer.current) { clearTimeout(scrollSeekTimer.current); scrollSeekTimer.current = null; }
+    userScrolledAt.current = null;
     // Stop and disconnect every scheduled source node immediately
     scheduledRef.current.forEach(function (s) {
       try { s.stop(0); } catch (e) {} // stop(0) = immediate
@@ -9620,6 +9647,8 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   // ── Play from a given time — all tracks share master destination ──
   const doPlay = async function (fromTime) {
     stopAll();
+    userScrolledAt.current = null; // reset manual override — auto-scroll active from start
+    liveTimeRef.current = fromTime;
     const actx   = getActx();
     const master = getOrCreateMaster();
     // Register pitch worklet if not done yet (async, required before AudioWorkletNode)
@@ -10356,15 +10385,25 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
   const togglePlay = function () {
     if (isPlaying) {
+      // Capture exact position from live RAF ref before stopping
+      const exactT = liveTimeRef.current > 0 ? liveTimeRef.current : currentTime;
       stopAll();
       setIsPlaying(false);
-      playheadAtRef.current = currentTime;
+      playheadAtRef.current = exactT;
+      liveTimeRef.current   = exactT;
+      setCurrentTime(exactT);
+      // Freeze playhead DOM exactly where it stopped
+      if (scrollRef.current) updatePlayheadDOM(exactT, scrollRef.current.scrollLeft);
     } else {
-      const startT = (loopEnabled && loopOut > loopIn) ? loopIn : currentTime;
+      // Resume from playheadAtRef — always accurate, never stale React state
+      const startT = playheadAtRef.current;
+      // Scroll view to playhead position so it's visible immediately on resume
+      if (scrollRef.current) {
+        scrollRef.current.scrollLeft = Math.max(0, startT * effectivePPS);
+        updatePlayheadDOM(startT, scrollRef.current.scrollLeft);
+      }
       doPlay(startT);
       setCurrentTime(startT);
-      setOffsetForTime(startT);
-      playheadAtRef.current = startT;
       setIsPlaying(true);
     }
   };
@@ -10374,9 +10413,14 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     setIsPlaying(false);
     const t = loopEnabled ? loopIn : 0;
     setCurrentTime(t);
-    setOffsetForTime(t);
     playheadAtRef.current = t;
+    liveTimeRef.current   = t;
     masterStartRef.current = 0;
+    // Scroll to start and snap playhead DOM immediately
+    if (scrollRef.current) {
+      scrollRef.current.scrollLeft = Math.max(0, t * effectivePPS);
+      updatePlayheadDOM(t, scrollRef.current.scrollLeft);
+    }
   };
 
   const stopRecording = function () {
@@ -13075,9 +13119,9 @@ userPickedMicRef.current = true;
           style={{
             position:"absolute",
             top:0, bottom:0,
-            left: SIDEBAR_W, // initial position (t=0), updated by updatePlayheadDOM
+            left: SIDEBAR_W, // t=0 = bar 1; lassoContainerRef spans both sidebar+lanes so offset by sidebar width
             width:1, zIndex:40, pointerEvents:"none",
-            willChange:"left", // GPU hint for smooth animation
+            willChange:"left",
           }}
         >
           <div style={{ position:"absolute", top:RULER_H-8, left:-5, width:0, height:0, borderLeft:"5px solid transparent", borderRight:"5px solid transparent", borderTop:"8px solid white" }} />
@@ -13114,7 +13158,7 @@ userPickedMicRef.current = true;
               background:"#0a0a0a",
               borderRight:"1px solid #141414",
               display:"flex", flexDirection:"column",
-              zIndex:20,
+              zIndex:50,
             }}
           >
             {/* Corner — TRACKS label, aligns with ruler height */}
@@ -13182,17 +13226,26 @@ userPickedMicRef.current = true;
             }}
             onTouchMove={function(e){ if (!selBoxRef.current) e.stopPropagation(); }}
             onScroll={function(e){
-              // Sync sidebar vertical scroll via translateY
+              // Sync sidebar vertical scroll
               if (sidebarRowsRef.current) {
                 sidebarRowsRef.current.style.transform = "translateY(-" + e.target.scrollTop + "px)";
               }
               const sl = e.target.scrollLeft;
+
               if (!isPlayingRef.current) {
-                const t = Math.max(0, sl / effectivePPS);
-                setCurrentTime(t);
-                playheadAtRef.current = t;
-                updatePlayheadDOM(t, sl);
+                // Stopped — playhead stays at its stored position, timeline scrolls under it
+                updatePlayheadDOM(playheadAtRef.current, sl);
               } else {
+                // Playing — mark that user is scrolling so auto-scroll pauses
+                // Playhead stays at true audio position, RAF tick redraws it each frame
+                userScrolledAt.current = performance.now();
+                // Clear the flag after 1.5s of no scroll so auto-follow resumes
+                if (scrollSeekTimer.current) clearTimeout(scrollSeekTimer.current);
+                scrollSeekTimer.current = setTimeout(function() {
+                  userScrolledAt.current  = null;
+                  scrollSeekTimer.current = null;
+                }, 1500);
+                // Keep drawing playhead at true audio position while user scrolls
                 const actx = actxRef.current;
                 const t = actx ? playheadAtRef.current + (actx.currentTime - masterStartRef.current) : playheadAtRef.current;
                 updatePlayheadDOM(t, sl);
