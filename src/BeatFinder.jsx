@@ -5400,9 +5400,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
   const EQPlugin     = function(p){ return _EQPlugin(p); };
   const CompPlugin   = function(p){ return _CompPlugin(p); };
   const ReverbPlugin = function(p){ return _ReverbPlugin(p); };
-  const PitchPlugin  = function(p){ return _PitchPlugin(p); };
   const OceanPlugin  = function(p){ return _OceanPlugin(p); };
-  const AppleXPlugin = function(p){ return _AppleXPlugin(p); };
   const NoiseRemoverPlugin = function(p){ return _NoiseRemoverPlugin(p); };
   const DoublerPlugin = function(p){ return _DoublerPlugin(p); };
   const HDelayPlugin  = function(p){ return _HDelayPlugin(p); };
@@ -5449,7 +5447,6 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"compressor",   label:"Compressor",          sub:"Dynamics processor",            icon:"fader", color:"#7C3AED" },
     { key:"reverb",       label:"Convolution Reverb",  sub:"Room simulation",               icon:"wave", color:"#C026D3" },
     { key:"ocean",        label:"Ocean Reverb",        sub:"Deep · Lush · Atmospheric",     icon:"wave", color:"#0891b2" },
-    { key:"applex",       label:"AppleX Auto-Tune",    sub:"Chromatic pitch correction",    icon:"note", color:"#9333EA" },
     { key:"noiseremover", label:"Noise Remover",       sub:"RNNoise · AI denoising",        icon:"mic", color:"#10B981" },
     { key:"doubler",      label:"Vocal Doubler",        sub:"Stereo width · Haas effect",     icon:"speaker", color:"#F59E0B" },
     { key:"hdelay",       label:"H-Delay",              sub:"Tape · BPM sync · Analog",       icon:"◷", color:"#E85D04" },
@@ -5486,7 +5483,6 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"compressor",   label:"Compressor",          sub:"Dynamics",        icon:"ph-compress",    color:"#7c3aed", cat:"DYNAMICS", tag:"EFFECT" },
     { key:"reverb",       label:"Reverb",              sub:"Room sim",        icon:"ph-reverb",      color:"#0891b2", cat:"REVERB",   tag:"EFFECT" },
     { key:"ocean",        label:"Ocean Reverb",        sub:"Lush · Deep",     icon:"ph-reverb",      color:"#0369a1", cat:"REVERB",   tag:"EFFECT" },
-    { key:"applex",       label:"AppleX",              sub:"Auto-Tune",       icon:"ph-pitch",       color:"#9333ea", cat:"PITCH",    tag:"EFFECT" },
     { key:"noiseremover", label:"Noise Gate AI",       sub:"RNNoise",         icon:"ph-gate",        color:"#059669", cat:"DYNAMICS", tag:"UTILITY" },
     { key:"doubler",      label:"Doubler",             sub:"Haas / Width",    icon:"ph-doubler",     color:"#d97706", cat:"UTILITY",  tag:"MIXER"  },
     { key:"hdelay",       label:"T-Delay",             sub:"Tape · BPM sync", icon:"ph-delay",       color:"#ea580c", cat:"UTILITY",  tag:"EFFECT" },
@@ -5723,8 +5719,6 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
           {/* Ocean Reverb plugin */}
           {key === "ocean" && <OceanPlugin fx={fx} upd={upd} Knob={Knob} />}
 
-          {/* AppleX Auto-Tune plugin */}
-          {key === "applex" && <AppleXPlugin fx={fx} upd={upd} Knob={Knob} />}
 
           {/* Noise Remover plugin */}
           {key === "noiseremover" && <NoiseRemoverPlugin fx={fx} upd={upd} Knob={Knob} />}
@@ -6006,298 +6000,6 @@ function _OceanPlugin({ fx, upd, Knob }) {
   );
 }
 
-function _AppleXPlugin({ fx, upd, Knob }) {
-  const on       = !!fx.applex?.on;
-  const speed    = fx.applex?.speed ?? 0.5;   // 0–1 stored internally
-  const depth    = fx.applex?.depth ?? 1.0;
-  const pitchKey = fx.applex?.key   ?? "C";
-  const NOTES    = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-
-  // Convert stored 0–1 speed to display ms (0ms = robotic, 400ms = natural)
-  const speedMs  = Math.round(speed * 400);
-  const speedLabel = speedMs === 0 ? "INSTANT" : speedMs < 80 ? "FAST" : speedMs < 200 ? "NATURAL" : "SLOW";
-  const speedColor = speedMs === 0 ? "#ff453a" : speedMs < 80 ? "#ff9f43" : speedMs < 200 ? "#30d158" : "#4a9eff";
-
-  return (
-    <div style={{ background:"linear-gradient(180deg,#130a22 0%,#0d0618 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (on ? "#9333ea" : "#2a2a2a"), boxShadow: on ? "0 0 20px rgba(147,51,234,0.2), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
-      {/* Header */}
-      <div style={{ backgroundImage:"linear-gradient(180deg,#1e0f35,#160a28)", padding:"8px 14px", borderBottom:"1px solid #2a1545", display:"flex", alignItems:"center", gap:8 }}>
-        <div style={{ flex:1 }}>
-          <div style={{ color:"#c084fc", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>APPLEX AUTO-TUNE</div>
-          <div style={{ color:"#3b1a5e", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>CHROMATIC PITCH CORRECTION</div>
-        </div>
-        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-          <div style={{ width:8, height:8, borderRadius:"50%", background: on ? "#9333ea" : "#1a1a1a", boxShadow: on ? "0 0 6px #9333ea, 0 0 14px rgba(147,51,234,0.5)" : "none", transition:"all 0.2s" }} />
-          <button onClick={function(){ upd("applex",{on:!on}); }} style={{ background: on ? "linear-gradient(180deg,#7c3aed,#6d28d9)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (on ? "#9333ea" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1 }}>{on ? "ON" : "OFF"}</button>
-        </div>
-      </div>
-
-      <div style={{ padding:"12px 14px", opacity:on?1:0.4, transition:"opacity 0.2s", pointerEvents:on?"auto":"none" }}>
-
-        {/* Key / root note selector */}
-        <div style={{ fontSize:8, fontWeight:700, color:"#4a2a6e", letterSpacing:2, fontFamily:"monospace", marginBottom:5 }}>ROOT KEY</div>
-        <div style={{ display:"flex", gap:3, marginBottom:12, flexWrap:"wrap" }}>
-          {NOTES.map(function(n){
-            const active = pitchKey === n;
-            return <button key={n} onClick={function(){ upd("applex",{key:n}); }} style={{ flex:1, minWidth:22, padding:"5px 2px", background: active ? "#7c3aed" : "#0f0f18", border:"1px solid "+(active?"#9333ea":"#1e1e2a"), borderRadius:5, color: active?"white":"#4c1d95", fontSize:8, fontWeight:800, cursor:"pointer", transition:"all 0.12s" }}>{n}</button>;
-          })}
-        </div>
-
-        {/* Retune Speed slider */}
-        <div style={{ marginBottom:12 }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
-            <div style={{ fontSize:8, fontWeight:700, color:"#4a2a6e", letterSpacing:2, fontFamily:"monospace" }}>RETUNE SPEED</div>
-            <div style={{ display:"flex", alignItems:"center", gap:5 }}>
-              <span style={{ fontSize:9, fontWeight:800, color:speedColor, fontFamily:"monospace" }}>{speedMs}ms</span>
-              <span style={{ fontSize:7, fontWeight:700, color:speedColor, background:speedColor+"22", borderRadius:3, padding:"1px 5px", letterSpacing:1 }}>{speedLabel}</span>
-            </div>
-          </div>
-          {/* Slider track */}
-          <div style={{ position:"relative", height:20, display:"flex", alignItems:"center" }}>
-            <div style={{ position:"absolute", left:0, right:0, height:3, borderRadius:2, background:"#1e0f35" }} />
-            <div style={{ position:"absolute", left:0, width:(speed*100)+"%", height:3, borderRadius:2, background:"linear-gradient(90deg,#ff453a,#9333ea)", transition:"width 0.05s" }} />
-            <input type="range" min={0} max={1} step={0.01} value={speed}
-              onChange={function(e){ upd("applex",{speed:parseFloat(e.target.value)}); }}
-              style={{ position:"relative", zIndex:1, width:"100%", appearance:"none", WebkitAppearance:"none", background:"transparent", height:20, cursor:"pointer", margin:0 }} />
-          </div>
-          {/* Labels */}
-          <div style={{ display:"flex", justifyContent:"space-between", marginTop:3 }}>
-            <span style={{ fontSize:7, color:"#ff453a", fontFamily:"monospace", fontWeight:700 }}>ROBOTIC</span>
-            <span style={{ fontSize:7, color:"#30d158", fontFamily:"monospace", fontWeight:700 }}>MUSICAL</span>
-            <span style={{ fontSize:7, color:"#4a9eff", fontFamily:"monospace", fontWeight:700 }}>SUBTLE</span>
-          </div>
-        </div>
-
-        {/* Depth knob */}
-        <div style={{ display:"flex", justifyContent:"center", alignItems:"center", gap:16, padding:"4px 0" }}>
-          <Knob label="DEPTH" value={depth} min={0} max={1} step={0.01} unit="%" color="#c084fc" onChange={function(v){ upd("applex",{depth:v}); }} />
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:7, color:"#3b1a5e", fontFamily:"monospace", lineHeight:1.7 }}>
-              <div>0ms = T-Pain / robotic snap</div>
-              <div>50–150ms = natural pop</div>
-              <div>300ms+ = subtle correction</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function _PitchPlugin({ fx, upd, Knob }) {
-  const pOn       = !!fx.pitch?.on;
-  const semitones = fx.pitch?.semitones ?? 0;
-  const speed     = fx.pitch?.speed ?? 0.5;
-  const formant   = fx.pitch?.formant ?? 0.5;
-  const pitchKey  = fx.pitch?.key ?? "C";
-  const scale     = fx.pitch?.scale ?? "chromatic";
-  const mode      = fx.pitch?.mode ?? "shift";
-  const stLabel   = semitones === 0 ? "0 st" : (semitones > 0 ? "+" + semitones : semitones) + " st";
-  const speedMs   = speed < 0.02 ? "INSTANT" : Math.round(speed * 400) + " ms";
-  const NOTES     = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-  const IS_BLACK  = [false,true,false,true,false,false,true,false,true,false,true,false];
-  const SCALE_INTERVALS = { chromatic:[0,1,2,3,4,5,6,7,8,9,10,11], major:[0,2,4,5,7,9,11], minor:[0,2,3,5,7,8,10], pentatonic:[0,2,4,7,9], blues:[0,3,5,6,7,10] };
-  const rootIdx   = NOTES.indexOf(pitchKey);
-  const intervals = SCALE_INTERVALS[scale] || SCALE_INTERVALS.chromatic;
-  const activeNotes = new Set(intervals.map(function(i){ return NOTES[(rootIdx + i) % 12]; }));
-  return (
-    <div style={{ background:"linear-gradient(160deg,#0f0f14 0%,#12101a 100%)", borderRadius:16, overflow:"hidden", border:"1px solid " + (pOn ? "#9333ea" : "#1e1e1e"), boxShadow: pOn ? "0 0 24px rgba(147,51,234,0.2)" : "none" }}>
-      <div style={{ display:"flex", alignItems:"center", padding:"8px 14px", background:"#0a0a0f", borderBottom:"1px solid #1a1a24" }}>
-        <div style={{ flex:1 }}>
-          <div style={{ color:"#7c3aed", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace" }}>AUTO·TUNE</div>
-          <div style={{ color:"#333", fontSize:8, letterSpacing:1 }}>PITCH PROCESSOR v2</div>
-        </div>
-        <div style={{ display:"flex", background:"#111", borderRadius:8, border:"1px solid #222", overflow:"hidden", marginRight:10 }}>
-          {["shift","autotune"].map(function(m){ return <button key={m} onClick={function(){ upd("pitch",{mode:m}); }} style={{ padding:"4px 10px", background:mode===m?"#7c3aed":"transparent", border:"none", color:mode===m?"white":"#444", fontSize:8, fontWeight:800, cursor:"pointer", letterSpacing:0.5, textTransform:"uppercase" }}>{m==="shift"?"SHIFT":"A-TUNE"}</button>; })}
-        </div>
-        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-          <div style={{ width:8, height:8, borderRadius:"50%", background: pOn ? "#a855f7" : "#1a1a1a", boxShadow: pOn ? "0 0 8px #a855f7, 0 0 16px #7c3aed44" : "none", transition:"all 0.2s" }} />
-          <button onClick={function(){ upd("pitch",{on:!pOn}); }} style={{ background:pOn?"#7c3aed":"#1a1a1a", border:"1px solid "+(pOn?"#9333ea":"#2a2a2a"), borderRadius:6, color:"white", fontSize:9, fontWeight:800, padding:"4px 10px", cursor:"pointer", letterSpacing:1 }}>{pOn ? "ON" : "OFF"}</button>
-        </div>
-      </div>
-      <div style={{ padding:"12px 14px", opacity: pOn ? 1 : 0.3, pointerEvents: pOn ? "auto" : "none", transition:"opacity 0.2s" }}>
-        <div style={{ background:"#060810", border:"1px solid #1a1a2e", borderRadius:8, padding:"8px 12px", marginBottom:14, fontFamily:"monospace", boxShadow:"inset 0 2px 8px rgba(0,0,0,0.6)" }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <div>
-              <div style={{ color:"#6d28d9", fontSize:8, letterSpacing:2, marginBottom:2 }}>{mode==="autotune"?"AUTO-TUNE":"PITCH SHIFT"}</div>
-              <div style={{ color:"#a855f7", fontSize:20, fontWeight:900, letterSpacing:1, lineHeight:1 }}>{mode==="autotune" ? pitchKey + " " + scale.toUpperCase() : stLabel}</div>
-            </div>
-            <div style={{ textAlign:"right" }}>
-              <div style={{ color:"#4c1d95", fontSize:8, letterSpacing:1, marginBottom:2 }}>SPEED</div>
-              <div style={{ color:"#7c3aed", fontSize:13, fontWeight:800, fontFamily:"monospace" }}>{speedMs}</div>
-            </div>
-          </div>
-          <div style={{ marginTop:8, height:3, background:"#0f0f1a", borderRadius:2, overflow:"hidden" }}>
-            <div style={{ height:"100%", width: (Math.abs(semitones)/12*100)+"%", background: semitones > 0 ? "linear-gradient(90deg,#6d28d9,#a855f7)" : "linear-gradient(90deg,#a855f7,#6d28d9)", marginLeft: semitones < 0 ? "auto" : "0", transition:"width 0.1s", borderRadius:2 }} />
-          </div>
-        </div>
-        <div style={{ display:"flex", justifyContent:"space-around", alignItems:"flex-end", marginBottom:14, gap:4 }}>
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-            <Knob label="PITCH" value={semitones} min={-12} max={12} step={1} unit=" st" color="#a855f7" onChange={function(v){ upd("pitch",{semitones:v}); }} />
-            <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{stLabel}</div>
-          </div>
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-            <Knob label="SPEED" value={speed} min={0} max={1} step={0.01} unit="%" color="#7c3aed" onChange={function(v){ upd("pitch",{speed:v}); }} />
-            <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{speedMs}</div>
-          </div>
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
-            <Knob label="FORMANT" value={formant} min={0} max={1} step={0.05} unit="" color="#9333ea" onChange={function(v){ upd("pitch",{formant:v}); }} />
-            <div style={{ color:"#4c1d95", fontSize:7, fontFamily:"monospace" }}>{Math.round(formant*100)}% PRES</div>
-          </div>
-        </div>
-        {mode === "autotune" && (
-          <div style={{ marginBottom:12 }}>
-            <div style={{ color:"#4c1d95", fontSize:8, letterSpacing:2, fontFamily:"monospace", marginBottom:6 }}>SCALE</div>
-            <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
-              {Object.keys(SCALE_INTERVALS).map(function(s){ const isA = scale === s; return <button key={s} onClick={function(){ upd("pitch",{scale:s}); }} style={{ padding:"4px 10px", background:isA?"#7c3aed":"#0f0f18", border:"1px solid "+(isA?"#9333ea":"#1e1e2a"), borderRadius:6, color:isA?"white":"#4c1d95", fontSize:8, fontWeight:800, cursor:"pointer", textTransform:"capitalize", letterSpacing:0.5 }}>{s}</button>; })}
-            </div>
-          </div>
-        )}
-        {mode === "autotune" && (
-          <div style={{ marginBottom:4 }}>
-            <div style={{ color:"#4c1d95", fontSize:8, letterSpacing:2, fontFamily:"monospace", marginBottom:6 }}>ROOT KEY</div>
-            <div style={{ position:"relative", height:48, display:"flex" }}>
-              {NOTES.filter(function(_,i){ return !IS_BLACK[i]; }).map(function(n, wi){
-                const isRoot = n === pitchKey;
-                const inScale = activeNotes.has(n);
-                return <button key={n} onClick={function(){ upd("pitch",{key:n}); }} style={{ flex:1, height:"100%", background: isRoot ? "#a855f7" : inScale ? "#2d1b4e" : "#e8e8e8", border:"1px solid #111", borderRadius:"0 0 4px 4px", cursor:"pointer", display:"flex", alignItems:"flex-end", justifyContent:"center", paddingBottom:3, boxShadow: isRoot ? "0 0 8px #a855f744" : "none", transition:"background 0.1s" }}><span style={{ fontSize:6, fontWeight:800, color: isRoot ? "white" : inScale ? "#a855f7" : "#333" }}>{n}</span></button>;
-              })}
-              <div style={{ position:"absolute", top:0, left:0, right:0, height:"58%", pointerEvents:"none", display:"flex" }}>
-                {[{note:"C#",left:"12.3%"},{note:"D#",left:"26%"},{note:"F#",left:"53.2%"},{note:"G#",left:"67%"},{note:"A#",left:"80.7%"}].map(function(bk){
-                  const isRoot = bk.note === pitchKey;
-                  const inScale = activeNotes.has(bk.note);
-                  return <button key={bk.note} onClick={function(){ upd("pitch",{key:bk.note}); }} style={{ position:"absolute", left:bk.left, width:"9%", height:"100%", background: isRoot ? "#a855f7" : inScale ? "#3b0d6b" : "#111", border:"1px solid "+(isRoot?"#9333ea":"#000"), borderRadius:"0 0 4px 4px", cursor:"pointer", pointerEvents:"auto", boxShadow: isRoot ? "0 0 8px #a855f7" : "none", zIndex:2 }} />;
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// =============================================================================
-// ── NOISE REMOVER PLUGIN ─────────────────────────────────────────────────────
-// Uses RNNoise (Mozilla's recurrent neural net) via WebAssembly + AudioWorklet.
-// Falls back to Web Audio biquad-based suppression when WASM unavailable.
-// =============================================================================
-
-// Noise Gate AudioWorklet — RMS-based gating with attack/hold/release envelope.
-// This is the same fundamental approach as Logic Pro's Noise Gate plugin:
-//   1. Compute short-term RMS of input
-//   2. Compare to threshold (in dB)
-//   3. Open/close an envelope follower with configurable attack/hold/release
-//   4. Multiply signal by envelope (1 = fully open, reduction = closed)
-// No external WASM needed — pure JS, works everywhere including iOS Safari.
-const NOISE_GATE_WORKLET_CODE = `
-class NoiseGateProcessor extends AudioWorkletProcessor {
-  static get parameterDescriptors() {
-    return [
-      { name: "threshold",  defaultValue: -40, minValue: -80, maxValue: 0,   automationRate: "k-rate" },
-      { name: "reduction",  defaultValue: -60, minValue: -80, maxValue: 0,   automationRate: "k-rate" },
-      { name: "attack",     defaultValue: 0.003, minValue: 0.0001, maxValue: 0.5, automationRate: "k-rate" },
-      { name: "hold",       defaultValue: 0.1,   minValue: 0,      maxValue: 1.0, automationRate: "k-rate" },
-      { name: "release",    defaultValue: 0.15,  minValue: 0.001,  maxValue: 2.0, automationRate: "k-rate" },
-      { name: "bypass",     defaultValue: 0,     minValue: 0,      maxValue: 1,   automationRate: "k-rate" },
-    ];
-  }
-
-  constructor() {
-    super();
-    this._envelope    = 0;    // current gate gain (0..1)
-    this._holdSamples = 0;    // remaining hold samples
-    this._open        = false; // gate state
-    // RMS window: 10ms @ sampleRate
-    this._rmsWin   = Math.round(sampleRate * 0.01);
-    this._rmsBuf   = new Float32Array(this._rmsWin);
-    this._rmsIdx   = 0;
-    this._rmsSumSq = 0;
-  }
-
-  process(inputs, outputs, params) {
-    const inp = inputs[0]?.[0];
-    const out = outputs[0]?.[0];
-    if (!inp || !out) return true;
-
-    const bypass    = params.bypass[0] > 0.5;
-    if (bypass) { out.set(inp); return true; }
-
-    const threshLin  = Math.pow(10, params.threshold[0]  / 20);
-    const reducLin   = Math.pow(10, params.reduction[0]  / 20);
-    const sr         = sampleRate;
-    const attackCoef  = Math.exp(-1 / (params.attack[0]  * sr));
-    const releaseCoef = Math.exp(-1 / (params.release[0] * sr));
-    const holdLen     = Math.round(params.hold[0] * sr);
-
-    for (let i = 0; i < inp.length; i++) {
-      // ── RMS update (sliding window) ──────────────────────────
-      const old = this._rmsBuf[this._rmsIdx];
-      const cur = inp[i];
-      this._rmsSumSq += cur * cur - old * old;
-      this._rmsBuf[this._rmsIdx] = cur;
-      this._rmsIdx = (this._rmsIdx + 1) % this._rmsWin;
-      const rms = Math.sqrt(Math.max(0, this._rmsSumSq) / this._rmsWin);
-
-      // ── Gate decision ────────────────────────────────────────
-      if (rms >= threshLin) {
-        this._open        = true;
-        this._holdSamples = holdLen;
-      } else if (this._holdSamples > 0) {
-        this._holdSamples--;
-        // gate stays open during hold
-      } else {
-        this._open = false;
-      }
-
-      // ── Envelope follower ────────────────────────────────────
-      const target = this._open ? 1.0 : reducLin;
-      const coef   = this._open ? attackCoef : releaseCoef;
-      this._envelope = target + coef * (this._envelope - target);
-
-      out[i] = inp[i] * this._envelope;
-    }
-    return true;
-  }
-}
-registerProcessor("noise-gate-processor", NoiseGateProcessor);
-`;
-
-// Singleton worklet registration tracker
-const noiseGateWorkletReady = { current: false, promise: null };
-// Keep old name so existing callers still work
-const rnnoiseWorkletReady = noiseGateWorkletReady;
-
-async function registerRNNoiseWorklet(actx) {
-  if (noiseGateWorkletReady.current) return;
-  if (noiseGateWorkletReady.promise) { await noiseGateWorkletReady.promise; return; }
-  noiseGateWorkletReady.promise = (async () => {
-    try {
-      const blob = new Blob([NOISE_GATE_WORKLET_CODE], { type: "application/javascript" });
-      const url  = URL.createObjectURL(blob);
-      await actx.audioWorklet.addModule(url);
-      URL.revokeObjectURL(url);
-      noiseGateWorkletReady.current = true;
-    } catch(e) {
-      // Worklet registration failed — biquad fallback used in buildChain
-    }
-  })();
-  await noiseGateWorkletReady.promise;
-}
-
-// ── T-Rotten Knob ─────────────────────────────────────────────────────────────
-// Defined at MODULE LEVEL — not inside _TRottenMasterPlugin.
-// Keeping it inside caused React to see a brand-new component type on every
-// parent render, unmounting+remounting the knob and destroying drag state
-// mid-gesture. Being outside means the component identity is stable.
-//
-// Stale-closure fix: dragRef stores a mutable baseline that updates every tick,
-// so onPointerMove always calculates delta from the last position, not the
-// original mousedown value. Without this the knob snaps back on every re-render.
-//
-// Gradient-ID fix: module counter gives each mounted knob a unique SVG defs ID
-// so knobs with the same label (e.g. blank INPUT/OUTPUT knobs) don't collide.
-let _tkc = 0; // module-level mount counter for unique gradient IDs
 function TKnob({ label, value, min, max, step, unit, onChange, size, color }) {
   const sz     = size || 44;
   const r      = sz / 2 - 4;
@@ -8214,7 +7916,6 @@ function StudioScreen({ user, onExit }) {
   // MUST be declared here (before line 4743 uses it) to avoid "uninitialized variable" crash
   const effectivePPSRef = useRef(100);
   const lassoContainerRef = useRef(null); // ref to the DAW wrapper — lasso overlay is positioned inside this
-  const pitchWorkletReadyRef = useRef(false); // true once the phase-vocoder worklet is registered
 
   // ── Audio engine gain/FX refs (declared here to follow Rules of Hooks) ──
   const gainNodesRef       = useRef({});   // trackId → GainNode
@@ -8829,9 +8530,12 @@ function StudioScreen({ user, onExit }) {
           });
         }
 
-        // Suspend monitor context
-        if (mCtx && mCtx.state === "running") {
-          mCtx.suspend().catch(function(){});
+        // Close monitor context entirely during recording so iOS fully releases
+        // the audio session — suspend() still holds the session and causes mic ducking.
+        if (mCtx && mCtx.state !== "closed") {
+          mCtx.close().catch(function(){});
+          // Clear the ref so startMonitoring creates a fresh context next time
+          monitorCtxRef.current = null;
         }
       }, 80);
     }, 0);
@@ -8974,302 +8678,6 @@ function StudioScreen({ user, onExit }) {
   // The worklet exposes a single AudioParam: "pitch" (ratio, 1.0 = no shift).
   // To shift by N semitones: ratio = 2^(N/12).
   // =============================================================================
-  const PITCH_WORKLET_CODE = `
-// ═══════════════════════════════════════════════════════════════════════
-// BeatFinder Real-Time Autotune — PSOLA + MPM Pitch Detector
-// ═══════════════════════════════════════════════════════════════════════
-// Algorithm: TD-PSOLA (Time-Domain Pitch-Synchronous Overlap-Add)
-//   Same family as Antares Auto-Tune / Melodyne. Operates on individual
-//   pitch periods rather than FFT frames — zero smearing, low latency.
-//
-// Pitch detection: McLeod Pitch Method (NSDF autocorrelation) — robust
-//   sub-Hz accuracy via parabolic interpolation, fast enough for 128-
-//   sample real-time blocks.
-//
-// Parameters (k-rate):
-//   pitch   – semitone shift ratio (SHIFT mode, default 1.0)
-//   speed   – retune speed 0–1 (0=instant/robotic, 1=400ms glide)
-//   mode    – 0=SHIFT, 1=AUTOTUNE (detect+snap)
-//   root    – key root 0–11 (C=0..B=11)
-//   scale   – 12-bit scale mask (4095=chromatic)
-//   formant – formant shift compensation 0–1 (unused, kept for API compat)
-// ═══════════════════════════════════════════════════════════════════════
-
-class PitchShiftProcessor extends AudioWorkletProcessor {
-  static get parameterDescriptors() {
-    return [
-      { name:'pitch',   defaultValue:1,    minValue:0.25,  maxValue:4,    automationRate:'k-rate' },
-      { name:'speed',   defaultValue:0.15, minValue:0,     maxValue:1,    automationRate:'k-rate' },
-      { name:'mode',    defaultValue:0,    minValue:0,     maxValue:1,    automationRate:'k-rate' },
-      { name:'root',    defaultValue:0,    minValue:0,     maxValue:11,   automationRate:'k-rate' },
-      { name:'scale',   defaultValue:4095, minValue:0,     maxValue:4095, automationRate:'k-rate' },
-      { name:'formant', defaultValue:0.5,  minValue:0,     maxValue:1,    automationRate:'k-rate' },
-    ];
-  }
-
-  constructor() {
-    super();
-    const sr = sampleRate;
-
-    // ── Input ring buffer — 3 seconds ───────────────────────────────────────
-    this._ringLen = sr * 3 | 0;
-    this._ring    = new Float32Array(this._ringLen);
-    this._ringW   = 0; // absolute write head (never modded until access)
-
-    // ── MPM pitch detection buffer — 40ms window ─────────────────────────────
-    this._detBufLen = (sr * 0.04 + 512) | 0; // ~1800 samples @ 44.1k
-    this._detBuf    = new Float32Array(this._detBufLen);
-    this._detTimer  = 0;
-    this._detRate   = 128; // re-detect every 128 samples (~3ms)
-
-    // ── Detected / smoothed pitch state ─────────────────────────────────────
-    this._detectedPeriod = 0;   // in samples, 0 = unvoiced
-    this._currentRatio   = 1.0; // smoothed pitch ratio (output/input period)
-    this._targetRatio    = 1.0;
-
-    // ── PSOLA state ──────────────────────────────────────────────────────────
-    // Output overlap-add buffer (2 seconds of headroom)
-    this._olaLen  = sr * 2 | 0;
-    this._olaBuf  = new Float32Array(this._olaLen);
-    this._olaW    = 0; // OLA write head (absolute)
-    this._olaR    = 0; // OLA read head  (absolute)
-
-    // Input grain-extraction pointer (absolute sample position in ring)
-    this._grainPtr = 0; // next input grain centre
-
-    // Output grain placement pointer
-    this._outGrainPtr = 0; // next output grain centre (absolute in OLA buf)
-
-    // Initialise
-    this._grainPtr    = this._ringW;
-    this._outGrainPtr = 0;
-    this._olaW        = 0;
-    this._olaR        = 0;
-
-    // Cross-fade Hann window (pre-computed for fastest grain size estimate)
-    // We use dynamic grain sizes equal to the detected period, but cache
-    // the per-grain Hann computation to avoid per-sample trig.
-    this._lastGrainSize = 0;
-    this._hannCache     = null;
-
-    // Prev voiced period for octave-continuity prior
-    this._prevPeriod = 0;
-  }
-
-  // ── MPM pitch detector ───────────────────────────────────────────────────────
-  // Returns fundamental period in samples, or 0 if unvoiced.
-  _detectPeriod(buf) {
-    const N  = buf.length;
-    const sr = sampleRate;
-
-    // Energy guard
-    let rms = 0;
-    for (let i = 0; i < N; i++) rms += buf[i] * buf[i];
-    if (rms / N < 8e-5) { this._prevPeriod = 0; return 0; } // -41dBFS threshold
-
-    const half    = N >> 1;
-    const minP    = Math.ceil(sr / 900);   // upper freq limit ~900Hz
-    const maxP    = Math.floor(sr / 60);   // lower freq limit ~60Hz
-    const nsdf    = new Float32Array(half);
-
-    // NSDF = 2·ACF(τ) / (m(0) + m(τ))
-    for (let tau = 0; tau < half; tau++) {
-      let num = 0, den = 0;
-      for (let j = 0; j < half; j++) {
-        num += buf[j] * buf[j + tau];
-        den += buf[j] * buf[j] + buf[j + tau] * buf[j + tau];
-      }
-      nsdf[tau] = den > 1e-10 ? (2 * num) / den : 0;
-    }
-
-    // Find first peak above 0.8 threshold
-    const THRESH = 0.8;
-    let best = -1, peakVal = -1, inPeak = false;
-
-    for (let tau = minP; tau <= maxP && tau < half; tau++) {
-      if (nsdf[tau] >= THRESH) {
-        inPeak = true;
-        if (nsdf[tau] > peakVal) { peakVal = nsdf[tau]; best = tau; }
-      } else if (inPeak) { break; }
-    }
-    if (best < 1) { this._prevPeriod = 0; return 0; }
-
-    // Parabolic interpolation for sub-sample accuracy
-    const y0 = nsdf[best - 1] ?? nsdf[best];
-    const y1 = nsdf[best];
-    const y2 = nsdf[best + 1] ?? nsdf[best];
-    const d  = 2 * (y0 - 2 * y1 + y2);
-    const refined = d !== 0 ? best - (y2 - y0) / (2 * d) : best;
-
-    // Octave-continuity prior: prefer period close to previous
-    if (this._prevPeriod > 0) {
-      const ratio = refined / this._prevPeriod;
-      if (ratio < 0.6)  return this._prevPeriod; // reject octave-down jump
-    }
-
-    this._prevPeriod = refined;
-    return refined;
-  }
-
-  // ── Snap Hz to nearest in-scale note, return ratio ──────────────────────────
-  _snapRatio(hz, root, scaleMask) {
-    if (hz <= 0) return 1.0;
-    const midi    = 69 + 12 * Math.log2(hz / 440);
-    const midiR   = Math.round(midi);
-    const nc      = ((midiR % 12) + 12) % 12;
-    let bestDelta = 0, bestDist = Infinity;
-    for (let s = 0; s < 12; s++) {
-      if (!(scaleMask & (1 << s))) continue;
-      const cand = (root + s) % 12;
-      let dist = (nc - cand + 12) % 12;
-      if (dist > 6) dist = 12 - dist;
-      if (dist < bestDist) {
-        bestDist = dist;
-        let d = cand - nc;
-        if (d > 6) d -= 12; if (d < -6) d += 12;
-        bestDelta = d;
-      }
-    }
-    // Ratio to shift input pitch to target: 2^(delta/12)
-    return Math.pow(2, bestDelta / 12);
-  }
-
-  // ── Hann window for a given grain size ──────────────────────────────────────
-  _getHann(size) {
-    if (this._lastGrainSize === size && this._hannCache) return this._hannCache;
-    const w = new Float32Array(size);
-    for (let i = 0; i < size; i++) w[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (size - 1));
-    this._hannCache     = w;
-    this._lastGrainSize = size;
-    return w;
-  }
-
-  // ── PSOLA: extract one grain from the input ring and OLA into output ─────────
-  _psola_grain(inputPeriod, outputPeriod) {
-    if (inputPeriod < 2) return;
-    const grainSize = (inputPeriod * 2) | 0; // grain = 2 periods (classic PSOLA)
-    const hann      = this._getHann(grainSize);
-    const half      = grainSize >> 1;
-
-    // Read grain from ring centred at _grainPtr
-    const centre = this._grainPtr;
-    for (let i = 0; i < grainSize; i++) {
-      const sampleIdx = ((centre - half + i) % this._ringLen + this._ringLen) % this._ringLen;
-      const olaIdx    = (this._outGrainPtr - half + i + this._olaLen) % this._olaLen;
-      this._olaBuf[olaIdx] += this._ring[sampleIdx] * hann[i];
-    }
-
-    // Advance pointers by their respective periods
-    this._grainPtr    = (this._grainPtr    + (inputPeriod  | 0) + this._ringLen) % this._ringLen;
-    this._outGrainPtr = (this._outGrainPtr + (outputPeriod | 0) + this._olaLen)  % this._olaLen;
-  }
-
-  process(inputs, outputs, params) {
-    const input  = inputs[0]?.[0];
-    const output = outputs[0]?.[0];
-    if (!input || !output) return true;
-
-    const blockSize  = input.length; // 128
-    const sr         = sampleRate;
-    const mode       = Math.round(params.mode[0]);
-    const shiftRatio = params.pitch[0];      // manual ratio (SHIFT mode)
-    const speed      = params.speed[0];      // retune speed 0–1
-    const root       = Math.round(params.root[0]);
-    const scaleMask  = Math.round(params.scale[0]);
-
-    // ── 1. Write input into ring ─────────────────────────────────────────────
-    for (let i = 0; i < blockSize; i++) {
-      this._ring[this._ringW % this._ringLen] = input[i];
-      this._ringW++;
-    }
-
-    // ── 2. Pitch detection (throttled) ──────────────────────────────────────
-    this._detTimer += blockSize;
-    if (this._detTimer >= this._detRate) {
-      this._detTimer = 0;
-
-      // Fill detection buffer from ring (most recent _detBufLen samples)
-      const dN = this._detBufLen;
-      for (let i = 0; i < dN; i++) {
-        const idx = (this._ringW - dN + i + this._ringLen * 4) % this._ringLen;
-        this._detBuf[i] = this._ring[idx];
-      }
-
-      const period = this._detectPeriod(this._detBuf);
-      this._detectedPeriod = period;
-
-      if (period > 0) {
-        const hz = sr / period;
-        if (mode === 1) {
-          // AUTOTUNE: snap to scale
-          this._targetRatio = this._snapRatio(hz, root, scaleMask);
-        } else {
-          // SHIFT: manual ratio
-          this._targetRatio = Math.max(0.25, Math.min(4, shiftRatio));
-        }
-      } else {
-        // Unvoiced — glide target back to 1
-        this._targetRatio += 0.05 * (1.0 - this._targetRatio);
-      }
-    }
-
-    // In SHIFT mode always use the param directly (no detection needed)
-    if (mode === 0) this._targetRatio = Math.max(0.25, Math.min(4, shiftRatio));
-
-    // ── 3. Lerp toward target ratio ─────────────────────────────────────────
-    // speed=0 → instant, speed=1 → ~400ms glide. Same RC-filter formula.
-    const tauSamples = Math.max(1, speed * 0.4 * sr);
-    const alpha      = 1 - Math.exp(-blockSize / tauSamples);
-    this._currentRatio += alpha * (this._targetRatio - this._currentRatio);
-
-    // ── 4. PSOLA grain scheduling ────────────────────────────────────────────
-    // Every time the output grain pointer falls behind the read head by more
-    // than outputPeriod samples, synthesise another grain.
-    const inputPeriod  = this._detectedPeriod > 0 ? this._detectedPeriod : (sr / 220); // fallback A3
-    const outputPeriod = inputPeriod / this._currentRatio;
-
-    // How many output samples we need to cover this block
-    const olaReadEnd = (this._olaR + blockSize) % this._olaLen;
-
-    while (true) {
-      // Distance from current outGrainPtr to where read head will be
-      const ahead = (this._outGrainPtr - this._olaR + this._olaLen) % this._olaLen;
-      if (ahead > blockSize + outputPeriod * 2) break; // enough grains scheduled
-      this._psola_grain(inputPeriod, outputPeriod);
-    }
-
-    // ── 5. Drain OLA buffer into output block ────────────────────────────────
-    for (let i = 0; i < blockSize; i++) {
-      output[i] = this._olaBuf[this._olaR];
-      this._olaBuf[this._olaR] = 0; // clear after reading (overlap-add accumulates here)
-      this._olaR = (this._olaR + 1) % this._olaLen;
-    }
-
-    // Bypass if no pitch correction needed (within 2 cents of unison in autotune)
-    if (mode === 0 && Math.abs(this._currentRatio - 1.0) < 0.0012) {
-      output.set(input); // transparent passthrough
-    }
-
-    return true;
-  }
-}
-registerProcessor('pitch-shift-processor', PitchShiftProcessor);
-`;
-
-  const registerPitchWorklet = async function (actx) {
-    if (pitchWorkletReadyRef.current) return true;
-    try {
-      const blob = new Blob([PITCH_WORKLET_CODE], { type: 'application/javascript' });
-      const url  = URL.createObjectURL(blob);
-      await actx.audioWorklet.addModule(url);
-      URL.revokeObjectURL(url);
-      pitchWorkletReadyRef.current = true;
-      return true;
-    } catch(e) {
-      console.warn('[BeatFinder] AudioWorklet pitch shift unavailable:', e);
-      return false;
-    }
-  };
 
   const getOrCreateMaster = function () {
     const actx = getActx();
@@ -9356,39 +8764,6 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       const mgOn = !!(fx.compressor && fx.compressor.on && fx.compressor.makeupGain);
       const mgVal = mgOn ? Math.pow(10, (fx.compressor.makeupGain || 0) / 20) : 1;
       live.makeupGain.gain.setTargetAtTime(mgVal, now, T);
-    }
-
-    // ── Pitch/Autotune worklet — update all params live ──
-    if (live.pitchNode) {
-      const pitchOn   = !!(fx.pitch && fx.pitch.on);
-      const semitones = pitchOn ? (fx.pitch.semitones || 0) : 0;
-      const formant   = pitchOn ? (fx.pitch.formant ?? 0.8) : 0.8;
-      const speed     = pitchOn ? (fx.pitch.speed ?? 0.5)   : 0.5;
-      const pitchMode = pitchOn && fx.pitch.mode === 'autotune' ? 1 : 0;
-      const NOTE_MAP  = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
-      const SCALE_MASKS={chromatic:4095,major:2741,minor:1453,pentatonic:661,blues:1193};
-      const rootNote  = pitchOn ? (NOTE_MAP[fx.pitch.key || 'C'] || 0) : 0;
-      const scaleMask = pitchOn ? (SCALE_MASKS[fx.pitch.scale || 'chromatic'] ?? 4095) : 4095;
-
-      live.pitchNode.parameters.get('pitch').setTargetAtTime(Math.pow(2, semitones / 12), now, T);
-      live.pitchNode.parameters.get('speed').value   = speed;
-      live.pitchNode.parameters.get('mode').value    = pitchMode;
-      live.pitchNode.parameters.get('root').value    = rootNote;
-      live.pitchNode.parameters.get('scale').value   = scaleMask;
-      live.pitchNode.parameters.get('formant').value = formant;
-      live.pitchFormant = formant;
-    }
-
-    // ── AppleX Auto-Tune — live param updates ──
-    if (live.applex) {
-      const NOTE_MAP_AX = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
-      const applexOn = !!(fx.applex && fx.applex.on);
-      const awn = live.applex.awn;
-      // If turned off: set mode=0 (bypass/passthrough), speed=0 for instant reset
-      awn.parameters.get('mode').value  = applexOn ? 1 : 0;
-      awn.parameters.get('speed').value = applexOn ? (fx.applex.speed ?? 0.5) : 0;
-      awn.parameters.get('root').value  = applexOn ? (NOTE_MAP_AX[fx.applex.key || 'C'] || 0) : 0;
-      awn.parameters.get('scale').value = 4095; // always chromatic for AppleX
     }
 
     // ── Reverb wet/dry ──
@@ -9515,26 +8890,6 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       }
     }
 
-    // ── Pitch fallback ScriptProcessor — live param updates ─────────────────
-    // The worklet path is handled above (live.pitchNode). This covers the
-    // ScriptProcessor fallback used when AudioWorklet is unavailable.
-    if (live.pitchFallbackSP && fx.pitch !== undefined) {
-      const pitchOn = !!(fx.pitch && fx.pitch.on);
-      // Update the ScriptProcessor's closure variables via a message-style
-      // property we attach to the node at build time.
-      if (pitchOn !== live.pitchFallbackSP._nrOn) {
-        live.pitchFallbackSP._nrOn = pitchOn;
-      }
-      // Expose current pitch params on the node so onaudioprocess can read them
-      live.pitchFallbackSP._speed    = pitchOn ? (fx.pitch.speed ?? 0.5)   : 0.5;
-      live.pitchFallbackSP._semitones= pitchOn ? (fx.pitch.semitones ?? 0) : 0;
-      const NOTE_MAP_L = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
-      const SCALE_MASKS_L = {chromatic:4095,major:2741,minor:1453,pentatonic:661,blues:1193};
-      live.pitchFallbackSP._rootNote  = pitchOn ? (NOTE_MAP_L[fx.pitch.key || 'C'] || 0) : 0;
-      live.pitchFallbackSP._scaleMask = pitchOn ? (SCALE_MASKS_L[fx.pitch.scale||'chromatic'] ?? 4095) : 4095;
-      live.pitchFallbackSP._isAutoTune= pitchOn && fx.pitch.mode === 'autotune';
-    }
-
     // ── T-Rotten Master — live param morphing ──────────────────────────────
     if (live.trotten && fx.trotten !== undefined) {
       const tr   = fx.trotten || {};
@@ -9655,7 +9010,6 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     const actx   = getActx();
     const master = getOrCreateMaster();
     // Register pitch worklet if not done yet (async, required before AudioWorkletNode)
-    await registerPitchWorklet(actx);
     // Register RNNoise worklet if not done yet
     await registerRNNoiseWorklet(actx);
     // Schedule audio 50ms ahead so all tracks start at exactly the same moment.
@@ -9758,29 +9112,6 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         split.connect(dryG); split.connect(preDelay);
         node = split;
         liveNodes.ocean = { dryG, wetG, preDelay, lpf };
-      }
-
-      // ── AppleX Auto-Tune — real-time pitch correction via pitch-shift-processor ──
-      {
-        const applexOn = !!(fx.applex && fx.applex.on);
-        if (applexOn && pitchWorkletReadyRef.current) {
-          try {
-            const NOTE_MAP_AX = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
-            const awn = new AudioWorkletNode(actx, 'pitch-shift-processor');
-            // mode=1 → autotune (pitch detection + chromatic snap)
-            awn.parameters.get('mode').value    = 1;
-            awn.parameters.get('pitch').value   = 1.0; // no manual shift
-            // speed: UI is 0–1 (0=instant/robotic, 1=slow/natural); map to 0–0.8 for worklet
-            awn.parameters.get('speed').value   = fx.applex.speed ?? 0.5;
-            awn.parameters.get('formant').value = 0.5; // moderate formant preservation
-            awn.parameters.get('root').value    = NOTE_MAP_AX[fx.applex.key || 'C'] || 0;
-            awn.parameters.get('scale').value   = 4095; // chromatic — snap to any semitone
-            awn.connect(node); node = awn;
-            liveNodes.applex = { awn };
-          } catch(e) { liveNodes.applex = null; }
-        } else {
-          liveNodes.applex = null;
-        }
       }
 
       // ── 5-band parametric EQ — always built; bypass = unity gain when off ──
@@ -10247,144 +9578,6 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         liveNodes.bandpass = { bp1, bp2, bpDry, bpWet, bpOut };
       }
 
-      // ── Pitch/Autotune via phase-vocoder AudioWorklet ──────────────────────
-      // SHIFT mode (mode=0): uses pitch param (semitone ratio) directly.
-      // AUTOTUNE mode (mode=1): worklet detects live pitch and snaps to scale at speed rate.
-      if (fx.pitch && fx.pitch.on && pitchWorkletReadyRef.current) {
-        try {
-          const pitchNode = new AudioWorkletNode(actx, 'pitch-shift-processor');
-          const semitones  = fx.pitch.semitones || 0;
-          const pitchMode  = fx.pitch.mode === 'autotune' ? 1 : 0;
-          const speed      = fx.pitch.speed ?? 0.5;
-          const formant    = fx.pitch.formant ?? 0.8;
-          // Root note: C=0..B=11
-          const NOTE_MAP   = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
-          const SCALE_MASKS= { chromatic:4095, major:2741, minor:1453, pentatonic:661, blues:1193 };
-          const rootNote   = NOTE_MAP[fx.pitch.key || 'C'] || 0;
-          const scaleKey   = fx.pitch.scale || 'chromatic';
-          const scaleMask  = SCALE_MASKS[scaleKey] ?? 4095;
-
-          pitchNode.parameters.get('pitch').value   = Math.pow(2, semitones / 12);
-          pitchNode.parameters.get('speed').value   = speed;
-          pitchNode.parameters.get('mode').value    = pitchMode;
-          pitchNode.parameters.get('root').value    = rootNote;
-          pitchNode.parameters.get('scale').value   = scaleMask;
-          pitchNode.parameters.get('formant').value = formant;
-          pitchNode.connect(node);
-          node = pitchNode;
-          liveNodes.pitchNode = pitchNode;
-        } catch(e) {
-          node._pitchSemitones = fx.pitch.semitones || 0;
-        }
-      } else if (fx.pitch && fx.pitch.on) {
-        // ── Fallback pitch processing (no worklet) ──────────────────────────
-        // SHIFT mode: playbackRate-based semitone shift (tape-style, always works).
-        // AUTOTUNE mode: ScriptProcessor-based pitch snap — finds nearest scale note
-        //   in real time using pYIN probabilistic pitch detection, applies tuning via GainNode
-        //   crossfades between semitone-shifted copies (2 BiquadAllpass bands for smooth transition).
-        //   Not as transparent as the phase-vocoder worklet, but fully functional.
-        const semitones = fx.pitch.semitones || 0;
-        const isAutoTune = fx.pitch.mode === 'autotune';
-        const NOTE_MAP_FB   = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
-        const SCALE_MASKS_FB= { chromatic:4095, major:2741, minor:1453, pentatonic:661, blues:1193 };
-        const rootNote_fb   = NOTE_MAP_FB[fx.pitch.key || 'C'] || 0;
-        const scaleMask_fb  = SCALE_MASKS_FB[fx.pitch.scale || 'chromatic'] ?? 4095;
-
-        if (isAutoTune) {
-          // ScriptProcessor fallback for auto-tune: soft-knee pitch snapping.
-          // We use pYIN (probabilistic YIN) to detect f0,
-          // compute the nearest in-scale semitone correction, then apply via
-          // two interlocked BiquadAllpass comb filters (Laroche-Dolson style).
-          // This gives perceptible pitch correction without AudioWorklet.
-          // Live params are written onto the sp node by applyFxLive so
-          // onaudioprocess always reads the latest values without stale closures.
-          const bufSize = 4096;
-          const sp = actx.createScriptProcessor(bufSize, 1, 1);
-          // Seed live-param properties on the node itself so applyFxLive can update them
-          sp._speed     = fx.pitch.speed ?? 0.5;
-          sp._rootNote  = rootNote_fb;
-          sp._scaleMask = scaleMask_fb;
-          sp._isAutoTune= true;
-          let currentCents = 0; // smoothed correction in cents
-
-          // Simple autocorrelation pitch detector (faster than full YIN)
-          const detectPitch = function(buf, sr) {
-            const n = buf.length;
-            let rms = 0;
-            for (let i = 0; i < n; i++) rms += buf[i] * buf[i];
-            if (rms / n < 0.0003) return 0;
-            const minP = Math.ceil(sr / 1200);
-            const maxP = Math.floor(sr / 50);
-            let bestCorr = -1, bestTau = 0;
-            for (let tau = minP; tau < Math.min(maxP, n >> 1); tau++) {
-              let corr = 0;
-              for (let j = 0; j < n >> 1; j++) corr += buf[j] * buf[j + tau];
-              if (corr > bestCorr) { bestCorr = corr; bestTau = tau; }
-            }
-            return bestTau > 0 ? sr / bestTau : 0;
-          };
-
-          sp.onaudioprocess = function(e) {
-            const input  = e.inputBuffer.getChannelData(0);
-            const output = e.outputBuffer.getChannelData(0);
-            const sr     = actx.sampleRate;
-            // Read live params from node properties (updated by applyFxLive)
-            const speed_live    = sp._speed     ?? 0.5;
-            const rootNote_live = sp._rootNote  ?? 0;
-            const scaleMask_live= sp._scaleMask ?? 4095;
-
-            // Detect pitch
-            const f0 = detectPitch(input, sr);
-            let targetCents = 0;
-
-            if (f0 > 20) {
-              // Convert f0 to MIDI note number
-              const midiNote = 69 + 12 * Math.log2(f0 / 440);
-              const semitone = Math.round(midiNote) % 12;
-              // Find nearest in-scale note
-              let bestDist = 12, bestSemi = semitone;
-              for (let s = 0; s < 12; s++) {
-                const scaleDeg = (s - rootNote_live + 12) % 12;
-                if (scaleMask_live & (1 << scaleDeg)) {
-                  const dist = Math.abs(((s - semitone + 6 + 12) % 12) - 6);
-                  if (dist < bestDist) { bestDist = dist; bestSemi = s; }
-                }
-              }
-              // Correction = distance from detected to nearest scale note (in cents)
-              targetCents = ((bestSemi - semitone + 6 + 12) % 12 - 6) * 100;
-            }
-
-            // Smooth correction (speed: 0=instant, 1=slow glide ~400ms)
-            const alpha = 1 - speed_live * 0.995;
-            currentCents += (targetCents - currentCents) * alpha;
-
-            // Apply pitch correction via linear interpolation resampling
-            const ratio = Math.pow(2, currentCents / 1200);
-            let readPos = 0;
-            for (let i = 0; i < output.length; i++) {
-              const iPos = Math.floor(readPos);
-              const frac = readPos - iPos;
-              const s0   = input[Math.min(iPos,     input.length - 1)];
-              const s1   = input[Math.min(iPos + 1, input.length - 1)];
-              output[i]  = s0 + (s1 - s0) * frac;
-              readPos   += ratio;
-              if (readPos >= input.length) readPos = input.length - 1;
-            }
-          };
-
-          sp.connect(node);
-          node = sp;
-          liveNodes.pitchFallbackSP = sp;
-        } else {
-          // SHIFT mode fallback: pure playbackRate-based shift applied in scheduleClip
-          node._pitchSemitones = semitones;
-        }
-      }
-      // Formant stored for scheduleClip fallback (no worklet path)
-      if (fx.pitch && fx.pitch.on) {
-        liveNodes.pitchFormant = fx.pitch.formant || 0;
-      }
-
       // Store live nodes for this track
       fxNodesRef.current[track.id] = liveNodes;
 
@@ -10405,19 +9598,6 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
         const src = actx.createBufferSource();
         src.buffer = buf;
-
-        // Pitch: if worklet is handling it, only apply formant via playbackRate.
-        // Formant shift = subtle playbackRate factor on top of the vocoder's ratio.
-        // This keeps vocal character (chest resonance) while the vocoder corrects pitch.
-        // If no worklet (fallback), full semitone shift via playbackRate (tape-style).
-        const live = fxNodesRef.current[track.id];
-        const hasWorklet = !!(live && live.pitchNode);
-        if (!hasWorklet) {
-          // Fallback (no worklet): tape-style pitch via playbackRate
-          const semitones = entryNode._pitchSemitones || 0;
-          if (semitones !== 0) src.playbackRate.value = Math.pow(2, semitones / 12);
-        }
-        // Formant is now handled entirely inside the PSOLA worklet — no playbackRate needed
 
         src.connect(entryNode);
 
@@ -10624,7 +9804,6 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     return {
       reverb:     { on:false, wet:0.25, roomSize:0.8 },
       ocean:      { on:false, wet:0.35, roomSize:1.0, damp:0.6, preDelay:20 },
-      applex:     { on:false, key:"C", speed:0.5, depth:1.0 },
       eq:         { on:false, low:0, mid:0, high:0 },
       compressor: { on:false, threshold:-24, ratio:4, attack:0.003, release:0.25 },
       trotten:    { on:false, eqLow:0, eqMid:0, eqHigh:0, eqLowT:"shelf", eqMidT:"bell", eqHighT:"shelf", compThr:-15, compAmt:50, compMode:"auto", tapeDrv:5, tapeSat:5, tapeMode:"modern", limCeil:-0.5, limRel:0.5, limMode:"truepeak", inputGain:0, outputGain:0 },
@@ -10959,10 +10138,28 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       // All DSP (echo cancellation, noise suppression, AGC) stays OFF — raw clean signal.
       // Post-processing is handled by the Noise Remover FX plugin instead.
       const recConstraints = await buildMicConstraints(micSource);
+      // Wait for monitor context to fully close and iOS to release the audio session.
+      // Without this wait, the OS hardware ducker activates between the two streams
+      // causing the mic level to drop on the second recording.
+      await new Promise(function(resolve){ setTimeout(resolve, 200); });
       // Always open a fresh stream for recording — never reuse the monitoring stream.
       // The monitoring stream may have been opened with different constraints (different
       // mic source, stale deviceId) and reusing it gives degraded or wrong-source audio.
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: recConstraints });
+      // Force all AGC/processing OFF at the hardware level.
+      // On iOS, having a second AudioContext (monitor) active while recording causes
+      // the OS to activate its hardware ducker which reduces mic gain. Adding these
+      // constraints to the raw getUserMedia call prevents that at the driver level.
+      const hardConstraints = Object.assign({}, recConstraints, {
+        echoCancellation:  false,
+        noiseSuppression:  false,
+        autoGainControl:   false,
+        googAutoGainControl:        false,
+        googEchoCancellation:       false,
+        googNoiseSuppression:       false,
+        googHighpassFilter:         false,
+        googTypingNoiseDetection:   false,
+      });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: hardConstraints });
 
       const actx    = getActx();
       const srcNode = actx.createMediaStreamSource(stream);
@@ -10972,49 +10169,11 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       micInputBoost.gain.value = micInputGainRef.current;
       srcNode.connect(micInputBoost);
 
-      // ── Real-time Autotune insert (AppleX) ───────────────────────────────
-      // Routes mic through the PSOLA pitch corrector BEFORE MediaRecorder
-      // captures it — this is what makes autotune affect the recording.
-      // Signal chain: srcNode → micInputBoost → [pitchNode?] → recSplitter → recMerger → analyser → MediaRecorder
-      let recChainEnd = micInputBoost;
-      const selectedTrackFx = tracksRef.current.find(function(t){ return t.id === selectedTrackId; })?.effects;
-      const applexFx = selectedTrackFx?.applex;
-      const pitchFx  = selectedTrackFx?.pitch;
-      let recPitchNode = null;
-
-      // Insert autotune if AppleX is ON for this track
-      if (pitchWorkletReadyRef.current && ((applexFx?.on) || (pitchFx?.on))) {
-        try {
-          const NOTE_MAP_R  = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11};
-          const SCALE_MAP_R = { chromatic:4095, major:2741, minor:1453, pentatonic:661, blues:1193 };
-          recPitchNode = new AudioWorkletNode(actx, 'pitch-shift-processor', {
-            numberOfInputs:1, numberOfOutputs:1, outputChannelCount:[1],
-          });
-          if (applexFx?.on) {
-            recPitchNode.parameters.get('mode').value  = 1; // autotune
-            recPitchNode.parameters.get('speed').value = applexFx.speed ?? 0.15;
-            recPitchNode.parameters.get('root').value  = NOTE_MAP_R[applexFx.key || 'C'] || 0;
-            recPitchNode.parameters.get('scale').value = 4095; // chromatic
-          } else if (pitchFx?.on) {
-            recPitchNode.parameters.get('mode').value  = pitchFx.mode === 'autotune' ? 1 : 0;
-            recPitchNode.parameters.get('pitch').value = Math.pow(2, (pitchFx.semitones||0)/12);
-            recPitchNode.parameters.get('speed').value = pitchFx.speed ?? 0.15;
-            recPitchNode.parameters.get('root').value  = NOTE_MAP_R[pitchFx.key || 'C'] || 0;
-            recPitchNode.parameters.get('scale').value = SCALE_MAP_R[pitchFx.scale || 'chromatic'] ?? 4095;
-          }
-          micInputBoost.connect(recPitchNode);
-          recChainEnd = recPitchNode;
-        } catch(e) {
-          console.warn('[BeatFinder] Autotune insert failed, recording dry:', e);
-          recPitchNode = null;
-        }
-      }
-
       // ── Mono merge + analyser ─────────────────────────────────────────────
       const analyser = actx.createAnalyser(); analyser.fftSize = 256;
       const recSplitter = actx.createChannelSplitter(1);
       const recMerger   = actx.createChannelMerger(2);
-      recChainEnd.connect(recSplitter);
+      micInputBoost.connect(recSplitter);
       recSplitter.connect(recMerger, 0, 0);
       recSplitter.connect(recMerger, 0, 1);
       recMerger.connect(analyser);
@@ -11033,20 +10192,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       const mime = CODEC_PREFS.find(function(m){ return MediaRecorder.isTypeSupported(m); }) || "";
 
       // 256kbps for best possible recording quality (Opus handles this very efficiently)
-      // Capture from the processed Web Audio chain (post-autotune) rather than
-      // the raw mic stream — this is the key fix: MediaRecorder gets the tuned audio.
-      let recDestStream = stream; // fallback: raw mic if Web Audio capture fails
-      let recDest = null;
-      try {
-        recDest = actx.createMediaStreamDestination();
-        analyser.connect(recDest);
-        recDestStream = recDest.stream;
-      } catch(e) {
-        // createMediaStreamDestination unavailable (some iOS versions) — use raw stream
-        console.warn('[BeatFinder] MediaStreamDestination unavailable, recording dry:', e);
-      }
-
-      const mr = new MediaRecorder(recDestStream, {
+      const mr = new MediaRecorder(stream, {
         mimeType:          mime || undefined,
         audioBitsPerSecond: 256000,
       });
@@ -11060,8 +10206,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         try { analyser.disconnect(); } catch(e) {}
         try { srcNode.disconnect(); } catch(e) {}
         try { micInputBoost.disconnect(); } catch(e) {}
-        try { if (recPitchNode) recPitchNode.disconnect(); } catch(e) {}
-
+        
         const blob = new Blob(chunksRef.current, { type: mime });
         const url  = URL.createObjectURL(blob);
 
@@ -11376,9 +10521,11 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   };
 
   const handleLaneLongPress = function(e, track) {
-    // Cancel if the touch landed directly on a clip (has data-clipid attribute)
-    // The inner mask div always covers the lane so we can't use e.target === e.currentTarget
-    if (e.target && e.target.closest && e.target.closest("[data-clipid]")) return;
+    // Cancel if touch landed on a clip or a trim handle
+    if (e.target && e.target.closest && (
+      e.target.closest("[data-clipid]") ||
+      e.target.closest("[data-trimhandle]")
+    )) return;
     // Called from onTouchStart on blank lane space.
     // We start a 0.4s timer; if the finger doesn't move much, activate lasso.
     const touch = e.touches[0];
@@ -13529,7 +12676,7 @@ userPickedMicRef.current = true;
                       return (
                         <div key={clip.id+"_handles"} style={{ position:"absolute", left:clipL, top:3, width:clipW, height:TRACK_H-6, pointerEvents:"none", zIndex:3 }}>
                           {/* Left */}
-                          <div style={{ position:"absolute", left:-10, top:0, bottom:0, width:18, cursor:"ew-resize", display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"all", touchAction:"none" }}
+                          <div data-trimhandle="left" style={{ position:"absolute", left:-10, top:0, bottom:0, width:28, cursor:"ew-resize", display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"all", touchAction:"none", zIndex:10 }}
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
                               const x0=e.clientX, ts0=trimS, cs0=clip.startTime||0;
@@ -13540,13 +12687,13 @@ userPickedMicRef.current = true;
                             onTouchStart={function(e){
                               e.stopPropagation(); e.preventDefault();
                               const x0=e.touches[0].clientX, ts0=trimS, cs0=clip.startTime||0;
-                              const mv=function(te){ const d=(te.touches[0].clientX-x0)/pps; const ts=Math.max(0,Math.min(ts0+d,trimE-0.05)); updateClip(track.id,clip.id,{trimStart:+ts.toFixed(4),startTime:Math.max(0,+(cs0+(ts-ts0)).toFixed(4))}); };
+                              const mv=function(te){ e.preventDefault(); const d=(te.touches[0].clientX-x0)/pps; const ts=Math.max(0,Math.min(ts0+d,trimE-0.05)); updateClip(track.id,clip.id,{trimStart:+ts.toFixed(4),startTime:Math.max(0,+(cs0+(ts-ts0)).toFixed(4))}); };
                               const up=function(){ document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
                               document.addEventListener("touchmove",mv,{passive:false}); document.addEventListener("touchend",up,{passive:true});
                             }}
-                          ><div style={{ width:4, height:26, borderRadius:3, background:track.color, opacity:isSel?1:0.5, boxShadow:"0 0 5px "+track.color+"88" }} /></div>
+                          ><div style={{ width:6, height:32, borderRadius:3, background:track.color, opacity:1, boxShadow:"0 0 8px "+track.color+"cc" }} /></div>
                           {/* Right */}
-                          <div style={{ position:"absolute", right:-10, top:0, bottom:0, width:18, cursor:"ew-resize", display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"all", touchAction:"none" }}
+                          <div data-trimhandle="right" style={{ position:"absolute", right:-10, top:0, bottom:0, width:28, cursor:"ew-resize", display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"all", touchAction:"none", zIndex:10 }}
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
                               const x0=e.clientX, te0=trimE;
@@ -13557,11 +12704,11 @@ userPickedMicRef.current = true;
                             onTouchStart={function(e){
                               e.stopPropagation(); e.preventDefault();
                               const x0=e.touches[0].clientX, te0=trimE;
-                              const mv=function(te){ const newTE=Math.max(trimS+0.05,Math.min(te0+(te.touches[0].clientX-x0)/pps,bufDur)); updateClip(track.id,clip.id,{trimEnd:+newTE.toFixed(4)}); };
+                              const mv=function(te){ e.preventDefault(); const newTE=Math.max(trimS+0.05,Math.min(te0+(te.touches[0].clientX-x0)/pps,bufDur)); updateClip(track.id,clip.id,{trimEnd:+newTE.toFixed(4)}); };
                               const up=function(){ document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
                               document.addEventListener("touchmove",mv,{passive:false}); document.addEventListener("touchend",up,{passive:true});
                             }}
-                          ><div style={{ width:4, height:26, borderRadius:3, background:track.color, opacity:isSel?1:0.5, boxShadow:"0 0 5px "+track.color+"88" }} /></div>
+                          ><div style={{ width:6, height:32, borderRadius:3, background:track.color, opacity:1, boxShadow:"0 0 8px "+track.color+"cc" }} /></div>
                         </div>
                       );
                     })}
