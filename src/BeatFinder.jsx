@@ -12408,7 +12408,7 @@ self.onmessage = async function(e) {
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
-      style={{ background:"#080808", height:"100dvh", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
+      style={{ background:"#080808", height:"100%", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
       onTouchMove={function(e){
         // Only allow touchmove inside the DAW scroll container — block everything else
@@ -12850,7 +12850,7 @@ self.onmessage = async function(e) {
       )}
 
       {/* ══ TOP BAR ══════════════════════════════════════════════ */}
-      <div style={{ display:"flex",alignItems:"center",padding:"10px 12px",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:6,zIndex:50 }}>
+      <div style={{ display:"flex",alignItems:"center",padding:"10px 12px",paddingTop:"calc(10px + env(safe-area-inset-top))",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:6,zIndex:50 }}>
         <button onClick={function(){
           if(!isSaved&&hasContent){
             setUnsavedAlert("exit");
@@ -14179,12 +14179,17 @@ export default function BeatFinder() {
         {["home","artists","trending","search","saved","studio","exclusive"].map(t => (
           <div key={t} style={{
             display: tab === t ? "block" : "none",
-            overflowY: t === "studio" ? "hidden" : "auto",
-            height: t === "studio"
-              ? "calc(100dvh - env(safe-area-inset-bottom))"
-              : "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))",
-            WebkitOverflowScrolling: "touch",
-            overscrollBehavior: "none",
+            ...(t === "studio" ? {
+              position: "fixed",
+              top: 0, left: 0, right: 0, bottom: 0,
+              zIndex: 10,
+              overflow: "hidden",
+            } : {
+              overflowY: "auto",
+              height: "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))",
+              WebkitOverflowScrolling: "touch",
+              overscrollBehavior: "none",
+            }),
           }}
           onTouchMove={t !== "studio" ? function(e){ e.stopPropagation(); } : undefined}
           >
