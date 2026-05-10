@@ -8117,16 +8117,15 @@ function StudioScreen({ user, onExit }) {
     }
   }, []);
 
-  // Prevent iOS from bouncing/scrolling the whole page in Studio.
-  // Block ALL touchmove on the document — only allow inside the timeline scroll container.
+  // Block ALL touchmove on the document to prevent iOS page bounce.
+  // Only allow touchmove inside the entire timeline/arrangement area (lassoContainerRef).
+  // Faders/knobs use pointerdown/pointermove so they still work independently.
   const mixerPanelRef = useRef(null);
   useEffect(function () {
     function onTouchMove(e) {
-      // Allow scrolling inside the timeline container
-      if (scrollRef.current && scrollRef.current.contains(e.target)) return;
-      // Allow dragging inside the mixer panel
-      if (mixerPanelRef.current && mixerPanelRef.current.contains(e.target)) return;
-      // Block everything else — kills iOS page bounce
+      // Allow touchmove anywhere inside the timeline arrangement area
+      if (lassoContainerRef.current && lassoContainerRef.current.contains(e.target)) return;
+      // Block everywhere else — kills iOS page bounce
       e.preventDefault();
     }
     document.addEventListener("touchmove", onTouchMove, { passive: false });
