@@ -50,9 +50,6 @@ const LOADER_STYLE = `
   input[type=range]::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:#9333ea; border:none; cursor:pointer; }
   .nr-slider::-webkit-slider-thumb { background:#10B981 !important; box-shadow:0 0 6px rgba(16,185,129,0.6) !important; }
   .nr-slider::-moz-range-thumb { background:#10B981 !important; }
-  .vol-slider::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px; border-radius:50%; background:#22C55E; box-shadow:0 0 8px rgba(34,197,94,0.7); cursor:pointer; }
-  .vol-slider::-moz-range-thumb { width:18px; height:18px; border-radius:50%; background:#22C55E; border:none; cursor:pointer; }
-  input[type=range]::-webkit-slider-runnable-track { background:transparent; }
   .bf-spinner {
     width: 44px; height: 44px; border-radius: 50%;
     border: 3px solid rgba(192,38,211,0.15);
@@ -162,92 +159,6 @@ function useAnalyser(analyserNode, isActive) {
   }, [analyserNode, isActive]);
 
   return { level, peak, clipping };
-}
-
-// Animated VU meter for the YouTube Player (no direct audio access – driven by animation)
-function PlayerVUMeter({ isPlaying, volume = 80 }) {
-  const NUM_BARS = 14;
-  // Envelope per bar: {level, peak, peakHold}
-  const envRef = React.useRef(
-    Array.from({ length: NUM_BARS }, (_, i) => ({
-      level: 0, peak: 0, peakHold: 0,
-      // Each bar has its own frequency/phase so they're fully independent
-      freq:  0.0008 + i * 0.00055 + Math.random() * 0.0003,
-      phase: Math.random() * Math.PI * 2,
-      // Low-mids (bars 3-7) are naturally louder — mimics real music spectrum
-      bias:  i < 2 ? 0.38 : i < 7 ? 0.62 : i < 10 ? 0.48 : 0.30,
-    }))
-  );
-  const [display, setDisplay] = React.useState(() => Array(NUM_BARS).fill(0));
-  const rafRef = React.useRef(null);
-  const lastTs  = React.useRef(0);
-
-  React.useEffect(() => {
-    if (!isPlaying) {
-      cancelAnimationFrame(rafRef.current);
-      // Fast decay to silence
-      setDisplay(Array(NUM_BARS).fill(0));
-      envRef.current.forEach(e => { e.level = 0; e.peak = 0; e.peakHold = 0; });
-      return;
-    }
-    const tick = (ts) => {
-      const dt = Math.min(ts - lastTs.current, 64); // cap at 64ms
-      lastTs.current = ts;
-
-      const ATTACK  = 1 - Math.exp(-dt / 8);   // ~8ms attack
-      const DECAY   = 1 - Math.exp(-dt / 80);  // ~80ms decay
-      const PEAK_D  = 1 - Math.exp(-dt / 600); // ~600ms peak hold decay
-
-      envRef.current.forEach(e => {
-        // Target: sine wave + random transient spikes
-        const sine   = 0.5 + 0.5 * Math.sin(ts * e.freq + e.phase);
-        const spike  = Math.random() < 0.04 ? Math.random() * 0.5 : 0; // 4% chance transient
-        const volScale = volume / 100;
-        const target = Math.min(1, (e.bias + sine * (1 - e.bias) * 0.7 + spike) * volScale);
-
-        if (target > e.level) {
-          e.level += ATTACK  * (target - e.level);
-        } else {
-          e.level += DECAY   * (target - e.level);
-        }
-        // Peak hold
-        if (e.level > e.peak) { e.peak = e.level; e.peakHold = ts + 1200; }
-        else if (ts > e.peakHold) { e.peak += PEAK_D * (e.level - e.peak); }
-      });
-
-      setDisplay(envRef.current.map(e => e.level));
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    lastTs.current = performance.now();
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [isPlaying]);
-
-  const clipping = display.some(v => v > 0.92);
-
-  return (
-    <div style={{
-      display: "flex", alignItems: "flex-end", gap: 2,
-      height: 36, padding: "4px 8px",
-      background: "rgba(0,0,0,0.6)",
-      borderRadius: 8,
-      border: "1px solid " + (clipping ? "rgba(239,68,68,0.6)" : "rgba(255,255,255,0.07)"),
-    }}>
-      {display.map((v, i) => {
-        const isClip = v > 0.92;
-        const color  = isClip ? "#EF4444" : v > 0.78 ? "#F59E0B" : v > 0.55 ? "#86EFAC" : "#22C55E";
-        const h      = isPlaying ? Math.max(2, v * 28) : 2;
-        return (
-          <div key={i} style={{
-            flex: 1, borderRadius: 2,
-            background: isPlaying ? color : "#111",
-            height: h,
-            boxShadow: isPlaying && v > 0.4 ? "0 0 5px " + color + "99" : "none",
-          }} />
-        );
-      })}
-    </div>
-  );
 }
 
 // Real VU meter driven by a Web Audio AnalyserNode – used in Studio
@@ -986,7 +897,7 @@ const GRAD = [
 ];
 const initials = n => n.split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase();
 const watchUrl  = id => `https://www.youtube.com/watch?v=${id}`;
-const embedUrl  = id => `https://www.youtube.com/embed/${id}?autoplay=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1`;
+const embedUrl  = id => `https://www.youtube.com/embed/${id}?autoplay=1&playsinline=1&rel=0&modestbranding=1`;
 
 // =============================================================================
 // ARTIST DATABASE
@@ -1681,54 +1592,6 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
 // FULL-SCREEN PLAYER
 // =============================================================================
 function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, savedLyrics, onEditLyric, onGoMembers }) {
-  const [ytVol, setYtVol] = React.useState(80);
-  const ytPlayerRef = React.useRef(null); // YT.Player instance
-  const divIdRef    = React.useRef("yt-player-" + beat.videoId);
-
-  // Load YouTube IFrame API once, create Player on ready
-  React.useEffect(function() {
-    const divId = divIdRef.current;
-
-    function createPlayer() {
-      if (ytPlayerRef.current) { try { ytPlayerRef.current.destroy(); } catch(e){} }
-      ytPlayerRef.current = new window.YT.Player(divId, {
-        videoId: beat.videoId,
-        playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1 },
-        events: {
-          onReady: function(ev) { ev.target.setVolume(80); },
-        },
-      });
-    }
-
-    if (window.YT && window.YT.Player) {
-      createPlayer();
-    } else {
-      // Inject the API script if not already present
-      if (!document.getElementById("yt-iframe-api")) {
-        const s = document.createElement("script");
-        s.id  = "yt-iframe-api";
-        s.src = "https://www.youtube.com/iframe_api";
-        document.head.appendChild(s);
-      }
-      // YT calls this global when ready
-      const prev = window.onYouTubeIframeAPIReady;
-      window.onYouTubeIframeAPIReady = function() {
-        if (prev) prev();
-        createPlayer();
-      };
-    }
-
-    return function() {
-      try { if (ytPlayerRef.current) ytPlayerRef.current.destroy(); } catch(e) {}
-      ytPlayerRef.current = null;
-    };
-  }, [beat.videoId]);
-
-  const handleVolume = function(v) {
-    setYtVol(v);
-    try { if (ytPlayerRef.current && ytPlayerRef.current.setVolume) ytPlayerRef.current.setVolume(v); } catch(e) {}
-  };
-
   return (
     <div style={{
       position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, background: "#000",
@@ -1757,42 +1620,15 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
           <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>{beat.channel}</div>
         </div>
       </div>
-      {/* YouTube IFrame API mounts here — replaces itself with an iframe */}
-      <div id={divIdRef.current} style={{ width: "100%", height: 220, background: "#000", flexShrink: 0 }} />
-      {/* ── VU meter + volume slider ── */}
-      <div style={{ padding: "8px 16px 10px", background: "#060606", borderBottom: "1px solid #111", flexShrink: 0 }}>
-        {/* VU meter row */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-          <div style={{ color: "#333", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, fontFamily: "monospace", whiteSpace: "nowrap" }}>OUTPUT</div>
-          <div style={{ flex: 1 }}>
-            <PlayerVUMeter isPlaying={true} volume={ytVol} />
-          </div>
-          <div style={{ color: "#22C55E", fontSize: 8, fontWeight: 700, letterSpacing: 1, fontFamily: "monospace" }}>{ytVol}%</div>
-        </div>
-        {/* Volume slider row */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ color: ytVol === 0 ? "#EF4444" : "#555", flexShrink: 0 }}>
-            <AppIcon id={ytVol === 0 ? "mute" : "speaker"} size={15} />
-          </div>
-          <input type="range" min={0} max={100} step={1} value={ytVol}
-            onChange={function(e){ handleVolume(parseInt(e.target.value)); }}
-            className="vol-slider"
-            style={{
-              flex: 1,
-              height: 4,
-              borderRadius: 2,
-              cursor: "pointer",
-              appearance: "none",
-              WebkitAppearance: "none",
-              outline: "none",
-              touchAction: "none",
-              background: "linear-gradient(90deg, #22C55E " + ytVol + "%, #222 " + ytVol + "%)",
-            }} />
-          <div style={{ color: "#555", flexShrink: 0 }}>
-            <AppIcon id="speaker" size={17} />
-          </div>
-        </div>
-      </div>
+      <iframe
+        key={beat.videoId}
+        src={embedUrl(beat.videoId)}
+        width="100%" height="220"
+        style={{ display: "block", border: "none", background: "#000", flexShrink: 0 }}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+        title={beat.title}
+      />
       <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
         <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4, lineHeight: 1.4 }}>
           {beat.title}
