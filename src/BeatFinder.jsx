@@ -4019,34 +4019,50 @@ function LyricCard({ lyric, lyricIndex, onDelete, onEditLyric }) {
 // =============================================================================
 // PUBLIC PROFILE SCREEN
 // =============================================================================
-function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave }) {
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState(null);
+function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, currentUser }) {
+  const [profile,   setProfile]   = useState(null);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState(null);
+  const [following, setFollowing] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
 
   useEffect(() => {
     apiFetch("/api/auth/profile/" + encodeURIComponent(username))
-      .then(d => { setProfile(d); setLoading(false); })
+      .then(d => { setProfile(d); setFollowing(d.isFollowing || false); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
   }, [username]);
 
+  const toggleFollow = async () => {
+    if (!currentUser) return;
+    setFollowLoading(true);
+    try {
+      await apiFetch("/api/auth/follow/" + encodeURIComponent(username), {
+        method: following ? "DELETE" : "POST"
+      });
+      setFollowing(!following);
+      setProfile(p => ({ ...p, followerCount: (p.followerCount || 0) + (following ? -1 : 1) }));
+    } catch(e) {}
+    setFollowLoading(false);
+  };
+
   if (loading) return (
     <div style={{ textAlign: "center", padding: "80px 24px", color: "#555" }}>
-      <div style={{ fontSize: 36, marginBottom: 10 }}><AppIcon id="profile" size={20}/></div>
+      <div style={{ marginBottom: 10 }}><AppIcon id="profile" size={36} /></div>
       <div style={{ fontSize: 13 }}>Loading profile...</div>
     </div>
   );
 
   if (error || !profile) return (
     <div style={{ textAlign: "center", padding: "80px 24px", color: "#555" }}>
-      <div style={{ fontSize: 36, marginBottom: 10 }}><AppIcon id="profile" size={20}/></div>
+      <div style={{ marginBottom: 10 }}><AppIcon id="profile" size={36} /></div>
       <div style={{ fontSize: 15, color: "#888" }}>Profile not found</div>
       <button onClick={onBack} style={{ marginTop: 20, background: "#1a1a1a", border: "1px solid #333", borderRadius: 12, color: "white", padding: "10px 24px", cursor: "pointer" }}>Go Back</button>
     </div>
   );
 
-  const planLabel = profile.plan === "producer" ? "Producer Pro" : profile.plan === "artist" ? "Artist Pro" : null;
-  const planColor = profile.plan === "producer" ? "#C026D3" : "#F59E0B";
+  const isProd = profile.plan === "producer";
+  const isArtist = profile.plan === "artist" || isProd;
+  const isOwnProfile = currentUser?.username === username;
 
   const handleDownload = async (beat) => {
     try {
@@ -4059,48 +4075,94 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave }) {
 
   return (
     <div style={{ padding: "0 0 100px" }}>
-      <div style={{ padding: "16px 16px 0" }}>
-        <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer" }}>←</button>
-      </div>
-
-      <div style={{ margin: "8px 16px 20px", background: "#111", borderRadius: 16, padding: 20, border: "1px solid rgba(255,255,255,0.07)", textAlign: "center" }}>
-        <div style={{ width: 72, height: 72, borderRadius: "50%", background: "linear-gradient(135deg,#6B21A8,#C026D3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 12px" }}>
-
+      {onBack && (
+        <div style={{ padding: "16px 16px 0" }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer" }}>←</button>
         </div>
-        <div style={{ color: "white", fontSize: 22, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
-          {profile.username}
+      )}
+
+      {/* ── Profile card ── */}
+      <div style={{ margin: "8px 16px 16px", background: "linear-gradient(160deg,#111,#0d0d1a)", borderRadius: 20, padding: 20, border: "1px solid #1e1e2a" }}>
+
+        {/* Top row — avatar + name + follow */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginBottom: 14 }}>
+          <div style={{ width: 68, height: 68, borderRadius: "50%", flexShrink: 0,
+            background: "linear-gradient(135deg,#6B21A8,#C026D3)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 26, color: "white", fontWeight: 800 }}>
+            {(profile.username || profile.name || "?")[0].toUpperCase()}
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <div style={{ color: "white", fontSize: 20, fontWeight: 800 }}>{profile.username || profile.name}</div>
+              {isProd && <VerifiedBadge size={18} />}
+            </div>
+            {profile.username && profile.name && (
+              <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>{profile.name}</div>
+            )}
+            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+              {isProd && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11 }}>Producer Pro</span>}
+              {isArtist && !isProd && <span style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11 }}>Artist Pro</span>}
+            </div>
+          </div>
+          {/* Follow button — only for logged-in non-own profiles */}
+          {currentUser && !isOwnProfile && (
+            <button onClick={toggleFollow} disabled={followLoading}
+              style={{ flexShrink: 0, padding: "8px 18px", borderRadius: 20, fontWeight: 700, fontSize: 13, cursor: "pointer",
+                background: following ? "transparent" : "#C026D3",
+                border: "1.5px solid " + (following ? "#555" : "#C026D3"),
+                color: following ? "#555" : "white", transition: "all 0.2s" }}>
+              {followLoading ? "..." : following ? "Following" : "Follow"}
+            </button>
+          )}
         </div>
-        <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>{profile.name}</div>
-        {planLabel && (
-          <div style={{ marginTop: 8, display: "inline-block", background: "rgba(192,38,211,0.15)", border: "1px solid " + planColor, borderRadius: 20, padding: "4px 14px", color: planColor, fontWeight: 800, fontSize: 12 }}>
-            {planLabel}
+
+        {/* Bio */}
+        {profile.bio && (
+          <div style={{ color: "#aaa", fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>
+            {profile.bio}
           </div>
         )}
+
+        {/* Stats row */}
+        <div style={{ display: "flex", gap: 24, borderTop: "1px solid #1e1e1e", paddingTop: 12 }}>
+          {[
+            { label: "Beats",     val: profile.beats?.length || 0 },
+            { label: "Followers", val: profile.followerCount || 0 },
+            { label: "Following", val: profile.followingCount || 0 },
+          ].map(s => (
+            <div key={s.label} style={{ textAlign: "center" }}>
+              <div style={{ color: "white", fontWeight: 800, fontSize: 16 }}>{s.val}</div>
+              <div style={{ color: "#555", fontSize: 11, marginTop: 2 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {profile.beats && profile.beats.length > 0 && (
+      {/* ── Beats ── */}
+      {profile.beats && profile.beats.length > 0 ? (
         <div style={{ padding: "0 16px" }}>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 14 }}><AppIcon id="note" size={20}/> Beats by {profile.username}</div>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+            <AppIcon id="note" size={18} /> Beats by @{profile.username}
+          </div>
           {profile.beats.map(beat => (
-            <div key={beat.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(245,158,11,0.2)" }}>
+            <div key={beat.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(245,158,11,0.15)" }}>
               <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{beat.title}</div>
               <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-                <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>
-                <div style={{ background: beat.price === "free" ? "rgba(34,197,94,0.15)" : "rgba(192,38,211,0.15)", border: "1px solid " + (beat.price === "free" ? "rgba(34,197,94,0.3)" : "rgba(192,38,211,0.3)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: beat.price === "free" ? "#22C55E" : "#C026D3", fontWeight: 700 }}>{beat.price === "free" ? "FREE" : beat.price}</div>
+                <div style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>
+                <div style={{ background: beat.price === "free" ? "rgba(34,197,94,0.12)" : "rgba(192,38,211,0.12)", border: "1px solid " + (beat.price === "free" ? "rgba(34,197,94,0.25)" : "rgba(192,38,211,0.25)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: beat.price === "free" ? "#22C55E" : "#C026D3", fontWeight: 700 }}>{beat.price === "free" ? "FREE" : beat.price}</div>
+                <div style={{ color: "#444", fontSize: 11 }}>{beat.downloads} downloads</div>
               </div>
-              <div style={{ color: "#555", fontSize: 12, marginBottom: 12 }}>{beat.downloads} downloads</div>
-              <button onClick={() => handleDownload(beat)} style={{ width: "100%", borderRadius: 12, padding: "13px", background: "linear-gradient(135deg,#F59E0B,#EF4444)", border: "none", color: "white", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
-                ⬇️ Download MP3
+              <button onClick={() => handleDownload(beat)} style={{ width: "100%", borderRadius: 12, padding: "12px", background: "linear-gradient(135deg,#F59E0B,#EF4444)", border: "none", color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <AppIcon id="download" size={16} /> Download MP3
               </button>
             </div>
           ))}
         </div>
-      )}
-
-      {(!profile.beats || profile.beats.length === 0) && (
+      ) : (
         <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
-      <div style={{ fontSize: 36, marginBottom: 10 }}><AppIcon id="profile" size={20}/></div>
-          <div style={{ fontSize: 14 }}>No beats uploaded yet</div>
+          <AppIcon id="note" size={36} />
+          <div style={{ fontSize: 14, marginTop: 10 }}>No beats uploaded yet</div>
         </div>
       )}
     </div>
@@ -4666,6 +4728,12 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
   // Add activeSection state for dashboard navigation
   const [activeSection, setActiveSection] = useState(null);
+  const [bio,           setBio]           = useState(user?.bio || "");
+  const [bioSaving,     setBioSaving]     = useState(false);
+  const [bioMsg,        setBioMsg]        = useState("");
+  const [userSearch,    setUserSearch]    = useState("");
+  const [userResults,   setUserResults]   = useState([]);
+  const [userSearching, setUserSearching] = useState(false);
   const [producerStats, setProducerStats] = useState(null);
 
   useEffect(() => {
@@ -4952,8 +5020,170 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
       
       {!activeSection && (
         <div>
-          
-          {/* Tools moved to Tools dropdown panel */}
+
+          {/* ── Public profile card ── */}
+          <div style={{ background: "linear-gradient(160deg,#111,#0d0d1a)", borderRadius: 20, padding: 20, border: "1px solid #1e1e2a", marginBottom: 20 }}>
+
+            {/* Avatar + name */}
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
+              <div style={{ width: 72, height: 72, borderRadius: "50%", flexShrink: 0,
+                background: "linear-gradient(135deg,#6B21A8,#C026D3)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 28, color: "white", fontWeight: 800 }}>
+                {(user.username || user.name || "?")[0].toUpperCase()}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ color: "white", fontWeight: 800, fontSize: 20 }}>{user.name}</div>
+                {user.username && <div style={{ color: "#C026D3", fontSize: 13, fontWeight: 600, marginTop: 2 }}>@{user.username}</div>}
+                <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {user.isPro && (
+                    <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"3px 10px", color:"#C026D3", fontWeight:800, fontSize:11 }}>
+                      <VerifiedBadge size={14} /> Producer Pro
+                    </span>
+                  )}
+                  {user.isArtistPro && !user.isPro && (
+                    <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"3px 10px", color:"#F59E0B", fontWeight:800, fontSize:11 }}>
+                      <AppIcon id="vocalmic" size={12}/> Artist Pro
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Bio */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ color: "#555", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>YOUR BIO</div>
+              <textarea
+                value={bio}
+                onChange={e => setBio(e.target.value)}
+                placeholder="Tell the world about yourself — your sound, your style, what you create..."
+                rows={3}
+                style={{ width: "100%", background: "#0a0a0a", border: "1px solid #222", borderRadius: 10,
+                  padding: "10px 14px", color: "white", fontSize: 13, outline: "none",
+                  resize: "none", boxSizing: "border-box", lineHeight: 1.6, fontFamily: "inherit" }}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+                <span style={{ color: bio.length > 180 ? "#F87171" : "#333", fontSize: 11 }}>{bio.length}/200</span>
+                <button
+                  disabled={bioSaving}
+                  onClick={async () => {
+                    if (bio.length > 200) return;
+                    setBioSaving(true);
+                    try {
+                      await apiFetch("/api/auth/bio", { method: "POST", body: JSON.stringify({ bio: bio.trim() }) });
+                      setBioMsg("Saved!"); setTimeout(() => setBioMsg(""), 2000);
+                    } catch(e) { setBioMsg("Error saving"); setTimeout(() => setBioMsg(""), 2000); }
+                    setBioSaving(false);
+                  }}
+                  style={{ background: "#C026D3", border: "none", borderRadius: 8, color: "white",
+                    fontWeight: 700, fontSize: 12, padding: "6px 16px", cursor: "pointer", opacity: bioSaving ? 0.5 : 1 }}>
+                  {bioSaving ? "Saving..." : bioMsg || "Save Bio"}
+                </button>
+              </div>
+            </div>
+
+            {/* Share profile link */}
+            {user.username && (
+              <div style={{ background: "#0a0a0a", borderRadius: 10, padding: "10px 14px",
+                border: "1px solid #1e1e1e", display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ flex: 1, color: "#555", fontSize: 12, fontFamily: "monospace",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  beatfinder.app/u/{user.username}
+                </div>
+                <button onClick={() => {
+                  navigator.clipboard?.writeText("beatfinder.app/u/" + user.username)
+                    .then(() => { setBioMsg("Link copied!"); setTimeout(() => setBioMsg(""), 2000); });
+                }} style={{ background: "none", border: "none", color: "#C026D3", fontSize: 12,
+                  fontWeight: 700, cursor: "pointer", flexShrink: 0, padding: 0 }}>
+                  Copy Link
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* ── Find other users ── */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>
+              <AppIcon id="search" size={14} /> FIND OTHER USERS
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                value={userSearch}
+                onChange={e => setUserSearch(e.target.value)}
+                onKeyDown={async e => {
+                  if (e.key !== "Enter") return;
+                  if (!userSearch.trim()) return;
+                  setUserSearching(true); setUserResults([]);
+                  try {
+                    const r = await apiFetch("/api/auth/search?q=" + encodeURIComponent(userSearch.trim()));
+                    setUserResults(r || []);
+                  } catch(err) { setUserResults([]); }
+                  setUserSearching(false);
+                }}
+                placeholder="Search by username..."
+                style={{ flex: 1, background: "#111", border: "1px solid #222", borderRadius: 10,
+                  padding: "10px 14px", color: "white", fontSize: 14, outline: "none" }}
+              />
+              <button
+                onClick={async () => {
+                  if (!userSearch.trim()) return;
+                  setUserSearching(true); setUserResults([]);
+                  try {
+                    const r = await apiFetch("/api/auth/search?q=" + encodeURIComponent(userSearch.trim()));
+                    setUserResults(r || []);
+                  } catch(err) { setUserResults([]); }
+                  setUserSearching(false);
+                }}
+                style={{ background: "#C026D3", border: "none", borderRadius: 10, color: "white",
+                  fontWeight: 700, fontSize: 13, padding: "10px 18px", cursor: "pointer" }}>
+                {userSearching ? "..." : "Search"}
+              </button>
+            </div>
+
+            {/* Search results */}
+            {userResults.length > 0 && (
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                {userResults.map(u => (
+                  <button key={u.username} onClick={() => setActiveSection("viewProfile:" + u.username)}
+                    style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
+                      padding: "12px 14px", cursor: "pointer", textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: "50%", flexShrink: 0,
+                      background: "linear-gradient(135deg,#6B21A8,#C026D3)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      color: "white", fontWeight: 800, fontSize: 16 }}>
+                      {(u.username || u.name || "?")[0].toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ color: "white", fontWeight: 700, fontSize: 14 }}>@{u.username}</div>
+                      <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>{u.name}</div>
+                    </div>
+                    {u.plan === "producer" && <VerifiedBadge size={16} />}
+                    <span style={{ color: "#444", fontSize: 16 }}>›</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {userResults.length === 0 && userSearch && !userSearching && (
+              <div style={{ color: "#444", fontSize: 13, textAlign: "center", marginTop: 12 }}>No users found for "{userSearch}"</div>
+            )}
+          </div>
+
+        </div>
+      )}
+
+      {/* View another user's profile */}
+      {activeSection && activeSection.startsWith("viewProfile:") && (
+        <div>
+          <SectionBack onBack={() => setActiveSection(null)} label="Back to Profile" />
+          <PublicProfileScreen
+            username={activeSection.replace("viewProfile:", "")}
+            onBack={() => setActiveSection(null)}
+            onPlay={onPlayBeat}
+            savedIds={new Set()}
+            onSave={() => {}}
+            currentUser={user}
+          />
         </div>
       )}
 
@@ -13769,8 +13999,13 @@ export default function BeatFinder() {
   const [savedMap, setSavedMap] = useState(loadSaved);
   const savedIds = new Set(Object.keys(savedMap));
 
-  // Handle reset token from URL
+  // Handle URL routing — reset_token and /u/:username public profiles
   const resetToken = new URLSearchParams(window.location.search).get("reset_token");
+  // /u/username — open a public profile directly from a shared link
+  const urlUsername = (function() {
+    const m = window.location.pathname.match(/^\/u\/([^/]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  })();
 
   // When user logs OUT (user goes from truthy to null), clear the savedMap
   // so we don't show their private beats to the next guest session.
@@ -13945,6 +14180,23 @@ export default function BeatFinder() {
   const isArtistPro = user?.isPro || user?.isArtistPro || user?.plan === "artist" || user?.plan === "producer";
 
 
+  // Public profile URL — /u/:username — accessible without login
+  if (urlUsername) {
+    return (
+      <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
+        <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
+        <PublicProfileScreen
+          username={urlUsername}
+          onBack={() => { window.history.replaceState({}, "", "/"); window.location.reload(); }}
+          onPlay={() => {}}
+          savedIds={new Set()}
+          onSave={() => {}}
+          currentUser={user}
+        />
+      </div>
+    );
+  }
+
   if (resetToken) {
     return (
       <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
@@ -14030,7 +14282,7 @@ export default function BeatFinder() {
 
       {publicProfile && (
         <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "#0a0a0a", overflowY: "auto", overscrollBehavior: "none", paddingTop: "env(safe-area-inset-top)" }} onTouchMove={function(e){ e.stopPropagation(); }}>
-          <PublicProfileScreen username={publicProfile} onBack={() => setPublicProfile(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />
+          <PublicProfileScreen username={publicProfile} onBack={() => setPublicProfile(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} currentUser={user} />
         </div>
       )}
 
