@@ -5396,6 +5396,8 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
   const CompPlugin   = function(p){ return _CompPlugin(p); };
   const ReverbPlugin = function(p){ return _ReverbPlugin(p); };
   const PitchPlugin  = function(p){ return _PitchPlugin(p); };
+  const OceanPlugin  = function(p){ return _OceanPlugin(p); };
+  const AppleXPlugin = function(p){ return _AppleXPlugin(p); };
   const NoiseRemoverPlugin = function(p){ return _NoiseRemoverPlugin(p); };
   const DoublerPlugin = function(p){ return _DoublerPlugin(p); };
   const HDelayPlugin  = function(p){ return _HDelayPlugin(p); };
@@ -5441,7 +5443,8 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"eq",           label:"Pro EQ",              sub:"5-Band · Drag handles",        icon:"▦", color:"#0ea5e9" },
     { key:"compressor",   label:"Compressor",          sub:"Dynamics processor",            icon:"fader", color:"#7C3AED" },
     { key:"reverb",       label:"Convolution Reverb",  sub:"Room simulation",               icon:"wave", color:"#C026D3" },
-    { key:"pitch",        label:"Auto-Tune / Pitch",   sub:"Pitch processor v2",            icon:"note", color:"#9333EA" },
+    { key:"ocean",        label:"Ocean Reverb",        sub:"Deep · Lush · Atmospheric",     icon:"wave", color:"#0891b2" },
+    { key:"applex",       label:"AppleX Auto-Tune",    sub:"Chromatic pitch correction",    icon:"note", color:"#9333EA" },
     { key:"noiseremover", label:"Noise Remover",       sub:"RNNoise · AI denoising",        icon:"mic", color:"#10B981" },
     { key:"doubler",      label:"Vocal Doubler",        sub:"Stereo width · Haas effect",     icon:"speaker", color:"#F59E0B" },
     { key:"hdelay",       label:"H-Delay",              sub:"Tape · BPM sync · Analog",       icon:"◷", color:"#E85D04" },
@@ -5477,7 +5480,8 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"eq",           label:"Parametric EQ",      sub:"5-Band",          icon:"ph-eq",          color:"#00b4d8", cat:"EQ",       tag:"MIXER"  },
     { key:"compressor",   label:"Compressor",          sub:"Dynamics",        icon:"ph-compress",    color:"#7c3aed", cat:"DYNAMICS", tag:"EFFECT" },
     { key:"reverb",       label:"Reverb",              sub:"Room sim",        icon:"ph-reverb",      color:"#0891b2", cat:"REVERB",   tag:"EFFECT" },
-    { key:"pitch",        label:"Newtone / Pitch",     sub:"Pitch v2",        icon:"ph-pitch",       color:"#db2777", cat:"PITCH",    tag:"EFFECT" },
+    { key:"ocean",        label:"Ocean Reverb",        sub:"Lush · Deep",     icon:"ph-reverb",      color:"#0369a1", cat:"REVERB",   tag:"EFFECT" },
+    { key:"applex",       label:"AppleX",              sub:"Auto-Tune",       icon:"ph-pitch",       color:"#9333ea", cat:"PITCH",    tag:"EFFECT" },
     { key:"noiseremover", label:"Noise Gate AI",       sub:"RNNoise",         icon:"ph-gate",        color:"#059669", cat:"DYNAMICS", tag:"UTILITY" },
     { key:"doubler",      label:"Doubler",             sub:"Haas / Width",    icon:"ph-doubler",     color:"#d97706", cat:"UTILITY",  tag:"MIXER"  },
     { key:"hdelay",       label:"T-Delay",             sub:"Tape · BPM sync", icon:"ph-delay",       color:"#ea580c", cat:"UTILITY",  tag:"EFFECT" },
@@ -5711,8 +5715,11 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
           {/* Reverb plugin */}
           {key === "reverb" && <ReverbPlugin fx={fx} upd={upd} ReverbViz={ReverbViz} Knob={Knob} />}
 
-          {/* Pitch / Autotune plugin */}
-          {key === "pitch" && <PitchPlugin fx={fx} upd={upd} Knob={Knob} />}
+          {/* Ocean Reverb plugin */}
+          {key === "ocean" && <OceanPlugin fx={fx} upd={upd} Knob={Knob} />}
+
+          {/* AppleX Auto-Tune plugin */}
+          {key === "applex" && <AppleXPlugin fx={fx} upd={upd} Knob={Knob} />}
 
           {/* Noise Remover plugin */}
           {key === "noiseremover" && <NoiseRemoverPlugin fx={fx} upd={upd} Knob={Knob} />}
@@ -5962,6 +5969,67 @@ function _ReverbPlugin({ fx, upd, ReverbViz, Knob }) {
             <Knob label="ROOM" value={fx.reverb?.roomSize??0.8} min={0.1} max={1} step={0.01} unit="%" color="#C026D3" onChange={function(v){ upd("reverb",{roomSize:v}); }} />
             <Knob label="PRE-DLY" value={fx.reverb?.preDelay??0} min={0} max={100} step={1} unit="ms" color="#8B5CF6" onChange={function(v){ upd("reverb",{preDelay:v}); }} />
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function _OceanPlugin({ fx, upd, Knob }) {
+  const on = !!fx.ocean?.on;
+  return (
+    <div style={{ background:"linear-gradient(180deg,#0a1628 0%,#061020 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (on ? "#0891b2" : "#2a2a2a"), boxShadow: on ? "0 0 20px rgba(8,145,178,0.2), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+      <div style={{ backgroundImage:"linear-gradient(180deg,#0f2035,#091828)", padding:"8px 14px", borderBottom:"1px solid #0e2a3a", display:"flex", alignItems:"center", gap:8 }}>
+        <div style={{ flex:1 }}>
+          <div style={{ color:"#38bdf8", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>OCEAN REVERB</div>
+          <div style={{ color:"#0c3347", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>DEEP · LUSH · ATMOSPHERIC</div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <div style={{ width:8, height:8, borderRadius:"50%", background: on ? "#0891b2" : "#1a1a1a", boxShadow: on ? "0 0 6px #0891b2, 0 0 14px rgba(8,145,178,0.5)" : "none", transition:"all 0.2s" }} />
+          <button onClick={function(){ upd("ocean",{on:!on}); }} style={{ background: on ? "linear-gradient(180deg,#0369a1,#075985)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (on ? "#0891b2" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1 }}>{on ? "ON" : "OFF"}</button>
+        </div>
+      </div>
+      <div style={{ padding:"12px 14px", opacity:on?1:0.4, transition:"opacity 0.2s" }}>
+        <div style={{ display:"flex", justifyContent:"space-around", padding:"4px 0" }}>
+          <Knob label="WET"    value={fx.ocean?.wet??0.35}      min={0} max={1}   step={0.01} unit="%" color="#0891b2" onChange={function(v){ upd("ocean",{wet:v}); }} />
+          <Knob label="SIZE"   value={fx.ocean?.roomSize??1.0}  min={0.5} max={2} step={0.01} unit="%" color="#0891b2" onChange={function(v){ upd("ocean",{roomSize:v}); }} />
+          <Knob label="DAMP"   value={fx.ocean?.damp??0.6}      min={0} max={1}   step={0.01} unit="%" color="#38bdf8" onChange={function(v){ upd("ocean",{damp:v}); }} />
+          <Knob label="PRE-DLY" value={fx.ocean?.preDelay??20}  min={0} max={150} step={1}    unit="ms" color="#38bdf8" onChange={function(v){ upd("ocean",{preDelay:v}); }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function _AppleXPlugin({ fx, upd, Knob }) {
+  const on     = !!fx.applex?.on;
+  const speed  = fx.applex?.speed  ?? 0.5;
+  const depth  = fx.applex?.depth  ?? 1.0;
+  const pitchKey = fx.applex?.key  ?? "C";
+  const NOTES  = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  return (
+    <div style={{ background:"linear-gradient(180deg,#130a22 0%,#0d0618 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (on ? "#9333ea" : "#2a2a2a"), boxShadow: on ? "0 0 20px rgba(147,51,234,0.2), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+      <div style={{ backgroundImage:"linear-gradient(180deg,#1e0f35,#160a28)", padding:"8px 14px", borderBottom:"1px solid #2a1545", display:"flex", alignItems:"center", gap:8 }}>
+        <div style={{ flex:1 }}>
+          <div style={{ color:"#c084fc", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>APPLEX AUTO-TUNE</div>
+          <div style={{ color:"#3b1a5e", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>CHROMATIC PITCH CORRECTION</div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <div style={{ width:8, height:8, borderRadius:"50%", background: on ? "#9333ea" : "#1a1a1a", boxShadow: on ? "0 0 6px #9333ea, 0 0 14px rgba(147,51,234,0.5)" : "none", transition:"all 0.2s" }} />
+          <button onClick={function(){ upd("applex",{on:!on}); }} style={{ background: on ? "linear-gradient(180deg,#7c3aed,#6d28d9)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (on ? "#9333ea" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1 }}>{on ? "ON" : "OFF"}</button>
+        </div>
+      </div>
+      <div style={{ padding:"12px 14px", opacity:on?1:0.4, transition:"opacity 0.2s" }}>
+        {/* Key selector */}
+        <div style={{ display:"flex", gap:3, marginBottom:10, flexWrap:"wrap" }}>
+          {NOTES.map(function(n){
+            const active = pitchKey === n;
+            return <button key={n} onClick={function(){ upd("applex",{key:n}); }} style={{ flex:1, minWidth:22, padding:"4px 2px", background: active ? "#7c3aed" : "#0f0f18", border:"1px solid "+(active?"#9333ea":"#1e1e2a"), borderRadius:5, color: active?"white":"#4c1d95", fontSize:8, fontWeight:800, cursor:"pointer" }}>{n}</button>;
+          })}
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-around", padding:"4px 0" }}>
+          <Knob label="SPEED" value={speed} min={0} max={1} step={0.01} unit="" color="#9333ea" onChange={function(v){ upd("applex",{speed:v}); }} />
+          <Knob label="DEPTH" value={depth} min={0} max={1} step={0.01} unit="" color="#c084fc" onChange={function(v){ upd("applex",{depth:v}); }} />
         </div>
       </div>
     </div>
@@ -8029,6 +8097,7 @@ function StudioScreen({ user, onExit }) {
   const monitorSplitterRef  = useRef(null); // ChannelSplitter for mono-centre
   const monitorMergerRef    = useRef(null); // ChannelMerger  for mono-centre
   const monitorCtxRef       = useRef(null); // persistent AudioContext — never closed between sessions
+  const monitorFxInputRef   = useRef(null); // input node of monitor FX chain
   // Persistent mic stream — requested once on mount, reused for both monitoring and recording
   const micStreamRef        = useRef(null);
   // micReady: true if we've confirmed mic permission this session.
@@ -8549,6 +8618,60 @@ function StudioScreen({ user, onExit }) {
   //     which was causing the large output buffer / background playback failures
   const monitorMicStreamRef = useRef(null); // monitoring-only mic stream, separate from recording
 
+  // ── Build lightweight FX chain in monitorCtx for the selected track ──
+  const buildMonitorFxChain = function (mCtx, fx) {
+    let node = mCtx.createGain(); node.gain.value = 1;
+    const outputNode = node;
+
+    // Ocean Reverb
+    if (fx && fx.ocean && fx.ocean.on) {
+      const o = fx.ocean; const sr = mCtx.sampleRate;
+      const len = Math.round(sr * Math.min(2, o.roomSize||1.0) * 4);
+      const ir = mCtx.createBuffer(2, len, sr);
+      for (let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,1.8);}
+      const conv=mCtx.createConvolver(); conv.buffer=ir;
+      const lpf=mCtx.createBiquadFilter(); lpf.type="lowpass"; lpf.frequency.value=800+(1-(o.damp||0.6))*7200;
+      const pre=mCtx.createDelay(0.3); pre.delayTime.value=(o.preDelay||20)/1000;
+      const wet=o.wet||0.35; const wetG=mCtx.createGain(); wetG.gain.value=wet; const dryG=mCtx.createGain(); dryG.gain.value=1-wet;
+      const mix=mCtx.createGain(); dryG.connect(mix); wetG.connect(mix); mix.connect(node);
+      pre.connect(conv); conv.connect(lpf); lpf.connect(wetG);
+      const split=mCtx.createGain(); split.connect(dryG); split.connect(pre); node=split;
+    }
+
+    // Convolution Reverb
+    if (fx && fx.reverb && fx.reverb.on) {
+      const r=fx.reverb; const sr=mCtx.sampleRate;
+      const len=Math.round(sr*(r.roomSize||0.8)*3);
+      const ir=mCtx.createBuffer(2,len,sr);
+      for (let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.5);}
+      const conv=mCtx.createConvolver(); conv.buffer=ir;
+      const pre=mCtx.createDelay(0.2); pre.delayTime.value=(r.preDelay||0)/1000;
+      const wet=r.wet||0.25; const wetG=mCtx.createGain(); wetG.gain.value=wet; const dryG=mCtx.createGain(); dryG.gain.value=1-wet;
+      const mix=mCtx.createGain(); dryG.connect(mix); wetG.connect(mix); mix.connect(node);
+      pre.connect(conv); conv.connect(wetG);
+      const split=mCtx.createGain(); split.connect(dryG); split.connect(pre); node=split;
+    }
+
+    // Compressor
+    if (fx && fx.compressor && fx.compressor.on) {
+      const c=fx.compressor; const comp=mCtx.createDynamicsCompressor();
+      comp.threshold.value=c.threshold??-24; comp.ratio.value=c.ratio??4;
+      comp.attack.value=c.attack??0.003; comp.release.value=c.release??0.25; comp.knee.value=6;
+      comp.connect(node); node=comp;
+    }
+
+    // EQ (3-band)
+    if (fx && fx.eq && fx.eq.on) {
+      const e=fx.eq;
+      const high=mCtx.createBiquadFilter(); high.type="highshelf"; high.frequency.value=8000; high.gain.value=e.high||0;
+      const mid=mCtx.createBiquadFilter(); mid.type="peaking"; mid.frequency.value=1000; mid.gain.value=e.mid||0; mid.Q.value=1;
+      const low=mCtx.createBiquadFilter(); low.type="lowshelf"; low.frequency.value=250; low.gain.value=e.low||0;
+      high.connect(node); mid.connect(high); low.connect(mid); node=low;
+    }
+
+    return { inputNode: node, outputNode };
+  };
+
   const startMonitoring = async function (forceLowLatency, forceMicSource) {
     if (monitorSrcRef.current) return; // already running
     setMonitorWarn("");
@@ -8590,7 +8713,7 @@ function StudioScreen({ user, onExit }) {
       micBoost.connect(splitter);
       splitter.connect(merger, 0, 0);
       splitter.connect(merger, 0, 1);
-      merger.connect(gain);
+      // merger connects through FX chain below — not directly to gain
       gain.connect(mCtx.destination);
       gain.connect(analyser);
 
@@ -8600,6 +8723,16 @@ function StudioScreen({ user, onExit }) {
       monitorAnalyserRef.current = analyser;
       monitorSplitterRef.current = splitter;
       monitorMergerRef.current   = merger;
+
+      // ── Insert selected track FX into the monitor chain ──
+      // Chain: merger → [FX chain] → gain → destination
+      const selectedTrack = tracksRef.current.find(function(t){ return t.id === selectedTrackId; });
+      const trackFx = selectedTrack ? (selectedTrack.effects || {}) : {};
+      const { inputNode, outputNode } = buildMonitorFxChain(mCtx, trackFx);
+      merger.connect(inputNode);
+      outputNode.connect(gain);
+      monitorFxInputRef.current = inputNode;
+
       setMonitoringOn(true);
     } catch (e) {
       monitorMicStreamRef.current = null;
@@ -8675,6 +8808,20 @@ function StudioScreen({ user, onExit }) {
       monitorMicBoostRef.current.gain.setTargetAtTime(micInputGain, monitorCtxRef.current.currentTime, 0.01);
     }
   }, [micInputGain]);
+
+  // Restart monitoring when the selected track or its FX change — so FX are heard live
+  const selectedTrackFx = tracks.find(function(t){ return t.id === selectedTrackId; })?.effects;
+  useEffect(function(){
+    if (!monitoringOn) return;
+    // Debounce slightly so knob drags don't restart on every tick
+    const timer = setTimeout(function(){
+      if (monitorSrcRef.current) {
+        stopMonitoring();
+        setTimeout(startMonitoring, 80);
+      }
+    }, 150);
+    return function(){ clearTimeout(timer); };
+  }, [selectedTrackId, JSON.stringify(selectedTrackFx)]);
 
   // ── Scroll container helpers ──────────────────────────────────
   // With paddingLeft=PLAYHEAD_X on inner div, Bar1 (x=0) sits exactly under the playhead.
@@ -9413,6 +9560,21 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
       // Note: room size changes the IR buffer — requires a brief rebuild only when roomSize changes
       // For smooth real-time feel, we defer that to the next play() call. Wet/dry is instant.
     }
+
+    // ── Ocean Reverb — live wet/dry and damping ──
+    if (live.ocean) {
+      const oceanOn = !!(fx.ocean && fx.ocean.on);
+      const wet = oceanOn ? (fx.ocean.wet || 0.35) : 0;
+      live.ocean.wetG.gain.setTargetAtTime(wet,     now, T);
+      live.ocean.dryG.gain.setTargetAtTime(1 - wet, now, T);
+      if (oceanOn && fx.ocean.preDelay !== undefined) {
+        live.ocean.preDelay.delayTime.setTargetAtTime(fx.ocean.preDelay / 1000, now, T);
+      }
+      if (oceanOn && fx.ocean.damp !== undefined && live.ocean.lpf) {
+        const freq = 800 + (1 - fx.ocean.damp) * 7200;
+        live.ocean.lpf.frequency.setTargetAtTime(freq, now, T);
+      }
+    }
     // ── H-Delay — live param morphing ──
     if (live.hdelay && fx.hdelay !== undefined) {
       const hd      = fx.hdelay || {};
@@ -9723,6 +9885,56 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
         split.connect(dryG); split.connect(preDelay);
         node = split;
         liveNodes.reverb = { dryG, wetG, preDelay, conv };
+      }
+
+      // ── Ocean Reverb — deeper/longer with damping lowpass on wet signal ──
+      {
+        const sr = actx.sampleRate;
+        const oceanOn = !!(fx.ocean && fx.ocean.on);
+        const preDelaySec = oceanOn ? (fx.ocean.preDelay || 20) / 1000 : 0.02;
+        const roomSize = oceanOn ? Math.min(2, fx.ocean.roomSize || 1.0) : 1.0;
+        const len = Math.round(sr * roomSize * 4); // longer tail than standard reverb
+        const ir = actx.createBuffer(2, len, sr);
+        for (let ch=0;ch<2;ch++){
+          const d = ir.getChannelData(ch);
+          for (let i=0;i<len;i++) d[i] = (Math.random()*2-1)*Math.pow(1-i/len, 1.8); // gentler decay
+        }
+        const conv = actx.createConvolver(); conv.buffer = ir;
+        // Damping: lowpass on wet signal for dark oceanic character
+        const damp = oceanOn ? (fx.ocean.damp || 0.6) : 0.6;
+        const lpf = actx.createBiquadFilter();
+        lpf.type = "lowpass";
+        lpf.frequency.value = 800 + (1 - damp) * 7200; // damp=1 → 800Hz, damp=0 → 8000Hz
+        lpf.Q.value = 0.5;
+        const preDelay = actx.createDelay(0.3); preDelay.delayTime.value = preDelaySec;
+        const wetVal = oceanOn ? (fx.ocean.wet || 0.35) : 0;
+        const dryG = actx.createGain(); dryG.gain.value = 1 - wetVal;
+        const wetG = actx.createGain(); wetG.gain.value = wetVal;
+        const mix  = actx.createGain();
+        dryG.connect(mix); wetG.connect(mix); mix.connect(node);
+        preDelay.connect(conv); conv.connect(lpf); lpf.connect(wetG);
+        const split = actx.createGain(); split.gain.value = 1;
+        split.connect(dryG); split.connect(preDelay);
+        node = split;
+        liveNodes.ocean = { dryG, wetG, preDelay, lpf };
+      }
+
+      // ── AppleX Auto-Tune — chromatic pitch snap using existing pitch worklet ──
+      {
+        const applexOn = !!(fx.applex && fx.applex.on);
+        // AppleX reuses the pitch worklet infrastructure with chromatic snapping
+        // The worklet receives isAutoTune=1 and rootNote=0 (chromatic = snaps to any semitone)
+        if (applexOn && pitchWorkletReadyRef.current) {
+          try {
+            const awn = new AudioWorkletNode(actx, "pitch-processor");
+            awn.parameters.get("pitch").value = 1.0; // no shift, just correction
+            awn.parameters.get("isAutoTune").value = 1;
+            awn.parameters.get("rootNote").value = NOTE_MAP[fx.applex.key || "C"] || 0;
+            awn.connect(node); node = awn;
+            liveNodes.applex = { awn };
+          } catch(e) { /* worklet not available, bypass */ }
+        }
+        if (!liveNodes.applex) liveNodes.applex = null;
       }
 
       // ── 5-band parametric EQ — always built; bypass = unity gain when off ──
@@ -10542,6 +10754,8 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
   const defaultEffects = function () {
     return {
       reverb:     { on:false, wet:0.25, roomSize:0.8 },
+      ocean:      { on:false, wet:0.35, roomSize:1.0, damp:0.6, preDelay:20 },
+      applex:     { on:false, key:"C", speed:0.5, depth:1.0 },
       eq:         { on:false, low:0, mid:0, high:0 },
       compressor: { on:false, threshold:-24, ratio:4, attack:0.003, release:0.25 },
       trotten:    { on:false, eqLow:0, eqMid:0, eqHigh:0, eqLowT:"shelf", eqMidT:"bell", eqHighT:"shelf", compThr:-15, compAmt:50, compMode:"auto", tapeDrv:5, tapeSat:5, tapeMode:"modern", limCeil:-0.5, limRel:0.5, limMode:"truepeak", inputGain:0, outputGain:0 },
