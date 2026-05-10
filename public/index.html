@@ -63,20 +63,11 @@
   <body>
     <div id="root"></div>
     <script>
-      // Block body-level touchmove (stops iOS standalone rubber-band)
-      // but allow it through on elements that are actually scrollable
+      // Block ALL body-level touchmove — prevents iOS standalone rubber-band on the whole page.
+      // Scrollable containers inside the app use their own touch handlers or have
+      // -webkit-overflow-scrolling:touch which works independently of this.
       document.body.addEventListener('touchmove', function(e) {
-        var el = e.target;
-        while (el && el !== document.body) {
-          var style = window.getComputedStyle(el);
-          var overflowY = style.overflowY;
-          var overflowX = style.overflowX;
-          var canScrollY = (overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight;
-          var canScrollX = (overflowX === 'auto' || overflowX === 'scroll') && el.scrollWidth > el.clientWidth;
-          if (canScrollY || canScrollX) return; // let it scroll
-          el = el.parentElement;
-        }
-        e.preventDefault(); // no scrollable parent found — block it
+        e.preventDefault();
       }, { passive: false });
     </script>
     </style>
