@@ -2371,7 +2371,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
   );
 }
 
-function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric, onGoTrending, onGoStudio }) {
+function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric, onGoTrending, onGoStudio, onGoArtists, onShowProducerPrompt }) {
   const [heroIndex, setHeroIndex] = useState(0);
 
   const HERO_SLIDES = [
@@ -2381,6 +2381,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
       emoji: "note",
       grad: "linear-gradient(135deg,#12002a 0%,#3b0070 60%,#C026D3 100%)",
       cta: "Explore Beats",
+      artistsSlide: true,
       btnColor: "rgba(192,38,211,0.5)",
       btnBorder: "rgba(192,38,211,0.7)",
     },
@@ -2389,7 +2390,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
       sub: "Write lyrics whilst beats play & save to your profile",
       emoji: "note",
       grad: "linear-gradient(135deg,#001a0a 0%,#003318 40%,#065f2f 75%,#16A34A 100%)",
-      cta: "Write Lyrics",
+      noCta: true,
       lyricsSlide: true,
       btnColor: "rgba(22,163,74,0.5)",
       btnBorder: "rgba(22,163,74,0.7)",
@@ -2399,8 +2400,8 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
       sub: "Find perfect rhymes & multi-syllable rhymes while you write",
       emoji: "note",
       grad: "linear-gradient(135deg,#1a0a00 0%,#3d1800 40%,#7c3500 75%,#EA580C 100%)",
-      cta: "Try It Now",
-      lyricsSlide: true,
+      cta: "Pro Plan Required",
+      proSlide: true,
       btnColor: "rgba(234,88,12,0.5)",
       btnBorder: "rgba(234,88,12,0.7)",
     },
@@ -2419,7 +2420,8 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
       sub: "Upload, price, and earn on every lease",
       emoji: "note",
       grad: "linear-gradient(135deg,#180800 0%,#3a1500 60%,#F59E0B 100%)",
-      cta: "Go Producer Pro",
+      cta: "Purchase Producer Pro",
+      producerSlide: true,
       btnColor: "rgba(245,158,11,0.5)",
       btnBorder: "rgba(245,158,11,0.7)",
     },
@@ -2525,14 +2527,21 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
           <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 13,
             marginBottom: 18, lineHeight: 1.5 }}>{slide.sub}</div>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <button onClick={slide.studioSlide ? onGoStudio : slide.trendingSlide ? onGoTrending : onGoProfile} style={{
+            {!slide.noCta && <button onClick={
+              slide.studioSlide ? onGoStudio :
+              slide.trendingSlide ? onGoTrending :
+              slide.artistsSlide ? onGoArtists :
+              slide.proSlide ? onGoMembers :
+              slide.producerSlide ? onShowProducerPrompt :
+              onGoProfile
+            } style={{
               background: slide.btnColor || "rgba(255,255,255,0.15)",
               backdropFilter: "blur(10px)",
               border: "1px solid " + (slide.btnBorder || "rgba(255,255,255,0.25)"),
               borderRadius: 22,
               color: "white", fontWeight: 800, fontSize: 13,
               padding: "9px 20px", cursor: "pointer",
-            }}>{slide.cta} →</button>
+            }}>{slide.cta} →</button>}
             {slide.badge && (
               <span style={{ background:"rgba(124,58,237,0.4)", border:"1px solid rgba(124,58,237,0.7)", borderRadius:12, color:"#a78bfa", fontSize:10, fontWeight:800, padding:"4px 8px", letterSpacing:1 }}>{slide.badge}</span>
             )}
@@ -3820,7 +3829,7 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile, sa
 // =============================================================================
 // EXCLUSIVE MEMBERS SCREEN
 // =============================================================================
-function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
+function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave, onSignUp }) {
   const isPro = user?.isPro || user?.isArtistPro;
   const [tab, setTab] = useState("beats");
 
@@ -3888,8 +3897,8 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
         </div>
 
         
-        <button onClick={onGoProfile} style={{ width: "100%", background: "linear-gradient(135deg,#F59E0B,#C026D3)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: "16px", fontSize: 16, cursor: "pointer", marginBottom: 20 }}>
-          Unlock Access
+        <button onClick={user ? onGoProfile : onSignUp} style={{ width: "100%", background: "linear-gradient(135deg,#F59E0B,#C026D3)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: "16px", fontSize: 16, cursor: "pointer", marginBottom: 20 }}>
+          {user ? "Unlock Access" : "Create Account"}
         </button>
 
         
@@ -4309,6 +4318,12 @@ function RootAuthScreen({ onLogin, startMode }) {
   const [rememberMe,  setRememberMe]  = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authErr,     setAuthErr]     = useState("");
+  const [selectedPlan, setSelectedPlan] = useState("artist"); // "artist" | "producer"
+
+  const SIGNUP_PLANS = [
+    { id: "artist",   label: "Artist Pro",   price: "£4.99/mo", priceId: "price_1TQDoFFHyNSCxas89UpDKiro", color: "#F59E0B" },
+    { id: "producer", label: "Producer Pro", price: "£8.99/mo", priceId: "price_1TQDpBFHyNSCxas8cktbqw1n", color: "#C026D3" },
+  ];
 
   useEffect(() => {
     try {
@@ -4356,6 +4371,28 @@ function RootAuthScreen({ onLogin, startMode }) {
           <label htmlFor="rm" style={{ color: "#888", fontSize: 13 }}>Remember my login</label>
         </div>
       )}
+      {/* Plan picker — signup only */}
+      {mode === "signup" && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ color: "#888", fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>CHOOSE YOUR PLAN</div>
+          <div style={{ display: "flex", gap: 10 }}>
+            {SIGNUP_PLANS.map(p => (
+              <button key={p.id} onClick={() => setSelectedPlan(p.id)} style={{
+                flex: 1, padding: "12px 8px", borderRadius: 12, cursor: "pointer",
+                border: "2px solid " + (selectedPlan === p.id ? p.color : "#222"),
+                background: selectedPlan === p.id ? p.color + "18" : "#111",
+                textAlign: "left", transition: "all 0.15s",
+              }}>
+                <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>{p.label}</div>
+                <div style={{ color: p.color, fontWeight: 700, fontSize: 13 }}>{p.price}</div>
+              </button>
+            ))}
+          </div>
+          <div style={{ color: "#444", fontSize: 11, marginTop: 8, textAlign: "center" }}>
+            You'll be taken to Stripe to complete payment after creating your account.
+          </div>
+        </div>
+      )}
       <button
         disabled={authLoading}
         onClick={async () => {
@@ -4371,7 +4408,23 @@ function RootAuthScreen({ onLogin, startMode }) {
             } else {
               try { localStorage.removeItem("bf_saved_email"); } catch {}
             }
-            onLogin(u);
+            // After signup, redirect to Stripe checkout for selected plan
+            if (mode === "signup") {
+              onLogin(u);
+              const plan = SIGNUP_PLANS.find(p => p.id === selectedPlan);
+              try {
+                const r = await apiFetch("/api/stripe/create-checkout", {
+                  method: "POST",
+                  body: JSON.stringify({ price_id: plan.priceId }),
+                });
+                window.location.href = r.checkout_url;
+              } catch(e) {
+                // Checkout failed — user still has account, they can subscribe from profile
+                setAuthErr("Account created! To subscribe, go to your Profile.");
+              }
+            } else {
+              onLogin(u);
+            }
           } catch (e) {
             setAuthErr(e.message);
           } finally {
@@ -4379,7 +4432,7 @@ function RootAuthScreen({ onLogin, startMode }) {
           }
         }}
         style={{ width: "100%", background: authLoading ? "#555" : "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: "pointer", opacity: authLoading ? 0.6 : 1 }}>
-        {authLoading ? "Please wait..." : mode === "signup" ? "Create Account" : "Log In"}
+        {authLoading ? "Please wait..." : mode === "signup" ? "Create Account & Subscribe" : "Log In"}
       </button>
       {authErr && <div style={{ color: "#F87171", fontSize: 13, textAlign: "center", marginTop: 12 }}>{authErr}</div>}
       <div style={{ textAlign: "center", marginTop: 20 }}>
@@ -13588,7 +13641,8 @@ export default function BeatFinder() {
     try { return !!localStorage.getItem("bf_welcomed"); } catch(e) { return false; }
   });
   // showAuthWall: true when user tapped "Sign In" — shows auth form full-screen, no app
-  const [showAuthWall, setShowAuthWall] = useState(false);
+  const [showAuthWall,   setShowAuthWall]   = useState(false);
+  const [authStartMode,  setAuthStartMode]  = useState("login");
 
   const doWelcome = function() {
     try { localStorage.setItem("bf_welcomed", "1"); } catch(e) {}
@@ -13811,7 +13865,7 @@ export default function BeatFinder() {
       {/* Welcome screen — shown once per session after splash */}
       {splashDone && !welcomeDone && !showAuthWall && (
         <WelcomeScreen
-          onSignIn={function() { setShowAuthWall(true); }}
+          onSignIn={function() { setAuthStartMode("login"); setShowAuthWall(true); }}
           onGuest={doWelcomeAsGuest}
         />
       )}
@@ -13831,7 +13885,7 @@ export default function BeatFinder() {
               cursor: "pointer", padding: "16px 20px", display: "block" }}>
             ←
           </button>
-          <RootAuthScreen startMode="login" onLogin={function(u) {
+          <RootAuthScreen startMode={authStartMode} onLogin={function(u) {
             setUser({
               ...u,
               isPro:       u.plan === "producer",
@@ -13854,18 +13908,20 @@ export default function BeatFinder() {
             borderRadius: 20, padding: 28, width: "100%", maxWidth: 340,
             textAlign: "center",
           }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 40, marginBottom: 12, color: "#C026D3" }}><AppIcon id={promptReason === "studio" ? "studio" : "profile"} size={36} /></div>
+            <div style={{ fontSize: 40, marginBottom: 12, color: "#C026D3" }}><AppIcon id={promptReason === "studio" ? "studio" : promptReason === "producer" ? "money" : "profile"} size={36} /></div>
             <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 8 }}>
-              {promptReason === "studio" ? "Pro Plan Required" : "Sign In Required"}
+              {promptReason === "studio" || promptReason === "producer" ? "Pro Plan Required" : "Sign In Required"}
             </div>
             <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 24 }}>
               {promptReason === "studio"
                 ? "Purchase a Pro plan to unlock Studio mode and start recording."
+                : promptReason === "producer"
+                ? "Purchase Producer Pro to upload beats, sell leases and get paid instantly."
                 : "Sign in to access your profile, save beats and more."}
             </div>
-            <button onClick={() => { setShowAuthPrompt(false); setShowAuthWall(true); setWelcomeDone(false); }}
+            <button onClick={() => { setShowAuthPrompt(false); if (promptReason === "studio" || promptReason === "producer") { goTab("exclusive"); } else { setShowAuthWall(true); setWelcomeDone(false); } }}
               style={{ width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, fontSize: 16, padding: "14px", cursor: "pointer", marginBottom: 12 }}>
-              {promptReason === "studio" ? "View Pro Plans" : "Sign In / Create Account"}
+              {promptReason === "studio" || promptReason === "producer" ? "View Pro Plans" : "Sign In / Create Account"}
             </button>
             <button onClick={() => setShowAuthPrompt(false)}
               style={{ background: "none", border: "none", color: "#555", fontSize: 14, cursor: "pointer" }}>
@@ -13899,13 +13955,13 @@ export default function BeatFinder() {
           }}
           onTouchMove={t !== "studio" ? function(e){ e.stopPropagation(); } : undefined}
           >
-            {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} />}
+            {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
             {t === "studio"    && studioVisited && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
-            {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
+            {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onSignUp={() => { setAuthStartMode("signup"); setShowAuthWall(true); setWelcomeDone(false); }} />}
           </div>
         ))}
         {tab === "profile" && (
