@@ -3580,7 +3580,7 @@ function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial }
 // =============================================================================
 // SAVED SCREEN
 // =============================================================================
-function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) {
+function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile, savedLyrics, onEditLyric }) {
   const list = Object.values(savedMap); // guests save locally, pro users sync to backend
 
   const [sort,         setSort]         = useState("recent");
@@ -3760,6 +3760,58 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) 
           </div>
         ))
       )}
+
+      {/* ── Guest Lyrics Section — only shown for non-logged-in users ── */}
+      {!user && (
+        <div style={{ marginTop: 32 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <span style={{ color: "#C026D3" }}><AppIcon id="writing" size={18} /></span>
+            <span style={{ color: "white", fontWeight: 800, fontSize: 20, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
+              My Lyrics
+            </span>
+            <span style={{ color: "#555", fontSize: 13, marginLeft: 4 }}>{(savedLyrics || []).length} saved</span>
+          </div>
+          <div style={{ color: "#666", fontSize: 13, marginBottom: 16 }}>Lyrics you've written — saved on this device</div>
+
+          {(!savedLyrics || savedLyrics.length === 0) ? (
+            <div style={{ textAlign: "center", padding: "32px 0" }}>
+              <div style={{ color: "#333", fontSize: 13, lineHeight: 1.8 }}>
+                No lyrics saved yet.<br />
+                <span style={{ color: "#555" }}>Tap ✍️ Write Lyrics on any beat to get started.</span>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {(savedLyrics || []).map(function(lyric, idx) {
+                return (
+                  <div key={lyric.id || idx}
+                    onClick={function() { onEditLyric && onEditLyric(lyric, idx); }}
+                    style={{
+                      background: "#111", border: "1px solid #1e1e1e",
+                      borderRadius: 14, padding: "14px 16px", cursor: "pointer",
+                      transition: "border-color 0.15s",
+                    }}>
+                    <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4,
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {lyric.title || "Untitled"}
+                    </div>
+                    {lyric.beatTitle && (
+                      <div style={{ color: "#555", fontSize: 12, marginBottom: 6,
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        🎵 {lyric.beatTitle}
+                      </div>
+                    )}
+                    <div style={{ color: "#444", fontSize: 12, lineHeight: 1.5,
+                      overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                      {lyric.text}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -3777,7 +3829,7 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
     <div style={{ paddingBottom: 100, overflowY: "auto" }}>
       
       <div style={{ background: "linear-gradient(160deg,#1a0a00,#2d1500,#1C1917)", padding: "32px 20px 24px", textAlign: "center", borderBottom: "1px solid rgba(245,158,11,0.15)" }}>
-        <div style={{ fontSize: 44, marginBottom: 10 }}><AppIcon id="lock" size={20}/></div>
+        <div style={{ fontSize: 44, marginBottom: 10, color: "#F59E0B" }}><AppIcon id="lock" size={36} /></div>
         <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 34, letterSpacing: 3, color: "#F59E0B", marginBottom: 6 }}>MEMBERS ONLY</div>
         <div style={{ color: "#aaa", fontSize: 14, lineHeight: 1.6, maxWidth: 300, margin: "0 auto" }}>
           Join the BeatFinder community and unlock the full producer ecosystem
@@ -3791,7 +3843,7 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
           {[
             { icon: "note",     color: "#F59E0B", title: "Exclusive Beats", desc: "Access member-only beats unavailable anywhere else" },
             { icon: "download", color: "#F59E0B", title: "MP3 Downloads",   desc: "Download and buy leases directly from producers" },
-            { icon: "edit",     color: "#F59E0B", title: "Lyric Studio",    desc: "Access exclusive member beats with AI assistance" },
+            { icon: "edit",     color: "#F59E0B", title: "Lyrics/Studio",   desc: "Access Rhyme Finder tool with lyrics, record/mix & master ideas in BeatFinder's DAW" },
             { icon: "knobs",    color: "#F59E0B", title: "Producer Tools",  desc: "Upload beats, sell leases and get paid instantly" },
           ].map(v => (
             <div key={v.title} style={{ background: "#111", borderRadius: 14, padding: 14, border: "1px solid rgba(245,158,11,0.15)" }}>
@@ -3805,9 +3857,20 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
         
         <div style={{ marginBottom: 20 }}>
           <div style={{ color: "#888", fontWeight: 700, fontSize: 12, letterSpacing: 1, marginBottom: 12, textAlign: "center" }}>CHOOSE YOUR PLAN</div>
+
+          {/* Guest plan card */}
+          <div style={{ background: "#111", border: "1.5px solid #333", borderRadius: 14, padding: "14px 12px", marginBottom: 10 }}>
+            <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>Guest</div>
+            <div style={{ color: "#555", fontWeight: 800, fontSize: 16, marginBottom: 10 }}>£0.00/mo</div>
+            <div style={{ color: "#555", fontSize: 11, lineHeight: 1.6 }}>
+              Search for beats, write and save lyrics to beats, discover new producers
+            </div>
+          </div>
+
+          {/* Paid plan cards */}
           <div style={{ display: "flex", gap: 10 }}>
             {[
-              { label: "Artist Pro", price: "£4.99/mo", color: "#F59E0B", perks: ["Write lyrics to beats", "Save unlimited beats", "Exclusive member beats", "Download MP3s", "Purchase leases", "Bookmark unlimited beats"] },
+              { label: "Artist Pro", price: "£4.99/mo", color: "#F59E0B", perks: ["Rhyme Finder AI tool", "Studio recording mode", "Your own profile", "Write lyrics to beats", "Save unlimited beats", "Exclusive member beats", "Download MP3s", "Purchase leases"] },
               { label: "Producer Pro", price: "£8.99/mo", color: "#C026D3", perks: ["Everything in Artist Pro", "Upload & sell beats", "Sell MP3 leases", "Download stats", "Verified badge", "Featured in rotation"] },
             ].map(p => (
               <div key={p.label} style={{ flex: 1, background: "#111", border: "1.5px solid " + p.color, borderRadius: 14, padding: "14px 12px", textAlign: "left" }}>
@@ -13522,13 +13585,13 @@ export default function BeatFinder() {
   });
   // welcomeDone: true once user has passed the welcome gate this session
   const [welcomeDone, setWelcomeDone] = useState(function() {
-    try { return !!sessionStorage.getItem("bf_welcomed"); } catch(e) { return false; }
+    try { return !!localStorage.getItem("bf_welcomed"); } catch(e) { return false; }
   });
   // showAuthWall: true when user tapped "Sign In" — shows auth form full-screen, no app
   const [showAuthWall, setShowAuthWall] = useState(false);
 
   const doWelcome = function() {
-    try { sessionStorage.setItem("bf_welcomed", "1"); } catch(e) {}
+    try { localStorage.setItem("bf_welcomed", "1"); } catch(e) {}
     setWelcomeDone(true);
   };
   const doWelcomeAsGuest = function() {
@@ -13564,8 +13627,12 @@ export default function BeatFinder() {
   const prevUserRef = React.useRef(user);
   useEffect(() => {
     if (prevUserRef.current && !user) {
-      // Logged out — clear synced beats, let guest start fresh
+      // Logged out — restore from localStorage so guest keeps their data
       setSavedMap(loadSaved());
+      try {
+        const localLyrics = JSON.parse(localStorage.getItem("bf_lyrics") || "[]");
+        setSavedLyrics(localLyrics);
+      } catch(e) {}
     }
     prevUserRef.current = user;
   }, [user]);
@@ -13587,23 +13654,34 @@ export default function BeatFinder() {
           isArtistPro: u.plan === "artist" || u.plan === "producer",
         });
         // Auto-skip welcome — user already has a valid session
-        try { sessionStorage.setItem("bf_welcomed", "1"); } catch(e) {}
+        try { localStorage.setItem("bf_welcomed", "1"); } catch(e) {}
         setWelcomeDone(true);
       })
       .catch(() => clearToken());
   }, []);
 
-  // When user logs in, pull their saved beats from the backend
+  // When user logs in, merge local guest beats with their backend library
   useEffect(() => {
     if (!user) return;
+    const guestBeats = loadSaved(); // beats saved while guest
     BeatsAPI.list()
       .then(list => {
         const map = {};
         list.forEach(b => { map[b.video_id] = { videoId: b.video_id, title: b.title, channel: b.channel, thumbnail: b.thumbnail }; });
+        // Merge guest beats into backend (upload any that aren't already there)
+        Object.values(guestBeats).forEach(beat => {
+          if (!map[beat.videoId]) {
+            map[beat.videoId] = beat;
+            BeatsAPI.save(beat).catch(() => {}); // sync guest beat to account
+          }
+        });
         setSavedMap(map);
         persistSaved(map);
       })
-      .catch(e => console.warn("[BeatFinder] Could not fetch saved beats:", e));
+      .catch(() => {
+        // Backend unavailable — keep guest beats in memory
+        setSavedMap(guestBeats);
+      });
   }, [user]);
 
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
@@ -13634,9 +13712,9 @@ export default function BeatFinder() {
       } else {
         next = [lyric, ...prev];
       }
-      // Always keep localStorage as guest fallback
+      // Always keep localStorage in sync — works for guests and as offline backup for pro users
       try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch {}
-      // Persist to backend if logged in
+      // Also persist to backend if logged in
       if (user) {
         apiFetch("/api/lyrics", { method: "POST", body: JSON.stringify(lyric) }).catch(() => {});
       }
@@ -13697,13 +13775,15 @@ export default function BeatFinder() {
             method: "POST",
             body: JSON.stringify({ lyrics: toMigrate }),
           }).then(() => {
-            // Merge migrated lyrics into cloud set
-            setSavedLyrics([...cloudLyrics, ...toMigrate]);
-            try { localStorage.removeItem("bf_lyrics"); } catch {}
+            // Merge migrated lyrics into cloud set — keep localStorage as offline backup
+            const merged = [...cloudLyrics, ...toMigrate];
+            setSavedLyrics(merged);
+            try { localStorage.setItem("bf_lyrics", JSON.stringify(merged)); } catch {}
           }).catch(() => setSavedLyrics(cloudLyrics));
         } else {
           setSavedLyrics(cloudLyrics);
-          try { localStorage.removeItem("bf_lyrics"); } catch {}
+          // Keep localStorage in sync for offline/guest fallback
+          try { localStorage.setItem("bf_lyrics", JSON.stringify(cloudLyrics)); } catch {}
         }
       })
       .catch(() => {
@@ -13823,7 +13903,7 @@ export default function BeatFinder() {
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} />}
-            {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} />}
+            {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
             {t === "studio"    && studioVisited && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
             {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
           </div>
