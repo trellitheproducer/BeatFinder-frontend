@@ -29,11 +29,11 @@
       *,
       *::before,
       *::after {
-        scrollbar-width: none;        /* Firefox */
-        -ms-overflow-style: none;     /* IE / Edge */
+        scrollbar-width: none;
+        -ms-overflow-style: none;
       }
       *::-webkit-scrollbar {
-        display: none;                /* Chrome / Safari / WebKit */
+        display: none;
         width: 0;
         height: 0;
       }
@@ -64,15 +64,9 @@
     <div id="root"></div>
     <script>
       // Block ALL body-level touchmove — prevents iOS standalone rubber-band on the whole page.
-      // Scrollable containers inside the app use their own touch handlers or have
-      // -webkit-overflow-scrolling:touch which works independently of this.
       document.body.addEventListener('touchmove', function(e) {
         e.preventDefault();
       }, { passive: false });
     </script>
-    </style>
-  </head>
-  <body>
-    <div id="root"></div>
   </body>
 </html>
