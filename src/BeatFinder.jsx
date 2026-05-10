@@ -1456,7 +1456,7 @@ function RhymeFinder({ onClose, onInsert }) {
   );
 }
 
-function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex }) {
+function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, user }) {
   const [text,       setText]       = useState(initialLyric ? initialLyric.text  : "");
   const [title,      setTitle]      = useState(initialLyric ? initialLyric.title : "");
   const [saved,      setSaved]      = useState(false);
@@ -1575,14 +1575,24 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex })
         <div style={{ color: "#444", fontSize: 11, flexShrink: 0 }}>
           {text.length} chars • {text.split(" ").filter(function(w){return w.length > 0;}).length} words
         </div>
-        <button onClick={() => setAiOpen(aiOpen === "rhymes" ? null : "rhymes")} style={{
-          background: aiOpen === "rhymes" ? "rgba(6,182,212,0.2)" : "rgba(6,182,212,0.15)",
-          border: "1px solid " + (aiOpen === "rhymes" ? "#06B6D4" : "rgba(6,182,212,0.4)"),
-          borderRadius: 20, color: "#06B6D4", fontWeight: 800,
-          fontSize: 12, padding: "8px 14px", cursor: "pointer",
-        }}>
-          <AppIcon id="target" size={20}/> Rhyme Finder
-        </button>
+        {user ? (
+          <button onClick={() => setAiOpen(aiOpen === "rhymes" ? null : "rhymes")} style={{
+            background: aiOpen === "rhymes" ? "rgba(6,182,212,0.2)" : "rgba(6,182,212,0.15)",
+            border: "1px solid " + (aiOpen === "rhymes" ? "#06B6D4" : "rgba(6,182,212,0.4)"),
+            borderRadius: 20, color: "#06B6D4", fontWeight: 800,
+            fontSize: 12, padding: "8px 14px", cursor: "pointer",
+          }}>
+            <AppIcon id="target" size={20}/> Rhyme Finder
+          </button>
+        ) : (
+          <div style={{
+            background: "rgba(255,255,255,0.04)", border: "1px solid #222",
+            borderRadius: 20, color: "#333", fontWeight: 800,
+            fontSize: 12, padding: "8px 14px", display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <AppIcon id="lock" size={14}/> Rhyme Finder
+          </div>
+        )}
       </div>
     </div>
   );
@@ -3571,7 +3581,7 @@ function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial }
 // SAVED SCREEN
 // =============================================================================
 function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) {
-  const list = user ? Object.values(savedMap) : [];
+  const list = Object.values(savedMap); // guests save locally, pro users sync to backend
 
   const [sort,         setSort]         = useState("recent");
   const [activeFolder, setActiveFolder] = useState("all");
@@ -3620,21 +3630,7 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) 
     return 0;
   });
 
-  if (!user) return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "60vh", padding: 24, textAlign: "center" }}>
-      <div style={{ fontSize: 64, marginBottom: 20 }}><AppIcon id="bookmark" size={20}/></div>
-      <div style={{ color: "white", fontSize: 22, fontWeight: 800, marginBottom: 8 }}>Your Beat Library</div>
-      <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 28 }}>
-        Create an account to save beats,<br />build collections and sync across devices.
-      </div>
-      <button onClick={onGoProfile} style={{ width: "100%", maxWidth: 300, background: "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: "pointer", marginBottom: 14 }}>
-        Create Account
-      </button>
-      <button onClick={onGoProfile} style={{ background: "none", border: "none", color: "#06B6D4", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
-        Log In
-      </button>
-    </div>
-  );
+
 
   return (
     <div style={{ padding: "0 16px 100px" }}>
@@ -4284,10 +4280,7 @@ function RootAuthScreen({ onLogin, startMode }) {
   );
 
   return (
-    <div style={{ padding: "40px 24px 100px" }}>
-      <button onClick={() => setMode("landing")} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer", marginBottom: 20 }}>
-        &#8592;
-      </button>
+    <div style={{ padding: "0 24px 100px" }}>
       <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 2, marginBottom: 24 }}>
         {mode === "signup" ? "CREATE ACCOUNT" : "WELCOME BACK"}
       </div>
@@ -13565,11 +13558,16 @@ export default function BeatFinder() {
   // Handle reset token from URL
   const resetToken = new URLSearchParams(window.location.search).get("reset_token");
 
-  // Clear local saves if not logged in - guests shouldn't have saved state
+  // When user logs OUT (user goes from truthy to null), clear the savedMap
+  // so we don't show their private beats to the next guest session.
+  // We use a ref to detect the transition rather than running on every guest render.
+  const prevUserRef = React.useRef(user);
   useEffect(() => {
-    if (!user) {
-      setSavedMap({});
+    if (prevUserRef.current && !user) {
+      // Logged out — clear synced beats, let guest start fresh
+      setSavedMap(loadSaved());
     }
+    prevUserRef.current = user;
   }, [user]);
 
   // Mark session as started on mount — used to skip splash on iOS background reload
@@ -13609,20 +13607,18 @@ export default function BeatFinder() {
   }, [user]);
 
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
+  const [promptReason,   setPromptReason]   = useState("studio"); // "studio" | "profile"
 
   const toggleSave = useCallback(beat => {
-    if (!user) {
-      setShowAuthPrompt(true);
-      return;
-    }
     setSavedMap(prev => {
       const next = { ...prev };
       if (next[beat.videoId]) {
         delete next[beat.videoId];
-        BeatsAPI.remove(beat.videoId).catch(console.warn);
+        // Only call backend for logged-in users
+        if (user) BeatsAPI.remove(beat.videoId).catch(console.warn);
       } else {
         next[beat.videoId] = beat;
-        BeatsAPI.save(beat).catch(console.warn);
+        if (user) BeatsAPI.save(beat).catch(console.warn);
       }
       persistSaved(next);
       return next;
@@ -13665,6 +13661,12 @@ export default function BeatFinder() {
 
   const handlePlay = useCallback(beat => setPlaying(beat), []);
   const goTab = id => {
+    // Guests cannot access Studio or Profile — prompt sign-in
+    if ((id === "studio" || id === "profile") && !user) {
+      setPromptReason(id);
+      setShowAuthPrompt(true);
+      return;
+    }
     setPlaying(null);
     setTab(id);
     if (id === "studio") setStudioVisited(true);
@@ -13772,16 +13774,18 @@ export default function BeatFinder() {
             borderRadius: 20, padding: 28, width: "100%", maxWidth: 340,
             textAlign: "center",
           }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 44, marginBottom: 14 }}><AppIcon id="bookmark" size={20}/></div>
+            <div style={{ fontSize: 40, marginBottom: 12, color: "#C026D3" }}><AppIcon id={promptReason === "studio" ? "studio" : "profile"} size={36} /></div>
             <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 8 }}>
-              Save Your Beats
+              {promptReason === "studio" ? "Pro Plan Required" : "Sign In Required"}
             </div>
             <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 24 }}>
-              Create a free account to save beats and sync your library across devices.
+              {promptReason === "studio"
+                ? "Purchase a Pro plan to unlock Studio mode and start recording."
+                : "Sign in to access your profile, save beats and more."}
             </div>
-            <button onClick={() => { setShowAuthPrompt(false); goTab("profile"); }}
+            <button onClick={() => { setShowAuthPrompt(false); setShowAuthWall(true); setWelcomeDone(false); }}
               style={{ width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, fontSize: 16, padding: "14px", cursor: "pointer", marginBottom: 12 }}>
-              Create Account
+              {promptReason === "studio" ? "View Pro Plans" : "Sign In / Create Account"}
             </button>
             <button onClick={() => setShowAuthPrompt(false)}
               style={{ background: "none", border: "none", color: "#555", fontSize: 14, cursor: "pointer" }}>
@@ -13831,14 +13835,14 @@ export default function BeatFinder() {
         )}
       </div>
 
-      {lyricsOpen && <LyricsNotepad beat={lyricsBeat} onClose={() => { setLyricsOpen(false); setEditingLyric(null); setEditingIndex(null); }} onSaveLyric={handleSaveLyric} initialLyric={editingLyric} lyricIndex={editingIndex} />}
+      {lyricsOpen && <LyricsNotepad beat={lyricsBeat} onClose={() => { setLyricsOpen(false); setEditingLyric(null); setEditingIndex(null); }} onSaveLyric={handleSaveLyric} initialLyric={editingLyric} lyricIndex={editingIndex} user={user} />}
       {playing && (
         <Player
           beat={playing}
           onClose={() => setPlaying(null)}
           savedIds={savedIds}
           onSave={toggleSave}
-          isArtistPro={user?.isPro || user?.isArtistPro}
+          isArtistPro={!user || user?.isPro || user?.isArtistPro}
           onGoMembers={() => goTab("exclusive")}
           onOpenLyrics={handleOpenLyrics}
           savedLyrics={savedLyrics}
@@ -13856,9 +13860,9 @@ export default function BeatFinder() {
           boxShadow: "0 -8px 32px rgba(0,0,0,0.9)",
           zIndex: 1000,
         }}>
-        {NAV.map(n => {
+        {NAV.filter(function(n){ return !(n.id === 'profile' && !user); }).map(n => {
           const isPro    = user?.isPro || user?.isArtistPro;
-          const locked   = n.id === "exclusive" && (!user || !isPro);
+          const locked   = (n.id === "exclusive" && (!user || !isPro)) || (n.id === "studio" && !user);
           const isActive = tab === n.id;
           const activeColor = n.id === "exclusive" ? "#F59E0B" : n.id === "studio" ? "#22C55E" : "#C026D3";
           const isStudio = n.id === "studio";
