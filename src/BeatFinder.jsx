@@ -4634,6 +4634,8 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   const [uploadLoading,    setUploadLoading]    = useState(false);
   const [uploadMsg,        setUploadMsg]        = useState("");
   const [settingsOpen,     setSettingsOpen]     = useState(false);
+  const [openSettingsSection, setOpenSettingsSection] = useState(null); // 'username' | 'password'
+  const [toolsOpen,            setToolsOpen]            = useState(false);
   const [newUsername,      setNewUsername]      = useState("");
   const [currentPw,        setCurrentPw]        = useState("");
   const [newPw,            setNewPw]            = useState("");
@@ -4766,7 +4768,11 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
       <div style={{ padding: "20px 0 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, display:"flex", alignItems:"center", gap:10 }}><AppIcon id="profile" size={26} />My Profile</div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", position: "relative" }}>
-          <button onClick={() => setSettingsOpen(!settingsOpen)}
+          <button onClick={() => { setToolsOpen(!toolsOpen); setSettingsOpen(false); }}
+            style={{ background: toolsOpen ? "rgba(192,38,211,0.15)" : "#1a1a1a", border: "1px solid " + (toolsOpen ? "#C026D3" : "#333"), color: toolsOpen ? "#C026D3" : "#aaa", borderRadius: 10, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
+            <AppIcon id="knobs" size={14} /> Tools
+          </button>
+          <button onClick={() => { setSettingsOpen(!settingsOpen); setToolsOpen(false); }}
             style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 10, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
             ⚙️ Settings
           </button>
@@ -4780,38 +4786,149 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 <div style={{ color: "white", fontWeight: 800, fontSize: 16 }}>⚙️ Settings</div>
                 <button onClick={() => setSettingsOpen(false)} style={{ background: "none", border: "none", color: "#555", fontSize: 20, cursor: "pointer" }}>✕</button>
               </div>
-              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>USERNAME</div>
-              <input value={newUsername} onChange={e => setNewUsername(e.target.value)} placeholder={user.username || "Set your username"}
-                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
-              <button onClick={async () => {
-                if (!newUsername.trim()) return;
-                try {
-                  await apiFetch("/api/auth/set-username", { method: "POST", body: JSON.stringify({ username: newUsername.trim() }) });
-                  setUser({ ...user, username: newUsername.trim() }); setNewUsername(""); setSettingsMsg("Username updated!"); setTimeout(() => setSettingsMsg(""), 2500);
-                } catch (e) { setSettingsMsg("Error: " + e.message); }
-              }} style={{ width: "100%", background: "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: "10px", fontSize: 14, cursor: "pointer", marginBottom: 16 }}>
-                {user.username ? "Update Username" : "Set Username"}
-              </button>
-              <div style={{ height: 1, background: "#1e1e1e", marginBottom: 16 }} />
-              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>CHANGE PASSWORD</div>
-              <input value={currentPw} onChange={e => setCurrentPw(e.target.value)} type="password" placeholder="Current password"
-                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
-              <input value={newPw} onChange={e => setNewPw(e.target.value)} type="password" placeholder="New password"
-                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
-              <input value={confirmPw} onChange={e => setConfirmPw(e.target.value)} type="password" placeholder="Confirm new password"
-                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
-              <button onClick={async () => {
-                if (!currentPw || !newPw) return;
-                if (newPw !== confirmPw) { setSettingsMsg("Passwords do not match"); return; }
-                if (newPw.length < 6) { setSettingsMsg("Password must be at least 6 characters"); return; }
-                try {
-                  await apiFetch("/api/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPw, new_password: newPw }) });
-                  setCurrentPw(""); setNewPw(""); setConfirmPw(""); setSettingsMsg("Password changed!"); setTimeout(() => setSettingsMsg(""), 2500);
-                } catch (e) { setSettingsMsg("Error: " + e.message); }
-              }} style={{ width: "100%", background: "#1a1a1a", border: "1.5px solid #333", borderRadius: 10, color: "#aaa", fontWeight: 800, padding: "10px", fontSize: 14, cursor: "pointer", marginBottom: 8 }}>
-                Change Password
-              </button>
-              {settingsMsg && <div style={{ color: settingsMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, textAlign: "center", fontWeight: 600 }}>{settingsMsg}</div>}
+              {/* ── Username accordion ── */}
+              <div style={{ borderRadius: 10, border: "1px solid #222", marginBottom: 8, overflow: "hidden" }}>
+                <button onClick={() => setOpenSettingsSection(openSettingsSection === "username" ? null : "username")}
+                  style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "12px 14px", background: openSettingsSection === "username" ? "#1a1a1a" : "#141414",
+                    border: "none", cursor: "pointer", color: "white", fontWeight: 700, fontSize: 14 }}>
+                  <span>Username</span>
+                  <span style={{ color: "#555", fontSize: 12, transition: "transform 0.2s",
+                    transform: openSettingsSection === "username" ? "rotate(180deg)" : "none" }}>▼</span>
+                </button>
+                {openSettingsSection === "username" && (
+                  <div style={{ padding: "12px 14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
+                    <input value={newUsername} onChange={e => setNewUsername(e.target.value)}
+                      placeholder={user.username || "Set your username"}
+                      style={{ width: "100%", background: "#111", border: "1px solid #333", borderRadius: 10,
+                        padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 10 }} />
+                    <button onClick={async () => {
+                      if (!newUsername.trim()) return;
+                      try {
+                        await apiFetch("/api/auth/set-username", { method: "POST", body: JSON.stringify({ username: newUsername.trim() }) });
+                        setUser({ ...user, username: newUsername.trim() }); setNewUsername(""); setSettingsMsg("Username updated!"); setTimeout(() => setSettingsMsg(""), 2500);
+                      } catch (e) { setSettingsMsg("Error: " + e.message); }
+                    }} style={{ width: "100%", background: "#C026D3", border: "none", borderRadius: 10,
+                      color: "white", fontWeight: 800, padding: "10px", fontSize: 14, cursor: "pointer" }}>
+                      {user.username ? "Update Username" : "Set Username"}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Change Password accordion ── */}
+              <div style={{ borderRadius: 10, border: "1px solid #222", marginBottom: 8, overflow: "hidden" }}>
+                <button onClick={() => setOpenSettingsSection(openSettingsSection === "password" ? null : "password")}
+                  style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "12px 14px", background: openSettingsSection === "password" ? "#1a1a1a" : "#141414",
+                    border: "none", cursor: "pointer", color: "white", fontWeight: 700, fontSize: 14 }}>
+                  <span>Change Password</span>
+                  <span style={{ color: "#555", fontSize: 12, transition: "transform 0.2s",
+                    transform: openSettingsSection === "password" ? "rotate(180deg)" : "none" }}>▼</span>
+                </button>
+                {openSettingsSection === "password" && (
+                  <div style={{ padding: "12px 14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
+                    <input value={currentPw} onChange={e => setCurrentPw(e.target.value)} type="password" placeholder="Current password"
+                      style={{ width: "100%", background: "#111", border: "1px solid #333", borderRadius: 10,
+                        padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
+                    <input value={newPw} onChange={e => setNewPw(e.target.value)} type="password" placeholder="New password"
+                      style={{ width: "100%", background: "#111", border: "1px solid #333", borderRadius: 10,
+                        padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
+                    <input value={confirmPw} onChange={e => setConfirmPw(e.target.value)} type="password" placeholder="Confirm new password"
+                      style={{ width: "100%", background: "#111", border: "1px solid #333", borderRadius: 10,
+                        padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 10 }} />
+                    <button onClick={async () => {
+                      if (!currentPw || !newPw) return;
+                      if (newPw !== confirmPw) { setSettingsMsg("Passwords do not match"); return; }
+                      if (newPw.length < 6) { setSettingsMsg("Password must be at least 6 characters"); return; }
+                      try {
+                        await apiFetch("/api/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPw, new_password: newPw }) });
+                        setCurrentPw(""); setNewPw(""); setConfirmPw(""); setSettingsMsg("Password changed!"); setTimeout(() => setSettingsMsg(""), 2500);
+                      } catch (e) { setSettingsMsg("Error: " + e.message); }
+                    }} style={{ width: "100%", background: "#1e1e1e", border: "1.5px solid #333", borderRadius: 10,
+                      color: "#aaa", fontWeight: 800, padding: "10px", fontSize: 14, cursor: "pointer" }}>
+                      Change Password
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {settingsMsg && <div style={{ color: settingsMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, textAlign: "center", fontWeight: 600, marginTop: 8 }}>{settingsMsg}</div>}
+            </div>
+          )}
+
+          {/* ── Tools panel ── */}
+          {toolsOpen && (
+            <div style={{ position: "absolute", top: 44, right: 0, zIndex: 100, background: "#111", border: "1px solid #333", borderRadius: 14, padding: 20, width: 320, boxShadow: "0 8px 32px rgba(0,0,0,0.6)", maxHeight: "80vh", overflowY: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <div style={{ color: "white", fontWeight: 800, fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}><AppIcon id="knobs" size={18} /> Tools</div>
+                <button onClick={() => setToolsOpen(false)} style={{ background: "none", border: "none", color: "#555", fontSize: 20, cursor: "pointer" }}>✕</button>
+              </div>
+
+              {user.isArtistPro && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>ARTIST TOOLS</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {[
+                      { id: "lyrics",  icon: "edit",  label: "My Lyrics",    desc: savedLyrics.length + " saved", color: "#C026D3" },
+                      { id: "members", icon: "note",  label: "Members Area", desc: "Exclusive beats",              color: "#F59E0B" },
+                    ].map(item => (
+                      <button key={item.id} onClick={() => { setToolsOpen(false); goSection(item.id); }}
+                        style={{ background: "#0f0f0f", borderRadius: 12, padding: "12px 10px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
+                        <div style={{ marginBottom: 6 }}><AppIcon id={item.icon} size={20} /></div>
+                        <div style={{ color: "white", fontWeight: 700, fontSize: 13 }}>{item.label}</div>
+                        <div style={{ color: item.color, fontSize: 11, marginTop: 2 }}>{item.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {savedLyrics.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ color: "#444", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>RECENT LYRICS</div>
+                      {savedLyrics.slice(0, 2).map((lyric, i) => (
+                        <div key={i} onClick={() => { setToolsOpen(false); onEditLyric(lyric, i); }}
+                          style={{ background: "#0f0f0f", borderRadius: 8, padding: "8px 12px", marginBottom: 4, border: "1px solid #1e1e1e", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div style={{ flex: 1, overflow: "hidden" }}>
+                            <div style={{ color: "white", fontWeight: 600, fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lyric.title || "Untitled"}</div>
+                            <div style={{ color: "#555", fontSize: 11, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lyric.beatTitle}</div>
+                          </div>
+                          <span style={{ color: "#C026D3", marginLeft: 8 }}><AppIcon id="writing" size={14} /></span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {user.isPro && (
+                <div>
+                  <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>PRODUCER TOOLS</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {[
+                      { id: "upload", icon: "upload", label: "Upload Beat",    desc: "Add new beat",                                                           color: "#C026D3" },
+                      { id: "manage", icon: "knobs",  label: "My Uploads",     desc: uploads.length + " beats",                                               color: "#F59E0B" },
+                      { id: "stripe", icon: "stripe", label: "Stripe Payouts", desc: producerStats?.stripeConnected ? "Connected" : "Not connected",           color: "#22C55E" },
+                      { id: "stats",  icon: "grid",   label: "Analytics",      desc: producerStats ? producerStats.totalDownloads + " downloads" : "Loading...", color: "#818CF8" },
+                    ].map(item => (
+                      <button key={item.id} onClick={() => { setToolsOpen(false); goSection(item.id); }}
+                        style={{ background: "#0f0f0f", borderRadius: 12, padding: "12px 10px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
+                        <div style={{ marginBottom: 6 }}><AppIcon id={item.icon} size={20} /></div>
+                        <div style={{ color: "white", fontWeight: 700, fontSize: 13 }}>{item.label}</div>
+                        <div style={{ color: item.color, fontSize: 11, marginTop: 2 }}>{item.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!user.isArtistPro && (
+                <div style={{ background: "linear-gradient(135deg,#1a0a00,#1a1000)", borderRadius: 12, padding: 14, border: "1px solid rgba(245,158,11,0.2)" }}>
+                  <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 13, marginBottom: 4 }}>Upgrade to Pro</div>
+                  <div style={{ color: "#888", fontSize: 12, marginBottom: 12 }}>Unlock tools from £4.99/mo</div>
+                  <button onClick={() => { setToolsOpen(false); goSection("upgrade"); }} style={{ background: "linear-gradient(135deg,#F59E0B,#C026D3)", border: "none", borderRadius: 20, color: "white", fontWeight: 800, fontSize: 13, padding: "8px 20px", cursor: "pointer" }}>
+                    View Plans
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -4836,77 +4953,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
       {!activeSection && (
         <div>
           
-          {user.isArtistPro && (
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}><AppIcon id="vocalmic" size={20}/> ARTIST TOOLS</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {[
-                  
-                  { id: "lyrics",  icon: "edit", label: "My Lyrics",    desc: savedLyrics.length + " saved",    color: "#C026D3" },
-                  { id: "members", icon: "note", label: "Members Area", desc: "Exclusive beats",                 color: "#F59E0B" },
-                ].map(item => (
-                  <button key={item.id} onClick={() => goSection(item.id)}
-                    style={{ background: "#111", borderRadius: 14, padding: "16px 12px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
-                    <div style={{ fontSize: 24, marginBottom: 8 }}><AppIcon id={item.icon} size={24}/></div>
-                    <div style={{ color: "white", fontWeight: 700, fontSize: 14 }}>{item.label}</div>
-                    <div style={{ color: item.color, fontSize: 12, marginTop: 3 }}>{item.desc}</div>
-                  </button>
-                ))}
-              </div>
-
-              
-              {savedLyrics.length > 0 && (
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ color: "#444", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>RECENT LYRICS</div>
-                  {savedLyrics.slice(0, 2).map((lyric, i) => (
-                    <div key={i} onClick={() => onEditLyric(lyric, i)}
-                      style={{ background: "#111", borderRadius: 10, padding: "10px 14px", marginBottom: 6, border: "1px solid #1e1e1e", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div>
-                        <div style={{ color: "white", fontWeight: 600, fontSize: 13 }}>{lyric.title || "Untitled"}</div>
-                        <div style={{ color: "#555", fontSize: 11, marginTop: 2 }}>{lyric.beatTitle}</div>
-                      </div>
-                      <span style={{ color: "#C026D3" }}><AppIcon id="writing" size={16} /></span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          
-          {user.isPro && (
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}><AppIcon id="piano" size={20}/> PRODUCER TOOLS</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {[
-                  { id: "upload",  icon: "upload", label: "Upload Beat",  desc: "Add new beat",       color: "#C026D3" },
-                  { id: "manage",  icon: "knobs", label: "My Uploads",   desc: uploads.length + " beats", color: "#F59E0B" },
-                  { id: "stripe",  icon: "stripe", label: "Stripe Payouts", desc: producerStats?.stripeConnected ? "Connected" : "Not connected", color: "#22C55E" },
-                  { id: "stats",   icon: "grid", label: "Analytics",    desc: producerStats ? producerStats.totalDownloads + " downloads" : "Loading...", color: "#818CF8" },
-                ].map(item => (
-                  <button key={item.id} onClick={() => goSection(item.id)}
-                    style={{ background: "#111", borderRadius: 14, padding: "16px 12px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
-                    <div style={{ fontSize: 24, marginBottom: 8 }}><AppIcon id={item.icon} size={24}/></div>
-                    <div style={{ color: "white", fontWeight: 700, fontSize: 14 }}>{item.label}</div>
-                    <div style={{ color: item.color, fontSize: 12, marginTop: 3 }}>{item.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          
-          {!user.isArtistPro && (
-            <div style={{ background: "linear-gradient(135deg,#1a0a00,#1a1000)", borderRadius: 16, padding: 16, marginBottom: 20, border: "1px solid rgba(245,158,11,0.2)" }}>
-              <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Upgrade to Pro</div>
-              <div style={{ color: "#888", fontSize: 13, marginBottom: 14 }}>Unlock lyrics, exclusive beats, MP3 downloads and more from £4.99/mo</div>
-              <button onClick={() => goSection("upgrade")} style={{ background: "linear-gradient(135deg,#F59E0B,#C026D3)", border: "none", borderRadius: 20, color: "white", fontWeight: 800, fontSize: 14, padding: "10px 24px", cursor: "pointer" }}>
-                View Plans
-              </button>
-            </div>
-          )}
-
-          
+          {/* Tools moved to Tools dropdown panel */}
         </div>
       )}
 
@@ -14016,7 +14063,16 @@ export default function BeatFinder() {
         ))}
         {tab === "profile" && (
           <div style={{ overflowY: "auto", height: "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))", WebkitOverflowScrolling: "touch", overscrollBehavior: "none" }} onTouchMove={function(e){ e.stopPropagation(); }}>
-            <ProfileScreen key={user ? user.id : "guest"} user={user} setUser={setUser} onLogout={() => { AuthAPI.logout(); setUser(null); }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} />
+            <ProfileScreen key={user ? user.id : "guest"} user={user} setUser={setUser} onLogout={() => {
+              AuthAPI.logout();
+              setUser(null);
+              // Reset welcome gate so the welcome screen shows again
+              try { localStorage.removeItem("bf_welcomed"); } catch(e) {}
+              setWelcomeDone(false);
+              setShowAuthWall(false);
+              setAuthStartMode("login");
+              goTab("home");
+            }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} />
           </div>
         )}
       </div>
