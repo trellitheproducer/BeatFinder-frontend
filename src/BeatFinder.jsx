@@ -1469,7 +1469,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
   const handleSave = () => {
     if (!text.trim()) return;
     const lyric = {
-      id:        isEditing ? initialLyric.id : Date.now(),
+      id:        isEditing ? initialLyric.id : ("lyric_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8)),
       title:     title.trim() || (beat ? beat.title : "Untitled"),
       text:      text.trim(),
       beatTitle: beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
@@ -14616,11 +14616,14 @@ export default function BeatFinder() {
       } else {
         next = [lyric, ...prev];
       }
-      // Always keep localStorage in sync — works for guests and as offline backup for pro users
-      try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch {}
-      // Also persist to backend if logged in
+      // Always keep localStorage in sync
+      try { localStorage.setItem("bf_lyrics", JSON.stringify(next)); } catch(e) {}
+      // Persist to backend if logged in
       if (user) {
-        apiFetch("/api/lyrics", { method: "POST", body: JSON.stringify(lyric) }).catch(() => {});
+        apiFetch("/api/lyrics", { method: "POST", body: JSON.stringify(lyric) })
+          .catch(() => {
+            // If backend fails, localStorage still has it — it will be migrated on next login
+          });
       }
       return next;
     });
@@ -14676,25 +14679,30 @@ export default function BeatFinder() {
         var localLyrics = [];
         try { localLyrics = JSON.parse(localStorage.getItem("bf_lyrics") || "[]"); } catch(e) {}
         const cloudIds = new Set(cloudLyrics.map(l => l.id));
-        const toMigrate = localLyrics.filter(l => !cloudIds.has(l.id));
+        const toMigrate = localLyrics.filter(l => l.id && !cloudIds.has(l.id));
         if (toMigrate.length > 0) {
+          // Upload local-only lyrics to backend
           apiFetch("/api/lyrics/bulk-import", {
             method: "POST",
             body: JSON.stringify({ lyrics: toMigrate }),
           }).then(() => {
-            // Merge migrated lyrics into cloud set — keep localStorage as offline backup
-            const merged = [...cloudLyrics, ...toMigrate];
+            const merged = [...toMigrate, ...cloudLyrics];
             setSavedLyrics(merged);
-            try { localStorage.setItem("bf_lyrics", JSON.stringify(merged)); } catch {}
-          }).catch(() => setSavedLyrics(cloudLyrics));
+            try { localStorage.setItem("bf_lyrics", JSON.stringify(merged)); } catch(e) {}
+          }).catch(() => {
+            // bulk-import failed — still show merged locally
+            const merged = [...toMigrate, ...cloudLyrics];
+            setSavedLyrics(merged);
+            try { localStorage.setItem("bf_lyrics", JSON.stringify(merged)); } catch(e) {}
+          });
         } else {
+          // No local-only lyrics — use cloud as source of truth
           setSavedLyrics(cloudLyrics);
-          // Keep localStorage in sync for offline/guest fallback
-          try { localStorage.setItem("bf_lyrics", JSON.stringify(cloudLyrics)); } catch {}
+          try { localStorage.setItem("bf_lyrics", JSON.stringify(cloudLyrics)); } catch(e) {}
         }
       })
       .catch(() => {
-        // Backend unavailable — fall back to localStorage silently
+        // Backend unavailable — keep localStorage version
       });
   }, [user?.id]);
 
