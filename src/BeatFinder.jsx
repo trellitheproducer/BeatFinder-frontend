@@ -7996,6 +7996,7 @@ function StudioScreen({ user, onExit }) {
   const playheadRef     = useRef(null); // direct DOM ref — updated without React re-render
   const trackContainerRef = useRef(null);
   const sidebarRef      = useRef(null);  // left column (locked horizontal)
+  const sidebarRowsRef  = useRef(null);  // inner rows div — driven by translateY for vertical sync
   const mediaRecRef     = useRef(null);
   const chunksRef       = useRef([]);
   const recIntRef       = useRef(null);
@@ -13038,50 +13039,111 @@ userPickedMicRef.current = true;
           />
         )}
 
-        {/* THE single scroll container — overflow-x:scroll drives ruler + lanes together */}
-        <div
-          ref={scrollRef}
-          style={{
-            width:"100%", height:"100%",
-            overflowX:"scroll", overflowY:"auto",
-            WebkitOverflowScrolling:"touch",
-            scrollbarWidth:"thin", scrollbarColor:"#2a2a2a #0a0a0a",
-          }}
-          onScroll={function(e){
-            const sl = e.target.scrollLeft;
-            if (!isPlayingRef.current) {
-              const t = Math.max(0, sl / effectivePPS);
-              setCurrentTime(t);
-              playheadAtRef.current = t;
-              updatePlayheadDOM(t, sl);
-            } else {
-              // During playback: playhead is driven by RAF, just update DOM position
-              const actx = actxRef.current;
-              const t = actx ? playheadAtRef.current + (actx.currentTime - masterStartRef.current) : playheadAtRef.current;
-              updatePlayheadDOM(t, sl);
-            }
-          }}
-        >
-          {/* Inner content — wide enough for whole project */}
-          <div style={{ minWidth: SIDEBAR_W + totalW + 400, position:"relative" }}>
+        {/* ── TWO-COLUMN DAW LAYOUT ─────────────────────────────────────────────
+            LEFT:  sidebar — track headers only, scrolls vertically in sync, never horizontally
+            RIGHT: scroll area — ruler + lanes, scrolls both axes
+        ──────────────────────────────────────────────────────────────────────── */}
+        <div style={{ display:"flex", width:"100%", height:"100%", overflow:"hidden" }}>
 
-            {/* ── RULER ROW — sticky top so it stays visible on vertical scroll ── */}
-            <div style={{ display:"flex", position:"sticky", top:0, zIndex:25, height:RULER_H }}>
+          {/* ── LEFT SIDEBAR — track headers, locked horizontally ── */}
+          <div
+            ref={sidebarRef}
+            style={{
+              width: SIDEBAR_W, flexShrink:0,
+              overflowY:"hidden", overflowX:"hidden",
+              background:"#0a0a0a",
+              borderRight:"1px solid #141414",
+              display:"flex", flexDirection:"column",
+              zIndex:20,
+            }}
+          >
+            {/* Corner — TRACKS label, aligns with ruler height */}
+            <div style={{
+              height:RULER_H, flexShrink:0,
+              borderBottom:"1px solid #1a1a1a",
+              display:"flex", alignItems:"center", paddingLeft:10,
+            }}>
+              <span style={{ color:"#333", fontSize:9, fontWeight:700 }}>TRACKS</span>
+            </div>
 
-              {/* Sticky corner: TRACKS label */}
-              <div style={{
-                width:SIDEBAR_W, flexShrink:0,
-                position:"sticky", left:0, zIndex:26,
-                background:"#0a0a0a", borderRight:"1px solid #141414",
-                borderBottom:"1px solid #1a1a1a",
-                display:"flex", alignItems:"center", paddingLeft:10,
-              }}>
-                <span style={{ color:"#333", fontSize:9, fontWeight:700 }}>TRACKS</span>
+            {/* Track header rows — scroll vertically in sync with main area */}
+            <div ref={sidebarRowsRef} style={{ flex:1, overflowY:"hidden", overflowX:"hidden" }}>
+              {tracks.map(function(track, trackIdx){
+                const isRec   = isRecording && recTrackId === track.id;
+                const isBeingDragged = reorderDragId === track.id;
+                const isDropTgt = reorderDropIdx === trackIdx && reorderDragId !== null && reorderDragId !== track.id;
+                return (
+                  <div key={track.id} style={{ height:TRACK_H, borderBottom: isDropTgt ? "2px solid #30D158" : "1px solid #0f0f0f", flexShrink:0 }}>
+                    <LogicTrackHeader
+                      track={track}
+                      isRec={isRec}
+                      isSelected={selectedTrackId===track.id}
+                      fxOpen={fxTrackId===track.id}
+                      showTakes={showTakes===track.id}
+                      onSelect={function(){ setSelectedTrackId(track.id); }}
+                      onMute={function(){ toggleMute(track.id); }}
+                      onSolo={function(){ toggleSolo(track.id); }}
+                      onFx={function(){ setFxTrackId(function(v){ return v===track.id?null:track.id; }); }}
+                      onTakes={function(){ setShowTakes(function(v){ return v===track.id?null:track.id; }); }}
+                      onRemove={function(){ removeTrack(track.id); }}
+                      updateTrack={updateTrack}
+                      analyserNode={trackAnalysersRef.current[track.id] || null}
+                      isPlaying={isPlaying}
+                      isDragging={isBeingDragged}
+                      isDropTarget={isDropTgt}
+                      onLongPressStart={function(e){ handleHeaderLongPressStart(e, track); }}
+                      onLongPressCancel={handleHeaderLongPressCancel}
+                      onDragMove={handleHeaderDragMove}
+                      onDragEnd={handleHeaderDragEnd}
+                    />
+                  </div>
+                );
+              })}
+              {/* Add track button — aligned with add-track row in lanes */}
+              <div style={{ height:48, borderBottom:"1px solid #111", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <button onClick={function(e){ e.stopPropagation(); setShowAddMenu(function(v){return !v;}); }} style={{ width:"100%", height:"100%", background:"transparent", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <span style={{ color:showAddMenu?"#C026D3":"#444", fontSize:24, fontWeight:300 }}>+</span>
+                </button>
               </div>
+            </div>
+          </div>
 
+          {/* ── RIGHT: scroll area — ruler + lanes only, no headers ── */}
+          <div
+            ref={scrollRef}
+            style={{
+              flex:1, height:"100%",
+              overflowX:"scroll", overflowY:"auto",
+              WebkitOverflowScrolling:"touch",
+              overscrollBehavior:"none",
+              scrollbarWidth:"thin", scrollbarColor:"#2a2a2a #0a0a0a",
+            }}
+            onScroll={function(e){
+              // Sync sidebar vertical scroll via translateY
+              if (sidebarRowsRef.current) {
+                sidebarRowsRef.current.style.transform = "translateY(-" + e.target.scrollTop + "px)";
+              }
+              const sl = e.target.scrollLeft;
+              if (!isPlayingRef.current) {
+                const t = Math.max(0, sl / effectivePPS);
+                setCurrentTime(t);
+                playheadAtRef.current = t;
+                updatePlayheadDOM(t, sl);
+              } else {
+                const actx = actxRef.current;
+                const t = actx ? playheadAtRef.current + (actx.currentTime - masterStartRef.current) : playheadAtRef.current;
+                updatePlayheadDOM(t, sl);
+              }
+            }}
+          >
+          {/* Inner content — wide enough for whole project, no sidebar width needed */}
+          <div style={{ minWidth: totalW + 400, position:"relative" }}>
+
+            {/* ── RULER ROW — sticky top ── */}
+            <div style={{ position:"sticky", top:0, zIndex:25, height:RULER_H, background:"#0c0c0c", borderBottom:"1px solid #1a1a1a" }}>
               {/* Ruler tick area — tap to seek */}
               <div
-                style={{ flex:1, position:"relative", background:"#0c0c0c", borderBottom:"1px solid #1a1a1a", cursor:"col-resize", touchAction:"none" }}
+                style={{ position:"relative", height:"100%", cursor:"col-resize", touchAction:"none" }}
                 onMouseDown={handleRulerMouseDown}
                 onTouchStart={handleRulerTouchStart}
                 onTouchMove={handleRulerTouchMove}
@@ -13107,7 +13169,7 @@ userPickedMicRef.current = true;
               </div>
             </div>
 
-            {/* ── TRACK ROWS ── each is a flex row: sticky header | lane ── */}
+            {/* ── LANE ROWS ── lanes only, no headers ── */}
             {tracks.map(function(track, trackIdx){
               const isRec   = isRecording && recTrackId === track.id;
               const hasSolo = tracks.some(function(t){return t.isSoloed;});
@@ -13118,36 +13180,6 @@ userPickedMicRef.current = true;
               return (
                 <div key={track.id} style={{ display:"flex", height:TRACK_H, borderBottom: isDropTgt ? "2px solid #30D158" : "1px solid #0f0f0f", opacity:dimmed?0.4:1, position:"relative" }}>
 
-                  {/* Track header — sticky left, never scrolls away horizontally */}
-                  <div
-                    style={{
-                      width:SIDEBAR_W, flexShrink:0,
-                      position:"sticky", left:0, zIndex:10,
-                    }}
-                  >
-                    <LogicTrackHeader
-                      track={track}
-                      isRec={isRec}
-                      isSelected={selectedTrackId===track.id}
-                      fxOpen={fxTrackId===track.id}
-                      showTakes={showTakes===track.id}
-                      onSelect={function(){ setSelectedTrackId(track.id); }}
-                      onMute={function(){ toggleMute(track.id); }}
-                      onSolo={function(){ toggleSolo(track.id); }}
-                      onFx={function(){ setFxTrackId(function(v){ return v===track.id?null:track.id; }); }}
-                      onTakes={function(){ setShowTakes(function(v){ return v===track.id?null:track.id; }); }}
-                      onRemove={function(){ removeTrack(track.id); }}
-                      updateTrack={updateTrack}
-                      analyserNode={trackAnalysersRef.current[track.id] || null}
-                      isPlaying={isPlaying}
-                      isDragging={isBeingDragged}
-                      isDropTarget={isDropTgt}
-                      onLongPressStart={function(e){ handleHeaderLongPressStart(e, track); }}
-                      onLongPressCancel={handleHeaderLongPressCancel}
-                      onDragMove={handleHeaderDragMove}
-                      onDragEnd={handleHeaderDragEnd}
-                    />
-                  </div>
 
                   {/* Lane outer — overflow:visible for trim handles only */}
                   <div style={{
@@ -13276,23 +13308,18 @@ userPickedMicRef.current = true;
               );
             })}
 
-            {/* Add track row */}
-            <div style={{ display:"flex", height:48, borderBottom:"1px solid #111" }}>
-              <div style={{ width:SIDEBAR_W, flexShrink:0, position:"sticky", left:0, zIndex:10, background:"#0a0a0a", borderRight:"1px solid #141414" }}>
-                <button onClick={function(e){ e.stopPropagation(); setShowAddMenu(function(v){return !v;}); }} style={{ width:"100%", height:"100%", background:"transparent", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                  <span style={{ color:showAddMenu?"#C026D3":"#444", fontSize:24, fontWeight:300 }}>+</span>
-                </button>
-              </div>
-              <div style={{ flex:1, background:"#090909" }} />
-            </div>
+            {/* Add track lane filler row — button is in the sidebar */}
+            <div style={{ height:48, borderBottom:"1px solid #111", background:"#090909" }} />
 
           </div>{/* end inner */}
-        </div>{/* end scroll container */}
+          </div>{/* end right scroll area */}
+        </div>{/* end two-column flex */}
+
       {/* ── Lasso selection box overlay — inside DAW wrapper so coords match ── */}
       {selBox && selBox.w > 4 && selBox.h > 4 && (
         <div style={{
           position:"absolute",
-          left: selBox.x - (scrollRef.current ? scrollRef.current.scrollLeft : 0),
+          left: SIDEBAR_W + selBox.x - (scrollRef.current ? scrollRef.current.scrollLeft : 0),
           top:  selBox.y,
           width: selBox.w,
           height: selBox.h,
@@ -14130,7 +14157,7 @@ export default function BeatFinder() {
       )}
 
       {publicProfile && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "#0a0a0a", overflowY: "auto", paddingTop: "env(safe-area-inset-top)" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "#0a0a0a", overflowY: "auto", overscrollBehavior: "none", paddingTop: "env(safe-area-inset-top)" }}>
           <PublicProfileScreen username={publicProfile} onBack={() => setPublicProfile(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />
         </div>
       )}
@@ -14144,6 +14171,7 @@ export default function BeatFinder() {
               ? "100dvh"
               : "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))",
             WebkitOverflowScrolling: "touch",
+            overscrollBehavior: "none",
           }}>
             {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
@@ -14155,7 +14183,7 @@ export default function BeatFinder() {
           </div>
         ))}
         {tab === "profile" && (
-          <div style={{ overflowY: "auto", height: "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))", WebkitOverflowScrolling: "touch" }}>
+          <div style={{ overflowY: "auto", height: "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))", WebkitOverflowScrolling: "touch", overscrollBehavior: "none" }}>
             <ProfileScreen key={user ? user.id : "guest"} user={user} setUser={setUser} onLogout={() => { AuthAPI.logout(); setUser(null); }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} />
           </div>
         )}
