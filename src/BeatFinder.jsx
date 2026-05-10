@@ -2531,7 +2531,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
   const SectionHead = ({ emoji, title, sub }) => (
     <div style={{ paddingLeft: 16, marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-        <AppIcon id={emoji} size={18} />
+        <span style={{ color:"#C026D3" }}><AppIcon id={emoji} size={18} /></span>
         <span style={{ color: "white", fontWeight: 800, fontSize: 16,
           fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>{title}</span>
       </div>
@@ -2614,7 +2614,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
             borderRadius: 16, padding: "13px 16px",
             display: "flex", alignItems: "center", gap: 14,
           }}>
-            <div style={{ fontSize: 28 }}><AppIcon id="lock" size={20}/></div>
+            <div style={{ fontSize: 28, color: "#C026D3" }}><AppIcon id="lock" size={20} color="#C026D3"/></div>
             <div style={{ flex: 1 }}>
               <div style={{ color: "white", fontWeight: 800, fontSize: 14, marginBottom: 2 }}>
                 Unlock Pro
@@ -2633,7 +2633,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
 
       {/* Featured Beats Carousel */}
       <div style={{ marginBottom: 28 }}>
-        <SectionHead emoji="⭐" title="FEATURED BEATS" sub="Hand-picked from YouTube" />
+        <SectionHead emoji="star" title="FEATURED BEATS" sub="Hand-picked from YouTube" />
         <FeaturedCarousel savedIds={savedIds} onSave={onSave} onPlay={onPlay} />
       </div>
 
@@ -2894,7 +2894,7 @@ function ArtistsScreen({ onPlay, savedIds, onSave }) {
     <div style={{ padding: "0 16px 100px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 0 14px" }}>
         <div>
-          <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 32, letterSpacing: 2 }}>BEATFINDER</div>
+          <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 32, letterSpacing: 2, display:"flex", alignItems:"center", gap:10 }}><AppIcon id="artists" size={28} />BEATFINDER</div>
           <div style={{ color: "#888", fontSize: 13 }}>Type beats, organized.</div>
         </div>
         <img
@@ -3385,7 +3385,7 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
   const SectionHeader = ({ emoji, title, subtitle, color }) => (
     <div style={{ marginBottom: 14, paddingLeft: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-        <AppIcon id={emoji} size={20} />
+        <span style={{ color:"#C026D3" }}><AppIcon id={emoji} size={20} /></span>
         <div style={{ color: color || "#C026D3", fontWeight: 800, fontSize: 16, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>{title}</div>
       </div>
       {subtitle && <div style={{ color: "#555", fontSize: 12, marginLeft: 28 }}>{subtitle}</div>}
@@ -3404,7 +3404,7 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
       <div style={{ padding: "0 16px", marginBottom: 28 }}>
         <div style={{ background: "linear-gradient(135deg,#1a1a2e,#6B21A8)", borderRadius: 16, padding: "20px" }}>
           <div style={{ color: "#F59E0B", fontSize: 13, fontWeight: 800, marginBottom: 4 }}>DISCOVER</div>
-          <div style={{ color: "white", fontSize: 26, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>Trending & Rising</div>
+          <div style={{ color: "white", fontSize: 26, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, display:"flex", alignItems:"center", gap:8 }}><AppIcon id="trending" size={26} />&nbsp;Trending & Rising</div>
           <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>Viral beats + emerging producers</div>
         </div>
       </div>
@@ -3523,8 +3523,7 @@ function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial }
   return (
     <div style={{ padding: "0 16px 100px" }}>
       <div style={{ padding: "20px 0 10px" }}>
-        <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>
-          Discover Beats
+        <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, display:"flex", alignItems:"center", gap:10 }}><AppIcon id="search" size={26} />Discover Beats
         </div>
         <div style={{ color: "#888", fontSize: 13, marginBottom: 14 }}>Search any artist, genre or vibe</div>
 
@@ -3704,7 +3703,7 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile }) 
     <div style={{ padding: "0 16px 100px" }}>
       <div style={{ padding: "20px 0 12px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 }}>
-          <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>Beat Library</div>
+          <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, display:"flex", alignItems:"center", gap:10 }}><AppIcon id="saved" size={26} />Beat Library</div>
           <div style={{ color: "#555", fontSize: 13 }}>{list.length} saved</div>
         </div>
         <div style={{ color: "#666", fontSize: 13, marginBottom: 16 }}>Your personal beat collection</div>
@@ -3924,7 +3923,7 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave }) {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
               <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, marginBottom: 4, letterSpacing: 1 }}><AppIcon id="lock" size={20}/> MEMBERS ONLY</div>
-              <div style={{ color: "white", fontSize: 24, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>Members Area</div>
+              <div style={{ color: "white", fontSize: 24, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, display:"flex", alignItems:"center", gap:8 }}><AppIcon id="crown" size={22} />Members Area</div>
               <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>Exclusive beats and downloadable MP3s</div>
             </div>
             <div style={{ background: user?.isPro ? "rgba(192,38,211,0.2)" : "rgba(245,158,11,0.2)", border: "1px solid " + (user?.isPro ? "#C026D3" : "#F59E0B"), borderRadius: 20, padding: "6px 12px", fontSize: 11, color: user?.isPro ? "#C026D3" : "#F59E0B", fontWeight: 800 }}>
@@ -4719,7 +4718,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
     <div style={{ padding: "0 16px 100px" }}>
       
       <div style={{ padding: "20px 0 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>My Profile</div>
+        <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, display:"flex", alignItems:"center", gap:10 }}><AppIcon id="profile" size={26} />My Profile</div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", position: "relative" }}>
           <button onClick={() => setSettingsOpen(!settingsOpen)}
             style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 10, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
@@ -7851,6 +7850,7 @@ function BeatGridOverlay({ beats, effectivePPS, sidebarW, rulerH, scrollRef, isP
 
 // ── GarageBand Mixer components — module level so React sees stable identity ──
 const GB_BG       = "#1c1c1e";
+let gbFaderDragging = false; // true while any fader is being dragged — blocks mixer scroll
 const GB_STRIP    = "#2c2c2e";
 const GB_BORDER   = "#3a3a3c";
 const GB_LABEL    = "#8e8e93";
@@ -7918,6 +7918,7 @@ function GBFader({ vol, color, muted, onChange }) {
     el.setPointerCapture(e.pointerId);
     const rect = el.getBoundingClientRect();
     const pid  = e.pointerId;
+    gbFaderDragging = true;
     function onM(me){
       if (me.pointerId !== pid) return;
       const dy = me.clientY - rect.top;
@@ -7926,6 +7927,7 @@ function GBFader({ vol, color, muted, onChange }) {
     }
     function onU(ue){
       if (ue.pointerId !== pid) return;
+      gbFaderDragging = false;
       el.releasePointerCapture(pid);
       el.removeEventListener("pointermove", onM);
       el.removeEventListener("pointerup",   onU);
@@ -13185,6 +13187,8 @@ userPickedMicRef.current = true;
               style={{ overflowX:"auto", overflowY:"hidden", WebkitOverflowScrolling:"touch", overscrollBehavior:"none", flex:1, minHeight:0 }}
               onTouchMove={function(e){
                 e.stopPropagation();
+                // Block horizontal scroll entirely while a fader is being dragged
+                if (gbFaderDragging) { e.preventDefault(); return; }
                 const el = e.currentTarget;
                 const atLeft  = el.scrollLeft <= 0;
                 const atRight = el.scrollLeft >= el.scrollWidth - el.clientWidth - 1;
