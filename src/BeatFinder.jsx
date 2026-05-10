@@ -6401,6 +6401,88 @@ function _BandpassPlugin({ fx, upd, Knob }) {
   );
 }
 
+// =============================================================================
+// NOISE GATE WORKLET + REGISTRATION
+// =============================================================================
+const NOISE_GATE_WORKLET_CODE = `
+class NoiseGateProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [
+      { name: "threshold",  defaultValue: -40, minValue: -80, maxValue: 0,   automationRate: "k-rate" },
+      { name: "reduction",  defaultValue: -60, minValue: -80, maxValue: 0,   automationRate: "k-rate" },
+      { name: "attack",     defaultValue: 0.003, minValue: 0.0001, maxValue: 0.5, automationRate: "k-rate" },
+      { name: "hold",       defaultValue: 0.1,   minValue: 0,      maxValue: 1.0, automationRate: "k-rate" },
+      { name: "release",    defaultValue: 0.15,  minValue: 0.001,  maxValue: 2.0, automationRate: "k-rate" },
+      { name: "bypass",     defaultValue: 0,     minValue: 0,      maxValue: 1,   automationRate: "k-rate" },
+    ];
+  }
+  constructor() {
+    super();
+    this._envelope    = 0;
+    this._holdSamples = 0;
+    this._open        = false;
+    this._rmsWin   = Math.round(sampleRate * 0.01);
+    this._rmsBuf   = new Float32Array(this._rmsWin);
+    this._rmsIdx   = 0;
+    this._rmsSumSq = 0;
+  }
+  process(inputs, outputs, params) {
+    const inp = inputs[0]?.[0];
+    const out = outputs[0]?.[0];
+    if (!inp || !out) return true;
+    const bypass = params.bypass[0] > 0.5;
+    if (bypass) { out.set(inp); return true; }
+    const threshLin  = Math.pow(10, params.threshold[0] / 20);
+    const reducLin   = Math.pow(10, params.reduction[0] / 20);
+    const sr         = sampleRate;
+    const attackCoef  = Math.exp(-1 / (params.attack[0]  * sr));
+    const releaseCoef = Math.exp(-1 / (params.release[0] * sr));
+    const holdLen     = Math.round(params.hold[0] * sr);
+    for (let i = 0; i < inp.length; i++) {
+      const old = this._rmsBuf[this._rmsIdx];
+      const cur = inp[i];
+      this._rmsSumSq += cur * cur - old * old;
+      this._rmsBuf[this._rmsIdx] = cur;
+      this._rmsIdx = (this._rmsIdx + 1) % this._rmsWin;
+      const rms = Math.sqrt(Math.max(0, this._rmsSumSq) / this._rmsWin);
+      if (rms >= threshLin) {
+        this._open = true; this._holdSamples = holdLen;
+      } else if (this._holdSamples > 0) {
+        this._holdSamples--;
+      } else {
+        this._open = false;
+      }
+      const target = this._open ? 1.0 : reducLin;
+      const coef   = this._open ? attackCoef : releaseCoef;
+      this._envelope = target + coef * (this._envelope - target);
+      out[i] = inp[i] * this._envelope;
+    }
+    return true;
+  }
+}
+registerProcessor("noise-gate-processor", NoiseGateProcessor);
+`;
+
+const noiseGateWorkletReady = { current: false, promise: null };
+const rnnoiseWorkletReady = noiseGateWorkletReady;
+
+async function registerRNNoiseWorklet(actx) {
+  if (noiseGateWorkletReady.current) return;
+  if (noiseGateWorkletReady.promise) { await noiseGateWorkletReady.promise; return; }
+  noiseGateWorkletReady.promise = (async () => {
+    try {
+      const blob = new Blob([NOISE_GATE_WORKLET_CODE], { type: "application/javascript" });
+      const url  = URL.createObjectURL(blob);
+      await actx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      noiseGateWorkletReady.current = true;
+    } catch(e) {
+      // Worklet registration failed — compressor fallback used in buildChain
+    }
+  })();
+  await noiseGateWorkletReady.promise;
+}
+
 function _TRottenMasterPlugin({ fx, upd }) {
   const m  = fx.trotten || {};
   const on = !!m.on;
