@@ -4242,8 +4242,8 @@ function MyUploadsSection({ user }) {
 // =============================================================================
 // ROOT AUTH SCREEN - shown at app root when no user logged in
 // =============================================================================
-function RootAuthScreen({ onLogin }) {
-  const [mode,        setMode]        = useState("landing");
+function RootAuthScreen({ onLogin, startMode }) {
+  const [mode,        setMode]        = useState(startMode || "landing");
   const [name,        setName]        = useState("");
   const [email,       setEmail]       = useState("");
   const [pw,          setPw]          = useState("");
@@ -13415,6 +13415,78 @@ function NavIcon({ id, size = 22, active, activeColor }) {
 
 // =============================================================================
 // =============================================================================
+// WELCOME SCREEN — shown after splash, before app, allows guest access
+// =============================================================================
+function WelcomeScreen({ onSignIn, onGuest }) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 99998,
+      background: "#0a0a0a",
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      padding: "40px 28px",
+      fontFamily: "'DM Sans',sans-serif",
+      paddingTop: "calc(40px + env(safe-area-inset-top))",
+      paddingBottom: "calc(40px + env(safe-area-inset-bottom))",
+    }}>
+
+      {/* Logo */}
+      <img
+        src="https://i.ibb.co/9myqbFB7/2-BB02064-13-F6-476-C-89-FF-B1-EDDAE0-C709.png"
+        alt="BeatFinder"
+        style={{ width: "100%", maxWidth: 260, marginBottom: 12, objectFit: "contain" }}
+      />
+
+      {/* Tagline */}
+      <div style={{ color: "#555", fontSize: 14, marginBottom: 56, textAlign: "center", lineHeight: 1.6 }}>
+        Find beats. Write lyrics. Record music.
+      </div>
+
+      {/* Sign In button */}
+      <button
+        onClick={onSignIn}
+        style={{
+          width: "100%", maxWidth: 340,
+          background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+          border: "none", borderRadius: 32,
+          color: "white", fontWeight: 800, fontSize: 17,
+          padding: "17px 0", cursor: "pointer",
+          marginBottom: 14,
+          boxShadow: "0 4px 24px rgba(192,38,211,0.35)",
+          letterSpacing: 0.3,
+        }}
+      >
+        Sign In / Create Account
+      </button>
+
+      {/* Continue as Guest */}
+      <button
+        onClick={onGuest}
+        style={{
+          width: "100%", maxWidth: 340,
+          background: "transparent",
+          border: "1.5px solid #222",
+          borderRadius: 32,
+          color: "#888", fontWeight: 700, fontSize: 15,
+          padding: "15px 0", cursor: "pointer",
+          marginBottom: 32,
+          letterSpacing: 0.2,
+        }}
+      >
+        Continue as Guest
+      </button>
+
+      {/* Fine print */}
+      <div style={{ color: "#333", fontSize: 11, textAlign: "center", lineHeight: 1.7, maxWidth: 300 }}>
+        Guests can browse and play beats.{" "}
+        <span style={{ color: "#555" }}>Sign in to save beats, write lyrics, and access the studio.</span>
+      </div>
+
+    </div>
+  );
+}
+
+// =============================================================================
 // SPLASH SCREEN
 // =============================================================================
 function SplashScreen({ onDone }) {
@@ -13455,6 +13527,21 @@ export default function BeatFinder() {
     try { if (sessionStorage.getItem("bf_session_started")) return true; } catch(e) {}
     return false;
   });
+  // welcomeDone: true once user has passed the welcome gate this session
+  const [welcomeDone, setWelcomeDone] = useState(function() {
+    try { return !!sessionStorage.getItem("bf_welcomed"); } catch(e) { return false; }
+  });
+  // showAuthWall: true when user tapped "Sign In" — shows auth form full-screen, no app
+  const [showAuthWall, setShowAuthWall] = useState(false);
+
+  const doWelcome = function() {
+    try { sessionStorage.setItem("bf_welcomed", "1"); } catch(e) {}
+    setWelcomeDone(true);
+  };
+  const doWelcomeAsGuest = function() {
+    setShowAuthWall(false);
+    doWelcome();
+  };
   const [tab, setTab] = useState(function() {
     // Restore the active tab after an iOS background reload.
     // Never open with studio on fresh load — user must navigate there intentionally.
@@ -13501,6 +13588,9 @@ export default function BeatFinder() {
           isPro:       u.plan === "producer",
           isArtistPro: u.plan === "artist" || u.plan === "producer",
         });
+        // Auto-skip welcome — user already has a valid session
+        try { sessionStorage.setItem("bf_welcomed", "1"); } catch(e) {}
+        setWelcomeDone(true);
       })
       .catch(() => clearToken());
   }, []);
@@ -13635,6 +13725,40 @@ export default function BeatFinder() {
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
       {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
+
+      {/* Welcome screen — shown once per session after splash */}
+      {splashDone && !welcomeDone && !showAuthWall && (
+        <WelcomeScreen
+          onSignIn={function() { setShowAuthWall(true); }}
+          onGuest={doWelcomeAsGuest}
+        />
+      )}
+
+      {/* Auth wall — full-screen login/signup, no app behind it */}
+      {splashDone && showAuthWall && !welcomeDone && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 99999,
+          background: "#0a0a0a",
+          overflowY: "auto",
+          fontFamily: "'DM Sans',sans-serif",
+          paddingTop: "env(safe-area-inset-top)",
+        }}>
+          <button
+            onClick={function() { setShowAuthWall(false); }}
+            style={{ background: "none", border: "none", color: "white", fontSize: 26,
+              cursor: "pointer", padding: "16px 20px", display: "block" }}>
+            ←
+          </button>
+          <RootAuthScreen startMode="login" onLogin={function(u) {
+            setUser({
+              ...u,
+              isPro:       u.plan === "producer",
+              isArtistPro: u.plan === "artist" || u.plan === "producer",
+            });
+            doWelcome();
+          }} />
+        </div>
+      )}
 
       {showAuthPrompt && (
         <div style={{
