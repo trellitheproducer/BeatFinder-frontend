@@ -3445,7 +3445,7 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
 // =============================================================================
 // SEARCH SCREEN
 // =============================================================================
-function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial }) {
+function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial, currentUser }) {
   var [input, setInput] = useState("");
   var [active, setActive] = useState(null);
   var [searchTab, setSearchTab] = useState("beats");
@@ -3527,7 +3527,7 @@ function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial }
         <PublicProfileScreen
           username={viewingProfile}
           onBack={function() { setViewingProfile(null); }}
-          onPlay={onPlay} savedIds={savedIds} onSave={onSave} currentUser={null} />
+          onPlay={onPlay} savedIds={savedIds} onSave={onSave} currentUser={currentUser} />
       </div>
     );
   }
@@ -3594,7 +3594,7 @@ function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial }
                         padding: "12px 0", cursor: "pointer", textAlign: "left",
                         display: "flex", alignItems: "center", gap: 14, width: "100%" }}>
                       <div style={{ width: 48, height: 48, borderRadius: "50%", flexShrink: 0,
-                        background: "linear-gradient(135deg,#6B21A8,#C026D3)",
+                        background: u.avatarUrl ? "#000" : "linear-gradient(135deg,#6B21A8,#C026D3)",
                         display: "flex", alignItems: "center", justifyContent: "center",
                         color: "white", fontWeight: 800, fontSize: 18, overflow: "hidden" }}>
                         {u.avatarUrl
@@ -3604,7 +3604,7 @@ function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial }
                       <div style={{ flex: 1 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                           <span style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{u.username || u.name}</span>
-                          {u.plan === "producer" && <VerifiedBadge size={14} />}
+                          {(u.plan === "producer" || u.plan === "artist") && <VerifiedBadge size={14} />}
                         </div>
                         <div style={{ color: "#555", fontSize: 13, marginTop: 1 }}>{u.name}</div>
                       </div>
@@ -4252,7 +4252,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
             <div style={{ color: "white", fontSize: 26, fontWeight: 800, lineHeight: 1.1 }}>
               {profile.username || profile.name}
             </div>
-            {isProd && <VerifiedBadge size={20} />}
+            {(isProd || isArtist) && <VerifiedBadge size={20} />}
           </div>
           {profile.username && <div style={{ color: "#666", fontSize: 14, marginTop: 2 }}>@{profile.username}</div>}
         </div>
@@ -5554,7 +5554,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               )}
               {user.isArtistPro && !user.isPro && (
                 <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 12px", color:"#F59E0B", fontWeight:800, fontSize:12 }}>
-                  <AppIcon id="vocalmic" size={12}/> Artist Pro
+                  <VerifiedBadge size={14}/> Artist Pro
                 </span>
               )}
             </div>
@@ -5694,73 +5694,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             </div>
           )}
 
-          {/* ── Find other users ── */}
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>
-              <AppIcon id="search" size={14} /> FIND OTHER USERS
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                value={userSearch}
-                onChange={e => setUserSearch(e.target.value)}
-                onKeyDown={async e => {
-                  if (e.key !== "Enter") return;
-                  if (!userSearch.trim()) return;
-                  setUserSearching(true); setUserResults([]);
-                  try {
-                    const r = await apiFetch("/api/auth/search?q=" + encodeURIComponent(userSearch.trim()));
-                    setUserResults(r || []);
-                  } catch(err) { setUserResults([]); }
-                  setUserSearching(false);
-                }}
-                placeholder="Search by username..."
-                style={{ flex: 1, background: "#111", border: "1px solid #222", borderRadius: 10,
-                  padding: "10px 14px", color: "white", fontSize: 14, outline: "none" }}
-              />
-              <button
-                onClick={async () => {
-                  if (!userSearch.trim()) return;
-                  setUserSearching(true); setUserResults([]);
-                  try {
-                    const r = await apiFetch("/api/auth/search?q=" + encodeURIComponent(userSearch.trim()));
-                    setUserResults(r || []);
-                  } catch(err) { setUserResults([]); }
-                  setUserSearching(false);
-                }}
-                style={{ background: "#C026D3", border: "none", borderRadius: 10, color: "white",
-                  fontWeight: 700, fontSize: 13, padding: "10px 18px", cursor: "pointer" }}>
-                {userSearching ? "..." : "Search"}
-              </button>
-            </div>
 
-            {/* Search results */}
-            {userResults.length > 0 && (
-              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-                {userResults.map(u => (
-                  <button key={u.username} onClick={() => setActiveSection("viewProfile:" + u.username)}
-                    style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
-                      padding: "12px 14px", cursor: "pointer", textAlign: "left",
-                      display: "flex", alignItems: "center", gap: 12 }}>
-                    <div style={{ width: 40, height: 40, borderRadius: "50%", flexShrink: 0,
-                      background: "linear-gradient(135deg,#6B21A8,#C026D3)",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      color: "white", fontWeight: 800, fontSize: 16 }}>
-                      {(u.username || u.name || "?")[0].toUpperCase()}
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ color: "white", fontWeight: 700, fontSize: 14 }}>@{u.username}</div>
-                      <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>{u.name}</div>
-                    </div>
-                    {u.plan === "producer" && <VerifiedBadge size={16} />}
-                    <span style={{ color: "#444", fontSize: 16 }}>›</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            {userResults.length === 0 && userSearch && !userSearching && (
-              <div style={{ color: "#444", fontSize: 13, textAlign: "center", marginTop: 12 }}>No users found for "{userSearch}"</div>
-            )}
-          </div>
 
         </div>
       )}
@@ -14908,7 +14842,7 @@ export default function BeatFinder() {
             {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => setShowMessages(true)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
-            {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} />}
+            {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} currentUser={user} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
             {t === "studio"    && studioVisited && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
             {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onSignUp={() => { setAuthStartMode("signup"); setShowAuthWall(true); setWelcomeDone(false); }} />}
