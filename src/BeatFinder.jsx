@@ -13771,7 +13771,7 @@ userPickedMicRef.current = true;
       })()}
 
       {/* ══ TRANSPORT ════════════════════════════════════════════ */}
-      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"calc(6px + env(safe-area-inset-bottom))",flexShrink:0,zIndex:50 }}>
+      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 16px",paddingBottom:"max(env(safe-area-inset-bottom), 16px)",flexShrink:0,zIndex:50 }}>
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
           <div style={{ width:40,height:40,borderRadius:10,background:showMixer?"rgba(139,92,246,0.2)":"#141414",border:"1px solid "+(showMixer?"#8B5CF6":"#222"),display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer" }} onClick={function(){ setShowMixer(function(v){return !v;}); }}>
             <span style={{ fontSize:14 }}><Icon id="fader" size={18} color={showMixer ? "#8B5CF6" : "#aaa"} strokeWidth={1.8}/></span>
@@ -14209,8 +14209,8 @@ export default function BeatFinder() {
           background: "#080808",
           borderTop: "1px solid rgba(255,255,255,0.07)",
           display: tab === "studio" ? "none" : "flex",
-          paddingTop: 6,
-          paddingBottom: "env(safe-area-inset-bottom)",
+          paddingTop: 8,
+          paddingBottom: "max(env(safe-area-inset-bottom), 16px)",
           boxShadow: "0 -8px 32px rgba(0,0,0,0.9)",
           zIndex: 1000,
         }}>
