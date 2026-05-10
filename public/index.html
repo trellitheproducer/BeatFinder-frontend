@@ -25,49 +25,29 @@
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
 
-      /* Hide scrollbar on every element, every browser */
-      *,
-      *::before,
-      *::after {
+      /* Hide scrollbars everywhere */
+      *, *::before, *::after {
         scrollbar-width: none;
         -ms-overflow-style: none;
       }
-      *::-webkit-scrollbar {
-        display: none;
-        width: 0;
-        height: 0;
-      }
+      *::-webkit-scrollbar { display: none; width: 0; height: 0; }
 
-      /* ── iOS bounce / rubber-band fix ── */
-      /* Lock the page itself — no scrolling, no bounce at document level */
       html {
-        position: fixed;
-        width: 100%;
         height: 100%;
         overflow: hidden;
         overscroll-behavior: none;
         -webkit-overflow-scrolling: auto;
-        touch-action: manipulation;
       }
 
       body {
-        position: fixed;
-        width: 100%;
         height: 100%;
         overflow: hidden;
         overscroll-behavior: none;
         background: #0a0a0a;
         -webkit-overflow-scrolling: auto;
-        touch-action: manipulation;
       }
 
       #root {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        width: 100%;
         height: 100%;
         overflow: hidden;
         overscroll-behavior: none;
