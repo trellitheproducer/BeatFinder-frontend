@@ -10390,7 +10390,8 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     const el = scrollRef.current;
     if (!el) return 0;
     const rect  = el.getBoundingClientRect();
-    const laneX = clientX - rect.left - SIDEBAR_W + el.scrollLeft;
+    // scrollRef is now the right-side lanes only (no sidebar) so no SIDEBAR_W offset needed
+    const laneX = clientX - rect.left + el.scrollLeft;
     return Math.max(0, laneX / effectivePPS);
   };
 
@@ -10437,6 +10438,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
   const handleRulerTouchStart = function (e) {
     e.preventDefault();
+    e.stopPropagation();
     const raw = rulerTimeFromClientX(e.touches[0].clientX);
     const t   = snapToBar(raw);
     const grabThresh = Math.max(0.15, spb * 0.5);
@@ -10450,6 +10452,7 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
 
   const handleRulerTouchMove = function (e) {
     e.preventDefault();
+    e.stopPropagation();
     if (!rulerDragRef.current) return;
     const nt = snapToBar(rulerTimeFromClientX(e.touches[0].clientX));
     if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
@@ -11097,6 +11100,9 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     setSelBox({ x: absX, y: absY, w: 0, h: 0 });
     setSelClipIds(new Set());
 
+    const scrollEl = laneScrollRef.current;
+    if (!scrollEl) return;
+
     const onMove = function(te) {
       if (!selBoxRef.current) return;
       te.preventDefault();
@@ -11137,12 +11143,12 @@ registerProcessor('pitch-shift-processor', PitchShiftProcessor);
     const onEnd = function() {
       selBoxRef.current = null;
       setSelBox(null);
-      document.removeEventListener("touchmove", onMove);
-      document.removeEventListener("touchend", onEnd);
+      scrollEl.removeEventListener("touchmove", onMove);
+      scrollEl.removeEventListener("touchend", onEnd);
     };
 
-    document.addEventListener("touchmove", onMove, { passive: false });
-    document.addEventListener("touchend", onEnd, { passive: true });
+    scrollEl.addEventListener("touchmove", onMove, { passive: false });
+    scrollEl.addEventListener("touchend", onEnd, { passive: true });
   };
 
   const handleLaneLongPress = function(e, track) {
@@ -13141,7 +13147,7 @@ userPickedMicRef.current = true;
               overscrollBehavior:"none",
               scrollbarWidth:"thin", scrollbarColor:"#2a2a2a #0a0a0a",
             }}
-            onTouchMove={function(e){ e.stopPropagation(); }}
+            onTouchMove={function(e){ if (!selBoxRef.current) e.stopPropagation(); }}
             onScroll={function(e){
               // Sync sidebar vertical scroll via translateY
               if (sidebarRowsRef.current) {
@@ -13219,7 +13225,7 @@ userPickedMicRef.current = true;
                       const isClip = t && t.closest && t.closest("[data-clipid]");
                       if (!isClip) { setSelBox(null); setSelClipIds(new Set()); }
                     }}
-                    onTouchStart={function(e){ handleLaneLongPress(e, track); }}
+                    onTouchStart={function(e){ e.stopPropagation(); handleLaneLongPress(e, track); }}
                   >
 
                     {/* ── INNER MASK — hard overflow:hidden, everything inside is clipped ── */}
@@ -13654,7 +13660,20 @@ userPickedMicRef.current = true;
             </div>
 
             {/* ── Channel strip scroll area ── */}
-            <div style={{ overflowX:"auto", overflowY:"hidden", WebkitOverflowScrolling:"touch", overscrollBehavior:"contain", flex:1, minHeight:0 }}>
+            <div
+              style={{ overflowX:"auto", overflowY:"hidden", WebkitOverflowScrolling:"touch", overscrollBehavior:"none", flex:1, minHeight:0 }}
+              onTouchMove={function(e){
+                e.stopPropagation();
+                const el = e.currentTarget;
+                const atLeft  = el.scrollLeft <= 0;
+                const atRight = el.scrollLeft >= el.scrollWidth - el.clientWidth - 1;
+                const dx = e.touches[0].clientX - (e.currentTarget._startX || e.touches[0].clientX);
+                if ((atLeft && dx > 0) || (atRight && dx < 0)) e.preventDefault();
+              }}
+              onTouchStart={function(e){
+                e.currentTarget._startX = e.touches[0].clientX;
+              }}
+            >
               <div style={{ display:"flex", gap:0, minWidth:"max-content", padding:"10px 8px 0" }}>
 
                 {tracks.map(function(t, ti){
