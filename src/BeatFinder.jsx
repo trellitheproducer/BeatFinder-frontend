@@ -13068,13 +13068,14 @@ userPickedMicRef.current = true;
             {/* ── RULER ROW — sticky top so it stays visible on vertical scroll ── */}
             <div style={{ display:"flex", position:"sticky", top:0, zIndex:25, height:RULER_H }}>
 
-              {/* Sticky corner: TRACKS label */}
+              {/* Sticky corner: TRACKS label — pinned to top-left regardless of horizontal scroll */}
               <div style={{
                 width:SIDEBAR_W, flexShrink:0,
                 position:"sticky", left:0, zIndex:26,
                 background:"#0a0a0a", borderRight:"1px solid #141414",
                 borderBottom:"1px solid #1a1a1a",
                 display:"flex", alignItems:"center", paddingLeft:10,
+                minWidth:SIDEBAR_W,
               }}>
                 <span style={{ color:"#333", fontSize:9, fontWeight:700 }}>TRACKS</span>
               </div>
@@ -14178,12 +14179,11 @@ export default function BeatFinder() {
       <div style={{
           position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
           width: "100%", maxWidth: 430,
-          background: "#080808",
+          background: "rgba(8,8,8,0.92)",
           borderTop: "1px solid rgba(255,255,255,0.07)",
           display: tab === "studio" ? "none" : "flex",
           paddingBottom: "env(safe-area-inset-bottom)",
-          boxShadow: "0 -8px 32px rgba(0,0,0,0.9)",
-          zIndex: 1000,
+          boxShadow: "0 -8px 32px rgba(0,0,0,0.6)",
         }}>
         {NAV.map(n => {
           const isPro    = user?.isPro || user?.isArtistPro;
