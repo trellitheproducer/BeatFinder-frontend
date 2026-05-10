@@ -29,29 +29,49 @@
       *,
       *::before,
       *::after {
-        scrollbar-width: none;        /* Firefox */
-        -ms-overflow-style: none;     /* IE / Edge */
+        scrollbar-width: none;
+        -ms-overflow-style: none;
       }
       *::-webkit-scrollbar {
-        display: none;                /* Chrome / Safari / WebKit */
+        display: none;
         width: 0;
         height: 0;
       }
 
-      html, body, #root {
+      /* ── iOS bounce / rubber-band fix ── */
+      /* Lock the page itself — no scrolling, no bounce at document level */
+      html {
+        position: fixed;
         width: 100%;
-        min-height: 100%;
-        background: #0a0a0a;
-        overflow-x: hidden;
-        scrollbar-width: none;
-        -ms-overflow-style: none;
+        height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
+        -webkit-overflow-scrolling: auto;
+        touch-action: manipulation;
       }
-      html::-webkit-scrollbar,
-      body::-webkit-scrollbar,
-      #root::-webkit-scrollbar {
-        display: none;
-        width: 0;
-        height: 0;
+
+      body {
+        position: fixed;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
+        background: #0a0a0a;
+        -webkit-overflow-scrolling: auto;
+        touch-action: manipulation;
+      }
+
+      #root {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
+        background: #0a0a0a;
       }
     </style>
   </head>
