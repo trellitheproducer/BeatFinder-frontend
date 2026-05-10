@@ -7847,7 +7847,7 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
   const eq5 = { hpfFreq:80,hpfQ:0.707,lowFreq:200,low:0,lowQ:0.707,midFreq:1000,mid:0,midQ:1.41,highFreq:8000,high:0,highQ:0.707,lpfFreq:18000,lpfQ:0.707,...fx.eq };
 
   return (
-    <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto" }} onClick={function(e){ e.stopPropagation(); }} onTouchMove={function(e){ e.stopPropagation(); }}>
+    <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto", paddingTop:"env(safe-area-inset-top)" }} onClick={function(e){ e.stopPropagation(); }} onTouchMove={function(e){ e.stopPropagation(); }}>
       <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0, position:"sticky", top:0, zIndex:10 }}>
         <div style={{ width:8, height:8, borderRadius:"50%", background:trackColor, marginRight:8 }} />
         <span style={{ color:"white", fontWeight:800, fontSize:14, flex:1 }}>{trackName} — Effects</span>
@@ -7973,8 +7973,8 @@ function StudioScreen({ user, onExit }) {
   const [tracks, setTracks, undoTracks, redoTracks, canUndo, canRedo] = useHistory([]);
   const [bpm,          setBpm]          = useState(120);
   const [timeSigNum,   setTimeSigNum]   = useState(4);
-  const [zoom,         setZoom]         = useState(1);
-  const [vZoom,        setVZoom]        = useState(1);   // vertical track-height zoom
+  const [zoom,         setZoom]         = useState(0.1); // start at 10% H-zoom
+  const [vZoom,        setVZoom]        = useState(1);   // vertical track-height zoom — start at 100%
 
   const TRACK_H     = Math.round(92 * vZoom); // each track row height — scales with vertical zoom
   const [snapToGrid,   setSnapToGrid]   = useState(true);
