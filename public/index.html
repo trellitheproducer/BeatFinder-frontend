@@ -25,33 +25,33 @@
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
 
-      /* Hide scrollbars everywhere */
-      *, *::before, *::after {
+      /* Hide scrollbar on every element, every browser */
+      *,
+      *::before,
+      *::after {
+        scrollbar-width: none;        /* Firefox */
+        -ms-overflow-style: none;     /* IE / Edge */
+      }
+      *::-webkit-scrollbar {
+        display: none;                /* Chrome / Safari / WebKit */
+        width: 0;
+        height: 0;
+      }
+
+      html, body, #root {
+        width: 100%;
+        min-height: 100%;
+        background: #0a0a0a;
+        overflow-x: hidden;
         scrollbar-width: none;
         -ms-overflow-style: none;
       }
-      *::-webkit-scrollbar { display: none; width: 0; height: 0; }
-
-      html {
-        height: 100%;
-        overflow: hidden;
-        overscroll-behavior: none;
-        -webkit-overflow-scrolling: auto;
-      }
-
-      body {
-        height: 100%;
-        overflow: hidden;
-        overscroll-behavior: none;
-        background: #0a0a0a;
-        -webkit-overflow-scrolling: auto;
-      }
-
-      #root {
-        height: 100%;
-        overflow: hidden;
-        overscroll-behavior: none;
-        background: #0a0a0a;
+      html::-webkit-scrollbar,
+      body::-webkit-scrollbar,
+      #root::-webkit-scrollbar {
+        display: none;
+        width: 0;
+        height: 0;
       }
     </style>
   </head>
