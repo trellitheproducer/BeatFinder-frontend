@@ -7849,6 +7849,165 @@ function BeatGridOverlay({ beats, effectivePPS, sidebarW, rulerH, scrollRef, isP
   );
 }
 
+// ── GarageBand Mixer components — module level so React sees stable identity ──
+const GB_BG       = "#1c1c1e";
+const GB_STRIP    = "#2c2c2e";
+const GB_BORDER   = "#3a3a3c";
+const GB_LABEL    = "#8e8e93";
+const GB_FADER_H  = 140; // px tall fader travel area
+const STRIP_W     = 58;
+
+function GBPanKnob({ pan, color, onChange }) {
+  const dragRef = React.useRef(null);
+  // pan −1..1 → norm 0..1
+  const norm  = (pan + 1) / 2;
+  const angle = -140 + norm * 280;
+  const r = 14, SW = 3, PAD = SW / 2 + 2;
+  const cx = r + PAD, cy = r + PAD, SIZE = (r + PAD) * 2;
+  const toXY = function(deg){ const rad=(deg-90)*Math.PI/180; return {x:cx+r*Math.cos(rad),y:cy+r*Math.sin(rad)}; };
+  const startA = toXY(-140), endA = toXY(angle);
+  const swept  = angle-(-140), large = swept>180?1:0;
+  const arcD   = "M "+startA.x.toFixed(2)+" "+startA.y.toFixed(2)+" A "+r+" "+r+" 0 "+large+" 1 "+endA.x.toFixed(2)+" "+endA.y.toFixed(2);
+  function onPD(e){
+    e.preventDefault();
+    dragRef.current = { y:e.clientY, val:pan };
+    function onM(me){
+      const dy = dragRef.current.y - me.clientY;
+      const nv = Math.max(-1, Math.min(1, dragRef.current.val + dy/60));
+      onChange(+nv.toFixed(2));
+    }
+    function onU(){ document.removeEventListener("pointermove",onM); document.removeEventListener("pointerup",onU); }
+    document.addEventListener("pointermove",onM);
+    document.addEventListener("pointerup",onU);
+  }
+  return (
+    <svg width={SIZE} height={SIZE} viewBox={"0 0 "+SIZE+" "+SIZE}
+      style={{cursor:"ns-resize",touchAction:"none",overflow:"visible",display:"block"}}
+      onPointerDown={onPD}
+      onDoubleClick={function(){ onChange(0); }}>
+      {/* Track arc */}
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#3a3a3c" strokeWidth={SW} strokeLinecap="round"
+        strokeDasharray={(2*Math.PI*r*280/360)+" "+(2*Math.PI*r)}
+        strokeDashoffset={(2*Math.PI*r*(90+140)/360)}
+        transform={"rotate(-90 "+cx+" "+cy+")"} />
+      {/* Centre dot */}
+      <line x1={cx} y1={PAD} x2={cx} y2={PAD+4} stroke="#555" strokeWidth={1} />
+      {/* Filled arc */}
+      {norm>0.01 && norm<0.99 && <path d={arcD} fill="none" stroke={color} strokeWidth={SW} strokeLinecap="round"/>}
+      {/* Dot at 0 */}
+      {Math.abs(pan)<0.02 && <circle cx={cx} cy={PAD+1} r={2} fill={color}/>}
+      {/* Thumb */}
+      <circle cx={endA.x} cy={endA.y} r={SW*0.85} fill={color}/>
+      {/* Inner cap */}
+      <circle cx={cx} cy={cy} r={r*0.38} fill="#1c1c1e" stroke="#3a3a3c" strokeWidth={1.5}/>
+    </svg>
+  );
+}
+
+function GBFader({ vol, color, muted, onChange }) {
+  const trackH = GB_FADER_H;
+  const thumbY = trackH - Math.max(0, Math.min(1, vol / 1.5)) * trackH;
+  const unityY = trackH - (1/1.5)*trackH;
+
+  function onPD(e){
+    e.preventDefault();
+    e.stopPropagation();
+    // Capture pointer to THIS element so moves are delivered here only —
+    // never leaking to adjacent faders even if finger drifts sideways.
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const rect = el.getBoundingClientRect();
+    const pid  = e.pointerId;
+    function onM(me){
+      if (me.pointerId !== pid) return;
+      const dy = me.clientY - rect.top;
+      const n  = Math.max(0, Math.min(1, dy / trackH));
+      onChange(+((1-n)*1.5).toFixed(3));
+    }
+    function onU(ue){
+      if (ue.pointerId !== pid) return;
+      el.releasePointerCapture(pid);
+      el.removeEventListener("pointermove", onM);
+      el.removeEventListener("pointerup",   onU);
+    }
+    el.addEventListener("pointermove", onM);
+    el.addEventListener("pointerup",   onU);
+  }
+
+  const thumbColor = muted ? "#636366" : "#e5e5ea";
+  const fillH = Math.max(0, Math.min(1, vol/1.5)) * trackH;
+
+  return (
+    <div style={{ position:"relative", width:28, height:trackH, flexShrink:0, cursor:"pointer" }}
+      onPointerDown={onPD}
+      onDoubleClick={function(){ onChange(1); }}>
+      {/* Rail background */}
+      <div style={{ position:"absolute", left:"50%", transform:"translateX(-50%)", top:0, bottom:0, width:4, background:"#3a3a3c", borderRadius:2 }} />
+      {/* Fill (level indicator on rail) */}
+      <div style={{
+        position:"absolute", left:"50%", transform:"translateX(-50%)",
+        bottom:0, width:4,
+        height: fillH,
+        background: muted ? "#48484a" : "linear-gradient(0deg,"+color+"cc,"+color+"66 80%,transparent)",
+        borderRadius:2,
+      }} />
+      {/* Unity tick */}
+      <div style={{ position:"absolute", left:"calc(50% + 4px)", top: unityY-0.5, width:6, height:1, background:"#636366" }} />
+      {/* Fader thumb — GB style: rounded rect pill */}
+      <div style={{
+        position:"absolute", left:"50%", top: thumbY - 14,
+        transform:"translateX(-50%)",
+        width:24, height:28,
+        background: muted
+          ? "linear-gradient(180deg,#48484a,#3a3a3c)"
+          : "linear-gradient(180deg,#f2f2f7,#d1d1d6)",
+        borderRadius:5,
+        boxShadow: muted ? "0 1px 3px rgba(0,0,0,0.8)" : "0 2px 6px rgba(0,0,0,0.7), 0 1px 0 rgba(255,255,255,0.15) inset",
+        display:"flex", alignItems:"center", justifyContent:"center",
+      }}>
+        {/* Grip lines */}
+        {[0,1,2].map(function(i){
+          return <div key={i} style={{ position:"absolute", left:5, right:5, top:9+i*3, height:1, background: muted?"rgba(100,100,100,0.5)":"rgba(0,0,0,0.18)", borderRadius:0.5 }} />;
+        })}
+      </div>
+    </div>
+  );
+}
+
+function GBVUBars({ analyserNode, active }) {
+  const { level, peak, clipping } = useAnalyser(analyserNode, active);
+  const rOff   = React.useRef(0.88 + Math.random()*0.12);
+  const rLevel = Math.min(1, level * rOff.current);
+  const rPeak  = Math.min(1, peak  * rOff.current);
+  const BAR_H  = GB_FADER_H;
+  const SEGS   = 24;
+
+  function renderCol(lv, pk) {
+    return (
+      <div style={{ display:"flex", flexDirection:"column-reverse", gap:1, height:BAR_H, width:5 }}>
+        {Array.from({length:SEGS}, function(_,i){
+          const frac    = i / SEGS;
+          const lit     = lv >= frac;
+          const isPeak  = pk>0 && Math.abs(pk-frac)<(1.5/SEGS);
+          const col     = frac>=0.875?"#ff3b30":frac>=0.688?"#ffd60a":"#30d158";
+          const dim     = frac>=0.875?"#3a0a08":frac>=0.688?"#3a2a00":"#0a2a14";
+          return <div key={i} style={{
+            flex:1, borderRadius:1,
+            background: isPeak?"#fff": lit?col:dim,
+          }}/>;
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display:"flex", gap:2, alignItems:"flex-end" }}>
+      {renderCol(level, peak)}
+      {renderCol(rLevel, rPeak)}
+    </div>
+  );
+}
+
 function StudioScreen({ user, onExit }) {
 
   // ── Constants ─────────────────────────────────────────────────
@@ -12996,155 +13155,6 @@ userPickedMicRef.current = true;
       {showMixer && (function(){
         // GB mixer: dark #1c1c1e panel, per-channel strips with:
         //   knob pan, tall vertical fader with GB-style thumb, dual VU bars, M/S buttons, colour tab at bottom
-        const GB_BG       = "#1c1c1e";
-        const GB_STRIP    = "#2c2c2e";
-        const GB_BORDER   = "#3a3a3c";
-        const GB_LABEL    = "#8e8e93";
-        const GB_FADER_H  = 140; // px tall fader travel area
-        const STRIP_W     = 58;
-
-        function GBPanKnob({ pan, color, onChange }) {
-          const dragRef = React.useRef(null);
-          // pan −1..1 → norm 0..1
-          const norm  = (pan + 1) / 2;
-          const angle = -140 + norm * 280;
-          const r = 14, SW = 3, PAD = SW / 2 + 2;
-          const cx = r + PAD, cy = r + PAD, SIZE = (r + PAD) * 2;
-          const toXY = function(deg){ const rad=(deg-90)*Math.PI/180; return {x:cx+r*Math.cos(rad),y:cy+r*Math.sin(rad)}; };
-          const startA = toXY(-140), endA = toXY(angle);
-          const swept  = angle-(-140), large = swept>180?1:0;
-          const arcD   = "M "+startA.x.toFixed(2)+" "+startA.y.toFixed(2)+" A "+r+" "+r+" 0 "+large+" 1 "+endA.x.toFixed(2)+" "+endA.y.toFixed(2);
-          function onPD(e){
-            e.preventDefault();
-            dragRef.current = { y:e.clientY, val:pan };
-            function onM(me){
-              const dy = dragRef.current.y - me.clientY;
-              const nv = Math.max(-1, Math.min(1, dragRef.current.val + dy/60));
-              onChange(+nv.toFixed(2));
-            }
-            function onU(){ document.removeEventListener("pointermove",onM); document.removeEventListener("pointerup",onU); }
-            document.addEventListener("pointermove",onM);
-            document.addEventListener("pointerup",onU);
-          }
-          return (
-            <svg width={SIZE} height={SIZE} viewBox={"0 0 "+SIZE+" "+SIZE}
-              style={{cursor:"ns-resize",touchAction:"none",overflow:"visible",display:"block"}}
-              onPointerDown={onPD}
-              onDoubleClick={function(){ onChange(0); }}>
-              {/* Track arc */}
-              <circle cx={cx} cy={cy} r={r} fill="none" stroke="#3a3a3c" strokeWidth={SW} strokeLinecap="round"
-                strokeDasharray={(2*Math.PI*r*280/360)+" "+(2*Math.PI*r)}
-                strokeDashoffset={(2*Math.PI*r*(90+140)/360)}
-                transform={"rotate(-90 "+cx+" "+cy+")"} />
-              {/* Centre dot */}
-              <line x1={cx} y1={PAD} x2={cx} y2={PAD+4} stroke="#555" strokeWidth={1} />
-              {/* Filled arc */}
-              {norm>0.01 && norm<0.99 && <path d={arcD} fill="none" stroke={color} strokeWidth={SW} strokeLinecap="round"/>}
-              {/* Dot at 0 */}
-              {Math.abs(pan)<0.02 && <circle cx={cx} cy={PAD+1} r={2} fill={color}/>}
-              {/* Thumb */}
-              <circle cx={endA.x} cy={endA.y} r={SW*0.85} fill={color}/>
-              {/* Inner cap */}
-              <circle cx={cx} cy={cy} r={r*0.38} fill="#1c1c1e" stroke="#3a3a3c" strokeWidth={1.5}/>
-            </svg>
-          );
-        }
-
-        function GBFader({ vol, color, muted, onChange }) {
-          const dragRef = React.useRef(null);
-          const trackH  = GB_FADER_H;
-          // vol 0..1.5 → thumb Y: 0=top(max), trackH=bottom(min)
-          const thumbY  = trackH - Math.max(0, Math.min(1, vol / 1.5)) * trackH;
-          // Unity (vol=1) tick position
-          const unityY  = trackH - (1/1.5)*trackH;
-
-          function onPD(e){
-            e.preventDefault();
-            const rect = e.currentTarget.getBoundingClientRect();
-            dragRef.current = { rect };
-            function onM(me){
-              const rel = me.clientY - dragRef.current.rect.top;
-              const n   = Math.max(0, Math.min(1, rel / trackH));
-              onChange(+((1-n)*1.5).toFixed(3));
-            }
-            function onU(){ document.removeEventListener("pointermove",onM); document.removeEventListener("pointerup",onU); }
-            document.addEventListener("pointermove",onM);
-            document.addEventListener("pointerup",onU);
-          }
-
-          const thumbColor = muted ? "#636366" : "#e5e5ea";
-          const fillH = Math.max(0, Math.min(1, vol/1.5)) * trackH;
-
-          return (
-            <div style={{ position:"relative", width:28, height:trackH, flexShrink:0, cursor:"pointer" }}
-              onPointerDown={onPD}
-              onDoubleClick={function(){ onChange(1); }}>
-              {/* Rail background */}
-              <div style={{ position:"absolute", left:"50%", transform:"translateX(-50%)", top:0, bottom:0, width:4, background:"#3a3a3c", borderRadius:2 }} />
-              {/* Fill (level indicator on rail) */}
-              <div style={{
-                position:"absolute", left:"50%", transform:"translateX(-50%)",
-                bottom:0, width:4,
-                height: fillH,
-                background: muted ? "#48484a" : "linear-gradient(0deg,"+color+"cc,"+color+"66 80%,transparent)",
-                borderRadius:2,
-              }} />
-              {/* Unity tick */}
-              <div style={{ position:"absolute", left:"calc(50% + 4px)", top: unityY-0.5, width:6, height:1, background:"#636366" }} />
-              {/* Fader thumb — GB style: rounded rect pill */}
-              <div style={{
-                position:"absolute", left:"50%", top: thumbY - 14,
-                transform:"translateX(-50%)",
-                width:24, height:28,
-                background: muted
-                  ? "linear-gradient(180deg,#48484a,#3a3a3c)"
-                  : "linear-gradient(180deg,#f2f2f7,#d1d1d6)",
-                borderRadius:5,
-                boxShadow: muted ? "0 1px 3px rgba(0,0,0,0.8)" : "0 2px 6px rgba(0,0,0,0.7), 0 1px 0 rgba(255,255,255,0.15) inset",
-                display:"flex", alignItems:"center", justifyContent:"center",
-              }}>
-                {/* Grip lines */}
-                {[0,1,2].map(function(i){
-                  return <div key={i} style={{ position:"absolute", left:5, right:5, top:9+i*3, height:1, background: muted?"rgba(100,100,100,0.5)":"rgba(0,0,0,0.18)", borderRadius:0.5 }} />;
-                })}
-              </div>
-            </div>
-          );
-        }
-
-        function GBVUBars({ analyserNode, active }) {
-          const { level, peak, clipping } = useAnalyser(analyserNode, active);
-          const rOff   = React.useRef(0.88 + Math.random()*0.12);
-          const rLevel = Math.min(1, level * rOff.current);
-          const rPeak  = Math.min(1, peak  * rOff.current);
-          const BAR_H  = GB_FADER_H;
-          const SEGS   = 24;
-
-          function renderCol(lv, pk) {
-            return (
-              <div style={{ display:"flex", flexDirection:"column-reverse", gap:1, height:BAR_H, width:5 }}>
-                {Array.from({length:SEGS}, function(_,i){
-                  const frac    = i / SEGS;
-                  const lit     = lv >= frac;
-                  const isPeak  = pk>0 && Math.abs(pk-frac)<(1.5/SEGS);
-                  const col     = frac>=0.875?"#ff3b30":frac>=0.688?"#ffd60a":"#30d158";
-                  const dim     = frac>=0.875?"#3a0a08":frac>=0.688?"#3a2a00":"#0a2a14";
-                  return <div key={i} style={{
-                    flex:1, borderRadius:1,
-                    background: isPeak?"#fff": lit?col:dim,
-                  }}/>;
-                })}
-              </div>
-            );
-          }
-
-          return (
-            <div style={{ display:"flex", gap:2, alignItems:"flex-end" }}>
-              {renderCol(level, peak)}
-              {renderCol(rLevel, rPeak)}
-            </div>
-          );
-        }
 
         return (
           <div style={{
