@@ -2371,7 +2371,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
   );
 }
 
-function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric, onGoTrending, onGoStudio, onGoArtists, onShowProducerPrompt }) {
+function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric, onGoTrending, onGoStudio, onGoArtists, onShowProducerPrompt, onOpenMessages, onViewOwnProfile }) {
   const [heroIndex, setHeroIndex] = useState(0);
 
   const HERO_SLIDES = [
@@ -2491,8 +2491,33 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
   return (
     <div className="bf-page" style={{ paddingBottom: 100, overflowX: "hidden" }}>
 
+      {/* Top bar — avatar + messages */}
+      <div style={{ padding: "14px 16px 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        {/* Avatar — taps to own public profile */}
+        <button onClick={onViewOwnProfile} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ position: "relative" }}>
+            <div style={{ width: 38, height: 38, borderRadius: "50%",
+              background: user ? "linear-gradient(135deg,#6B21A8,#C026D3)" : "#222",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "white", fontWeight: 800, fontSize: 15, border: "2px solid #333" }}>
+              {user ? (user.username || user.name || "?")[0].toUpperCase() : <AppIcon id="profile" size={18} />}
+            </div>
+            {user && <div style={{ position: "absolute", bottom: 1, right: 1, width: 9, height: 9, borderRadius: "50%", background: "#22C55E", border: "2px solid #0a0a0a" }} />}
+          </div>
+          {user && <span style={{ color: "#aaa", fontSize: 13, fontWeight: 600 }}>{user.username ? "@" + user.username : user.name}</span>}
+          {!user && <span style={{ color: "#444", fontSize: 13 }}>Sign in</span>}
+        </button>
+
+        {/* Messages icon */}
+        <button onClick={onOpenMessages} style={{ background: "none", border: "none", padding: 8, cursor: "pointer", position: "relative" }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#aaa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+        </button>
+      </div>
+
       {/* Logo */}
-      <div style={{ padding: "18px 16px 0" }}>
+      <div style={{ padding: "0 16px 0" }}>
         <img
           src="https://i.ibb.co/9myqbFB7/2-BB02064-13-F6-476-C-89-FF-B1-EDDAE0-C709.png"
           alt="BeatFinder"
@@ -4019,7 +4044,7 @@ function LyricCard({ lyric, lyricIndex, onDelete, onEditLyric }) {
 // =============================================================================
 // PUBLIC PROFILE SCREEN
 // =============================================================================
-function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, currentUser }) {
+function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, currentUser, onMessage }) {
   const [profile,   setProfile]   = useState(null);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState(null);
@@ -4074,84 +4099,112 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
   };
 
   return (
-    <div style={{ padding: "0 0 100px" }}>
+    <div style={{ paddingBottom: 100 }}>
       {onBack && (
-        <div style={{ padding: "16px 16px 0" }}>
-          <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 28, cursor: "pointer" }}>←</button>
+        <div style={{ padding: "16px 16px 0", display: "flex", alignItems: "center" }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 24, cursor: "pointer", padding: 0 }}>←</button>
         </div>
       )}
 
-      {/* ── Profile card ── */}
-      <div style={{ margin: "8px 16px 16px", background: "linear-gradient(160deg,#111,#0d0d1a)", borderRadius: 20, padding: 20, border: "1px solid #1e1e2a" }}>
+      {/* ── BandLab-style header ── */}
+      <div style={{ padding: "16px 16px 0" }}>
 
-        {/* Top row — avatar + name + follow */}
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginBottom: 14 }}>
-          <div style={{ width: 68, height: 68, borderRadius: "50%", flexShrink: 0,
+        {/* Avatar */}
+        <div style={{ position: "relative", display: "inline-block", marginBottom: 12 }}>
+          <div style={{ width: 80, height: 80, borderRadius: "50%",
             background: "linear-gradient(135deg,#6B21A8,#C026D3)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 26, color: "white", fontWeight: 800 }}>
+            fontSize: 30, color: "white", fontWeight: 800 }}>
             {(profile.username || profile.name || "?")[0].toUpperCase()}
           </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <div style={{ color: "white", fontSize: 20, fontWeight: 800 }}>{profile.username || profile.name}</div>
-              {isProd && <VerifiedBadge size={18} />}
-            </div>
-            {profile.username && profile.name && (
-              <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>{profile.name}</div>
-            )}
-            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-              {isProd && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11 }}>Producer Pro</span>}
-              {isArtist && !isProd && <span style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11 }}>Artist Pro</span>}
-            </div>
-          </div>
-          {/* Follow button — only for logged-in non-own profiles */}
-          {currentUser && !isOwnProfile && (
-            <button onClick={toggleFollow} disabled={followLoading}
-              style={{ flexShrink: 0, padding: "8px 18px", borderRadius: 20, fontWeight: 700, fontSize: 13, cursor: "pointer",
-                background: following ? "transparent" : "#C026D3",
-                border: "1.5px solid " + (following ? "#555" : "#C026D3"),
-                color: following ? "#555" : "white", transition: "all 0.2s" }}>
-              {followLoading ? "..." : following ? "Following" : "Follow"}
-            </button>
-          )}
+          <div style={{ position: "absolute", bottom: 4, right: 4, width: 14, height: 14,
+            borderRadius: "50%", background: "#22C55E", border: "2.5px solid #0a0a0a" }} />
         </div>
 
-        {/* Bio */}
-        {profile.bio && (
-          <div style={{ color: "#aaa", fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>
-            {profile.bio}
+        {/* Name + username */}
+        <div style={{ marginBottom: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ color: "white", fontSize: 26, fontWeight: 800, lineHeight: 1.1 }}>
+              {profile.username || profile.name}
+            </div>
+            {isProd && <VerifiedBadge size={20} />}
+          </div>
+          {profile.username && <div style={{ color: "#666", fontSize: 14, marginTop: 2 }}>@{profile.username}</div>}
+        </div>
+
+        {/* Plan tags */}
+        {(isProd || isArtist) && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+            {isProd && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11 }}>Producer Pro</span>}
+            {isArtist && !isProd && <span style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11 }}>Artist Pro</span>}
           </div>
         )}
 
-        {/* Stats row */}
-        <div style={{ display: "flex", gap: 24, borderTop: "1px solid #1e1e1e", paddingTop: 12 }}>
+        {/* Bio */}
+        {profile.bio && (
+          <div style={{ color: "#aaa", fontSize: 13, lineHeight: 1.6, marginBottom: 10 }}>{profile.bio}</div>
+        )}
+
+        {/* Stats inline */}
+        <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 14 }}>
           {[
-            { label: "Beats",     val: profile.beats?.length || 0 },
-            { label: "Followers", val: profile.followerCount || 0 },
-            { label: "Following", val: profile.followingCount || 0 },
-          ].map(s => (
-            <div key={s.label} style={{ textAlign: "center" }}>
-              <div style={{ color: "white", fontWeight: 800, fontSize: 16 }}>{s.val}</div>
-              <div style={{ color: "#555", fontSize: 11, marginTop: 2 }}>{s.label}</div>
+            { val: profile.followerCount || 0, label: "Followers" },
+            { val: profile.followingCount || 0, label: "Following" },
+            { val: profile.beats?.length || 0,  label: "Beats" },
+          ].map((s, i) => (
+            <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              {i > 0 && <span style={{ color: "#333", marginRight: 4 }}>·</span>}
+              <span style={{ color: "white", fontWeight: 700, fontSize: 14 }}>{s.val}</span>
+              <span style={{ color: "#555", fontSize: 13, marginLeft: 2 }}>{s.label}</span>
             </div>
           ))}
         </div>
+
+        {/* Action buttons */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 20, alignItems: "center" }}>
+          {currentUser && !isOwnProfile && (
+            <>
+              <button onClick={toggleFollow} disabled={followLoading}
+                style={{ flex: 1, padding: "10px 0", borderRadius: 20, fontWeight: 800, fontSize: 14, cursor: "pointer",
+                  background: following ? "transparent" : "#C026D3",
+                  border: "1.5px solid " + (following ? "#444" : "#C026D3"),
+                  color: following ? "#777" : "white" }}>
+                {followLoading ? "..." : following ? "Following" : "Follow"}
+              </button>
+              {onMessage && (
+                <button onClick={() => onMessage(username)}
+                  style={{ padding: "10px 18px", borderRadius: 20, fontWeight: 700, fontSize: 13, cursor: "pointer",
+                    background: "transparent", border: "1.5px solid #333", color: "#aaa" }}>
+                  Message
+                </button>
+              )}
+            </>
+          )}
+          {isOwnProfile && <div style={{ color: "#555", fontSize: 12, flex: 1 }}>This is your public profile</div>}
+          <button onClick={() => navigator.clipboard?.writeText("beatfinder.app/u/" + (profile.username || username))}
+            style={{ width: 40, height: 40, borderRadius: "50%", background: "transparent", flexShrink: 0,
+              border: "1.5px solid #333", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#aaa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+            </svg>
+          </button>
+        </div>
+
+        <div style={{ height: 1, background: "#1a1a1a", marginBottom: 20 }} />
       </div>
 
-      {/* ── Beats ── */}
+      {/* ── Beats / activity ── */}
       {profile.beats && profile.beats.length > 0 ? (
         <div style={{ padding: "0 16px" }}>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
-            <AppIcon id="note" size={18} /> Beats by @{profile.username}
-          </div>
+          <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 14 }}>BEATS</div>
           {profile.beats.map(beat => (
-            <div key={beat.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(245,158,11,0.15)" }}>
+            <div key={beat.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid #1e1e1e" }}>
               <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{beat.title}</div>
-              <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-                <div style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+                {beat.genre && <div style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>}
                 <div style={{ background: beat.price === "free" ? "rgba(34,197,94,0.12)" : "rgba(192,38,211,0.12)", border: "1px solid " + (beat.price === "free" ? "rgba(34,197,94,0.25)" : "rgba(192,38,211,0.25)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: beat.price === "free" ? "#22C55E" : "#C026D3", fontWeight: 700 }}>{beat.price === "free" ? "FREE" : beat.price}</div>
-                <div style={{ color: "#444", fontSize: 11 }}>{beat.downloads} downloads</div>
+                <div style={{ color: "#444", fontSize: 11 }}>{beat.downloads || 0} downloads</div>
               </div>
               <button onClick={() => handleDownload(beat)} style={{ width: "100%", borderRadius: 12, padding: "12px", background: "linear-gradient(135deg,#F59E0B,#EF4444)", border: "none", color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                 <AppIcon id="download" size={16} /> Download MP3
@@ -4160,15 +4213,184 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
           ))}
         </div>
       ) : (
-        <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
-          <AppIcon id="note" size={36} />
-          <div style={{ fontSize: 14, marginTop: 10 }}>No beats uploaded yet</div>
+        <div style={{ textAlign: "center", padding: "60px 24px", color: "#555" }}>
+          <AppIcon id="note" size={48} />
+          <div style={{ fontSize: 16, marginTop: 14, color: "#444", fontWeight: 700 }}>No activity yet</div>
+          <div style={{ fontSize: 13, color: "#333", marginTop: 6 }}>Beats uploaded by this user will appear here</div>
         </div>
       )}
     </div>
   );
 }
 
+
+// =============================================================================
+// =============================================================================
+// MESSAGES SCREEN — DM system
+// =============================================================================
+function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
+  const [conversations, setConversations] = useState([]);
+  const [loading,       setLoading]       = useState(true);
+  const [activeThread,  setActiveThread]  = useState(initialThread || null);
+  const [messages,      setMessages]      = useState([]);
+  const [msgInput,      setMsgInput]      = useState("");
+  const [sending,       setSending]       = useState(false);
+  const msgEndRef = React.useRef(null);
+
+  // Load conversations list
+  useEffect(() => {
+    if (!user) { setLoading(false); return; }
+    apiFetch("/api/messages/conversations")
+      .then(d => { setConversations(d || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [user]);
+
+  // Load messages for active thread
+  useEffect(() => {
+    if (!activeThread || !user) return;
+    apiFetch("/api/messages/thread/" + encodeURIComponent(activeThread))
+      .then(d => { setMessages(d || []); })
+      .catch(() => {});
+  }, [activeThread]);
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    msgEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const sendMessage = async () => {
+    if (!msgInput.trim() || !activeThread || sending) return;
+    setSending(true);
+    const text = msgInput.trim();
+    setMsgInput("");
+    // Optimistic update
+    setMessages(prev => [...prev, { from: user.username, text, createdAt: new Date().toISOString(), sending: true }]);
+    try {
+      await apiFetch("/api/messages/send", { method: "POST", body: JSON.stringify({ to: activeThread, text }) });
+      setMessages(prev => prev.map(m => m.sending ? { ...m, sending: false } : m));
+    } catch(e) {
+      setMessages(prev => prev.filter(m => !m.sending));
+      setMsgInput(text);
+    }
+    setSending(false);
+  };
+
+  const inp = {
+    background: "#111", border: "1px solid #222", borderRadius: 12,
+    padding: "12px 16px", color: "white", fontSize: 14, outline: "none",
+    fontFamily: "inherit",
+  };
+
+  // Thread view
+  if (activeThread) return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh" }}>
+      {/* Thread header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px", borderBottom: "1px solid #1a1a1a", flexShrink: 0, paddingTop: "calc(16px + env(safe-area-inset-top))" }}>
+        <button onClick={() => setActiveThread(null)} style={{ background: "none", border: "none", color: "white", fontSize: 22, cursor: "pointer", padding: 0 }}>←</button>
+        <button onClick={() => onViewProfile && onViewProfile(activeThread)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#6B21A8,#C026D3)", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 800, fontSize: 14 }}>
+            {activeThread[0].toUpperCase()}
+          </div>
+          <div style={{ color: "white", fontWeight: 700, fontSize: 16 }}>@{activeThread}</div>
+        </button>
+      </div>
+
+      {/* Messages */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "16px", display: "flex", flexDirection: "column", gap: 8 }}>
+        {messages.length === 0 && (
+          <div style={{ textAlign: "center", color: "#333", fontSize: 13, paddingTop: 40 }}>
+            Start a conversation with @{activeThread}
+          </div>
+        )}
+        {messages.map((m, i) => {
+          const isMe = m.from === user?.username;
+          return (
+            <div key={i} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start" }}>
+              <div style={{ maxWidth: "75%", padding: "10px 14px", borderRadius: isMe ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+                background: isMe ? "#C026D3" : "#1a1a1a",
+                color: "white", fontSize: 14, lineHeight: 1.5, opacity: m.sending ? 0.6 : 1 }}>
+                {m.text}
+              </div>
+            </div>
+          );
+        })}
+        <div ref={msgEndRef} />
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: "12px 16px", paddingBottom: "calc(12px + env(safe-area-inset-bottom))", borderTop: "1px solid #1a1a1a", display: "flex", gap: 8, flexShrink: 0 }}>
+        <input value={msgInput} onChange={e => setMsgInput(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && sendMessage()}
+          placeholder="Send a message..."
+          style={{ ...inp, flex: 1 }} />
+        <button onClick={sendMessage} disabled={sending || !msgInput.trim()}
+          style={{ background: "#C026D3", border: "none", borderRadius: 12, color: "white", fontWeight: 700, fontSize: 13, padding: "12px 18px", cursor: "pointer", opacity: !msgInput.trim() ? 0.4 : 1 }}>
+          Send
+        </button>
+      </div>
+    </div>
+  );
+
+  // Conversations list
+  return (
+    <div style={{ paddingBottom: 100 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px", borderBottom: "1px solid #1a1a1a", paddingTop: "calc(16px + env(safe-area-inset-top))" }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 22, cursor: "pointer", padding: 0 }}>←</button>
+        <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>Messages</div>
+      </div>
+
+      {!user && (
+        <div style={{ textAlign: "center", padding: "60px 24px", color: "#555" }}>
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 12 }}>
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#444", marginBottom: 6 }}>Sign in to message</div>
+          <div style={{ fontSize: 13, color: "#333" }}>Create an account to send direct messages to other users</div>
+        </div>
+      )}
+
+      {user && loading && (
+        <div style={{ textAlign: "center", padding: "60px 24px", color: "#555", fontSize: 14 }}>Loading...</div>
+      )}
+
+      {user && !loading && conversations.length === 0 && (
+        <div style={{ textAlign: "center", padding: "60px 24px", color: "#555" }}>
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 12 }}>
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#444", marginBottom: 6 }}>No messages yet</div>
+          <div style={{ fontSize: 13, color: "#333" }}>Visit a user's profile and tap Message to start a conversation</div>
+        </div>
+      )}
+
+      {user && !loading && conversations.map(c => (
+        <button key={c.username} onClick={() => setActiveThread(c.username)}
+          style={{ width: "100%", display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
+            background: "none", border: "none", borderBottom: "1px solid #111", cursor: "pointer", textAlign: "left" }}>
+          <div style={{ width: 46, height: 46, borderRadius: "50%", flexShrink: 0,
+            background: "linear-gradient(135deg,#6B21A8,#C026D3)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "white", fontWeight: 800, fontSize: 18 }}>
+            {c.username[0].toUpperCase()}
+          </div>
+          <div style={{ flex: 1, overflow: "hidden" }}>
+            <div style={{ color: "white", fontWeight: 700, fontSize: 15 }}>@{c.username}</div>
+            <div style={{ color: "#555", fontSize: 13, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.lastMessage || "Start chatting"}</div>
+          </div>
+          {c.unread > 0 && (
+            <div style={{ width: 20, height: 20, borderRadius: "50%", background: "#C026D3",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "white", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
+              {c.unread}
+            </div>
+          )}
+          <span style={{ color: "#333", fontSize: 16, flexShrink: 0 }}>›</span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 // =============================================================================
 // STRIPE CONNECT SECTION - for Producer Pro profile
@@ -4729,8 +4951,16 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   // Add activeSection state for dashboard navigation
   const [activeSection, setActiveSection] = useState(null);
   const [bio,           setBio]           = useState(user?.bio || "");
+  const [editName,      setEditName]      = useState(user?.name || "");
+  const [location,      setLocation]      = useState(user?.location || "");
+  const [instagram,     setInstagram]     = useState(user?.instagram || "");
+  const [tiktok,        setTiktok]        = useState(user?.tiktok || "");
+  const [youtube,       setYoutube]       = useState(user?.youtube || "");
+  const [spotify,       setSpotify]       = useState(user?.spotify || "");
+  const [website,       setWebsite]       = useState(user?.website || "");
   const [bioSaving,     setBioSaving]     = useState(false);
   const [bioMsg,        setBioMsg]        = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
   const [userSearch,    setUserSearch]    = useState("");
   const [userResults,   setUserResults]   = useState([]);
   const [userSearching, setUserSearching] = useState(false);
@@ -5021,85 +5251,182 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
       {!activeSection && (
         <div>
 
-          {/* ── Public profile card ── */}
-          <div style={{ background: "linear-gradient(160deg,#111,#0d0d1a)", borderRadius: 20, padding: 20, border: "1px solid #1e1e2a", marginBottom: 20 }}>
+          {/* ── Edit Profile (BandLab-style) ── */}
 
-            {/* Avatar + name */}
-            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
-              <div style={{ width: 72, height: 72, borderRadius: "50%", flexShrink: 0,
+          {/* Section header */}
+          <div style={{ color: "white", fontWeight: 800, fontSize: 22, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, marginBottom: 20, textAlign: "center" }}>
+            Update Profile
+          </div>
+
+          {/* Centred avatar with edit pencil */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 28 }}>
+            <div style={{ position: "relative", display: "inline-block" }}>
+              <div style={{ width: 88, height: 88, borderRadius: "50%",
                 background: "linear-gradient(135deg,#6B21A8,#C026D3)",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 28, color: "white", fontWeight: 800 }}>
+                fontSize: 34, color: "white", fontWeight: 800 }}>
                 {(user.username || user.name || "?")[0].toUpperCase()}
               </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ color: "white", fontWeight: 800, fontSize: 20 }}>{user.name}</div>
-                {user.username && <div style={{ color: "#C026D3", fontSize: 13, fontWeight: 600, marginTop: 2 }}>@{user.username}</div>}
-                <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {user.isPro && (
-                    <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"3px 10px", color:"#C026D3", fontWeight:800, fontSize:11 }}>
-                      <VerifiedBadge size={14} /> Producer Pro
-                    </span>
-                  )}
-                  {user.isArtistPro && !user.isPro && (
-                    <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"3px 10px", color:"#F59E0B", fontWeight:800, fontSize:11 }}>
-                      <AppIcon id="vocalmic" size={12}/> Artist Pro
-                    </span>
-                  )}
-                </div>
+              <div style={{ position: "absolute", bottom: 2, right: 2, width: 26, height: 26,
+                borderRadius: "50%", background: "#222", border: "2px solid #0a0a0a",
+                display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                <AppIcon id="writing" size={12} />
               </div>
             </div>
-
-            {/* Bio */}
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ color: "#555", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>YOUR BIO</div>
-              <textarea
-                value={bio}
-                onChange={e => setBio(e.target.value)}
-                placeholder="Tell the world about yourself — your sound, your style, what you create..."
-                rows={3}
-                style={{ width: "100%", background: "#0a0a0a", border: "1px solid #222", borderRadius: 10,
-                  padding: "10px 14px", color: "white", fontSize: 13, outline: "none",
-                  resize: "none", boxSizing: "border-box", lineHeight: 1.6, fontFamily: "inherit" }}
-              />
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
-                <span style={{ color: bio.length > 180 ? "#F87171" : "#333", fontSize: 11 }}>{bio.length}/200</span>
-                <button
-                  disabled={bioSaving}
-                  onClick={async () => {
-                    if (bio.length > 200) return;
-                    setBioSaving(true);
-                    try {
-                      await apiFetch("/api/auth/bio", { method: "POST", body: JSON.stringify({ bio: bio.trim() }) });
-                      setBioMsg("Saved!"); setTimeout(() => setBioMsg(""), 2000);
-                    } catch(e) { setBioMsg("Error saving"); setTimeout(() => setBioMsg(""), 2000); }
-                    setBioSaving(false);
-                  }}
-                  style={{ background: "#C026D3", border: "none", borderRadius: 8, color: "white",
-                    fontWeight: 700, fontSize: 12, padding: "6px 16px", cursor: "pointer", opacity: bioSaving ? 0.5 : 1 }}>
-                  {bioSaving ? "Saving..." : bioMsg || "Save Bio"}
-                </button>
-              </div>
+            {/* Plan badge under avatar */}
+            <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
+              {user.isPro && (
+                <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 12px", color:"#C026D3", fontWeight:800, fontSize:12 }}>
+                  <VerifiedBadge size={14} /> Producer Pro
+                </span>
+              )}
+              {user.isArtistPro && !user.isPro && (
+                <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 12px", color:"#F59E0B", fontWeight:800, fontSize:12 }}>
+                  <AppIcon id="vocalmic" size={12}/> Artist Pro
+                </span>
+              )}
             </div>
-
-            {/* Share profile link */}
-            {user.username && (
-              <div style={{ background: "#0a0a0a", borderRadius: 10, padding: "10px 14px",
-                border: "1px solid #1e1e1e", display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ flex: 1, color: "#555", fontSize: 12, fontFamily: "monospace",
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  beatfinder.app/u/{user.username}
-                </div>
-                <button onClick={() => {
-                  navigator.clipboard?.writeText("beatfinder.app/u/" + user.username)
-                    .then(() => { setBioMsg("Link copied!"); setTimeout(() => setBioMsg(""), 2000); });
-                }} style={{ background: "none", border: "none", color: "#C026D3", fontSize: 12,
-                  fontWeight: 700, cursor: "pointer", flexShrink: 0, padding: 0 }}>
-                  Copy Link
-                </button>
-              </div>
-            )}
           </div>
+
+          {/* Name */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>Name</div>
+            <input value={editName} onChange={e => setEditName(e.target.value)}
+              placeholder="Your name"
+              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
+                padding: "13px 16px", color: "white", fontSize: 15, outline: "none", boxSizing: "border-box" }} />
+          </div>
+
+          {/* Username */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>Username</div>
+            <input value={newUsername} onChange={e => setNewUsername(e.target.value)}
+              placeholder={user.username || "Set your username"}
+              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
+                padding: "13px 16px", color: "white", fontSize: 15, outline: "none", boxSizing: "border-box" }} />
+          </div>
+
+          {/* Location */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>Location</div>
+            <input value={location} onChange={e => setLocation(e.target.value)}
+              placeholder="City, Country"
+              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
+                padding: "13px 16px", color: "white", fontSize: 15, outline: "none", boxSizing: "border-box" }} />
+          </div>
+
+          {/* Social links */}
+          <div style={{ background: "#111", borderRadius: 14, border: "1px solid #1e1e1e", marginBottom: 16, overflow: "hidden" }}>
+            {[
+              { key: "instagram", label: "Instagram", icon: "📸", placeholder: "instagram.com/yourhandle", val: instagram, set: setInstagram },
+              { key: "tiktok",    label: "TikTok",    icon: "🎵", placeholder: "tiktok.com/@yourhandle",   val: tiktok,    set: setTiktok },
+            ].map((s, i) => (
+              <div key={s.key} style={{ borderBottom: i === 0 ? "1px solid #1a1a1a" : "none" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px" }}>
+                  <span style={{ fontSize: 20, flexShrink: 0 }}>{s.icon}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ color: "white", fontWeight: 600, fontSize: 14 }}>{s.label}</div>
+                    <input value={s.val} onChange={e => s.set(e.target.value)}
+                      placeholder={s.placeholder}
+                      style={{ background: "none", border: "none", color: "#555", fontSize: 12,
+                        outline: "none", width: "100%", padding: 0, marginTop: 2 }} />
+                  </div>
+                  <span style={{ color: "#333", fontSize: 18 }}>›</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Spotify */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>Spotify</div>
+            <input value={spotify} onChange={e => setSpotify(e.target.value)}
+              placeholder="Add profile URL"
+              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
+                padding: "13px 16px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+          </div>
+
+          {/* YouTube */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>YouTube</div>
+            <input value={youtube} onChange={e => setYoutube(e.target.value)}
+              placeholder="Add channel URL"
+              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
+                padding: "13px 16px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+          </div>
+
+          {/* Website */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>Website</div>
+            <input value={website} onChange={e => setWebsite(e.target.value)}
+              placeholder="Add URL"
+              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
+                padding: "13px 16px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+          </div>
+
+          {/* About / Bio */}
+          <div style={{ marginBottom: 6 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ color: "#555", fontSize: 12 }}>About</div>
+              <div style={{ color: bio.length > 240 ? "#F87171" : "#333", fontSize: 12 }}>{bio.length}/250</div>
+            </div>
+            <textarea value={bio} onChange={e => setBio(e.target.value)}
+              placeholder="Tell the world about yourself..."
+              rows={5}
+              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
+                padding: "13px 16px", color: "white", fontSize: 14, outline: "none",
+                resize: "none", boxSizing: "border-box", lineHeight: 1.6, fontFamily: "inherit" }} />
+          </div>
+
+          {/* Save all button */}
+          <button
+            disabled={profileSaving}
+            onClick={async () => {
+              setProfileSaving(true);
+              try {
+                // Save name/username/location/links/bio in one call
+                await Promise.all([
+                  apiFetch("/api/auth/profile/update", { method: "POST", body: JSON.stringify({
+                    name: editName.trim(), location: location.trim(),
+                    instagram: instagram.trim(), tiktok: tiktok.trim(),
+                    youtube: youtube.trim(), spotify: spotify.trim(), website: website.trim(),
+                    bio: bio.trim(),
+                  })}),
+                  newUsername.trim() && newUsername.trim() !== user.username
+                    ? apiFetch("/api/auth/set-username", { method: "POST", body: JSON.stringify({ username: newUsername.trim() }) })
+                    : Promise.resolve(),
+                ]);
+                if (editName.trim()) setUser({ ...user, name: editName.trim() });
+                if (newUsername.trim()) setUser(u => ({ ...u, username: newUsername.trim() }));
+                setBioMsg("Profile saved!"); setTimeout(() => setBioMsg(""), 3000);
+              } catch(e) { setBioMsg("Error: " + e.message); setTimeout(() => setBioMsg(""), 3000); }
+              setProfileSaving(false);
+            }}
+            style={{ width: "100%", background: profileSaving ? "#333" : "linear-gradient(135deg,#C026D3,#7C3AED)",
+              border: "none", borderRadius: 32, color: "white", fontWeight: 800, fontSize: 16,
+              padding: "15px", cursor: "pointer", marginBottom: 12, opacity: profileSaving ? 0.6 : 1 }}>
+            {profileSaving ? "Saving..." : "Save Profile"}
+          </button>
+
+          {bioMsg && <div style={{ color: bioMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, textAlign: "center", marginBottom: 16, fontWeight: 600 }}>{bioMsg}</div>}
+
+          {/* Share link */}
+          {user.username && (
+            <div style={{ background: "#111", borderRadius: 12, padding: "12px 16px",
+              border: "1px solid #1e1e1e", display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
+              <div style={{ flex: 1, color: "#555", fontSize: 12, fontFamily: "monospace",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                beatfinder.app/u/{user.username}
+              </div>
+              <button onClick={() => {
+                navigator.clipboard?.writeText("beatfinder.app/u/" + user.username)
+                  .then(() => { setBioMsg("Link copied!"); setTimeout(() => setBioMsg(""), 2000); });
+              }} style={{ background: "none", border: "none", color: "#C026D3", fontSize: 12,
+                fontWeight: 700, cursor: "pointer", flexShrink: 0, padding: 0 }}>
+                Copy Link
+              </button>
+            </div>
+          )}
 
           {/* ── Find other users ── */}
           <div style={{ marginBottom: 20 }}>
@@ -14143,6 +14470,8 @@ export default function BeatFinder() {
   const [editingLyric,  setEditingLyric]  = useState(null);
   const [editingIndex,  setEditingIndex]  = useState(null);
   const [publicProfile, setPublicProfile] = useState(null);
+  const [showMessages,  setShowMessages]  = useState(false);
+  const [messageThread, setMessageThread] = useState(null); // username to DM
   const [savedLyrics,   setSavedLyrics]   = useState(() => {
     try { return JSON.parse(localStorage.getItem("bf_lyrics") || "[]"); } catch { return []; }
   });
@@ -14282,7 +14611,13 @@ export default function BeatFinder() {
 
       {publicProfile && (
         <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "#0a0a0a", overflowY: "auto", overscrollBehavior: "none", paddingTop: "env(safe-area-inset-top)" }} onTouchMove={function(e){ e.stopPropagation(); }}>
-          <PublicProfileScreen username={publicProfile} onBack={() => setPublicProfile(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} currentUser={user} />
+          <PublicProfileScreen username={publicProfile} onBack={() => setPublicProfile(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} currentUser={user} onMessage={u => { setPublicProfile(null); setMessageThread(u); setShowMessages(true); }} />
+        </div>
+      )}
+
+      {showMessages && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "#0a0a0a", overflowY: "auto", overscrollBehavior: "none", paddingTop: "env(safe-area-inset-top)", fontFamily: "'DM Sans',sans-serif" }} onTouchMove={function(e){ e.stopPropagation(); }}>
+          <MessagesScreen user={user} onBack={() => { setShowMessages(false); setMessageThread(null); }} initialThread={messageThread} onViewProfile={u => { setShowMessages(false); setPublicProfile(u); }} />
         </div>
       )}
 
@@ -14304,7 +14639,7 @@ export default function BeatFinder() {
           }}
           onTouchMove={t !== "studio" ? function(e){ e.stopPropagation(); } : undefined}
           >
-            {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} />}
+            {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => setShowMessages(true)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} />}
