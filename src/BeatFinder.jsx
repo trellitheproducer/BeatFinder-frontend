@@ -4056,10 +4056,13 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
   const [followLoading, setFollowLoading] = useState(false);
 
   useEffect(() => {
-    apiFetch("/api/auth/profile/" + encodeURIComponent(username))
+    const endpoint = currentUser
+      ? "/api/auth/profile-auth/" + encodeURIComponent(username)
+      : "/api/auth/profile/" + encodeURIComponent(username);
+    apiFetch(endpoint)
       .then(d => { setProfile(d); setFollowing(d.isFollowing || false); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
-  }, [username]);
+  }, [username, currentUser?.id]);
 
   const toggleFollow = async () => {
     if (!currentUser) return;
@@ -4203,6 +4206,84 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
         <div style={{ height: 1, background: "#1a1a1a", marginBottom: 20 }} />
       </div>
+
+      {/* ── Find Me On — social links ── */}
+      {(profile.instagram || profile.tiktok || profile.youtube || profile.spotify || profile.appleMusic || profile.website) && (
+        <div style={{ padding: "0 16px", marginBottom: 20 }}>
+          <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>FIND ME ON</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {[
+              {
+                key: "instagram", label: "Instagram", url: profile.instagram,
+                icon: (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <defs><linearGradient id="ig2" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stopColor="#f09433"/><stop offset="50%" stopColor="#dc2743"/><stop offset="100%" stopColor="#bc1888"/></linearGradient></defs>
+                    <rect x="2" y="2" width="20" height="20" rx="5" fill="url(#ig2)"/>
+                    <circle cx="12" cy="12" r="4.5" stroke="white" strokeWidth="1.5" fill="none"/>
+                    <circle cx="17.5" cy="6.5" r="1.2" fill="white"/>
+                  </svg>
+                ),
+              },
+              {
+                key: "tiktok", label: "TikTok", url: profile.tiktok,
+                icon: (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+                    <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.34 6.34 0 0 0-6.13 6.33 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.93a8.16 8.16 0 0 0 4.77 1.52V7.01a4.85 4.85 0 0 1-1-.32z"/>
+                  </svg>
+                ),
+              },
+              {
+                key: "youtube", label: "YouTube", url: profile.youtube,
+                icon: (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <rect x="2" y="5" width="20" height="14" rx="4" fill="#FF0000"/>
+                    <polygon points="10,8.5 16,12 10,15.5" fill="white"/>
+                  </svg>
+                ),
+              },
+              {
+                key: "spotify", label: "Spotify", url: profile.spotify,
+                icon: (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="10" fill="#1DB954"/>
+                    <path d="M8 15.5c2.5-1 5.5-1 8 0" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+                    <path d="M7 12.5c3-1.2 7-1.2 10 0" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+                    <path d="M6.5 9.5c3.5-1.3 8-1.3 11 0" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+                  </svg>
+                ),
+              },
+              {
+                key: "appleMusic", label: "Apple Music", url: profile.appleMusic,
+                icon: (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <rect x="2" y="2" width="20" height="20" rx="5" fill="linear-gradient(135deg,#fc3c44,#fc3c44)"/>
+                    <rect x="2" y="2" width="20" height="20" rx="5" fill="#fc3c44"/>
+                    <path d="M16 7v6.5a2.5 2.5 0 1 1-1.5-2.3V8.5L10 9.5V15a2.5 2.5 0 1 1-1.5-2.3V8l7.5-1z" fill="white"/>
+                  </svg>
+                ),
+              },
+              {
+                key: "website", label: "Website", url: profile.website,
+                icon: (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                  </svg>
+                ),
+              },
+            ].filter(s => s.url).map(s => (
+              <button key={s.key}
+                onClick={() => { const url = s.url.startsWith("http") ? s.url : "https://" + s.url; window.open(url, "_blank"); }}
+                style={{ display: "flex", alignItems: "center", gap: 7, background: "#111",
+                  border: "1px solid #1e1e1e", borderRadius: 20, padding: "8px 14px",
+                  cursor: "pointer", color: "white", fontWeight: 600, fontSize: 13 }}>
+                {s.icon}
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Beats / activity ── */}
       {profile.beats && profile.beats.length > 0 ? (
@@ -4972,6 +5053,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   const [tiktok,        setTiktok]        = useState(user?.tiktok || "");
   const [youtube,       setYoutube]       = useState(user?.youtube || "");
   const [spotify,       setSpotify]       = useState(user?.spotify || "");
+  const [appleMusic,    setAppleMusic]    = useState(user?.appleMusic || "");
   const [website,       setWebsite]       = useState(user?.website || "");
   const [bioSaving,     setBioSaving]     = useState(false);
   const [bioMsg,        setBioMsg]        = useState("");
@@ -4980,6 +5062,28 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   const [userResults,   setUserResults]   = useState([]);
   const [userSearching, setUserSearching] = useState(false);
   const [producerStats, setProducerStats] = useState(null);
+
+  // Fetch fresh profile data on mount so form fields always show latest saved values
+  useEffect(() => {
+    if (!user) return;
+    apiFetch("/api/auth/me")
+      .then(fresh => {
+        setUser(u => ({ ...u, ...fresh, isPro: fresh.plan === "producer", isArtistPro: fresh.plan === "artist" || fresh.plan === "producer" }));
+        setBio(fresh.bio || "");
+        setEditName(fresh.name || "");
+        setLocation(fresh.location || "");
+        setInstagram(fresh.instagram || "");
+        setTiktok(fresh.tiktok || "");
+        setYoutube(fresh.youtube || "");
+        setSpotify(fresh.spotify || "");
+        setWebsite(fresh.website || "");
+        setAppleMusic(fresh.appleMusic || "");
+        setAvatarColor(fresh.avatarColor || "linear-gradient(135deg,#6B21A8,#C026D3)");
+        setAvatarUrl(fresh.avatarUrl || "");
+        setNewUsername(fresh.username || "");
+      })
+      .catch(() => {});
+  }, [user?.id]);
 
   useEffect(() => {
     if (user?.isPro) {
@@ -5426,6 +5530,15 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 padding: "13px 16px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
           </div>
 
+          {/* Apple Music */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>Apple Music</div>
+            <input value={appleMusic} onChange={e => setAppleMusic(e.target.value)}
+              placeholder="Add Apple Music URL"
+              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
+                padding: "13px 16px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+          </div>
+
           {/* YouTube */}
           <div style={{ marginBottom: 16 }}>
             <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>YouTube</div>
@@ -5470,14 +5583,15 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                     name: editName.trim(), location: location.trim(),
                     instagram: instagram.trim(), tiktok: tiktok.trim(),
                     youtube: youtube.trim(), spotify: spotify.trim(), website: website.trim(),
-                    bio: bio.trim(), avatarColor: avatarColor, avatarUrl: avatarUrl,
+                    bio: bio.trim(), avatarColor: avatarColor, avatarUrl: avatarUrl, appleMusic: appleMusic.trim(),
                   })}),
                   newUsername.trim() && newUsername.trim() !== user.username
                     ? apiFetch("/api/auth/set-username", { method: "POST", body: JSON.stringify({ username: newUsername.trim() }) })
                     : Promise.resolve(),
                 ]);
-                if (editName.trim()) setUser({ ...user, name: editName.trim() });
+                if (editName.trim()) setUser(u => ({ ...u, name: editName.trim() }));
                 if (newUsername.trim()) setUser(u => ({ ...u, username: newUsername.trim() }));
+                setUser(u => ({ ...u, bio: bio.trim(), location: location.trim(), instagram: instagram.trim(), tiktok: tiktok.trim(), youtube: youtube.trim(), spotify: spotify.trim(), website: website.trim(), appleMusic: appleMusic.trim(), avatarColor, avatarUrl }));
                 setBioMsg("Profile saved!"); setTimeout(() => setBioMsg(""), 3000);
               } catch(e) { setBioMsg("Error: " + e.message); setTimeout(() => setBioMsg(""), 3000); }
               setProfileSaving(false);
