@@ -2496,11 +2496,15 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
         {/* Avatar — taps to own public profile */}
         <button onClick={onViewOwnProfile} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ position: "relative" }}>
-            <div style={{ width: 38, height: 38, borderRadius: "50%",
+            <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0,
               background: user ? "linear-gradient(135deg,#6B21A8,#C026D3)" : "#222",
+              border: "2px solid #333", overflow: "hidden",
               display: "flex", alignItems: "center", justifyContent: "center",
-              color: "white", fontWeight: 800, fontSize: 15, border: "2px solid #333" }}>
-              {user ? (user.username || user.name || "?")[0].toUpperCase() : <AppIcon id="profile" size={18} />}
+              color: "white", fontWeight: 800, fontSize: 15 }}>
+              {user?.avatarUrl
+                ? <img src={user.avatarUrl} alt="me" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : user ? (user.username || user.name || "?")[0].toUpperCase()
+                : <AppIcon id="profile" size={18} />}
             </div>
             {user && <div style={{ position: "absolute", bottom: 1, right: 1, width: 9, height: 9, borderRadius: "50%", background: "#22C55E", border: "2px solid #0a0a0a" }} />}
           </div>
@@ -4111,12 +4115,18 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
         {/* Avatar */}
         <div style={{ position: "relative", display: "inline-block", marginBottom: 12 }}>
-          <div style={{ width: 80, height: 80, borderRadius: "50%",
-            background: "linear-gradient(135deg,#6B21A8,#C026D3)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 30, color: "white", fontWeight: 800 }}>
-            {(profile.username || profile.name || "?")[0].toUpperCase()}
-          </div>
+          {profile.avatarUrl ? (
+            <img src={profile.avatarUrl} alt={profile.username}
+              style={{ width: 80, height: 80, borderRadius: "50%", objectFit: "cover",
+                border: "3px solid #222", display: "block" }} />
+          ) : (
+            <div style={{ width: 80, height: 80, borderRadius: "50%",
+              background: profile.avatarColor || "linear-gradient(135deg,#6B21A8,#C026D3)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 30, color: "white", fontWeight: 800 }}>
+              {(profile.username || profile.name || "?")[0].toUpperCase()}
+            </div>
+          )}
           <div style={{ position: "absolute", bottom: 4, right: 4, width: 14, height: 14,
             borderRadius: "50%", background: "#22C55E", border: "2.5px solid #0a0a0a" }} />
         </div>
@@ -4950,10 +4960,15 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
   // Add activeSection state for dashboard navigation
   const [activeSection, setActiveSection] = useState(null);
-  const [bio,           setBio]           = useState(user?.bio || "");
-  const [editName,      setEditName]      = useState(user?.name || "");
-  const [location,      setLocation]      = useState(user?.location || "");
-  const [instagram,     setInstagram]     = useState(user?.instagram || "");
+  const [bio,              setBio]              = useState(user?.bio || "");
+  const [editName,         setEditName]         = useState(user?.name || "");
+  const [location,         setLocation]         = useState(user?.location || "");
+  const [instagram,        setInstagram]        = useState(user?.instagram || "");
+  const [avatarColor,      setAvatarColor]      = useState(user?.avatarColor || "linear-gradient(135deg,#6B21A8,#C026D3)");
+  const [avatarUrl,        setAvatarUrl]        = useState(user?.avatarUrl || "");
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [avatarUploading,  setAvatarUploading]  = useState(false);
+  const avatarFileRef = React.useRef(null);
   const [tiktok,        setTiktok]        = useState(user?.tiktok || "");
   const [youtube,       setYoutube]       = useState(user?.youtube || "");
   const [spotify,       setSpotify]       = useState(user?.spotify || "");
@@ -5258,22 +5273,63 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             Update Profile
           </div>
 
-          {/* Centred avatar with edit pencil */}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 28 }}>
-            <div style={{ position: "relative", display: "inline-block" }}>
-              <div style={{ width: 88, height: 88, borderRadius: "50%",
-                background: "linear-gradient(135deg,#6B21A8,#C026D3)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 34, color: "white", fontWeight: 800 }}>
-                {(user.username || user.name || "?")[0].toUpperCase()}
+          {/* ── Avatar ── tap to change photo */}
+          {/* Hidden file input */}
+          <input ref={avatarFileRef} type="file" accept="image/*" style={{ display: "none" }}
+            onChange={async function(e) {
+              const file = e.target.files && e.target.files[0];
+              if (!file) return;
+              if (file.size > 5 * 1024 * 1024) { setBioMsg("Image too large — max 5MB"); setTimeout(() => setBioMsg(""), 3000); return; }
+              setAvatarUploading(true);
+              try {
+                const fd = new FormData();
+                fd.append("file", file);
+                const token = localStorage.getItem("bf_token") || "";
+                const res = await fetch("/api/auth/avatar", {
+                  method: "POST",
+                  headers: { Authorization: "Bearer " + token },
+                  body: fd,
+                });
+                if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || "Upload failed"); }
+                const data = await res.json();
+                setAvatarUrl(data.avatarUrl);
+                setUser(u => ({ ...u, avatarUrl: data.avatarUrl }));
+                setBioMsg("Profile photo updated!");
+                setTimeout(() => setBioMsg(""), 2500);
+              } catch(err) { setBioMsg("Error: " + err.message); setTimeout(() => setBioMsg(""), 3000); }
+              setAvatarUploading(false);
+              e.target.value = "";
+            }} />
+
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 24 }}>
+            <button onClick={() => avatarFileRef.current && avatarFileRef.current.click()}
+              style={{ position: "relative", display: "inline-block", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="avatar"
+                  style={{ width: 88, height: 88, borderRadius: "50%", objectFit: "cover",
+                    border: "3px solid #333", display: "block" }} />
+              ) : (
+                <div style={{ width: 88, height: 88, borderRadius: "50%",
+                  background: avatarColor,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 34, color: "white", fontWeight: 800 }}>
+                  {(user.username || user.name || "?")[0].toUpperCase()}
+                </div>
+              )}
+              {/* Edit badge */}
+              <div style={{ position: "absolute", bottom: 2, right: 2, width: 28, height: 28,
+                borderRadius: "50%", background: "#C026D3", border: "2px solid #0a0a0a",
+                display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {avatarUploading
+                  ? <div style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "white", borderRadius: "50%" }} />
+                  : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>}
               </div>
-              <div style={{ position: "absolute", bottom: 2, right: 2, width: 26, height: 26,
-                borderRadius: "50%", background: "#222", border: "2px solid #0a0a0a",
-                display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-                <AppIcon id="writing" size={12} />
-              </div>
+            </button>
+            <div style={{ color: "#555", fontSize: 12, marginTop: 8 }}>
+              {avatarUploading ? "Uploading..." : "Tap to change photo"}
             </div>
-            {/* Plan badge under avatar */}
+
+            {/* Plan badge */}
             <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
               {user.isPro && (
                 <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 12px", color:"#C026D3", fontWeight:800, fontSize:12 }}>
@@ -5315,23 +5371,47 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 padding: "13px 16px", color: "white", fontSize: 15, outline: "none", boxSizing: "border-box" }} />
           </div>
 
-          {/* Social links */}
+          {/* Social links — with proper brand icons + tap to open */}
           <div style={{ background: "#111", borderRadius: 14, border: "1px solid #1e1e1e", marginBottom: 16, overflow: "hidden" }}>
             {[
-              { key: "instagram", label: "Instagram", icon: "📸", placeholder: "instagram.com/yourhandle", val: instagram, set: setInstagram },
-              { key: "tiktok",    label: "TikTok",    icon: "🎵", placeholder: "tiktok.com/@yourhandle",   val: tiktok,    set: setTiktok },
-            ].map((s, i) => (
-              <div key={s.key} style={{ borderBottom: i === 0 ? "1px solid #1a1a1a" : "none" }}>
+              {
+                key: "instagram", label: "Instagram", val: instagram, set: setInstagram,
+                placeholder: "instagram.com/yourhandle",
+                icon: (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                    <defs><linearGradient id="ig" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stopColor="#f09433"/><stop offset="25%" stopColor="#e6683c"/><stop offset="50%" stopColor="#dc2743"/><stop offset="75%" stopColor="#cc2366"/><stop offset="100%" stopColor="#bc1888"/></linearGradient></defs>
+                    <rect x="2" y="2" width="20" height="20" rx="5" ry="5" fill="url(#ig)"/>
+                    <circle cx="12" cy="12" r="4.5" stroke="white" strokeWidth="1.5" fill="none"/>
+                    <circle cx="17.5" cy="6.5" r="1.2" fill="white"/>
+                  </svg>
+                ),
+              },
+              {
+                key: "tiktok", label: "TikTok", val: tiktok, set: setTiktok,
+                placeholder: "tiktok.com/@yourhandle",
+                icon: (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
+                    <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.93a8.16 8.16 0 0 0 4.77 1.52V7.01a4.85 4.85 0 0 1-1-.32z"/>
+                  </svg>
+                ),
+              },
+            ].map((s, i, arr) => (
+              <div key={s.key} style={{ borderBottom: i < arr.length - 1 ? "1px solid #1a1a1a" : "none" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px" }}>
-                  <span style={{ fontSize: 20, flexShrink: 0 }}>{s.icon}</span>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: "#1a1a1a", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {s.icon}
+                  </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ color: "white", fontWeight: 600, fontSize: 14 }}>{s.label}</div>
                     <input value={s.val} onChange={e => s.set(e.target.value)}
                       placeholder={s.placeholder}
-                      style={{ background: "none", border: "none", color: "#555", fontSize: 12,
+                      style={{ background: "none", border: "none", color: s.val ? "#C026D3" : "#555", fontSize: 12,
                         outline: "none", width: "100%", padding: 0, marginTop: 2 }} />
                   </div>
-                  <span style={{ color: "#333", fontSize: 18 }}>›</span>
+                  {s.val && (
+                    <button onClick={() => { const url = s.val.startsWith("http") ? s.val : "https://" + s.val; window.open(url, "_blank"); }}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "#555", fontSize: 18, padding: 4, flexShrink: 0 }}>›</button>
+                  )}
                 </div>
               </div>
             ))}
@@ -5390,7 +5470,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                     name: editName.trim(), location: location.trim(),
                     instagram: instagram.trim(), tiktok: tiktok.trim(),
                     youtube: youtube.trim(), spotify: spotify.trim(), website: website.trim(),
-                    bio: bio.trim(),
+                    bio: bio.trim(), avatarColor: avatarColor, avatarUrl: avatarUrl,
                   })}),
                   newUsername.trim() && newUsername.trim() !== user.username
                     ? apiFetch("/api/auth/set-username", { method: "POST", body: JSON.stringify({ username: newUsername.trim() }) })
