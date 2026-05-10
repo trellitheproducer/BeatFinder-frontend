@@ -12406,7 +12406,7 @@ self.onmessage = async function(e) {
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
-      style={{ background:"#080808", height:"100%", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
+      style={{ background:"#080808", height:"100dvh", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
     >
       {/* ── Overlays ── */}
@@ -14141,8 +14141,8 @@ export default function BeatFinder() {
             display: tab === t ? "block" : "none",
             overflowY: t === "studio" ? "hidden" : "auto",
             height: t === "studio"
-              ? "calc(100vh - env(safe-area-inset-bottom))"
-              : "calc(100vh - calc(72px + env(safe-area-inset-bottom)))",
+              ? "calc(100dvh - env(safe-area-inset-bottom))"
+              : "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))",
             WebkitOverflowScrolling: "touch",
           }}>
             {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} />}
@@ -14155,7 +14155,7 @@ export default function BeatFinder() {
           </div>
         ))}
         {tab === "profile" && (
-          <div style={{ overflowY: "auto", height: "calc(100vh - calc(72px + env(safe-area-inset-bottom)))", WebkitOverflowScrolling: "touch" }}>
+          <div style={{ overflowY: "auto", height: "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))", WebkitOverflowScrolling: "touch" }}>
             <ProfileScreen key={user ? user.id : "guest"} user={user} setUser={setUser} onLogout={() => { AuthAPI.logout(); setUser(null); }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} />
           </div>
         )}
@@ -14178,11 +14178,12 @@ export default function BeatFinder() {
       <div style={{
           position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
           width: "100%", maxWidth: 430,
-          background: "rgba(8,8,8,0.92)",
+          background: "#080808",
           borderTop: "1px solid rgba(255,255,255,0.07)",
           display: tab === "studio" ? "none" : "flex",
           paddingBottom: "env(safe-area-inset-bottom)",
-          boxShadow: "0 -8px 32px rgba(0,0,0,0.6)",
+          boxShadow: "0 -8px 32px rgba(0,0,0,0.9)",
+          zIndex: 1000,
         }}>
         {NAV.map(n => {
           const isPro    = user?.isPro || user?.isArtistPro;
