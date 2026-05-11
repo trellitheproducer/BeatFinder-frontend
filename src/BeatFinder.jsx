@@ -4440,12 +4440,15 @@ function PostSheet({ user, onClose, onPosted }) {
       style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.7)",
         display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
       <div ref={sheetRef}
-        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
-        style={{ background: "#111", borderRadius: "20px 20px 0 0", maxHeight: "90vh",
-          display: "flex", flexDirection: "column", transition: "transform 0.15s" }}>
+        style={{ background: "#111", borderRadius: "20px 20px 0 0",
+          maxHeight: "85vh", minHeight: "50vh",
+          display: "flex", flexDirection: "column",
+          transition: "transform 0.15s",
+          paddingBottom: "env(safe-area-inset-bottom)" }}>
 
-        {/* Handle */}
-        <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 4px" }}>
+        {/* Handle — drag to dismiss */}
+        <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+          style={{ display: "flex", justifyContent: "center", padding: "12px 0 4px", cursor: "grab" }}>
           <div style={{ width: 36, height: 4, borderRadius: 2, background: "#333" }} />
         </div>
 
@@ -4466,7 +4469,8 @@ function PostSheet({ user, onClose, onPosted }) {
           </button>
         </div>
 
-        <div style={{ overflowY: "auto", flex: 1 }}>
+        <div style={{ overflowY: "auto", flex: 1, WebkitOverflowScrolling: "touch" }}
+          onTouchMove={function(e) { e.stopPropagation(); }}>
           {/* Mode picker */}
           {!mode && (
             <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -4635,6 +4639,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
 
 
   var [posts, setPosts]         = React.useState([]);
+  var [openPostSheet, setOpenPostSheet] = React.useState(null);
   var [postLikes, setPostLikes] = React.useState({});
   var [postComments, setPostComments] = React.useState({});
 
@@ -4801,10 +4806,10 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
   }
 
   var tabs = [
+    { id: "posts", label: "Posts" },
     { id: "beats", label: "Beats" },
     { id: "music", label: "Music" },
     { id: "video", label: "Videos" },
-    { id: "posts", label: "Posts" },
   ];
 
   // Render comment thread for a content item
@@ -4881,6 +4886,16 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
   return (
     <div style={{ marginTop: 8 }}>
       <SheetOverlay />
+      {openPostSheet && (
+        <CommentsBottomSheet
+          contentId={openPostSheet}
+          itemComments={postComments[openPostSheet] || []}
+          currentUser={currentUser}
+          onSubmit={submitPostComment}
+          onDelete={deletePostComment}
+          onClose={function() { setOpenPostSheet(null); }}
+        />
+      )}
       {/* Tab bar */}
       <div style={{ display: "flex", borderBottom: "1px solid #1a1a1a", marginBottom: 16 }}>
         {tabs.map(function(t) {
@@ -4997,12 +5012,14 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
                       </svg>
                       <span style={{ fontSize: 13 }}>{post.likeCount || 0}</span>
                     </button>
-                    <div style={{ display: "flex", alignItems: "center", gap: 5, color: "#555" }}>
+                    <button onClick={function() { setOpenPostSheet(post.id); loadPostComments(post.id); }}
+                      style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
+                        display: "flex", alignItems: "center", gap: 5, color: "#555" }}>
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                       </svg>
                       <span style={{ fontSize: 13 }}>{post.commentCount || 0}</span>
-                    </div>
+                    </button>
                     {post.type === "music" && post.spotifyUrl && (
                       <button onClick={function() { window.open(post.spotifyUrl, "_blank"); }}
                         style={{ marginLeft: "auto", background: "#1DB954", border: "none", borderRadius: 20,
@@ -5012,16 +5029,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
                     )}
                   </div>
 
-                  {/* Comments */}
-                  <CommentsBottomSheet
-                    contentId={post.id}
-                    itemComments={postComments[post.id] || []}
-                    currentUser={currentUser}
-                    onSubmit={submitPostComment}
-                    onDelete={deletePostComment}
-                    onClose={function() {}}
-                    inline={true}
-                  />
+
                 </div>
               );
             })
