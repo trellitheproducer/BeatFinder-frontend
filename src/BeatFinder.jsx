@@ -2371,7 +2371,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
   );
 }
 
-function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric, onGoTrending, onGoStudio, onGoArtists, onShowProducerPrompt, onOpenMessages, onViewOwnProfile }) {
+function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric, onGoTrending, onGoStudio, onGoArtists, onShowProducerPrompt, onOpenMessages, onViewOwnProfile, onOpenPost }) {
   const [heroIndex, setHeroIndex] = useState(0);
 
   const HERO_SLIDES = [
@@ -2491,7 +2491,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
   return (
     <div className="bf-page" style={{ paddingBottom: 100, overflowX: "hidden" }}>
 
-      {/* Top bar — avatar + messages */}
+      {/* Top bar — avatar + post + messages */}
       <div style={{ padding: "14px 16px 8px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         {/* Avatar — taps to own public profile */}
         <button onClick={onViewOwnProfile} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
@@ -2512,12 +2512,24 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
           {!user && <span style={{ color: "#444", fontSize: 13 }}>Sign in</span>}
         </button>
 
-        {/* Messages icon */}
-        <button onClick={onOpenMessages} style={{ background: "none", border: "none", padding: 8, cursor: "pointer", position: "relative" }}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#aaa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          {/* + Post button — Pro users only */}
+          {user && (user.isPro || user.isArtistPro) && (
+            <button onClick={onOpenPost}
+              style={{ width: 36, height: 36, borderRadius: "50%", background: "#2a2a2a",
+                border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#aaa" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
+          )}
+          {/* Messages icon */}
+          <button onClick={onOpenMessages} style={{ background: "none", border: "none", padding: 8, cursor: "pointer", position: "relative" }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#aaa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Logo */}
@@ -4336,6 +4348,279 @@ function CommentsBottomSheet({ contentId, itemComments, currentUser, onSubmit, o
 }
 
 
+
+// =============================================================================
+// POST SHEET — slides up from bottom, lets Pro users post track/video/status
+// =============================================================================
+function PostSheet({ user, onClose, onPosted }) {
+  var [mode, setMode]         = React.useState(null); // null | "status" | "music" | "video"
+  var [text, setText]         = React.useState("");
+  var [images, setImages]     = React.useState([]);   // {url, file}
+  var [spotifyUrl, setSpotifyUrl] = React.useState("");
+  var [caption, setCaption]   = React.useState("");
+  var [loading, setLoading]   = React.useState(false);
+  var [msg, setMsg]           = React.useState("");
+  var imageFileRef             = React.useRef(null);
+  var videoFileRef             = React.useRef(null);
+  var sheetRef                 = React.useRef(null);
+  var startY                   = React.useRef(null);
+
+  function onTouchStart(e) { startY.current = e.touches[0].clientY; }
+  function onTouchMove(e) {
+    var dy = e.touches[0].clientY - startY.current;
+    if (dy > 0 && sheetRef.current) sheetRef.current.style.transform = "translateY(" + dy + "px)";
+  }
+  function onTouchEnd(e) {
+    var dy = e.touches[0].clientY - (startY.current || 0);
+    if (dy > 80) onClose();
+    else if (sheetRef.current) sheetRef.current.style.transform = "translateY(0)";
+  }
+
+  function addImages(files) {
+    var remaining = 3 - images.length;
+    var toAdd = Array.from(files).slice(0, remaining);
+    toAdd.forEach(function(file) {
+      var url = URL.createObjectURL(file);
+      setImages(function(prev) { return [...prev, { url: url, file: file }]; });
+    });
+  }
+
+  function removeImage(idx) {
+    setImages(function(prev) { return prev.filter(function(_, i) { return i !== idx; }); });
+  }
+
+  function submitStatus() {
+    if (!text.trim() && images.length === 0) return;
+    setLoading(true);
+    var fd = new FormData();
+    fd.append("text", text.trim());
+    images.forEach(function(img) { fd.append("images", img.file); });
+    fetch(API_BASE + "/api/posts/status", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + (getToken() || "") },
+      body: fd
+    }).then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.detail) throw new Error(data.detail);
+        setLoading(false);
+        onPosted && onPosted(data);
+        onClose();
+      }).catch(function(err) { setMsg(err.message); setLoading(false); });
+  }
+
+  function submitMusic() {
+    if (!spotifyUrl.trim()) return;
+    setLoading(true);
+    apiFetch("/api/posts/music", { method: "POST", body: JSON.stringify({ spotifyUrl: spotifyUrl.trim(), caption: caption.trim() }) })
+      .then(function(data) { setLoading(false); onPosted && onPosted(data); onClose(); })
+      .catch(function(err) { setMsg(err.message); setLoading(false); });
+  }
+
+  function submitVideo(file) {
+    if (!file) return;
+    setLoading(true);
+    var fd = new FormData();
+    fd.append("file", file);
+    fd.append("caption", caption.trim());
+    fetch(API_BASE + "/api/posts/video", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + (getToken() || "") },
+      body: fd
+    }).then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.detail) throw new Error(data.detail);
+        setLoading(false);
+        onPosted && onPosted(data);
+        onClose();
+      }).catch(function(err) { setMsg(err.message); setLoading(false); });
+  }
+
+  return (
+    <div onClick={function(e) { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.7)",
+        display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+      <div ref={sheetRef}
+        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+        style={{ background: "#111", borderRadius: "20px 20px 0 0", maxHeight: "90vh",
+          display: "flex", flexDirection: "column", transition: "transform 0.15s" }}>
+
+        {/* Handle */}
+        <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 4px" }}>
+          <div style={{ width: 36, height: 4, borderRadius: 2, background: "#333" }} />
+        </div>
+
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "4px 16px 12px", borderBottom: "1px solid #1a1a1a" }}>
+          {mode ? (
+            <button onClick={function() { setMode(null); setMsg(""); }}
+              style={{ background: "none", border: "none", color: "#C026D3", fontSize: 14, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+              &#8592; Back
+            </button>
+          ) : (
+            <div style={{ color: "white", fontWeight: 700, fontSize: 16 }}>Create Post</div>
+          )}
+          <button onClick={onClose}
+            style={{ background: "none", border: "none", color: "#555", fontSize: 22, cursor: "pointer", padding: 4 }}>
+            &#10005;
+          </button>
+        </div>
+
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          {/* Mode picker */}
+          {!mode && (
+            <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+              {[
+                { id: "status", label: "Post Status", desc: "Share thoughts, news or photos", color: "#C026D3",
+                  icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2" strokeLinecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
+                { id: "music", label: "Post Track", desc: "Share a Spotify track or album", color: "#1DB954",
+                  icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1DB954" strokeWidth="2" strokeLinecap="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> },
+                { id: "video", label: "Post Video", desc: "Upload a video clip", color: "#3B82F6",
+                  icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round"><rect x="2" y="2" width="20" height="20" rx="3"/><polygon points="10,8 16,12 10,16"/></svg> },
+              ].map(function(opt) {
+                return (
+                  <button key={opt.id} onClick={function() { setMode(opt.id); }}
+                    style={{ background: "#1a1a1a", border: "1px solid #222", borderRadius: 14,
+                      padding: "14px 16px", cursor: "pointer", textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 14 }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: "#111",
+                      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {opt.icon}
+                    </div>
+                    <div>
+                      <div style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{opt.label}</div>
+                      <div style={{ color: "#555", fontSize: 13, marginTop: 2 }}>{opt.desc}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Status composer */}
+          {mode === "status" && (
+            <div style={{ padding: 16 }}>
+              <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+                <div style={{ width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
+                  background: "linear-gradient(135deg,#6B21A8,#C026D3)", overflow: "hidden",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "white", fontWeight: 800, fontSize: 14 }}>
+                  {user?.avatarUrl
+                    ? <img src={user.avatarUrl} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    : (user?.username || "?")[0].toUpperCase()}
+                </div>
+                <textarea value={text} onChange={function(e) { setText(e.target.value); }}
+                  placeholder={"What's on your mind, " + (user?.username || "") + "?"}
+                  maxLength={500}
+                  style={{ flex: 1, background: "none", border: "none", outline: "none",
+                    color: "white", fontSize: 15, lineHeight: 1.5, resize: "none",
+                    minHeight: 80, fontFamily: "inherit" }} />
+              </div>
+
+              {/* Image previews */}
+              {images.length > 0 && (
+                <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                  {images.map(function(img, i) {
+                    return (
+                      <div key={i} style={{ position: "relative", width: 90, height: 90 }}>
+                        <img src={img.url} style={{ width: 90, height: 90, borderRadius: 10, objectFit: "cover" }} />
+                        <button onClick={function() { removeImage(i); }}
+                          style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,0.7)",
+                            border: "none", borderRadius: "50%", width: 22, height: 22, color: "white",
+                            cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          &#10005;
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <input ref={imageFileRef} type="file" accept="image/*" multiple style={{ display: "none" }}
+                onChange={function(e) { addImages(e.target.files); e.target.value = ""; }} />
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                borderTop: "1px solid #1a1a1a", paddingTop: 12 }}>
+                <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                  {images.length < 3 && (
+                    <button onClick={function() { imageFileRef.current && imageFileRef.current.click(); }}
+                      style={{ background: "none", border: "none", cursor: "pointer", padding: 4, color: "#555" }}>
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2" strokeLinecap="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+                        <polyline points="21 15 16 10 5 21"/>
+                      </svg>
+                    </button>
+                  )}
+                  <span style={{ color: "#333", fontSize: 12 }}>{text.length}/500</span>
+                </div>
+                <button onClick={submitStatus} disabled={loading || (!text.trim() && images.length === 0)}
+                  style={{ background: "#C026D3", border: "none", borderRadius: 20, color: "white",
+                    fontWeight: 700, fontSize: 14, padding: "8px 20px", cursor: "pointer",
+                    opacity: loading ? 0.6 : 1 }}>
+                  {loading ? "Posting..." : "Post"}
+                </button>
+              </div>
+              {msg && <div style={{ color: "#EF4444", fontSize: 13, marginTop: 8 }}>{msg}</div>}
+            </div>
+          )}
+
+          {/* Music composer */}
+          {mode === "music" && (
+            <div style={{ padding: 16 }}>
+              <div style={{ color: "#888", fontSize: 12, marginBottom: 8 }}>Spotify URL</div>
+              <input value={spotifyUrl} onChange={function(e) { setSpotifyUrl(e.target.value); }}
+                placeholder="https://open.spotify.com/track/..."
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 10,
+                  padding: "12px 14px", color: "white", fontSize: 14, outline: "none",
+                  boxSizing: "border-box", marginBottom: 12 }} />
+              <div style={{ color: "#888", fontSize: 12, marginBottom: 8 }}>Caption (optional)</div>
+              <textarea value={caption} onChange={function(e) { setCaption(e.target.value); }}
+                placeholder="Say something about this track..." rows={3}
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 10,
+                  padding: "12px 14px", color: "white", fontSize: 14, outline: "none",
+                  resize: "none", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 14 }} />
+              <button onClick={submitMusic} disabled={loading || !spotifyUrl.trim()}
+                style={{ width: "100%", background: "#1DB954", border: "none", borderRadius: 12,
+                  color: "white", fontWeight: 800, fontSize: 15, padding: 14, cursor: "pointer",
+                  opacity: loading ? 0.6 : 1 }}>
+                {loading ? "Posting..." : "Post Track"}
+              </button>
+              {msg && <div style={{ color: "#EF4444", fontSize: 13, marginTop: 8 }}>{msg}</div>}
+            </div>
+          )}
+
+          {/* Video composer */}
+          {mode === "video" && (
+            <div style={{ padding: 16 }}>
+              <div style={{ color: "#888", fontSize: 12, marginBottom: 8 }}>Caption (optional)</div>
+              <textarea value={caption} onChange={function(e) { setCaption(e.target.value); }}
+                placeholder="Say something about this video..." rows={3}
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 10,
+                  padding: "12px 14px", color: "white", fontSize: 14, outline: "none",
+                  resize: "none", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 14 }} />
+              <input ref={videoFileRef} type="file" accept="video/*" style={{ display: "none" }}
+                onChange={function(e) { submitVideo(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+              <button onClick={function() { videoFileRef.current && videoFileRef.current.click(); }}
+                disabled={loading}
+                style={{ width: "100%", background: "#3B82F6", border: "none", borderRadius: 12,
+                  color: "white", fontWeight: 800, fontSize: 15, padding: 14, cursor: "pointer",
+                  opacity: loading ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                {loading ? "Uploading..." : "Choose Video"}
+              </button>
+              {msg && <div style={{ color: "#EF4444", fontSize: 13, marginTop: 8 }}>{msg}</div>}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // =============================================================================
 // CONTENT TABS — shown on every public profile (Beats / Music / Videos)
 // =============================================================================
@@ -4348,6 +4633,70 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
   var [likes, setLikes]             = React.useState({});
   var [openSheet, setOpenSheet]       = React.useState(null); // contentId
 
+
+  var [posts, setPosts]         = React.useState([]);
+  var [postLikes, setPostLikes] = React.useState({});
+  var [postComments, setPostComments] = React.useState({});
+
+  function loadPosts() {
+    setLoading(true); setPosts([]);
+    apiFetch("/api/posts/profile/" + encodeURIComponent(username) + "?type=all")
+      .then(function(data) {
+        var loaded = data || [];
+        setPosts(loaded);
+        setLoading(false);
+        loaded.forEach(function(p) { loadPostComments(p.id); });
+        if (currentUser) {
+          loaded.forEach(function(p) {
+            apiFetch("/api/posts/" + p.id + "/liked")
+              .then(function(r) {
+                setPostLikes(function(prev) { var n = Object.assign({}, prev); n[p.id] = r.liked; return n; });
+              }).catch(function() {});
+          });
+        }
+      }).catch(function() { setLoading(false); });
+  }
+
+  function loadPostComments(id) {
+    apiFetch("/api/posts/" + id + "/comments")
+      .then(function(data) {
+        setPostComments(function(prev) { var n = Object.assign({}, prev); n[id] = data || []; return n; });
+      }).catch(function() {});
+  }
+
+  function togglePostLike(id) {
+    if (!currentUser) return;
+    var wasLiked = postLikes[id] || false;
+    setPostLikes(function(prev) { var n = Object.assign({}, prev); n[id] = !wasLiked; return n; });
+    setPosts(function(prev) { return prev.map(function(p) {
+      return p.id === id ? Object.assign({}, p, { likeCount: p.likeCount + (!wasLiked ? 1 : -1) }) : p;
+    }); });
+    apiFetch("/api/posts/" + id + "/like", { method: "POST" })
+      .then(function(r) { setPostLikes(function(prev) { var n = Object.assign({}, prev); n[id] = r.liked; return n; }); })
+      .catch(function() { setPostLikes(function(prev) { var n = Object.assign({}, prev); n[id] = wasLiked; return n; }); });
+  }
+
+  function submitPostComment(postId, text, parentId, onSuccess, onError) {
+    apiFetch("/api/posts/" + postId + "/comments", {
+      method: "POST", body: JSON.stringify({ text: text, parentId: parentId || null })
+    }).then(function(c) {
+      setPostComments(function(prev) { var n = Object.assign({}, prev); n[postId] = [...(n[postId] || []), c]; return n; });
+      setPosts(function(prev) { return prev.map(function(p) {
+        return p.id === postId ? Object.assign({}, p, { commentCount: p.commentCount + 1 }) : p;
+      }); });
+      if (onSuccess) onSuccess();
+    }).catch(function() { if (onError) onError(); });
+  }
+
+  function deletePostComment(postId, commentId) {
+    apiFetch("/api/posts/" + postId + "/comments/" + commentId, { method: "DELETE" })
+      .then(function() {
+        setPostComments(function(prev) { var n = Object.assign({}, prev); n[postId] = (n[postId] || []).filter(function(c) { return c.id !== commentId; }); return n; });
+        setPosts(function(prev) { return prev.map(function(p) {
+          return p.id === postId ? Object.assign({}, p, { commentCount: Math.max(0, p.commentCount - 1) }) : p;
+        }); });
+      }).catch(function() {});
+  }
 
   function loadContent(type) {
     setLoading(true); setItems([]);
@@ -4374,6 +4723,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
 
   React.useEffect(function() {
     if (tab === "music" || tab === "video") loadContent(tab);
+    if (tab === "posts") loadPosts();
   }, [tab, username]);
 
   function toggleLike(id) {
@@ -4454,6 +4804,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
     { id: "beats", label: "Beats" },
     { id: "music", label: "Music" },
     { id: "video", label: "Videos" },
+    { id: "posts", label: "Posts" },
   ];
 
   // Render comment thread for a content item
@@ -4571,6 +4922,120 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
       )}
 
       {/* Music / Video tabs */}
+      {tab === "posts" && (
+        <div style={{ padding: "0 16px" }}>
+          {loading ? (
+            <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>Loading...</div>
+          ) : posts.length > 0 ? (
+            posts.map(function(post) {
+              return (
+                <div key={post.id} style={{ background: "#111", borderRadius: 16, border: "1px solid #1e1e1e", marginBottom: 14, overflow: "hidden" }}>
+                  {/* Post header */}
+                  <div style={{ padding: "12px 14px 8px", display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
+                      background: "linear-gradient(135deg,#6B21A8,#C026D3)", overflow: "hidden",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      color: "white", fontWeight: 800, fontSize: 14 }}>
+                      {post.avatarUrl
+                        ? <img src={post.avatarUrl} alt={post.username} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        : (post.username || "?")[0].toUpperCase()}
+                    </div>
+                    <div>
+                      <div style={{ color: "white", fontWeight: 700, fontSize: 14 }}>@{post.username}</div>
+                      <div style={{ color: "#444", fontSize: 11 }}>{new Date(post.createdAt).toLocaleDateString()}</div>
+                    </div>
+                  </div>
+
+                  {/* Status text */}
+                  {post.text && (
+                    <div style={{ padding: "0 14px 10px", color: "#ddd", fontSize: 14, lineHeight: 1.6 }}>{post.text}</div>
+                  )}
+
+                  {/* Images */}
+                  {post.images && post.images.length > 0 && (
+                    <div style={{ display: "grid", gap: 2,
+                      gridTemplateColumns: post.images.length === 1 ? "1fr" : post.images.length === 2 ? "1fr 1fr" : "1fr 1fr 1fr" }}>
+                      {post.images.map(function(img, i) {
+                        return (
+                          <img key={i} src={img} alt="post"
+                            style={{ width: "100%", aspectRatio: post.images.length === 1 ? "16/9" : "1",
+                              objectFit: "cover", display: "block" }} />
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Spotify embed */}
+                  {post.type === "music" && post.embedUrl && (
+                    <iframe src={post.embedUrl + "?utm_source=generator&theme=0"}
+                      width="100%" height="152" frameBorder="0"
+                      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                      loading="lazy" style={{ display: "block" }} />
+                  )}
+
+                  {/* Video */}
+                  {post.type === "video" && post.videoUrl && (
+                    <video controls src={post.videoUrl}
+                      style={{ width: "100%", maxHeight: 360, background: "#000", display: "block" }} />
+                  )}
+
+                  {/* Caption */}
+                  {post.caption && (
+                    <div style={{ padding: "8px 14px 4px", color: "#aaa", fontSize: 13 }}>{post.caption}</div>
+                  )}
+
+                  {/* Like + comment */}
+                  <div style={{ padding: "8px 14px 12px", display: "flex", gap: 16, alignItems: "center" }}>
+                    <button onClick={function() { togglePostLike(post.id); }}
+                      style={{ background: "none", border: "none", cursor: currentUser ? "pointer" : "default",
+                        padding: 0, display: "flex", alignItems: "center", gap: 5,
+                        color: postLikes[post.id] ? "#EF4444" : "#555" }}>
+                      <svg width="17" height="17" viewBox="0 0 24 24"
+                        fill={postLikes[post.id] ? "#EF4444" : "none"}
+                        stroke={postLikes[post.id] ? "#EF4444" : "#555"} strokeWidth="2" strokeLinecap="round">
+                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+                      </svg>
+                      <span style={{ fontSize: 13 }}>{post.likeCount || 0}</span>
+                    </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, color: "#555" }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                      </svg>
+                      <span style={{ fontSize: 13 }}>{post.commentCount || 0}</span>
+                    </div>
+                    {post.type === "music" && post.spotifyUrl && (
+                      <button onClick={function() { window.open(post.spotifyUrl, "_blank"); }}
+                        style={{ marginLeft: "auto", background: "#1DB954", border: "none", borderRadius: 20,
+                          color: "white", fontWeight: 700, fontSize: 11, padding: "5px 12px", cursor: "pointer" }}>
+                        Open in Spotify
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Comments */}
+                  <CommentsBottomSheet
+                    contentId={post.id}
+                    itemComments={postComments[post.id] || []}
+                    currentUser={currentUser}
+                    onSubmit={submitPostComment}
+                    onDelete={deletePostComment}
+                    onClose={function() {}}
+                    inline={true}
+                  />
+                </div>
+              );
+            })
+          ) : (
+            <div style={{ textAlign: "center", padding: "40px 24px" }}>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#444" strokeWidth="1.5" strokeLinecap="round" style={{ marginBottom: 12 }}>
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              <div style={{ fontSize: 15, color: "#444", fontWeight: 700 }}>No posts yet</div>
+            </div>
+          )}
+        </div>
+      )}
+
       {(tab === "music" || tab === "video") && (
         <div style={{ padding: "0 16px" }}>
           {loading ? (
@@ -15492,6 +15957,7 @@ export default function BeatFinder() {
   const [publicProfile, setPublicProfile] = useState(null);
   const [searchProfile, setSearchProfile] = useState(null);
   const [showMessages,  setShowMessages]  = useState(false);
+  const [showPost,      setShowPost]      = useState(false);
   const [messageThread, setMessageThread] = useState(null); // username to DM
   const [savedLyrics,   setSavedLyrics]   = useState(() => {
     try { return JSON.parse(localStorage.getItem("bf_lyrics") || "[]"); } catch { return []; }
@@ -15665,7 +16131,7 @@ export default function BeatFinder() {
           }}
           onTouchMove={t !== "studio" ? function(e){ e.stopPropagation(); } : undefined}
           >
-            {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => setShowMessages(true)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} />}
+            {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => setShowMessages(true)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} onOpenPost={() => setShowPost(true)} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} currentUser={user} onViewProfile={function(u) { setSearchProfile(u); }} />}
@@ -15689,6 +16155,10 @@ export default function BeatFinder() {
           </div>
         )}
       </div>
+
+      {showPost && (
+        <PostSheet user={user} onClose={() => setShowPost(false)} onPosted={() => setShowPost(false)} />
+      )}
 
       {searchProfile && (
         <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "#0a0a0a", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "none" }}
