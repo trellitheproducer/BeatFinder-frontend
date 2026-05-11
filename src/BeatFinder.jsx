@@ -5919,15 +5919,16 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 <button onClick={() => setToolsOpen(false)} style={{ background: "none", border: "none", color: "#555", fontSize: 20, cursor: "pointer" }}>✕</button>
               </div>
 
-              {user.isArtistPro && (
+              {/* Artist Pro only (not Producer Pro) — artist tools */}
+              {user.isArtistPro && !user.isPro && (
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>ARTIST TOOLS</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     {[
-                      { id: "lyrics",    icon: "edit",    label: "My Lyrics",    desc: savedLyrics.length + " saved", color: "#C026D3" },
-                      { id: "members",   icon: "note",    label: "Members Area", desc: "Exclusive beats",              color: "#F59E0B" },
-                      { id: "postmusic", icon: "note",    label: "Post Music",   desc: "Add Spotify track",            color: "#1DB954" },
-                      { id: "postvideo", icon: "vocalmic",label: "Post Video",   desc: "Upload from phone",            color: "#3B82F6" },
+                      { id: "lyrics",    icon: "edit",     label: "My Lyrics",    desc: savedLyrics.length + " saved", color: "#C026D3" },
+                      { id: "members",   icon: "note",     label: "Members Area", desc: "Exclusive beats",              color: "#F59E0B" },
+                      { id: "postmusic", icon: "note",     label: "Post Music",   desc: "Add Spotify track",            color: "#1DB954" },
+                      { id: "postvideo", icon: "vocalmic", label: "Post Video",   desc: "Upload from phone",            color: "#3B82F6" },
                     ].map(item => (
                       <button key={item.id} onClick={() => { setToolsOpen(false); goSection(item.id); }}
                         style={{ background: "#0f0f0f", borderRadius: 12, padding: "12px 10px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
@@ -5955,17 +5956,20 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 </div>
               )}
 
+              {/* Producer Pro — all tools in one section (includes artist tools) */}
               {user.isPro && (
                 <div>
                   <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>PRODUCER TOOLS</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     {[
-                      { id: "upload",      icon: "upload", label: "Upload Beat",    desc: "Add new beat",                                                           color: "#C026D3" },
-                      { id: "manage",      icon: "knobs",  label: "My Uploads",     desc: uploads.length + " beats",                                               color: "#F59E0B" },
-                      { id: "postmusic",   icon: "note",   label: "Post Music",     desc: "Add Spotify track",                                                     color: "#1DB954" },
-                      { id: "postvideo",   icon: "vocalmic", label: "Post Video",   desc: "Upload from phone",                                                     color: "#3B82F6" },
-                      { id: "stripe",      icon: "stripe", label: "Stripe Payouts", desc: producerStats?.stripeConnected ? "Connected" : "Not connected",           color: "#22C55E" },
-                      { id: "stats",       icon: "grid",   label: "Analytics",      desc: producerStats ? producerStats.totalDownloads + " downloads" : "Loading...", color: "#818CF8" },
+                      { id: "upload",    icon: "upload",   label: "Upload Beat",    desc: "Add new beat",                                                              color: "#C026D3" },
+                      { id: "manage",    icon: "knobs",    label: "My Uploads",     desc: uploads.length + " beats",                                                  color: "#F59E0B" },
+                      { id: "postmusic", icon: "note",     label: "Post Music",     desc: "Add Spotify track",                                                        color: "#1DB954" },
+                      { id: "postvideo", icon: "vocalmic", label: "Post Video",     desc: "Upload from phone",                                                        color: "#3B82F6" },
+                      { id: "lyrics",    icon: "edit",     label: "My Lyrics",      desc: savedLyrics.length + " saved",                                              color: "#818CF8" },
+                      { id: "members",   icon: "note",     label: "Members Area",   desc: "Exclusive beats",                                                          color: "#F59E0B" },
+                      { id: "stripe",    icon: "stripe",   label: "Stripe Payouts", desc: producerStats?.stripeConnected ? "Connected" : "Not connected",              color: "#22C55E" },
+                      { id: "stats",     icon: "grid",     label: "Analytics",      desc: producerStats ? producerStats.totalDownloads + " downloads" : "Loading...", color: "#818CF8" },
                     ].map(item => (
                       <button key={item.id} onClick={() => { setToolsOpen(false); goSection(item.id); }}
                         style={{ background: "#0f0f0f", borderRadius: 12, padding: "12px 10px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
