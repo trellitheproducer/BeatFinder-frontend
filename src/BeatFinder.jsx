@@ -4662,9 +4662,12 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
         {/* Header photo */}
         {profile.headerUrl && (
-          <div style={{ margin: "0 -16px", position: "relative", height: 140, marginBottom: -40, overflow: "hidden" }}>
-            <img src={profile.headerUrl} alt="header" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 30%, #0a0a0a 100%)" }} />
+          <div style={{ margin: "0 -16px", position: "relative", height: 180, marginBottom: -50, overflow: "hidden" }}>
+            <img src={profile.headerUrl} alt="header" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} />
+            {/* Top fade */}
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, #0a0a0a 0%, transparent 25%, transparent 50%, #0a0a0a 100%)" }} />
+            {/* Left/right side fade */}
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, #0a0a0a 0%, transparent 15%, transparent 85%, #0a0a0a 100%)" }} />
           </div>
         )}
 
@@ -6151,8 +6154,8 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                   headers: { Authorization: "Bearer " + token },
                   body: fd,
                 });
-                if (!res.ok) throw new Error("Upload failed");
                 const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || "Upload failed");
                 setHeaderUrl(data.headerUrl);
                 setUser(u => ({ ...u, headerUrl: data.headerUrl }));
                 setBioMsg("Header photo updated!");
