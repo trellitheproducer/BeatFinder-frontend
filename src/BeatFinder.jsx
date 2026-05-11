@@ -5193,8 +5193,10 @@ function ProfileBeatCard({ beat, currentUser }) {
   var [previewTime, setPreviewTime] = React.useState(0);
   var [buyLoading,  setBuyLoading]  = React.useState(false);
   var [buyErr,      setBuyErr]      = React.useState("");
+  var [playCount,   setPlayCount]   = React.useState(beat.playCount || 0);
   var audioRef  = React.useRef(null);
   var timerRef  = React.useRef(null);
+  var playedRef = React.useRef(false); // only record once per card mount
   var isFree    = beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
 
   var previewId = React.useRef("profile_" + beat.id);
@@ -5203,6 +5205,12 @@ function ProfileBeatCard({ beat, currentUser }) {
     if (previewing) { stopPreview(); return; }
     startGlobalPreview(previewId.current);
     setPreviewing(true); setPreviewTime(0);
+    // Record play once per session
+    if (!playedRef.current) {
+      playedRef.current = true;
+      setPlayCount(function(c) { return c + 1; });
+      apiFetch("/api/auth/beat-play/" + beat.id, { method: "POST" }).catch(function(){});
+    }
   }
 
   function stopPreview() {
@@ -5280,6 +5288,7 @@ function ProfileBeatCard({ beat, currentUser }) {
           {isFree ? "FREE" : beat.price}
         </div>
         <div style={{ color: "#444", fontSize: 11 }}>{beat.downloads || 0} downloads</div>
+        {playCount > 0 && <div style={{ color: "#444", fontSize: 11 }}>▶ {fmtCount(playCount)} plays</div>}
       </div>
 
       {/* Preview button */}
@@ -5975,13 +5984,77 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
 }
 
 
+// ── Format large numbers: 1200 → "1.2K", 1050000 → "1.1M" ───────
+function fmtCount(n) {
+  if (!n || n < 1) return "0";
+  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+  if (n >= 1000)    return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K";
+  return String(n);
+}
+
+// ── Followers / Following list screen ────────────────────────────
+function FollowListScreen({ username, mode, onBack, onViewProfile }) {
+  // mode: "followers" | "following"
+  const [users,   setUsers]   = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error,   setError]   = React.useState(null);
+
+  React.useEffect(() => {
+    setLoading(true);
+    apiFetch("/api/auth/" + mode + "/" + encodeURIComponent(username))
+      .then(d  => { setUsers(d); setLoading(false); })
+      .catch(e => { setError(e.message); setLoading(false); });
+  }, [username, mode]);
+
+  return (
+    <div style={{ background:"#0a0a0a", minHeight:"100%", color:"white", fontFamily:"inherit" }}>
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", padding:"16px 16px 12px", borderBottom:"1px solid #1a1a1a", position:"sticky", top:0, background:"#0a0a0a", zIndex:10 }}>
+        <button onClick={onBack} style={{ background:"none", border:"none", color:"white", fontSize:20, cursor:"pointer", padding:"4px 8px 4px 0", marginRight:8 }}>‹</button>
+        <span style={{ fontWeight:800, fontSize:17, textTransform:"capitalize" }}>{mode === "followers" ? "Followers" : "Following"}</span>
+      </div>
+
+      {loading && <div style={{ textAlign:"center", padding:40, color:"#555" }}>Loading...</div>}
+      {error   && <div style={{ textAlign:"center", padding:40, color:"#e44" }}>{error}</div>}
+      {!loading && !error && users.length === 0 && (
+        <div style={{ textAlign:"center", padding:40, color:"#555" }}>
+          {mode === "followers" ? "No followers yet" : "Not following anyone yet"}
+        </div>
+      )}
+
+      {users.map(u => (
+        <div key={u.username} onClick={() => onViewProfile(u.username)}
+          style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #111", cursor:"pointer", gap:12 }}>
+          {/* Avatar */}
+          <div style={{ width:48, height:48, borderRadius:"50%", overflow:"hidden", flexShrink:0, background:"#222", display:"flex", alignItems:"center", justifyContent:"center" }}>
+            {u.avatarUrl
+              ? <img src={u.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+              : <span style={{ fontSize:20, color:"#555" }}>👤</span>
+            }
+          </div>
+          {/* Name + username */}
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontWeight:700, fontSize:14, color:"white", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{u.name || u.username}</div>
+            <div style={{ color:"#555", fontSize:12, marginTop:1 }}>@{u.username}</div>
+          </div>
+          {/* Plan badge */}
+          {u.plan === "producer" && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 8px", color:"#C026D3", fontWeight:700, fontSize:10 }}>Pro</span>}
+          {u.plan === "artist"   && <span style={{ background:"rgba(245,158,11,0.15)",  border:"1px solid #F59E0B", borderRadius:20, padding:"2px 8px", color:"#F59E0B",  fontWeight:700, fontSize:10 }}>Artist</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, currentUser, onMessage, hideBack }) {
-  const [profile,   setProfile]   = useState(null);
-  const [loading,   setLoading]   = useState(true);
-  const [error,     setError]     = useState(null);
-  const [following, setFollowing] = useState(false);
-  const [followLoading, setFollowLoading] = useState(false);
-  const [badgePopup, setBadgePopup] = useState(null);
+  const [profile,      setProfile]      = useState(null);
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState(null);
+  const [following,    setFollowing]    = useState(false);
+  const [followLoading,setFollowLoading]= useState(false);
+  const [badgePopup,   setBadgePopup]   = useState(null);
+  // followList: null | "followers" | "following"
+  const [followList,   setFollowList]   = useState(null);
 
   useEffect(() => {
     const endpoint = currentUser
@@ -6036,6 +6109,21 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
   return (
     <div style={{ overflowX: "hidden" }}>
+
+      {/* ── Follow list overlay ── */}
+      {followList && (
+        <div style={{ position:"fixed", inset:0, zIndex:5000, background:"#0a0a0a", overflowY:"auto" }}>
+          <FollowListScreen
+            username={username}
+            mode={followList}
+            onBack={() => setFollowList(null)}
+            onViewProfile={(u) => { setFollowList(null); /* parent handles navigation */ onBack && typeof onBack === "function" && onBack(u); }}
+          />
+        </div>
+      )}
+
+      {/* ── Badge info popup ── */}
+      <BadgeInfoPopup message={badgePopup} onClose={() => setBadgePopup(null)} />
 
       {profile.headerUrl ? (
         <div>
@@ -6128,7 +6216,6 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
             {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"🎤", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
           </div>
         )}
-        <BadgeInfoPopup message={badgePopup} onClose={() => setBadgePopup(null)} />
 
         {/* Bio */}
         {profile.bio && (
@@ -6138,14 +6225,18 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {/* Stats inline */}
         <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: isOwnProfile ? 10 : 14 }}>
           {[
-            { val: profile.followerCount || 0, label: "Followers" },
-            { val: profile.followingCount || 0, label: "Following" },
-            { val: profile.beats?.length || 0,  label: "Beats" },
+            { val: profile.followerCount || 0, label: "Followers", onClick: () => setFollowList("followers") },
+            { val: profile.followingCount || 0, label: "Following", onClick: () => setFollowList("following") },
+            { val: profile.beats?.length || 0,  label: "Beats",     onClick: null },
+            { val: profile.playCount || 0,      label: "Plays",     onClick: null, icon: "▶" },
           ].map((s, i) => (
-            <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <div key={s.label}
+              onClick={s.onClick || undefined}
+              style={{ display: "flex", alignItems: "center", gap: 4, cursor: s.onClick ? "pointer" : "default" }}>
               {i > 0 && <span style={{ color: "#333", marginRight: 4 }}>·</span>}
-              <span style={{ color: "white", fontWeight: 700, fontSize: 14 }}>{s.val}</span>
-              <span style={{ color: "#555", fontSize: 13, marginLeft: 2 }}>{s.label}</span>
+              {s.icon && <span style={{ color: "#555", fontSize: 12 }}>{s.icon}</span>}
+              <span style={{ color: s.onClick ? "white" : "white", fontWeight: 700, fontSize: 14 }}>{fmtCount(s.val)}</span>
+              <span style={{ color: s.onClick ? "#aaa" : "#555", fontSize: 13, marginLeft: 2, textDecoration: s.onClick ? "underline" : "none", textDecorationColor: "#444" }}>{s.label}</span>
             </div>
           ))}
         </div>
@@ -7329,7 +7420,7 @@ function PostVideoSection({ user, onBack }) {
 
 
 function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric, onOpenMessages }) {
-  const [mode,        setMode]        = useState("landing");
+  const [mode,          setMode]          = useState("landing");
   const [ownBadgePopup, setOwnBadgePopup] = useState(null);
   const [email,       setEmail]       = useState(() => {
     try { return localStorage.getItem("bf_remember") === "1" ? (localStorage.getItem("bf_saved_email") || "") : ""; } catch { return ""; }
@@ -11263,15 +11354,9 @@ function CEOBadge({ onClick }) {
     <span onClick={onClick} style={{
       display: "inline-flex", alignItems: "center", gap: 4,
       background: "linear-gradient(135deg, #000 0%, #1a1a1a 40%, #B8860B 100%)",
-      border: "1.5px solid #FFD700",
-      borderRadius: 20,
-      padding: "3px 10px",
-      color: "#FFD700",
-      fontWeight: 900,
-      fontSize: 10,
-      letterSpacing: 1.5,
-      textTransform: "uppercase",
-      boxShadow: "0 0 8px rgba(255,215,0,0.4)",
+      border: "1.5px solid #FFD700", borderRadius: 20, padding: "3px 10px",
+      color: "#FFD700", fontWeight: 900, fontSize: 10, letterSpacing: 1.5,
+      textTransform: "uppercase", boxShadow: "0 0 8px rgba(255,215,0,0.4)",
       cursor: onClick ? "pointer" : "default",
     }}>
       <svg width="10" height="10" viewBox="0 0 24 24" fill="#FFD700">
@@ -11286,35 +11371,19 @@ function BadgeInfoPopup({ message, onClose }) {
   if (!message) return null;
   return (
     <>
-      <div onClick={onClose} style={{
-        position:"fixed", inset:0, zIndex:99998,
-        background:"rgba(0,0,0,0.6)",
-      }}/>
+      <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:99998, background:"rgba(0,0,0,0.6)" }}/>
       <div style={{
-        position:"fixed", top:"50%", left:"50%",
-        transform:"translate(-50%,-50%)",
-        zIndex:99999,
-        background:"#1a1a1a",
-        border:"1px solid rgba(255,255,255,0.12)",
-        borderRadius:20,
-        padding:"28px 28px 22px",
-        minWidth:260, maxWidth:320,
+        position:"fixed", top:"50%", left:"50%", transform:"translate(-50%,-50%)",
+        zIndex:99999, background:"#1a1a1a", border:"1px solid rgba(255,255,255,0.12)",
+        borderRadius:20, padding:"28px 28px 22px", minWidth:260, maxWidth:320,
         boxShadow:"0 16px 60px rgba(0,0,0,0.85)",
-        display:"flex", flexDirection:"column", alignItems:"center", gap:14,
-        textAlign:"center",
+        display:"flex", flexDirection:"column", alignItems:"center", gap:14, textAlign:"center",
       }}>
         <div style={{ fontSize:38 }}>{message.icon}</div>
-        <div style={{ color:"white", fontSize:15, fontWeight:600, lineHeight:1.5 }}>
-          {message.text}
-        </div>
+        <div style={{ color:"white", fontSize:15, fontWeight:600, lineHeight:1.5 }}>{message.text}</div>
         <button onClick={onClose} style={{
-          marginTop:4,
-          background:"rgba(255,255,255,0.08)",
-          border:"1px solid rgba(255,255,255,0.15)",
-          borderRadius:50, color:"white",
-          fontWeight:700, fontSize:13,
-          padding:"9px 30px",
-          cursor:"pointer",
+          marginTop:4, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.15)",
+          borderRadius:50, color:"white", fontWeight:700, fontSize:13, padding:"9px 30px", cursor:"pointer",
         }}>Got it</button>
       </div>
     </>
@@ -13354,75 +13423,53 @@ function StudioScreen({ user, onExit }) {
     }
   };
 
-  // ── Ruler interaction — Logic Pro model ──────────────────────
-  // • Drag the LEFT edge  (within 18px) → move loopIn
-  // • Drag the RIGHT edge (within 18px) → move loopOut
-  // • Press-and-hold INSIDE the region  → drag the whole region
-  // • Tap/touch anywhere ELSE           → do nothing (no reset)
-  //
-  // All move handlers read loopIn/loopOut from rulerDragRef (snapshotted
-  // at pointerdown) — never from the stale React closure.
+  // ── Ruler tap/drag → set loop in/out points ONLY ─────────────
+  // Tapping the ruler only creates/adjusts the loop region.
+  // It never seeks the playhead or interrupts playback.
+  // First tap on empty area: sets loop-in, second tap to the right: sets loop-out.
+  // Dragging: if tap lands within 0.3s of loopIn → drag loopIn,
+  //           if tap lands within 0.3s of loopOut → drag loopOut,
+  //           otherwise start a new loop region from that point.
+  // rulerDragRef declared at top of component (Rules of Hooks)
   const rulerTimeFromClientX = function (clientX) {
     const el = scrollRef.current;
     if (!el) return 0;
     const rect  = el.getBoundingClientRect();
+    // scrollRef is now the right-side lanes only (no sidebar) so no SIDEBAR_W offset needed
     const laneX = clientX - rect.left + el.scrollLeft;
     return Math.max(0, laneX / effectivePPS);
   };
 
+  // Ruler snaps to the nearest BEAT boundary (not just bars).
+  // This allows loop regions to start/end on any individual beat,
+  // making 1-bar, 2-bar, half-bar loops all equally easy to set.
   const snapToBar = function (t) {
     if (spb <= 0) return Math.max(0, t);
-    return Math.max(0, Math.round(t / spb) * spb);
+    // Snap to nearest beat
+    const snappedBeat = Math.max(0, Math.round(t / spb) * spb);
+    return snappedBeat;
   };
-
-  // 18px grab zone — constant physical size regardless of zoom
-  const pxToSecs = function (px) { return px / Math.max(1, effectivePPS); };
 
   const handleRulerMouseDown = function (e) {
     e.preventDefault();
-    const raw  = rulerTimeFromClientX(e.clientX);
-    const grab = pxToSecs(18);
+    const raw = rulerTimeFromClientX(e.clientX);
+    const t   = snapToBar(raw);
+    // Grab threshold: half a beat (so handles feel magnetic near beat boundaries)
+    const grabThresh = Math.max(0.15, spb * 0.5);
+    let mode = "new";
+    if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
+    else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
+    rulerDragRef.current = { mode, startX: e.clientX, startT: t };
 
-    let mode = null;
-    if (Math.abs(raw - loopIn)  < grab) {
-      mode = "in";
-    } else if (Math.abs(raw - loopOut) < grab) {
-      mode = "out";
-    } else if (raw > loopIn && raw < loopOut) {
-      mode = "move";
-    }
-    // Tap outside region and not near a handle → ignore entirely
-    if (!mode) return;
-
-    rulerDragRef.current = {
-      mode,
-      startRaw: raw,
-      startT:   snapToBar(raw),
-      snapIn:   loopIn,
-      snapOut:  loopOut,
-    };
+    if (mode === "new") { setLoopIn(t); setLoopOut(snapToBar(t + spb)); } // don't auto-enable — user must toggle loop button
 
     const onMove = function (me) {
-      const d = rulerDragRef.current;
-      if (!d) return;
-      const nt     = snapToBar(rulerTimeFromClientX(me.clientX));
-      const curIn  = d.snapIn;
-      const curOut = d.snapOut;
-
-      if (d.mode === "in") {
-        const newIn = Math.max(0, Math.min(nt, curOut - spb));
-        setLoopIn(newIn);
-        d.snapIn = newIn;
-      } else if (d.mode === "out") {
-        const newOut = Math.max(nt, curIn + spb);
-        setLoopOut(newOut);
-        d.snapOut = newOut;
-      } else {
-        // move — shift whole region keeping span fixed
-        const delta  = nt - d.startT;
-        const newIn  = Math.max(0, snapToBar(d.snapIn  + delta));
-        const newOut = snapToBar(d.snapOut + delta);
-        if (newOut > newIn) { setLoopIn(newIn); setLoopOut(newOut); }
+      const nt = snapToBar(rulerTimeFromClientX(me.clientX));
+      if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
+      else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spb)); }
+      else {
+        if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spb));
+        else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
       }
     };
     const onUp = function () {
@@ -13437,51 +13484,27 @@ function StudioScreen({ user, onExit }) {
   const handleRulerTouchStart = function (e) {
     e.preventDefault();
     e.stopPropagation();
-    const raw  = rulerTimeFromClientX(e.touches[0].clientX);
-    const grab = pxToSecs(22); // slightly larger on touch
+    const raw = rulerTimeFromClientX(e.touches[0].clientX);
+    const t   = snapToBar(raw);
+    const grabThresh = Math.max(0.15, spb * 0.5);
+    let mode = "new";
+    if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
+    else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
+    rulerDragRef.current = { mode, startT: t };
 
-    let mode = null;
-    if (Math.abs(raw - loopIn)  < grab) {
-      mode = "in";
-    } else if (Math.abs(raw - loopOut) < grab) {
-      mode = "out";
-    } else if (raw > loopIn && raw < loopOut) {
-      mode = "move";
-    }
-    if (!mode) return; // tap outside — do nothing
-
-    rulerDragRef.current = {
-      mode,
-      startRaw: raw,
-      startT:   snapToBar(raw),
-      snapIn:   loopIn,
-      snapOut:  loopOut,
-    };
+    if (mode === "new") { setLoopIn(t); setLoopOut(snapToBar(t + spb)); } // don't auto-enable — user must toggle loop button
   };
 
   const handleRulerTouchMove = function (e) {
     e.preventDefault();
     e.stopPropagation();
-    const d = rulerDragRef.current;
-    if (!d) return;
-
-    const nt     = snapToBar(rulerTimeFromClientX(e.touches[0].clientX));
-    const curIn  = d.snapIn;
-    const curOut = d.snapOut;
-
-    if (d.mode === "in") {
-      const newIn = Math.max(0, Math.min(nt, curOut - spb));
-      setLoopIn(newIn);
-      d.snapIn = newIn;
-    } else if (d.mode === "out") {
-      const newOut = Math.max(nt, curIn + spb);
-      setLoopOut(newOut);
-      d.snapOut = newOut;
-    } else {
-      const delta  = nt - d.startT;
-      const newIn  = Math.max(0, snapToBar(d.snapIn  + delta));
-      const newOut = snapToBar(d.snapOut + delta);
-      if (newOut > newIn) { setLoopIn(newIn); setLoopOut(newOut); }
+    if (!rulerDragRef.current) return;
+    const nt = snapToBar(rulerTimeFromClientX(e.touches[0].clientX));
+    if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
+    else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spb)); }
+    else {
+      if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spb));
+      else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
     }
   };
 
