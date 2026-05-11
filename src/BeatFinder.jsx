@@ -723,12 +723,11 @@ function useGlobalPreviewStop(myId, stopFn) {
 // thumbnail when inactive so the user can switch between tracks.
 function SpotifyEmbed({ embedUrl, height, style, itemId }) {
   var [active, setActive] = React.useState(false);
-  var idRef    = React.useRef("spotify_" + itemId);
-  var iframeRef = React.useRef(null);
+  var idRef = React.useRef("spotify_" + itemId);
   var h  = height || 152;
   var br = (style && style.borderRadius) ? style.borderRadius : 0;
 
-  // Listen for another preview activating — deactivate self
+  // Listen for another preview activating — deactivate self (unmounts iframe)
   React.useEffect(function() {
     function handler(e) {
       if (e.detail.except !== idRef.current) setActive(false);
@@ -736,30 +735,6 @@ function SpotifyEmbed({ embedUrl, height, style, itemId }) {
     window.addEventListener("bf:stopPreview", handler);
     return function() { window.removeEventListener("bf:stopPreview", handler); };
   }, []);
-
-  // When activated, send postMessage to the Spotify embed to trigger play.
-  // Spotify's embed listens for { command: "toggle" } from the parent window.
-  // We retry a few times to handle iframe load timing.
-  React.useEffect(function() {
-    if (!active) return;
-    var attempts = 0;
-    var maxAttempts = 8;
-    function sendPlay() {
-      if (!iframeRef.current) return;
-      try {
-        iframeRef.current.contentWindow.postMessage(
-          JSON.stringify({ command: "toggle" }), "*"
-        );
-      } catch(e) {}
-      attempts++;
-      if (attempts < maxAttempts) {
-        setTimeout(sendPlay, 400);
-      }
-    }
-    // Give iframe a moment to load before first attempt
-    var t = setTimeout(sendPlay, 300);
-    return function() { clearTimeout(t); };
-  }, [active]);
 
   function activate() {
     startGlobalPreview(idRef.current);
@@ -772,7 +747,6 @@ function SpotifyEmbed({ embedUrl, height, style, itemId }) {
     })}>
       {/* Always render iframe so artwork/track name shows through */}
       <iframe
-        ref={iframeRef}
         src={embedUrl + "?utm_source=generator&theme=0"}
         width="100%"
         height={h}
@@ -781,7 +755,7 @@ function SpotifyEmbed({ embedUrl, height, style, itemId }) {
         loading="lazy"
         style={{ display: "block", border: "none" }}
       />
-      {/* Semi-transparent overlay — tap to play */}
+      {/* Semi-transparent overlay — removed when user taps */}
       {!active && (
         <div onClick={activate} style={{
           position: "absolute", inset: 0,
@@ -789,17 +763,14 @@ function SpotifyEmbed({ embedUrl, height, style, itemId }) {
           display: "flex", alignItems: "center", justifyContent: "center",
           cursor: "pointer", borderRadius: br,
         }}>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 52, height: 52, borderRadius: "50%",
-              background: "#1DB954",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              boxShadow: "0 0 24px rgba(29,185,84,0.6)" }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
-                <polygon points="5,3 19,12 5,21"/>
-              </svg>
-            </div>
-            <span style={{ color: "white", fontSize: 12, fontWeight: 700,
-              textShadow: "0 1px 4px rgba(0,0,0,0.8)" }}>Tap to play</span>
+          <div style={{
+            background: "rgba(0,0,0,0.6)", borderRadius: 20,
+            padding: "8px 18px", border: "1px solid rgba(255,255,255,0.15)",
+          }}>
+            <span style={{ color: "white", fontSize: 13, fontWeight: 700,
+              letterSpacing: 0.3, textShadow: "0 1px 4px rgba(0,0,0,0.8)" }}>
+              Tap here to listen
+            </span>
           </div>
         </div>
       )}
