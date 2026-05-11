@@ -11339,17 +11339,30 @@ function StudioScreen({ user, onExit }) {
   // Re-route iOS audio output back to speaker after mic use.
   // iOS switches to earpiece when getUserMedia is called; this forces it back.
   const restoreIOSSpeaker = async function() {
+    // iOS routes AudioContext to the earpiece when a mic stream is open.
+    // Even after mic tracks stop, the existing AudioContext stays earpiece-routed.
+    // The ONLY reliable fix is to close the AudioContext entirely and create a new one.
+    // iOS then re-evaluates the route from scratch — with no active mic, it picks the speaker.
     try {
-      const ctx = actxRef.current;
-      if (!ctx) return;
-      if (ctx.state === "suspended") { try { await ctx.resume(); } catch(e) {} }
-      const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.05), ctx.sampleRate);
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.connect(ctx.destination);
-      src.start();
-      src.stop(ctx.currentTime + 0.05);
-    } catch(e) {}
+      const old = actxRef.current;
+      if (old && old.state !== "closed") {
+        try { await old.close(); } catch(e) {}
+      }
+      actxRef.current = null;
+      gainNodesRef.current = {};
+      masterGainRef.current = null;
+      fxNodesRef.current = {};
+      scheduledRef.current = [];
+      // Small pause so iOS registers the session change before we create the new context
+      await new Promise(function(res) { setTimeout(res, 80); });
+      // Create fresh AudioContext — iOS will route this to the speaker
+      actxRef.current = new (window.AudioContext || window.webkitAudioContext)({
+        latencyHint: "interactive",
+      });
+      if (actxRef.current.state === "suspended") {
+        try { await actxRef.current.resume(); } catch(e) {}
+      }
+    } catch(e) { console.warn("[iOS speaker restore]", e); }
   };
   // micReady: true if we've confirmed mic permission this session.
   // We check the Permissions API first — if the browser shows "granted", skip the prompt.
@@ -11571,51 +11584,6 @@ function StudioScreen({ user, onExit }) {
   useEffect(function () {
     try { setSavedProjects(JSON.parse(localStorage.getItem("bf_studio_projects") || "[]")); } catch (e) {}
   }, []);
-
-  // ── Autosave ──────────────────────────────────────────────────
-  // Saves project to IndexedDB + localStorage whenever tracks change,
-  // debounced 8s so rapid edits don't hammer storage.
-  // Also runs a periodic hard save every 60s as a safety net.
-  const autosaveTimerRef = useRef(null);
-  const lastAutoSaveRef  = useRef(0);
-
-  useEffect(function() {
-    // Don't autosave if there's nothing to save
-    if (!tracks.length && !projectName) return;
-
-    // Debounce: wait 8s after last change before saving
-    clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = setTimeout(async function() {
-      try {
-        await saveProject(true); // silent autosave
-        lastAutoSaveRef.current = Date.now();
-      } catch(e) { /* autosave failure is silent — user can still save manually */ }
-    }, 8000);
-
-    return function() { clearTimeout(autosaveTimerRef.current); };
-  }, [tracks, projectName, bpm, projectKey]);
-
-  // Periodic hard save every 60s regardless of changes
-  useEffect(function() {
-    var interval = setInterval(async function() {
-      if (!tracks.length && !projectName) return;
-      try { await saveProject(true); } catch(e) {} // silent periodic autosave
-    }, 60000);
-    return function() { clearInterval(interval); };
-  }, [tracks, projectName, bpm, projectKey]);
-
-  // Save immediately when user leaves Studio (tab change, back button)
-  useEffect(function() {
-    function handleVisibilityChange() {
-      if (document.visibilityState === "hidden" && (tracks.length || projectName)) {
-        clearTimeout(autosaveTimerRef.current);
-        // Fire-and-forget — can't await in event handler
-        saveProject(true).catch(function() {}); // silent visibility-change save
-      }
-    }
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return function() { document.removeEventListener("visibilitychange", handleVisibilityChange); };
-  }, [tracks, projectName, bpm, projectKey]);
 
   // ── iOS Background Persistence ────────────────────────────────
   // iOS Safari can fully reload the page when the app is backgrounded.
@@ -13723,28 +13691,9 @@ function StudioScreen({ user, onExit }) {
         try { micInputBoost.disconnect(); } catch(e) {}
 
         // ── iOS speaker re-routing fix ────────────────────────────────────────
-        // When getUserMedia opens the mic, iOS switches AVAudioSession to
-        // playAndRecord with the default output route = earpiece (like a phone call).
-        // Even after all mic tracks are stopped, iOS keeps the earpiece routing
-        // until the audio session is explicitly re-asserted.
-        // Playing a short silent buffer through the AudioContext immediately after
-        // mic teardown forces iOS to re-evaluate the output route and switch back
-        // to the main speaker. This must happen BEFORE decodeAudioData so the
-        // context is in the correct state for playback.
-        try {
-          const forceCtx = actxRef.current || getActx();
-          if (forceCtx) {
-            if (forceCtx.state === "suspended") { await forceCtx.resume(); }
-            const silBuf  = forceCtx.createBuffer(1, forceCtx.sampleRate * 0.1, forceCtx.sampleRate);
-            const silSrc  = forceCtx.createBufferSource();
-            silSrc.buffer = silBuf;
-            silSrc.connect(forceCtx.destination);
-            silSrc.start();
-            silSrc.stop(forceCtx.currentTime + 0.1);
-            // Small pause so iOS has time to complete the route switch
-            await new Promise(function(res) { setTimeout(res, 150); });
-          }
-        } catch(routeErr) { /* non-fatal — proceed regardless */ }
+        // Close and recreate AudioContext so iOS re-routes to speaker (not earpiece).
+        // Must happen before decodeAudioData so the new context is used for playback.
+        await restoreIOSSpeaker();
         
         const blob = new Blob(chunksRef.current, { type: mime });
         const url  = URL.createObjectURL(blob);
@@ -14329,9 +14278,9 @@ function StudioScreen({ user, onExit }) {
     } catch(e){ return null; }
   };
 
-  const saveProject = async function (silent) {
+  const saveProject = async function () {
     try {
-      if (!silent) setSaveStatus("Saving...");
+      setSaveStatus("Saving...");
 
       // Generate a stable project id — reuse existing one if this project was already saved
       let list = JSON.parse(localStorage.getItem("bf_studio_projects")||"[]");
@@ -14374,8 +14323,7 @@ function StudioScreen({ user, onExit }) {
       }
 
       setSavedProjects(list); setIsSaved(true);
-      if (!silent) { setSaveStatus("Saved! ✓"); setTimeout(function(){ setSaveStatus(""); }, 2500); }
-      else { setSaveStatus("Autosaved"); setTimeout(function(){ setSaveStatus(""); }, 1500); }
+      setSaveStatus("Saved! ✓"); setTimeout(function(){ setSaveStatus(""); }, 2500);
     } catch(e){
       console.error("[BeatFinder] saveProject error:", e);
       setSaveStatus("Save failed — " + (e.message || "unknown error"));
