@@ -4152,6 +4152,153 @@ function LyricCard({ lyric, lyricIndex, onDelete, onEditLyric }) {
 // PUBLIC PROFILE SCREEN
 // =============================================================================
 
+
+// =============================================================================
+// COMMENTS PANEL — standalone so keyboard doesn't collapse on rerender
+// =============================================================================
+function CommentsPanel({ contentId, itemComments, currentUser, onSubmit, onDelete }) {
+  var [text, setText]         = React.useState("");
+  var [replyTo, setReplyTo]   = React.useState(null);
+  var [expanded, setExpanded] = React.useState(false);
+  var [submitting, setSubmitting] = React.useState(false);
+
+  var allComments = itemComments || [];
+  var topLevel    = allComments.filter(function(c) { return !c.parentId; });
+  var getReplies  = function(id) { return allComments.filter(function(c) { return c.parentId === id; }); };
+  var PREVIEW = 3;
+  var showMore = topLevel.length > PREVIEW && !expanded;
+  var visibleTop = expanded ? topLevel : topLevel.slice(0, PREVIEW);
+
+  function submit() {
+    if (!text.trim() || !currentUser || submitting) return;
+    setSubmitting(true);
+    onSubmit(contentId, text.trim(), replyTo ? replyTo.id : null, function() {
+      setText(""); setReplyTo(null); setSubmitting(false);
+    }, function() { setSubmitting(false); });
+  }
+
+  function CommentAvatar({ c, size }) {
+    return (
+      <div style={{ width: size, height: size, borderRadius: "50%", flexShrink: 0,
+        background: "linear-gradient(135deg,#6B21A8,#C026D3)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        color: "white", fontWeight: 800, fontSize: size * 0.4, overflow: "hidden" }}>
+        {c.avatarUrl
+          ? <img src={c.avatarUrl} alt={c.username} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          : (c.username || "?")[0].toUpperCase()}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ borderTop: "1px solid #1a1a1a", marginTop: 12, paddingTop: 12 }}>
+      <div style={{ color: "#888", fontSize: 12, fontWeight: 700, marginBottom: 10 }}>COMMENTS</div>
+
+      {topLevel.length === 0 && (
+        <div style={{ color: "#444", fontSize: 13, marginBottom: 12 }}>No comments yet. Be the first!</div>
+      )}
+
+      {visibleTop.map(function(c) {
+        var replies = getReplies(c.id);
+        return (
+          <div key={c.id} style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <CommentAvatar c={c} size={32} />
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                  <span style={{ color: "white", fontWeight: 700, fontSize: 13 }}>@{c.username}</span>
+                  <span style={{ color: "#444", fontSize: 11 }}>{new Date(c.createdAt).toLocaleDateString()}</span>
+                </div>
+                <div style={{ color: "#ccc", fontSize: 13, lineHeight: 1.5 }}>{c.text}</div>
+                <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
+                  {currentUser && (
+                    <button onClick={function() { setReplyTo({ id: c.id, username: c.username }); setText("@" + c.username + " "); }}
+                      style={{ background: "none", border: "none", color: "#C026D3", fontSize: 12, cursor: "pointer", padding: 0, fontWeight: 600 }}>
+                      Reply
+                    </button>
+                  )}
+                  {currentUser && currentUser.username === c.username && (
+                    <button onClick={function() { onDelete(contentId, c.id); }}
+                      style={{ background: "none", border: "none", color: "#444", fontSize: 12, cursor: "pointer", padding: 0 }}>
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            {replies.map(function(r) {
+              return (
+                <div key={r.id} style={{ marginLeft: 42, marginTop: 8, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <CommentAvatar c={r} size={26} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 2 }}>
+                      <span style={{ color: "white", fontWeight: 700, fontSize: 12 }}>@{r.username}</span>
+                      <span style={{ color: "#444", fontSize: 11 }}>{new Date(r.createdAt).toLocaleDateString()}</span>
+                    </div>
+                    <div style={{ color: "#ccc", fontSize: 12, lineHeight: 1.5 }}>{r.text}</div>
+                    {currentUser && currentUser.username === r.username && (
+                      <button onClick={function() { onDelete(contentId, r.id); }}
+                        style={{ background: "none", border: "none", color: "#444", fontSize: 11, cursor: "pointer", padding: 0, marginTop: 4 }}>
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      {showMore && (
+        <button onClick={function() { setExpanded(true); }}
+          style={{ background: "none", border: "1px solid #2a2a2a", borderRadius: 20, color: "#C026D3",
+            fontSize: 13, fontWeight: 600, padding: "6px 16px", cursor: "pointer", marginBottom: 12, width: "100%" }}>
+          Show all {topLevel.length} comments
+        </button>
+      )}
+      {expanded && topLevel.length > PREVIEW && (
+        <button onClick={function() { setExpanded(false); }}
+          style={{ background: "none", border: "1px solid #2a2a2a", borderRadius: 20, color: "#555",
+            fontSize: 13, padding: "6px 16px", cursor: "pointer", marginBottom: 12, width: "100%" }}>
+          Show less
+        </button>
+      )}
+
+      {currentUser ? (
+        <div style={{ marginTop: 8 }}>
+          {replyTo && (
+            <div style={{ color: "#C026D3", fontSize: 12, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+              Replying to @{replyTo.username}
+              <button onClick={function() { setReplyTo(null); setText(""); }}
+                style={{ background: "none", border: "none", color: "#444", cursor: "pointer", padding: 0, fontSize: 14 }}>
+                &#10005;
+              </button>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={text}
+              onChange={function(e) { setText(e.target.value); }}
+              onKeyDown={function(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
+              placeholder="Add a comment..."
+              style={{ flex: 1, background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 20,
+                padding: "8px 14px", color: "white", fontSize: 13, outline: "none" }} />
+            <button onClick={submit} disabled={submitting || !text.trim()}
+              style={{ background: "#C026D3", border: "none", borderRadius: 20, color: "white",
+                fontWeight: 700, fontSize: 13, padding: "8px 16px", cursor: "pointer",
+                opacity: submitting ? 0.6 : 1 }}>
+              Post
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ color: "#444", fontSize: 12, marginTop: 8 }}>Sign in to comment</div>
+      )}
+    </div>
+  );
+}
+
+
 // =============================================================================
 // CONTENT TABS — shown on every public profile (Beats / Music / Videos)
 // =============================================================================
@@ -4160,11 +4307,9 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
   var [items, setItems]       = React.useState([]);
   var [loading, setLoading]   = React.useState(false);
   var [comments, setComments] = React.useState({});
-  var [commentText, setCommentText] = React.useState("");
-  var [replyTo, setReplyTo]         = React.useState(null);
+
   var [likes, setLikes]             = React.useState({});
-  var [submitting, setSubmitting]   = React.useState(false);
-  var [activeComment, setActiveComment] = React.useState(null); // which item's comment box is focused
+
 
   function loadContent(type) {
     setLoading(true); setItems([]);
@@ -4219,12 +4364,10 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
       .catch(function() {});
   }
 
-  function submitComment(contentId) {
-    if (!commentText.trim() || !currentUser) return;
-    setSubmitting(true);
+  function submitComment(contentId, text, parentId, onSuccess, onError) {
     apiFetch("/api/content/" + contentId + "/comments", {
       method: "POST",
-      body: JSON.stringify({ text: commentText.trim(), parentId: replyTo ? replyTo.id : null })
+      body: JSON.stringify({ text: text, parentId: parentId || null })
     }).then(function(newComment) {
       setComments(function(prev) {
         var n = Object.assign({}, prev);
@@ -4234,10 +4377,8 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
       setItems(function(prev) { return prev.map(function(it) {
         return it.id === contentId ? Object.assign({}, it, { commentCount: it.commentCount + 1 }) : it;
       }); });
-      setCommentText("");
-      setReplyTo(null);
-      setSubmitting(false);
-    }).catch(function() { setSubmitting(false); });
+      if (onSuccess) onSuccess();
+    }).catch(function() { if (onError) onError(); });
   }
 
   function deleteComment(contentId, commentId) {
@@ -4261,117 +4402,6 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
   ];
 
   // Render comment thread for a content item
-  function CommentsPanel({ contentId, itemComments }) {
-    var allComments = itemComments || [];
-    var topLevel    = allComments.filter(function(c) { return !c.parentId; });
-    var getReplies  = function(id) { return allComments.filter(function(c) { return c.parentId === id; }); };
-
-    return (
-      <div style={{ borderTop: "1px solid #1a1a1a", marginTop: 12, paddingTop: 12 }}>
-        <div style={{ color: "#888", fontSize: 12, fontWeight: 700, marginBottom: 10 }}>COMMENTS</div>
-
-        {topLevel.length === 0 && (
-          <div style={{ color: "#444", fontSize: 13, marginBottom: 12 }}>No comments yet. Be the first!</div>
-        )}
-
-        {topLevel.map(function(c) {
-          var replies = getReplies(c.id);
-          return (
-            <div key={c.id} style={{ marginBottom: 12 }}>
-              <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                <div style={{ width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
-                  background: "linear-gradient(135deg,#6B21A8,#C026D3)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  color: "white", fontWeight: 800, fontSize: 13, overflow: "hidden" }}>
-                  {c.avatarUrl
-                    ? <img src={c.avatarUrl} alt={c.username} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    : (c.username || "?")[0].toUpperCase()}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                    <span style={{ color: "white", fontWeight: 700, fontSize: 13 }}>@{c.username}</span>
-                    <span style={{ color: "#444", fontSize: 11 }}>{new Date(c.createdAt).toLocaleDateString()}</span>
-                  </div>
-                  <div style={{ color: "#ccc", fontSize: 13, lineHeight: 1.5 }}>{c.text}</div>
-                  <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
-                    {currentUser && (
-                      <button onClick={function() { setReplyTo({ id: c.id, username: c.username }); setCommentText("@" + c.username + " "); }}
-                        style={{ background: "none", border: "none", color: "#C026D3", fontSize: 12, cursor: "pointer", padding: 0, fontWeight: 600 }}>
-                        Reply
-                      </button>
-                    )}
-                    {currentUser && currentUser.username === c.username && (
-                      <button onClick={function() { deleteComment(contentId, c.id); }}
-                        style={{ background: "none", border: "none", color: "#444", fontSize: 12, cursor: "pointer", padding: 0 }}>
-                        Delete
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {replies.map(function(r) {
-                return (
-                  <div key={r.id} style={{ marginLeft: 42, marginTop: 8, display: "flex", gap: 8, alignItems: "flex-start" }}>
-                    <div style={{ width: 26, height: 26, borderRadius: "50%", flexShrink: 0,
-                      background: "linear-gradient(135deg,#6B21A8,#C026D3)",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      color: "white", fontWeight: 800, fontSize: 11, overflow: "hidden" }}>
-                      {r.avatarUrl
-                        ? <img src={r.avatarUrl} alt={r.username} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                        : (r.username || "?")[0].toUpperCase()}
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 2 }}>
-                        <span style={{ color: "white", fontWeight: 700, fontSize: 12 }}>@{r.username}</span>
-                        <span style={{ color: "#444", fontSize: 11 }}>{new Date(r.createdAt).toLocaleDateString()}</span>
-                      </div>
-                      <div style={{ color: "#ccc", fontSize: 12, lineHeight: 1.5 }}>{r.text}</div>
-                      {currentUser && currentUser.username === r.username && (
-                        <button onClick={function() { deleteComment(contentId, r.id); }}
-                          style={{ background: "none", border: "none", color: "#444", fontSize: 11, cursor: "pointer", padding: 0, marginTop: 4 }}>
-                          Delete
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
-
-        {currentUser ? (
-          <div style={{ marginTop: 8 }}>
-            {replyTo && (
-              <div style={{ color: "#C026D3", fontSize: 12, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
-                Replying to @{replyTo.username}
-                <button onClick={function() { setReplyTo(null); setCommentText(""); }}
-                  style={{ background: "none", border: "none", color: "#444", cursor: "pointer", padding: 0, fontSize: 14 }}>
-                  &#10005;
-                </button>
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 8 }}>
-              <input value={commentText} onChange={function(e) { setCommentText(e.target.value); }}
-                onKeyDown={function(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(contentId); } }}
-                placeholder="Add a comment..."
-                style={{ flex: 1, background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 20,
-                  padding: "8px 14px", color: "white", fontSize: 13, outline: "none" }} />
-              <button onClick={function() { submitComment(contentId); }} disabled={submitting || !commentText.trim()}
-                style={{ background: "#C026D3", border: "none", borderRadius: 20, color: "white",
-                  fontWeight: 700, fontSize: 13, padding: "8px 16px", cursor: "pointer", opacity: submitting ? 0.6 : 1 }}>
-                Post
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div style={{ color: "#444", fontSize: 12, marginTop: 8 }}>Sign in to comment</div>
-        )}
-      </div>
-    );
-  }
-
   function ContentCard({ item }) {
     var isLiked = likes[item.id] || false;
     var itemComments = comments[item.id] || [];
@@ -4435,7 +4465,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
           </div>
 
           {/* Comments — always visible */}
-          <CommentsPanel contentId={item.id} itemComments={itemComments} />
+          <CommentsPanel contentId={item.id} itemComments={itemComments} currentUser={currentUser} onSubmit={submitComment} onDelete={deleteComment} />
         </div>
       </div>
     );
