@@ -689,6 +689,19 @@ function LogicTrackHeader({
 // Set this to your Render/Railway URL after deployment.
 const API_BASE = "https://beatfinder-backend.onrender.com";
 
+// Global content-deletion event bus
+// Any component that deletes content dispatches this; any that displays it listens.
+function dispatchContentDeleted(id, kind) {
+  window.dispatchEvent(new CustomEvent("bf:contentDeleted", { detail: { id: id, kind: kind } }));
+}
+function useContentDeletedListener(callback) {
+  React.useEffect(function() {
+    function handler(e) { callback(e.detail); }
+    window.addEventListener("bf:contentDeleted", handler);
+    return function() { window.removeEventListener("bf:contentDeleted", handler); };
+  }, [callback]);
+}
+
 // -- In-memory cache (10 minutes TTL) -----------------------------------------
 const cache = {};
 const CACHE_TTL = 10 * 60 * 1000;
@@ -1500,7 +1513,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
             ←
           </button>
           <div style={{ flex: 1 }}>
-            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13 }}>✍️ Lyrics Notepad</div>
+            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13 }}>Lyrics Notepad</div>
           </div>
           <button onClick={handleSave} style={{
             background: saved ? "#22C55E" : "#C026D3",
@@ -3040,11 +3053,66 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
 // =============================================================================
 // BEAT LEASE CARD
 // =============================================================================
-function BeatLeaseCard({ beat, user }) {
-  const [loading,   setLoading]   = useState(false);
-  const [err,       setErr]       = useState("");
-  const [previewing,setPreviewing]= useState(false);
-  const isFree  = beat.price === "free";
+function BeatLeaseCard({ beat, user, onViewProfile }) {
+  const [loading,     setLoading]     = useState(false);
+  const [err,         setErr]         = useState("");
+  const [previewing,  setPreviewing]  = useState(false);
+  const [previewTime, setPreviewTime] = useState(0);   // 0-30 seconds elapsed
+  const audioRef    = React.useRef(null);
+  const timerRef    = React.useRef(null);
+  const isFree  = beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
+
+  // Enforce 30-second hard stop — no scrubbing, no skipping
+  function startPreview() {
+    if (previewing) { stopPreview(); return; }
+    setPreviewing(true);
+    setPreviewTime(0);
+  }
+
+  function stopPreview() {
+    setPreviewing(false);
+    setPreviewTime(0);
+    clearInterval(timerRef.current);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+  }
+
+  // When audio starts playing, enforce the 30s limit via a timer
+  function onAudioPlay(e) {
+    clearInterval(timerRef.current);
+    var start = Date.now() - (previewTime * 1000);
+    timerRef.current = setInterval(function() {
+      var elapsed = (Date.now() - start) / 1000;
+      setPreviewTime(Math.min(elapsed, 30));
+      if (elapsed >= 30) {
+        clearInterval(timerRef.current);
+        stopPreview();
+      }
+    }, 100);
+  }
+
+  function onAudioPause() {
+    clearInterval(timerRef.current);
+  }
+
+  // Lock currentTime to the preview window — prevent scrubbing past 30s
+  function onTimeUpdate(e) {
+    var el = e.target;
+    var maxTime = (el.dataset.startTime ? parseFloat(el.dataset.startTime) : 0) + 30;
+    if (el.currentTime >= maxTime) {
+      el.pause();
+      stopPreview();
+    }
+    // Also lock backward scrubbing before startTime
+    var startT = el.dataset.startTime ? parseFloat(el.dataset.startTime) : 0;
+    if (el.currentTime < startT) {
+      el.currentTime = startT;
+    }
+  }
+
+  React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
 
   const handleBuyLease = async () => {
     if (!user) { setErr("Please log in to purchase a lease"); return; }
@@ -3052,6 +3120,14 @@ function BeatLeaseCard({ beat, user }) {
     setErr("");
     try {
       const result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
+      // Reset loading if user returns from Stripe without completing payment
+      const resetOnReturn = () => {
+        if (document.visibilityState === "visible") {
+          document.removeEventListener("visibilitychange", resetOnReturn);
+          setLoading(false);
+        }
+      };
+      document.addEventListener("visibilitychange", resetOnReturn);
       window.location.href = result.checkout_url;
     } catch (e) {
       setErr(e.message);
@@ -3093,13 +3169,13 @@ function BeatLeaseCard({ beat, user }) {
       </div>
 
       <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>
-        By <span style={{ color: "#C026D3", fontWeight: 700 }}>{beat.producer}</span> • {beat.downloads} downloads
+        By <span onClick={function(e) { e.stopPropagation(); if (onViewProfile && beat.producer) onViewProfile(beat.producer); }} style={{ color: "#C026D3", fontWeight: 700, cursor: onViewProfile && beat.producer ? "pointer" : "default" }}>{beat.producer}</span> • {beat.downloads} downloads
       </div>
 
       {err && <div style={{ color: "#F87171", fontSize: 12, marginBottom: 10 }}>{err}</div>}
 
       <button
-        onClick={() => setPreviewing(!previewing)}
+        onClick={startPreview}
         style={{
           width: "100%", borderRadius: 12, padding: "11px",
           background: previewing ? "rgba(99,91,255,0.2)" : "transparent",
@@ -3114,22 +3190,41 @@ function BeatLeaseCard({ beat, user }) {
       </button>
 
       {previewing && beat.url && (
-        <audio
-          src={beat.url + "#t=60,90"}
-          autoPlay
-          controls
-          controlsList="nodownload"
-          style={{ width: "100%", marginBottom: 10, borderRadius: 8, height: 36 }}
-          onTimeUpdate={e => {
-            const el = e.target;
-            // Stop at 30 seconds of playback (1:00 - 1:30)
-            if (el.currentTime >= 90) {
-              el.pause();
-              setPreviewing(false);
-            }
-          }}
-          onEnded={() => setPreviewing(false)}
-        />
+        <div style={{ marginBottom: 10 }}>
+          {/* Hidden audio — no controls so users cannot scrub or seek */}
+          <audio
+            ref={audioRef}
+            src={beat.url + "#t=45"}
+            autoPlay
+            data-start-time="45"
+            onPlay={onAudioPlay}
+            onPause={onAudioPause}
+            onTimeUpdate={onTimeUpdate}
+            onEnded={stopPreview}
+          />
+          {/* Custom minimal preview bar — shows time only, no scrubbing */}
+          <div style={{ background: "#1a1a1a", borderRadius: 10, padding: "10px 14px",
+            border: "1px solid #2a2a2a", display: "flex", alignItems: "center", gap: 12 }}>
+            <button onClick={stopPreview}
+              style={{ background: "none", border: "none", color: "#635BFF", cursor: "pointer",
+                fontSize: 18, padding: 0, flexShrink: 0, lineHeight: 1 }}>
+              ■
+            </button>
+            {/* Progress bar — display only, not interactive */}
+            <div style={{ flex: 1, height: 4, background: "#333", borderRadius: 2, overflow: "hidden" }}>
+              <div style={{ height: "100%", borderRadius: 2,
+                background: "linear-gradient(90deg,#635BFF,#C026D3)",
+                width: (previewTime / 30 * 100) + "%",
+                transition: "width 0.1s linear" }} />
+            </div>
+            <div style={{ color: "#888", fontSize: 12, fontWeight: 600, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
+              {Math.floor(previewTime)}s / 30s
+            </div>
+          </div>
+          <div style={{ color: "#555", fontSize: 11, textAlign: "center", marginTop: 6 }}>
+            30s preview only
+          </div>
+        </div>
       )}
 
       {isFree ? (
@@ -3139,7 +3234,7 @@ function BeatLeaseCard({ beat, user }) {
           border: "none", color: "white", fontWeight: 800, fontSize: 15,
           cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
         }}>
-          ⬇️ Download Free MP3
+          ↓ Download Free MP3
         </button>
       ) : (
         <button onClick={handleBuyLease} disabled={loading} style={{
@@ -3228,7 +3323,7 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
 
       {leases.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 12 }}>✅ Your Purchased Leases</div>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Your Purchased Leases</div>
           {leases.map(lease => (
             <div key={lease.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(34,197,94,0.3)" }}>
               <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{lease.beat_title}</div>
@@ -3244,7 +3339,7 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
                   document.body.removeChild(a);
                 }}
                 style={{ width: "100%", borderRadius: 12, padding: "13px", background: "linear-gradient(135deg,#22C55E,#16A34A)", border: "none", color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
-                ⬇️ Download Your Lease MP3
+                ↓ Download Your Lease MP3
               </button>
             </div>
           ))}
@@ -3263,7 +3358,7 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
 // =============================================================================
 // TRENDING SCREEN
 // =============================================================================
-function TrendingScreen({ savedIds, onSave, onPlay }) {
+function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
   const [trending,  setTrending]  = useState([]);
   const [rising,    setRising]    = useState([]);
   const [fresh,     setFresh]     = useState([]);
@@ -3348,36 +3443,108 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
   };
 
   // Producer carousel card (no videoId)
-  const ProducerCard = ({ beat }) => (
-    <div style={{
-      flexShrink: 0, width: 160,
-      background: "#111", borderRadius: 14,
-      border: "1px solid rgba(34,197,94,0.2)", overflow: "hidden",
-    }}>
-      <div style={{
-        height: 100, background: "linear-gradient(135deg,#052e16,#166534)",
-        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36,
-      }}>
+  const ProducerCard = ({ beat, user }) => {
+    const [prev,       setPrev]       = React.useState(false);
+    const [pTime,      setPTime]      = React.useState(0);
+    const [buyLoading, setBuyLoading] = React.useState(false);
+    const [buyErr,     setBuyErr]     = React.useState("");
+    const aRef = React.useRef(null);
+    const tRef = React.useRef(null);
+    const isFree = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
 
-      </div>
-      <div style={{ padding: "10px 10px 12px" }}>
-        <div style={{ color: "white", fontSize: 12, fontWeight: 700, lineHeight: 1.4, marginBottom: 4, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-          {beat.title}
+    function startPrev() { if (prev) { stopPrev(); return; } setPrev(true); setPTime(0); }
+    function stopPrev() {
+      setPrev(false); setPTime(0); clearInterval(tRef.current);
+      if (aRef.current) { aRef.current.pause(); aRef.current.currentTime = 0; }
+    }
+    function onPlay() {
+      clearInterval(tRef.current);
+      var start = Date.now();
+      tRef.current = setInterval(function() {
+        var el = (Date.now() - start) / 1000;
+        setPTime(Math.min(el, 30));
+        if (el >= 30) { clearInterval(tRef.current); stopPrev(); }
+      }, 100);
+    }
+    function onTimeUpdate(e) {
+      var el = e.target, st = parseFloat(el.dataset.startTime || 0);
+      if (el.currentTime >= st + 30) { el.pause(); stopPrev(); }
+      if (el.currentTime < st) el.currentTime = st;
+    }
+    async function handleBuy() {
+      if (!user) { setBuyErr("Log in to purchase"); return; }
+      setBuyLoading(true); setBuyErr("");
+      try {
+        var result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
+        var resetOnReturn = function() {
+          if (document.visibilityState === "visible") {
+            document.removeEventListener("visibilitychange", resetOnReturn);
+            setBuyLoading(false);
+          }
+        };
+        document.addEventListener("visibilitychange", resetOnReturn);
+        window.location.href = result.checkout_url;
+      } catch(e) { setBuyErr(e.message); setBuyLoading(false); }
+    }
+    function handleDownload() {
+      apiFetch("/api/producer/beats/" + beat.id + "/download", { method: "POST" }).catch(function(){});
+      var a = document.createElement("a");
+      a.href = beat.url; a.download = (beat.title || "beat") + ".mp3"; a.target = "_blank";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }
+    React.useEffect(function() { return function() { clearInterval(tRef.current); }; }, []);
+
+    return (
+      <div style={{ flexShrink: 0, width: 220, background: "#111", borderRadius: 14, border: "1px solid rgba(34,197,94,0.2)", overflow: "hidden" }}>
+        <div style={{ height: 80, background: "linear-gradient(135deg,#052e16,#166534)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <AppIcon id="note" size={28} />
         </div>
-        <div style={{ color: "#22C55E", fontSize: 11 }}>{beat.producer}</div>
-        <div style={{ marginTop: 8 }}>
+        <div style={{ padding: "10px 10px 12px" }}>
+          {/* Title */}
+          <div style={{ color: "white", fontSize: 12, fontWeight: 700, lineHeight: 1.4, marginBottom: 4, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{beat.title}</div>
+          {/* Producer + price badge */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div onClick={function(e) { e.stopPropagation(); if (onViewProfile && beat.producer) onViewProfile(beat.producer); }}
+              style={{ color: "#22C55E", fontSize: 11, fontWeight: 600, cursor: onViewProfile && beat.producer ? "pointer" : "default" }}>
+              {beat.producer}
+            </div>
+            <div style={{ background: isFree ? "rgba(34,197,94,0.15)" : "rgba(192,38,211,0.15)", border: "1px solid " + (isFree ? "rgba(34,197,94,0.3)" : "rgba(192,38,211,0.3)"), borderRadius: 20, padding: "1px 8px", fontSize: 10, color: isFree ? "#22C55E" : "#C026D3", fontWeight: 700 }}>
+              {isFree ? "FREE" : beat.price}
+            </div>
+          </div>
+          {/* 30s preview */}
           {beat.url && (
-            <audio
-              src={beat.url + "#t=60,90"}
-              controls
-              controlsList="nodownload"
-              style={{ width: "100%", height: 28, borderRadius: 6 }}
-            />
+            <>
+              <button onClick={startPrev} style={{ width: "100%", background: prev ? "rgba(99,91,255,0.2)" : "transparent", border: "1px solid " + (prev ? "#635BFF" : "#333"), borderRadius: 8, color: prev ? "#635BFF" : "#888", fontSize: 11, fontWeight: 700, padding: "5px 0", cursor: "pointer", marginBottom: 6 }}>
+                {prev ? "■ Stop" : "▶ Preview"}
+              </button>
+              {prev && (
+                <div style={{ background: "#1a1a1a", borderRadius: 6, padding: "5px 8px", display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <audio ref={aRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
+                    onPlay={onPlay} onPause={function() { clearInterval(tRef.current); }} onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
+                  <div style={{ flex: 1, height: 3, background: "#333", borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ height: "100%", background: "linear-gradient(90deg,#635BFF,#C026D3)", width: (pTime / 30 * 100) + "%", transition: "width 0.1s linear" }} />
+                  </div>
+                  <span style={{ color: "#666", fontSize: 10, fontVariantNumeric: "tabular-nums" }}>{Math.floor(pTime)}s</span>
+                </div>
+              )}
+            </>
+          )}
+          {/* Buy or Download */}
+          {buyErr && <div style={{ color: "#F87171", fontSize: 10, marginBottom: 4 }}>{buyErr}</div>}
+          {isFree ? (
+            <button onClick={handleDownload} style={{ width: "100%", background: "linear-gradient(135deg,#22C55E,#16A34A)", border: "none", borderRadius: 8, color: "white", fontWeight: 800, fontSize: 11, padding: "7px 0", cursor: "pointer" }}>
+              ↓ Free Download
+            </button>
+          ) : (
+            <button onClick={handleBuy} disabled={buyLoading} style={{ width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 8, color: "white", fontWeight: 800, fontSize: 11, padding: "7px 0", cursor: "pointer", opacity: buyLoading ? 0.6 : 1 }}>
+              {buyLoading ? "..." : "Buy — " + beat.price}
+            </button>
           )}
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const SectionHeader = ({ emoji, title, subtitle, color }) => (
     <div style={{ marginBottom: 14, paddingLeft: 16 }}>
@@ -3431,7 +3598,7 @@ function TrendingScreen({ savedIds, onSave, onPlay }) {
             ) : rising.map((beat, i) => (
               beat.videoId
                 ? <CarouselCard key={beat.videoId} beat={beat} />
-                : <ProducerCard key={beat.id || i} beat={beat} />
+                : <ProducerCard key={beat.id || i} beat={beat} user={user} />
             ))}
           </div>
         </div>
@@ -3930,7 +4097,7 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile, sa
             <div style={{ textAlign: "center", padding: "32px 0" }}>
               <div style={{ color: "#333", fontSize: 13, lineHeight: 1.8 }}>
                 No lyrics saved yet.<br />
-                <span style={{ color: "#555" }}>Tap ✍️ Write Lyrics on any beat to get started.</span>
+                <span style={{ color: "#555" }}>Tap Write Lyrics on any beat to get started.</span>
               </div>
             </div>
           ) : (
@@ -3951,7 +4118,7 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile, sa
                     {lyric.beatTitle && (
                       <div style={{ color: "#555", fontSize: 12, marginBottom: 6,
                         whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        🎵 {lyric.beatTitle}
+                        {lyric.beatTitle}
                       </div>
                     )}
                     <div style={{ color: "#444", fontSize: 12, lineHeight: 1.5,
@@ -3973,7 +4140,113 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile, sa
 // =============================================================================
 // EXCLUSIVE MEMBERS SCREEN
 // =============================================================================
-function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave, onSignUp }) {
+// =============================================================================
+// MEMBERS BEATS TAB
+// priced=true  → Exclusive Beats (paid leases, BeatLeaseCard with preview + buy)
+// priced=false → MP3 Downloads   (free beats, direct download)
+// =============================================================================
+function MembersBeatsTab({ user, priced, onViewProfile }) {
+  var [beats,   setBeats]   = React.useState([]);
+  var [loading, setLoading] = React.useState(true);
+  var [error,   setError]   = React.useState(null);
+
+  function isFreePrice(p) {
+    return !p || p === "free" || p === "£0" || p === "0" || p === "£0.00" || p === "0.00";
+  }
+
+  React.useEffect(function() {
+    setLoading(true); setError(null);
+    apiFetch("/api/producer/beats")
+      .then(function(all) {
+        var filtered = (all || []).filter(function(b) {
+          return priced ? !isFreePrice(b.price) : isFreePrice(b.price);
+        });
+        setBeats(filtered);
+        setLoading(false);
+      })
+      .catch(function(e) { setError(e.message); setLoading(false); });
+  }, [priced]);
+
+  // Remove beat instantly if deleted from profile dashboard
+  useContentDeletedListener(React.useCallback(function(detail) {
+    if (detail.kind === "beat") {
+      setBeats(function(prev) { return prev.filter(function(b) { return b.id !== detail.id; }); });
+    }
+  }, []));
+
+  if (loading) return <BFLoader type="spinner" text="LOADING BEATS..." />;
+
+  if (error) return (
+    <div style={{ background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 14, padding: 20, textAlign: "center", margin: "20px 0" }}>
+      <div style={{ color: "#F87171", fontWeight: 700, fontSize: 15 }}>Could not load beats</div>
+      <div style={{ color: "#888", fontSize: 13, marginTop: 8 }}>{error}</div>
+    </div>
+  );
+
+  if (beats.length === 0) return (
+    <div style={{ textAlign: "center", padding: "60px 0" }}>
+      <div style={{ fontSize: 48, marginBottom: 16 }}><AppIcon id="note" size={40} /></div>
+      <div style={{ color: "white", fontWeight: 800, fontSize: 17, marginBottom: 8 }}>
+        {priced ? "No beats available yet" : "No free downloads yet"}
+      </div>
+      <div style={{ color: "#555", fontSize: 13, lineHeight: 1.7 }}>
+        {priced
+          ? "Producer Pro members can upload beats from their Profile tab."
+          : "Producers can set a beat price to £0 to make it free to download."}
+      </div>
+    </div>
+  );
+
+  if (priced) {
+    // Exclusive Beats — full BeatLeaseCard with 30s preview + buy
+    return (
+      <div>
+        <div style={{ color: "#F59E0B", fontWeight: 700, fontSize: 12, letterSpacing: 1, marginBottom: 14 }}>
+          {beats.length} BEAT{beats.length !== 1 ? "S" : ""} AVAILABLE
+        </div>
+        {beats.map(function(beat) {
+          return <BeatLeaseCard key={beat.id} beat={beat} user={user} onViewProfile={onViewProfile} />;
+        })}
+      </div>
+    );
+  }
+
+  // MP3 Downloads — free beats, direct download button
+  return (
+    <div>
+      <div style={{ color: "#C026D3", fontWeight: 700, fontSize: 12, letterSpacing: 1, marginBottom: 14 }}>
+        {beats.length} FREE DOWNLOAD{beats.length !== 1 ? "S" : ""} AVAILABLE
+      </div>
+      {beats.map(function(beat) {
+        return (
+          <div key={beat.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(34,197,94,0.2)" }}>
+            <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{beat.title}</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+              {beat.genre && (
+                <div style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>
+              )}
+              <div style={{ background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#22C55E", fontWeight: 700 }}>FREE</div>
+              <div style={{ color: "#555", fontSize: 11 }}>By <span onClick={function(e) { e.stopPropagation(); if (onViewProfile && beat.producer) onViewProfile(beat.producer); }} style={{ color: "#C026D3", fontWeight: 700, cursor: onViewProfile && beat.producer ? "pointer" : "default" }}>{beat.producer}</span> • {beat.downloads || 0} downloads</div>
+            </div>
+            <button onClick={function() {
+              apiFetch("/api/producer/beats/" + beat.id + "/download", { method: "POST" }).catch(function(){});
+              var a = document.createElement("a");
+              a.href = beat.url; a.download = (beat.title || "beat") + ".mp3"; a.target = "_blank";
+              document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            }} style={{ width: "100%", borderRadius: 12, padding: "13px", border: "none",
+              background: "linear-gradient(135deg,#22C55E,#16A34A)",
+              color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              ↓ Free Download MP3
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave, onSignUp, onViewProfile }) {
   const isPro = user?.isPro || user?.isArtistPro;
   const [tab, setTab] = useState("beats");
 
@@ -4093,21 +4366,11 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave, onSignUp
       </div>
 
       {tab === "beats" && (
-        <div>
-          
-          <div style={{ background: "linear-gradient(135deg,#1a0040,#2d0060)", borderRadius: 16, padding: "16px", marginBottom: 20, border: "1px solid rgba(192,38,211,0.3)" }}>
-            <div style={{ color: "#C026D3", fontSize: 11, fontWeight: 800, letterSpacing: 1, marginBottom: 6 }}>FEATURED PRODUCER</div>
-            <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 4 }}>Top producers upload here daily</div>
-            <div style={{ color: "#888", fontSize: 12 }}>Exclusive content only available to members</div>
-          </div>
-
-          <div style={{ color: "#F59E0B", fontWeight: 700, fontSize: 12, letterSpacing: 1, marginBottom: 12 }}>EXCLUSIVE DROPS</div>
-          <BeatFeed artistName="exclusive premium" savedIds={savedIds} onSave={onSave} onPlay={onPlay} filterTitle={false} />
-        </div>
+        <MembersBeatsTab user={user} priced={true} onViewProfile={onViewProfile} />
       )}
 
       {tab === "mp3s" && (
-        <ProducerBeatsScreen onPlay={onPlay} savedIds={savedIds} onSave={onSave} user={user} />
+        <MembersBeatsTab user={user} priced={false} onViewProfile={onViewProfile} />
       )}
     </div>
   );
@@ -4389,50 +4652,71 @@ function PostSheet({ user, onClose, onPosted }) {
     setImages(function(prev) { return prev.filter(function(_, i) { return i !== idx; }); });
   }
 
-  function submitStatus() {
+  async function submitStatus() {
     if (!text.trim() && images.length === 0) return;
-    setLoading(true);
+    setLoading(true); setMsg("");
     var fd = new FormData();
     fd.append("text", text.trim());
     images.forEach(function(img) { fd.append("images", img.file); });
-    fetch(API_BASE + "/api/posts/status", {
-      method: "POST",
-      headers: { Authorization: "Bearer " + (getToken() || "") },
-      body: fd
-    }).then(function(r) { return r.json(); })
-      .then(function(data) {
+    var attempt = 0;
+    while (attempt < 2) {
+      try {
+        var r = await fetch(API_BASE + "/api/posts/status", {
+          method: "POST",
+          headers: { Authorization: "Bearer " + (getToken() || "") },
+          body: fd,
+        });
+        var data = await r.json().catch(function() { return {}; });
+        if (!r.ok) throw new Error(data.detail || ("Error " + r.status));
         if (data.detail) throw new Error(data.detail);
         setLoading(false);
         onPosted && onPosted(data);
         onClose();
-      }).catch(function(err) { setMsg(err.message); setLoading(false); });
+        return;
+      } catch(err) {
+        attempt++;
+        if (attempt >= 2) { setMsg(err.message || "Post failed. Please try again."); setLoading(false); return; }
+        // brief pause before retry (handles cold-start / transient network blip)
+        await new Promise(function(res) { setTimeout(res, 1200); });
+      }
+    }
   }
 
   function submitMusic() {
     if (!spotifyUrl.trim()) return;
-    setLoading(true);
+    setLoading(true); setMsg("");
     apiFetch("/api/posts/music", { method: "POST", body: JSON.stringify({ spotifyUrl: spotifyUrl.trim(), caption: caption.trim() }) })
       .then(function(data) { setLoading(false); onPosted && onPosted(data); onClose(); })
-      .catch(function(err) { setMsg(err.message); setLoading(false); });
+      .catch(function(err) { setMsg(err.message || "Failed to post. Please try again."); setLoading(false); });
   }
 
-  function submitVideo(file) {
+  async function submitVideo(file) {
     if (!file) return;
-    setLoading(true);
+    setLoading(true); setMsg("");
     var fd = new FormData();
     fd.append("file", file);
     fd.append("caption", caption.trim());
-    fetch(API_BASE + "/api/posts/video", {
-      method: "POST",
-      headers: { Authorization: "Bearer " + (getToken() || "") },
-      body: fd
-    }).then(function(r) { return r.json(); })
-      .then(function(data) {
+    var attempt = 0;
+    while (attempt < 2) {
+      try {
+        var r = await fetch(API_BASE + "/api/posts/video", {
+          method: "POST",
+          headers: { Authorization: "Bearer " + (getToken() || "") },
+          body: fd,
+        });
+        var data = await r.json().catch(function() { return {}; });
+        if (!r.ok) throw new Error(data.detail || ("Error " + r.status));
         if (data.detail) throw new Error(data.detail);
         setLoading(false);
         onPosted && onPosted(data);
         onClose();
-      }).catch(function(err) { setMsg(err.message); setLoading(false); });
+        return;
+      } catch(err) {
+        attempt++;
+        if (attempt >= 2) { setMsg(err.message || "Upload failed. Please try again."); setLoading(false); return; }
+        await new Promise(function(res) { setTimeout(res, 1200); });
+      }
+    }
   }
 
   return (
@@ -4626,10 +4910,244 @@ function PostSheet({ user, onClose, onPosted }) {
 
 
 // =============================================================================
+// PROFILE BEAT CARD — preview + buy from public profiles
+// Reuses the same 30-second enforced preview as BeatLeaseCard
+// =============================================================================
+function ProfileBeatCard({ beat, currentUser }) {
+  var [previewing,  setPreviewing]  = React.useState(false);
+  var [previewTime, setPreviewTime] = React.useState(0);
+  var [buyLoading,  setBuyLoading]  = React.useState(false);
+  var [buyErr,      setBuyErr]      = React.useState("");
+  var audioRef  = React.useRef(null);
+  var timerRef  = React.useRef(null);
+  var isFree    = beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
+
+  function startPreview() { if (previewing) { stopPreview(); return; } setPreviewing(true); setPreviewTime(0); }
+
+  function stopPreview() {
+    setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
+  }
+
+  function onAudioPlay() {
+    clearInterval(timerRef.current);
+    var start = Date.now() - (previewTime * 1000);
+    timerRef.current = setInterval(function() {
+      var elapsed = (Date.now() - start) / 1000;
+      setPreviewTime(Math.min(elapsed, 30));
+      if (elapsed >= 30) { clearInterval(timerRef.current); stopPreview(); }
+    }, 100);
+  }
+
+  function onTimeUpdate(e) {
+    var el = e.target;
+    var startT = el.dataset.startTime ? parseFloat(el.dataset.startTime) : 0;
+    if (el.currentTime >= startT + 30) { el.pause(); stopPreview(); }
+    if (el.currentTime < startT) el.currentTime = startT;
+  }
+
+  async function handleBuy() {
+    if (!currentUser) { setBuyErr("Please log in to purchase"); return; }
+    setBuyLoading(true); setBuyErr("");
+    try {
+      var result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
+      // Reset loading if user returns from Stripe without completing payment
+      var resetOnReturn = function() {
+        if (document.visibilityState === "visible") {
+          document.removeEventListener("visibilitychange", resetOnReturn);
+          setBuyLoading(false);
+        }
+      };
+      document.addEventListener("visibilitychange", resetOnReturn);
+      window.location.href = result.checkout_url;
+    } catch(e) { setBuyErr(e.message); setBuyLoading(false); }
+  }
+
+  async function handleDownload() {
+    try {
+      await apiFetch("/api/producer/beats/" + beat.id + "/download", { method: "POST" });
+      var a = document.createElement("a");
+      a.href = beat.url; a.download = beat.title + ".mp3"; a.target = "_blank";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    } catch(e) { setBuyErr(e.message); }
+  }
+
+  React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
+
+  // Self-remove if this beat is deleted from the profile dashboard
+  var [deleted, setDeleted] = React.useState(false);
+  useContentDeletedListener(React.useCallback(function(detail) {
+    if (detail.kind === "beat" && detail.id === beat.id) setDeleted(true);
+  }, [beat.id]));
+  if (deleted) return null;
+
+  return (
+    <div style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(245,158,11,0.2)" }}>
+      {/* Title + badges */}
+      <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 8 }}>{beat.title}</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+        {beat.genre && (
+          <div style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>
+        )}
+        <div style={{ background: isFree ? "rgba(34,197,94,0.12)" : "rgba(192,38,211,0.12)", border: "1px solid " + (isFree ? "rgba(34,197,94,0.25)" : "rgba(192,38,211,0.25)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: isFree ? "#22C55E" : "#C026D3", fontWeight: 700 }}>
+          {isFree ? "FREE" : beat.price}
+        </div>
+        <div style={{ color: "#444", fontSize: 11 }}>{beat.downloads || 0} downloads</div>
+      </div>
+
+      {/* Preview button */}
+      {beat.url && (
+        <button onClick={startPreview} style={{
+          width: "100%", borderRadius: 12, padding: "10px",
+          background: previewing ? "rgba(99,91,255,0.2)" : "transparent",
+          border: "1.5px solid " + (previewing ? "#635BFF" : "#333"),
+          color: previewing ? "#635BFF" : "#888",
+          fontWeight: 700, fontSize: 14, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 10,
+        }}>
+          {previewing ? "■ Stop Preview" : "▶ Preview Beat"}
+        </button>
+      )}
+
+      {/* 30-second preview player */}
+      {previewing && beat.url && (
+        <div style={{ marginBottom: 10 }}>
+          <audio ref={audioRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
+            onPlay={onAudioPlay} onPause={function() { clearInterval(timerRef.current); }}
+            onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
+          <div style={{ background: "#1a1a1a", borderRadius: 10, padding: "10px 14px",
+            border: "1px solid #2a2a2a", display: "flex", alignItems: "center", gap: 12 }}>
+            <button onClick={stopPreview} style={{ background: "none", border: "none", color: "#635BFF", cursor: "pointer", fontSize: 18, padding: 0, flexShrink: 0, lineHeight: 1 }}>■</button>
+            <div style={{ flex: 1, height: 4, background: "#333", borderRadius: 2, overflow: "hidden" }}>
+              <div style={{ height: "100%", borderRadius: 2, background: "linear-gradient(90deg,#635BFF,#C026D3)", width: (previewTime / 30 * 100) + "%", transition: "width 0.1s linear" }} />
+            </div>
+            <div style={{ color: "#888", fontSize: 12, fontWeight: 600, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{Math.floor(previewTime)}s / 30s</div>
+          </div>
+          <div style={{ color: "#555", fontSize: 11, textAlign: "center", marginTop: 6 }}>30s preview only</div>
+        </div>
+      )}
+
+      {buyErr && <div style={{ color: "#F87171", fontSize: 12, marginBottom: 8 }}>{buyErr}</div>}
+
+      {/* Buy / Download button */}
+      {isFree ? (
+        <button onClick={handleDownload} style={{
+          width: "100%", borderRadius: 12, padding: "13px", border: "none",
+          background: "linear-gradient(135deg,#22C55E,#16A34A)",
+          color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        }}>
+          ↓ Download Free MP3
+        </button>
+      ) : (
+        <button onClick={handleBuy} disabled={buyLoading} style={{
+          width: "100%", borderRadius: 12, padding: "13px", border: "none",
+          background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+          color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer",
+          opacity: buyLoading ? 0.6 : 1,
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        }}>
+          {buyLoading ? "Loading..." : "Buy Lease — " + beat.price}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// IMAGE LIGHTBOX — fullscreen image viewer with swipe to close + multi-image nav
+// =============================================================================
+function ImageLightbox({ images, startIndex, onClose }) {
+  var [idx, setIdx] = React.useState(startIndex || 0);
+  var startX = React.useRef(null);
+  var startY = React.useRef(null);
+
+  React.useEffect(function() {
+    function onKey(e) {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowRight") setIdx(function(i) { return Math.min(i + 1, images.length - 1); });
+      if (e.key === "ArrowLeft")  setIdx(function(i) { return Math.max(i - 1, 0); });
+    }
+    window.addEventListener("keydown", onKey);
+    return function() { window.removeEventListener("keydown", onKey); };
+  }, []);
+
+  function onTouchStart(e) { startX.current = e.touches[0].clientX; startY.current = e.touches[0].clientY; }
+  function onTouchEnd(e) {
+    if (startX.current === null) return;
+    var dx = e.changedTouches[0].clientX - startX.current;
+    var dy = e.changedTouches[0].clientY - startY.current;
+    if (Math.abs(dy) > Math.abs(dx) && dy > 60) { onClose(); return; }
+    if (Math.abs(dx) > 50) {
+      if (dx < 0) setIdx(function(i) { return Math.min(i + 1, images.length - 1); });
+      else         setIdx(function(i) { return Math.max(i - 1, 0); });
+    }
+    startX.current = null; startY.current = null;
+  }
+
+  return (
+    <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}
+      onClick={function(e) { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: "fixed", inset: 0, zIndex: 99999, background: "rgba(0,0,0,0.96)",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+      {/* Close button */}
+      <button onClick={onClose}
+        style={{ position: "absolute", top: "max(env(safe-area-inset-top),16px)", right: 16,
+          background: "rgba(255,255,255,0.12)", border: "none", borderRadius: "50%",
+          width: 36, height: 36, color: "white", fontSize: 18, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1 }}>
+        ✕
+      </button>
+
+      {/* Image */}
+      <img src={images[idx]} alt={"Image " + (idx + 1)}
+        style={{ maxWidth: "100%", maxHeight: "90vh", objectFit: "contain", borderRadius: 4,
+          userSelect: "none", WebkitUserSelect: "none", pointerEvents: "none" }} />
+
+      {/* Prev / Next arrows (multi-image only) */}
+      {images.length > 1 && (
+        <>
+          {idx > 0 && (
+            <button onClick={function() { setIdx(function(i) { return i - 1; }); }}
+              style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
+                background: "rgba(255,255,255,0.15)", border: "none", borderRadius: "50%",
+                width: 40, height: 40, color: "white", fontSize: 20, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center" }}>
+              ‹
+            </button>
+          )}
+          {idx < images.length - 1 && (
+            <button onClick={function() { setIdx(function(i) { return i + 1; }); }}
+              style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
+                background: "rgba(255,255,255,0.15)", border: "none", borderRadius: "50%",
+                width: 40, height: 40, color: "white", fontSize: 20, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center" }}>
+              ›
+            </button>
+          )}
+          {/* Dot indicators */}
+          <div style={{ position: "absolute", bottom: "max(env(safe-area-inset-bottom),20px)",
+            display: "flex", gap: 6 }}>
+            {images.map(function(_, i) {
+              return (
+                <div key={i} onClick={function() { setIdx(i); }}
+                  style={{ width: i === idx ? 18 : 6, height: 6, borderRadius: 3,
+                    background: i === idx ? "white" : "rgba(255,255,255,0.3)",
+                    transition: "all 0.2s", cursor: "pointer" }} />
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
 // CONTENT TABS — shown on every public profile (Beats / Music / Videos)
 // =============================================================================
 function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave }) {
-  var [tab, setTab]           = React.useState("beats");
+  var [tab, setTab]           = React.useState("posts");
   var [items, setItems]       = React.useState([]);
   var [loading, setLoading]   = React.useState(false);
   var [comments, setComments] = React.useState({});
@@ -4642,6 +5160,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
   var [openPostSheet, setOpenPostSheet] = React.useState(null);
   var [postLikes, setPostLikes] = React.useState({});
   var [postComments, setPostComments] = React.useState({});
+  var [lightbox, setLightbox] = React.useState(null); // { images: [], index: 0 }
 
   function loadPosts() {
     setLoading(true); setPosts([]);
@@ -4788,6 +5307,39 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
       }).catch(function() {});
   }
 
+  var isOwner = currentUser && username &&
+    currentUser.username && currentUser.username.toLowerCase() === username.toLowerCase();
+
+  function deletePost(id) {
+    if (!window.confirm("Delete this post? This cannot be undone.")) return;
+    apiFetch("/api/posts/" + id, { method: "DELETE" })
+      .then(function() {
+        setPosts(function(prev) { return prev.filter(function(p) { return p.id !== id; }); });
+        dispatchContentDeleted(id, "post");
+      })
+      .catch(function() { alert("Failed to delete post."); });
+  }
+
+  function deleteContent(id) {
+    if (!window.confirm("Delete this? This cannot be undone.")) return;
+    apiFetch("/api/content/" + id, { method: "DELETE" })
+      .then(function() {
+        setItems(function(prev) { return prev.filter(function(it) { return it.id !== id; }); });
+        dispatchContentDeleted(id, "content");
+      })
+      .catch(function() { alert("Failed to delete."); });
+  }
+
+  // Listen for deletions from the profile dashboard and remove from local state
+  useContentDeletedListener(React.useCallback(function(detail) {
+    if (detail.kind === "music" || detail.kind === "video" || detail.kind === "content") {
+      setItems(function(prev) { return prev.filter(function(it) { return it.id !== detail.id; }); });
+    }
+    if (detail.kind === "post") {
+      setPosts(function(prev) { return prev.filter(function(p) { return p.id !== detail.id; }); });
+    }
+  }, []));
+
   // Render bottom sheet at ContentTabs level
   function SheetOverlay() {
     if (!openSheet) return null;
@@ -4844,6 +5396,16 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
 
           {/* Like + Open in Spotify row */}
           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 14 }}>
+            {isOwner && (
+              <button onClick={function() { deleteContent(item.id); }}
+                style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.25)",
+                  borderRadius: 8, color: "#F87171", fontSize: 11, fontWeight: 700,
+                  padding: "4px 10px", cursor: "pointer", marginLeft: "auto", marginBottom: 0 }}>
+                Delete
+              </button>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 14 }}>
             <button onClick={function() { toggleLike(item.id); }}
               style={{ background: "none", border: "none", cursor: currentUser ? "pointer" : "default", padding: 0,
                 display: "flex", alignItems: "center", gap: 6,
@@ -4885,6 +5447,13 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
 
   return (
     <div style={{ marginTop: 8 }}>
+      {lightbox && (
+        <ImageLightbox
+          images={lightbox.images}
+          startIndex={lightbox.index}
+          onClose={function() { setLightbox(null); }}
+        />
+      )}
       <SheetOverlay />
       {openPostSheet && (
         <CommentsBottomSheet
@@ -4916,16 +5485,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
         <div style={{ padding: "0 16px" }}>
           {profile && profile.beats && profile.beats.length > 0 ? (
             profile.beats.map(function(beat) {
-              return (
-                <div key={beat.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid #1e1e1e" }}>
-                  <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{beat.title}</div>
-                  <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-                    {beat.genre && <div style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>}
-                    <div style={{ background: beat.price === "free" ? "rgba(34,197,94,0.12)" : "rgba(192,38,211,0.12)", border: "1px solid " + (beat.price === "free" ? "rgba(34,197,94,0.25)" : "rgba(192,38,211,0.25)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: beat.price === "free" ? "#22C55E" : "#C026D3", fontWeight: 700 }}>{beat.price === "free" ? "FREE" : beat.price}</div>
-                    <div style={{ color: "#444", fontSize: 11 }}>{beat.downloads || 0} downloads</div>
-                  </div>
-                </div>
-              );
+              return <ProfileBeatCard key={beat.id} beat={beat} currentUser={currentUser} />;
             })
           ) : (
             <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
@@ -4955,10 +5515,18 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
                         ? <img src={post.avatarUrl} alt={post.username} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                         : (post.username || "?")[0].toUpperCase()}
                     </div>
-                    <div>
+                    <div style={{ flex: 1 }}>
                       <div style={{ color: "white", fontWeight: 700, fontSize: 14 }}>@{post.username}</div>
                       <div style={{ color: "#444", fontSize: 11 }}>{new Date(post.createdAt).toLocaleDateString()}</div>
                     </div>
+                    {isOwner && (
+                      <button onClick={function() { deletePost(post.id); }}
+                        style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.25)",
+                          borderRadius: 8, color: "#F87171", fontSize: 11, fontWeight: 700,
+                          padding: "4px 10px", cursor: "pointer", flexShrink: 0 }}>
+                        Delete
+                      </button>
+                    )}
                   </div>
 
                   {/* Status text */}
@@ -4966,15 +5534,29 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
                     <div style={{ padding: "0 14px 10px", color: "#ddd", fontSize: 14, lineHeight: 1.6 }}>{post.text}</div>
                   )}
 
-                  {/* Images */}
+                  {/* Images — tap to expand */}
                   {post.images && post.images.length > 0 && (
                     <div style={{ display: "grid", gap: 2,
                       gridTemplateColumns: post.images.length === 1 ? "1fr" : post.images.length === 2 ? "1fr 1fr" : "1fr 1fr 1fr" }}>
                       {post.images.map(function(img, i) {
                         return (
-                          <img key={i} src={img} alt="post"
-                            style={{ width: "100%", aspectRatio: post.images.length === 1 ? "16/9" : "1",
-                              objectFit: "cover", display: "block" }} />
+                          <div key={i} style={{ position: "relative", cursor: "pointer", overflow: "hidden" }}
+                            onClick={function() { setLightbox({ images: post.images, index: i }); }}>
+                            <img src={img} alt="post"
+                              style={{ width: "100%", aspectRatio: post.images.length === 1 ? "16/9" : "1",
+                                objectFit: "cover", display: "block", transition: "transform 0.15s" }} />
+                            {/* Expand hint icon on single image */}
+                            {post.images.length === 1 && (
+                              <div style={{ position: "absolute", bottom: 8, right: 8,
+                                background: "rgba(0,0,0,0.5)", borderRadius: 6, padding: "3px 6px",
+                                display: "flex", alignItems: "center", gap: 4 }}>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                                  <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+                                  <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+                                </svg>
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
                     </div>
@@ -5334,7 +5916,22 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
               },
             ].filter(s => s.url).map(s => (
               <button key={s.key}
-                onClick={() => { const url = s.url.startsWith("http") ? s.url : "https://" + s.url; window.open(url, "_blank"); }}
+                onClick={() => {
+                  const url = s.url.startsWith("http") ? s.url : "https://" + s.url;
+                  // When the in-app Safari browser is dismissed, iOS fires visibilitychange.
+                  // We force a tiny re-render so the blank white overlay clears automatically.
+                  const handleReturn = () => {
+                    if (document.visibilityState === "visible") {
+                      document.removeEventListener("visibilitychange", handleReturn);
+                      // Force the browser to repaint the app layer
+                      window.dispatchEvent(new Event("resize"));
+                      document.body.style.opacity = "0.99";
+                      requestAnimationFrame(() => { document.body.style.opacity = "1"; });
+                    }
+                  };
+                  document.addEventListener("visibilitychange", handleReturn);
+                  window.open(url, "_blank");
+                }}
                 style={{ display: "flex", alignItems: "center", gap: 7, background: "#111",
                   border: "1px solid #1e1e1e", borderRadius: 20, padding: "8px 14px",
                   cursor: "pointer", color: "white", fontWeight: 600, fontSize: 13 }}>
@@ -5642,6 +6239,7 @@ function MyUploadsSection({ user }) {
     try {
       await apiFetch("/api/producer/beats/" + beatId, { method: "DELETE" });
       setBeats(prev => prev.filter(b => b.id !== beatId));
+      dispatchContentDeleted(beatId, "beat");
     } catch (e) {
       setMsg("Error: " + e.message);
     }
@@ -6069,8 +6667,12 @@ function PostMusicSection({ user, onBack }) {
   }
 
   function deletePost(id) {
+    if (!window.confirm("Delete this track? This cannot be undone.")) return;
     apiFetch("/api/content/" + id, { method: "DELETE" })
-      .then(function() { setPosts(function(prev) { return prev.filter(function(p) { return p.id !== id; }); }); })
+      .then(function() {
+        setPosts(function(prev) { return prev.filter(function(p) { return p.id !== id; }); });
+        dispatchContentDeleted(id, "music");
+      })
       .catch(function() {});
   }
 
@@ -6180,8 +6782,12 @@ function PostVideoSection({ user, onBack }) {
   }
 
   function deletePost(id) {
+    if (!window.confirm("Delete this video? This cannot be undone.")) return;
     apiFetch("/api/content/" + id, { method: "DELETE" })
-      .then(function() { setPosts(function(prev) { return prev.filter(function(p) { return p.id !== id; }); }); })
+      .then(function() {
+        setPosts(function(prev) { return prev.filter(function(p) { return p.id !== id; }); });
+        dispatchContentDeleted(id, "video");
+      })
       .catch(function() {});
   }
 
@@ -6260,6 +6866,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   const [uploadGenre,      setUploadGenre]      = useState("");
   const [uploadPrice,      setUploadPrice]      = useState("");
   const [uploadFile,       setUploadFile]       = useState(null);
+  const uploadFileRef = React.useRef(null);
   const [uploadLoading,    setUploadLoading]    = useState(false);
   const [uploadMsg,        setUploadMsg]        = useState("");
   const [settingsOpen,     setSettingsOpen]     = useState(false);
@@ -6350,6 +6957,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         apiFetch("/api/producer/my-leases").catch(() => []),
         apiFetch("/api/producer/stripe-status").catch(() => ({})),
       ]).then(([beats, leases, stripe]) => {
+        setUploads(beats); // populate My Uploads count
         const totalDownloads = beats.reduce((s, b) => s + (b.downloads || 0), 0);
         const totalRevenue   = leases.reduce((s, l) => {
           const p = parseFloat((l.price || "0").replace(/[^0-9.]/g, ""));
@@ -6845,7 +7453,19 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                           fontSize: 12, outline: "none", width: "100%", padding: 0, marginTop: 2 }} />
                     </div>
                     {s.val ? (
-                      <button onClick={function() { var url = s.val.startsWith("http") ? s.val : "https://" + s.val; window.open(url, "_blank"); }}
+                      <button onClick={function() {
+                        var url = s.val.startsWith("http") ? s.val : "https://" + s.val;
+                        var handleReturn = function() {
+                          if (document.visibilityState === "visible") {
+                            document.removeEventListener("visibilitychange", handleReturn);
+                            window.dispatchEvent(new Event("resize"));
+                            document.body.style.opacity = "0.99";
+                            requestAnimationFrame(function() { document.body.style.opacity = "1"; });
+                          }
+                        };
+                        document.addEventListener("visibilitychange", handleReturn);
+                        window.open(url, "_blank");
+                      }}
                         style={{ background: "none", border: "none", cursor: "pointer", color: "#555", fontSize: 18, padding: 4, flexShrink: 0 }}>
                         &#8250;
                       </button>
@@ -6997,20 +7617,23 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
           <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #222" }}>
             <input value={ytLink} onChange={e => setYtLink(e.target.value)} placeholder="Beat title e.g. Dark Trap Beat" style={inp} />
             <input value={uploadGenre || ""} onChange={e => setUploadGenre(e.target.value)} placeholder="Genre e.g. Trap, R&B, Afrobeats" style={inp} />
-            <input value={uploadPrice || ""} onChange={e => setUploadPrice(e.target.value)} placeholder="Price e.g. free or £9.99" style={inp} />
-            <input type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac,.aiff,.opus" onChange={e => setUploadFile(e.target.files[0])}
+            <input value={uploadPrice || ""} onChange={e => setUploadPrice(e.target.value)} placeholder="Price e.g. £9.99 (enter £0 for free)" style={inp} />
+            <input ref={uploadFileRef} type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac,.aiff,.opus" onChange={e => setUploadFile(e.target.files[0])}
               style={{ width: "100%", marginBottom: 12, color: "#aaa", fontSize: 14 }} />
             <button disabled={uploadLoading} onClick={async () => {
               if (!ytLink.trim() || !uploadFile) { setUploadMsg("Please fill all fields and select an MP3"); return; }
               setUploadLoading(true); setUploadMsg("");
               try {
                 const fd = new FormData();
-                fd.append("title", ytLink.trim()); fd.append("genre", uploadGenre || ""); fd.append("price", uploadPrice || "free"); fd.append("file", uploadFile);
+                var priceVal = (uploadPrice || "").trim();
+                // Treat £0, 0, £0.00, 0.00 as free
+                if (priceVal === "0" || priceVal === "£0" || priceVal === "0.00" || priceVal === "£0.00" || priceVal === "") priceVal = "free";
+                fd.append("title", ytLink.trim()); fd.append("genre", uploadGenre || ""); fd.append("price", priceVal); fd.append("file", uploadFile);
                 const token = typeof getToken === "function" ? getToken() : (localStorage.getItem("bf_token") || "");
                 const res = await fetch(API_BASE + "/api/producer/upload", { method: "POST", headers: { "Authorization": "Bearer " + token }, body: fd });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || "Upload failed");
-                setUploads(prev => [data.beat, ...prev]); setUploadMsg("Beat uploaded!"); setYtLink(""); setUploadGenre(""); setUploadPrice(""); setUploadFile(null);
+                setUploads(prev => [data.beat, ...prev]); setUploadMsg("Beat uploaded!"); setYtLink(""); setUploadGenre(""); setUploadPrice(""); setUploadFile(null); if (uploadFileRef.current) uploadFileRef.current.value = "";
               } catch (e) { setUploadMsg("Error: " + e.message); }
               setUploadLoading(false);
             }} style={{ width: "100%", background: uploadLoading ? "#333" : "#C026D3", border: "none", borderRadius: 12, color: "white", fontWeight: 800, fontSize: 15, padding: "14px", cursor: uploadLoading ? "not-allowed" : "pointer" }}>
@@ -14710,7 +15333,7 @@ self.onmessage = async function(e) {
               {label:"▤  Save As…",     fn:function(){setShowProjMenu(false);setTimeout(function(){const n=window.prompt("Save as:",projectName+" (copy)");if(n){setProjectName(n);setIsSaved(false);setTimeout(saveProject,50);}},50);}},
               {label:"✏️  Rename",       fn:function(){setShowProjMenu(false);setRenamingProj(true);}},
               {label:"▤  All Projects", fn:function(){setShowProjMenu(false);setTimeout(function(){setShowProjects(true);},50);}},
-              {label:"⬇️  Export Mix",   fn:function(){setShowProjMenu(false);setTimeout(exportMix,50);},hi:true},
+              {label:"↓ Export Mix",   fn:function(){setShowProjMenu(false);setTimeout(exportMix,50);},hi:true},
               {label:"+  New Project",  fn:function(){setShowProjMenu(false);setTimeout(function(){
                 if(!isSaved&&hasContent) setUnsavedAlert("new");
                 else{
@@ -16141,11 +16764,11 @@ export default function BeatFinder() {
           >
             {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => setShowMessages(true)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} onOpenPost={() => setShowPost(true)} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
-            {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} />}
+            {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} onViewProfile={function(u) { setPublicProfile(u); }} user={user} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} currentUser={user} onViewProfile={function(u) { setSearchProfile(u); }} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
             {t === "studio"    && studioVisited && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
-            {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onSignUp={() => { setAuthStartMode("signup"); setShowAuthWall(true); setWelcomeDone(false); }} />}
+            {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onSignUp={() => { setAuthStartMode("signup"); setShowAuthWall(true); setWelcomeDone(false); }} onViewProfile={function(u) { setPublicProfile(u); }} />}
           </div>
         ))}
         {tab === "profile" && (
