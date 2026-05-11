@@ -4156,18 +4156,33 @@ function LyricCard({ lyric, lyricIndex, onDelete, onEditLyric }) {
 // =============================================================================
 // COMMENTS PANEL — standalone so keyboard doesn't collapse on rerender
 // =============================================================================
-function CommentsPanel({ contentId, itemComments, currentUser, onSubmit, onDelete }) {
-  var [text, setText]         = React.useState("");
-  var [replyTo, setReplyTo]   = React.useState(null);
-  var [expanded, setExpanded] = React.useState(false);
+function CommentsBottomSheet({ contentId, itemComments, currentUser, onSubmit, onDelete, onClose }) {
+  var [text, setText]       = React.useState("");
+  var [replyTo, setReplyTo] = React.useState(null);
   var [submitting, setSubmitting] = React.useState(false);
+  var sheetRef = React.useRef(null);
+  var startY   = React.useRef(null);
+  var dragY    = React.useRef(0);
 
-  var allComments = itemComments || [];
-  var topLevel    = allComments.filter(function(c) { return !c.parentId; });
-  var getReplies  = function(id) { return allComments.filter(function(c) { return c.parentId === id; }); };
-  var PREVIEW = 3;
-  var showMore = topLevel.length > PREVIEW && !expanded;
-  var visibleTop = expanded ? topLevel : topLevel.slice(0, PREVIEW);
+  // Close on backdrop tap
+  function handleBackdrop(e) {
+    if (e.target === e.currentTarget) onClose();
+  }
+
+  // Drag-to-dismiss
+  function onTouchStart(e) { startY.current = e.touches[0].clientY; }
+  function onTouchMove(e) {
+    var dy = e.touches[0].clientY - startY.current;
+    if (dy > 0 && sheetRef.current) {
+      dragY.current = dy;
+      sheetRef.current.style.transform = "translateY(" + dy + "px)";
+    }
+  }
+  function onTouchEnd() {
+    if (dragY.current > 100) { onClose(); }
+    else if (sheetRef.current) { sheetRef.current.style.transform = "translateY(0)"; }
+    dragY.current = 0;
+  }
 
   function submit() {
     if (!text.trim() || !currentUser || submitting) return;
@@ -4177,12 +4192,16 @@ function CommentsPanel({ contentId, itemComments, currentUser, onSubmit, onDelet
     }, function() { setSubmitting(false); });
   }
 
-  function CommentAvatar({ c, size }) {
+  var allComments = itemComments || [];
+  var topLevel    = allComments.filter(function(c) { return !c.parentId; });
+  var getReplies  = function(id) { return allComments.filter(function(c) { return c.parentId === id; }); };
+
+  function Avatar({ c, size }) {
     return (
       <div style={{ width: size, height: size, borderRadius: "50%", flexShrink: 0,
         background: "linear-gradient(135deg,#6B21A8,#C026D3)",
         display: "flex", alignItems: "center", justifyContent: "center",
-        color: "white", fontWeight: 800, fontSize: size * 0.4, overflow: "hidden" }}>
+        color: "white", fontWeight: 800, fontSize: size * 0.38, overflow: "hidden" }}>
         {c.avatarUrl
           ? <img src={c.avatarUrl} alt={c.username} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           : (c.username || "?")[0].toUpperCase()}
@@ -4191,84 +4210,100 @@ function CommentsPanel({ contentId, itemComments, currentUser, onSubmit, onDelet
   }
 
   return (
-    <div style={{ borderTop: "1px solid #1a1a1a", marginTop: 12, paddingTop: 12 }}>
-      <div style={{ color: "#888", fontSize: 12, fontWeight: 700, marginBottom: 10 }}>COMMENTS</div>
+    <div onClick={handleBackdrop}
+      style={{ position: "fixed", inset: 0, zIndex: 9000, background: "rgba(0,0,0,0.6)",
+        display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+      <div ref={sheetRef}
+        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+        style={{ background: "#111", borderRadius: "20px 20px 0 0", maxHeight: "80vh",
+          display: "flex", flexDirection: "column", transition: "transform 0.1s" }}>
 
-      {topLevel.length === 0 && (
-        <div style={{ color: "#444", fontSize: 13, marginBottom: 12 }}>No comments yet. Be the first!</div>
-      )}
+        {/* Handle */}
+        <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 4px" }}>
+          <div style={{ width: 36, height: 4, borderRadius: 2, background: "#333" }} />
+        </div>
 
-      {visibleTop.map(function(c) {
-        var replies = getReplies(c.id);
-        return (
-          <div key={c.id} style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-              <CommentAvatar c={c} size={32} />
-              <div style={{ flex: 1 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                  <span style={{ color: "white", fontWeight: 700, fontSize: 13 }}>@{c.username}</span>
-                  <span style={{ color: "#444", fontSize: 11 }}>{new Date(c.createdAt).toLocaleDateString()}</span>
-                </div>
-                <div style={{ color: "#ccc", fontSize: 13, lineHeight: 1.5 }}>{c.text}</div>
-                <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
-                  {currentUser && (
-                    <button onClick={function() { setReplyTo({ id: c.id, username: c.username }); setText("@" + c.username + " "); }}
-                      style={{ background: "none", border: "none", color: "#C026D3", fontSize: 12, cursor: "pointer", padding: 0, fontWeight: 600 }}>
-                      Reply
-                    </button>
-                  )}
-                  {currentUser && currentUser.username === c.username && (
-                    <button onClick={function() { onDelete(contentId, c.id); }}
-                      style={{ background: "none", border: "none", color: "#444", fontSize: 12, cursor: "pointer", padding: 0 }}>
-                      Delete
-                    </button>
-                  )}
-                </div>
-              </div>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "4px 16px 12px", borderBottom: "1px solid #1a1a1a" }}>
+          <div style={{ color: "white", fontWeight: 700, fontSize: 16 }}>
+            Comments
+            {allComments.length > 0 && <span style={{ color: "#555", fontWeight: 400, fontSize: 13, marginLeft: 8 }}>{allComments.length}</span>}
+          </div>
+          <button onClick={onClose}
+            style={{ background: "none", border: "none", color: "#555", fontSize: 22, cursor: "pointer", padding: 4 }}>
+            &#10005;
+          </button>
+        </div>
+
+        {/* Comment list */}
+        <div style={{ overflowY: "auto", flex: 1, padding: "12px 16px" }}>
+          {topLevel.length === 0 && (
+            <div style={{ color: "#444", fontSize: 14, textAlign: "center", padding: "30px 0" }}>
+              No comments yet. Be the first!
             </div>
-            {replies.map(function(r) {
-              return (
-                <div key={r.id} style={{ marginLeft: 42, marginTop: 8, display: "flex", gap: 8, alignItems: "flex-start" }}>
-                  <CommentAvatar c={r} size={26} />
+          )}
+          {topLevel.map(function(c) {
+            var replies = getReplies(c.id);
+            return (
+              <div key={c.id} style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <Avatar c={c} size={36} />
                   <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 2 }}>
-                      <span style={{ color: "white", fontWeight: 700, fontSize: 12 }}>@{r.username}</span>
-                      <span style={{ color: "#444", fontSize: 11 }}>{new Date(r.createdAt).toLocaleDateString()}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                      <span style={{ color: "white", fontWeight: 700, fontSize: 14 }}>@{c.username}</span>
+                      <span style={{ color: "#444", fontSize: 11 }}>{new Date(c.createdAt).toLocaleDateString()}</span>
                     </div>
-                    <div style={{ color: "#ccc", fontSize: 12, lineHeight: 1.5 }}>{r.text}</div>
-                    {currentUser && currentUser.username === r.username && (
-                      <button onClick={function() { onDelete(contentId, r.id); }}
-                        style={{ background: "none", border: "none", color: "#444", fontSize: 11, cursor: "pointer", padding: 0, marginTop: 4 }}>
-                        Delete
-                      </button>
-                    )}
+                    <div style={{ color: "#ddd", fontSize: 14, lineHeight: 1.5 }}>{c.text}</div>
+                    <div style={{ display: "flex", gap: 16, marginTop: 6 }}>
+                      {currentUser && (
+                        <button onClick={function() { setReplyTo({ id: c.id, username: c.username }); setText("@" + c.username + " "); }}
+                          style={{ background: "none", border: "none", color: "#888", fontSize: 12, cursor: "pointer", padding: 0, fontWeight: 600 }}>
+                          Reply
+                        </button>
+                      )}
+                      {currentUser && currentUser.username === c.username && (
+                        <button onClick={function() { onDelete(contentId, c.id); }}
+                          style={{ background: "none", border: "none", color: "#444", fontSize: 12, cursor: "pointer", padding: 0 }}>
+                          Delete
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        );
-      })}
+                {replies.length > 0 && (
+                  <div style={{ marginLeft: 46, marginTop: 8 }}>
+                    {replies.map(function(r) {
+                      return (
+                        <div key={r.id} style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                          <Avatar c={r} size={28} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 2 }}>
+                              <span style={{ color: "white", fontWeight: 700, fontSize: 13 }}>@{r.username}</span>
+                              <span style={{ color: "#444", fontSize: 11 }}>{new Date(r.createdAt).toLocaleDateString()}</span>
+                            </div>
+                            <div style={{ color: "#ddd", fontSize: 13, lineHeight: 1.5 }}>{r.text}</div>
+                            {currentUser && currentUser.username === r.username && (
+                              <button onClick={function() { onDelete(contentId, r.id); }}
+                                style={{ background: "none", border: "none", color: "#444", fontSize: 11, cursor: "pointer", padding: 0, marginTop: 3 }}>
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
 
-      {showMore && (
-        <button onClick={function() { setExpanded(true); }}
-          style={{ background: "none", border: "1px solid #2a2a2a", borderRadius: 20, color: "#C026D3",
-            fontSize: 13, fontWeight: 600, padding: "6px 16px", cursor: "pointer", marginBottom: 12, width: "100%" }}>
-          Show all {topLevel.length} comments
-        </button>
-      )}
-      {expanded && topLevel.length > PREVIEW && (
-        <button onClick={function() { setExpanded(false); }}
-          style={{ background: "none", border: "1px solid #2a2a2a", borderRadius: 20, color: "#555",
-            fontSize: 13, padding: "6px 16px", cursor: "pointer", marginBottom: 12, width: "100%" }}>
-          Show less
-        </button>
-      )}
-
-      {currentUser ? (
-        <div style={{ marginTop: 8 }}>
+        {/* Input */}
+        <div style={{ padding: "10px 16px 24px", borderTop: "1px solid #1a1a1a" }}>
           {replyTo && (
-            <div style={{ color: "#C026D3", fontSize: 12, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ color: "#C026D3", fontSize: 12, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
               Replying to @{replyTo.username}
               <button onClick={function() { setReplyTo(null); setText(""); }}
                 style={{ background: "none", border: "none", color: "#444", cursor: "pointer", padding: 0, fontSize: 14 }}>
@@ -4276,24 +4311,26 @@ function CommentsPanel({ contentId, itemComments, currentUser, onSubmit, onDelet
               </button>
             </div>
           )}
-          <div style={{ display: "flex", gap: 8 }}>
-            <input value={text}
-              onChange={function(e) { setText(e.target.value); }}
-              onKeyDown={function(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
-              placeholder="Add a comment..."
-              style={{ flex: 1, background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 20,
-                padding: "8px 14px", color: "white", fontSize: 13, outline: "none" }} />
-            <button onClick={submit} disabled={submitting || !text.trim()}
-              style={{ background: "#C026D3", border: "none", borderRadius: 20, color: "white",
-                fontWeight: 700, fontSize: 13, padding: "8px 16px", cursor: "pointer",
-                opacity: submitting ? 0.6 : 1 }}>
-              Post
-            </button>
-          </div>
+          {currentUser ? (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input value={text}
+                onChange={function(e) { setText(e.target.value); }}
+                onKeyDown={function(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
+                placeholder="Leave a comment..."
+                style={{ flex: 1, background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 24,
+                  padding: "10px 16px", color: "white", fontSize: 14, outline: "none" }} />
+              <button onClick={submit} disabled={submitting || !text.trim()}
+                style={{ background: "#C026D3", border: "none", borderRadius: 24, color: "white",
+                  fontWeight: 700, fontSize: 13, padding: "10px 18px", cursor: "pointer",
+                  opacity: submitting ? 0.6 : 1, flexShrink: 0 }}>
+                Post
+              </button>
+            </div>
+          ) : (
+            <div style={{ color: "#555", fontSize: 13, textAlign: "center" }}>Sign in to comment</div>
+          )}
         </div>
-      ) : (
-        <div style={{ color: "#444", fontSize: 12, marginTop: 8 }}>Sign in to comment</div>
-      )}
+      </div>
     </div>
   );
 }
@@ -4309,6 +4346,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
   var [comments, setComments] = React.useState({});
 
   var [likes, setLikes]             = React.useState({});
+  var [openSheet, setOpenSheet]       = React.useState(null); // contentId
 
 
   function loadContent(type) {
@@ -4395,6 +4433,23 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
       }).catch(function() {});
   }
 
+  // Render bottom sheet at ContentTabs level
+  function SheetOverlay() {
+    if (!openSheet) return null;
+    var sheetItem = items.find(function(it) { return it.id === openSheet; });
+    if (!sheetItem) return null;
+    return (
+      <CommentsBottomSheet
+        contentId={openSheet}
+        itemComments={comments[openSheet] || []}
+        currentUser={currentUser}
+        onSubmit={submitComment}
+        onDelete={deleteComment}
+        onClose={function() { setOpenSheet(null); }}
+      />
+    );
+  }
+
   var tabs = [
     { id: "beats", label: "Beats" },
     { id: "music", label: "Music" },
@@ -4444,12 +4499,14 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
               <span style={{ fontSize: 13, fontWeight: 600 }}>{item.likeCount || 0}</span>
             </button>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#555" }}>
+            <button onClick={function() { setOpenSheet(item.id); loadComments(item.id); }}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
+                display: "flex", alignItems: "center", gap: 6, color: "#555" }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
               </svg>
               <span style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>{item.commentCount || 0}</span>
-            </div>
+            </button>
 
             {item.type === "music" && item.spotifyUrl && (
               <button onClick={function() { window.open(item.spotifyUrl, "_blank"); }}
@@ -4464,8 +4521,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
             )}
           </div>
 
-          {/* Comments — always visible */}
-          <CommentsPanel contentId={item.id} itemComments={itemComments} currentUser={currentUser} onSubmit={submitComment} onDelete={deleteComment} />
+
         </div>
       </div>
     );
@@ -4473,6 +4529,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
 
   return (
     <div style={{ marginTop: 8 }}>
+      <SheetOverlay />
       {/* Tab bar */}
       <div style={{ display: "flex", borderBottom: "1px solid #1a1a1a", marginBottom: 16 }}>
         {tabs.map(function(t) {
