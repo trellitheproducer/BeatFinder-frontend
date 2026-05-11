@@ -4159,17 +4159,33 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
   var [tab, setTab]           = React.useState("beats");
   var [items, setItems]       = React.useState([]);
   var [loading, setLoading]   = React.useState(false);
-  var [comments, setComments] = React.useState({});  // contentId -> comments[]
-  var [showComments, setShowComments] = React.useState(null); // contentId
-  var [commentText, setCommentText]   = React.useState("");
-  var [replyTo, setReplyTo]           = React.useState(null); // {id, username}
-  var [likes, setLikes]               = React.useState({});   // contentId -> bool
-  var [submitting, setSubmitting]     = React.useState(false);
+  var [comments, setComments] = React.useState({});
+  var [commentText, setCommentText] = React.useState("");
+  var [replyTo, setReplyTo]         = React.useState(null);
+  var [likes, setLikes]             = React.useState({});
+  var [submitting, setSubmitting]   = React.useState(false);
+  var [activeComment, setActiveComment] = React.useState(null); // which item's comment box is focused
 
   function loadContent(type) {
     setLoading(true); setItems([]);
     apiFetch("/api/content/profile/" + encodeURIComponent(username) + "?type=" + type)
-      .then(function(data) { setItems(data || []); setLoading(false); })
+      .then(function(data) {
+        var loaded = data || [];
+        setItems(loaded);
+        setLoading(false);
+        // Load comments for all items
+        loaded.forEach(function(item) { loadComments(item.id); });
+        // Check liked state for logged-in user
+        if (currentUser) {
+          loaded.forEach(function(item) {
+            apiFetch("/api/content/" + item.id + "/liked")
+              .then(function(r) {
+                setLikes(function(prev) { var n = Object.assign({}, prev); n[item.id] = r.liked; return n; });
+              })
+              .catch(function() {});
+          });
+        }
+      })
       .catch(function() { setLoading(false); });
   }
 
@@ -4179,14 +4195,20 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
 
   function toggleLike(id) {
     if (!currentUser) return;
+    // Optimistic update
+    var wasLiked = likes[id] || false;
+    setLikes(function(prev) { var n = Object.assign({}, prev); n[id] = !wasLiked; return n; });
+    setItems(function(prev) { return prev.map(function(it) {
+      return it.id === id ? Object.assign({}, it, { likeCount: it.likeCount + (!wasLiked ? 1 : -1) }) : it;
+    }); });
     apiFetch("/api/content/" + id + "/like", { method: "POST" })
       .then(function(r) {
         setLikes(function(prev) { var n = Object.assign({}, prev); n[id] = r.liked; return n; });
-        setItems(function(prev) { return prev.map(function(it) {
-          return it.id === id ? Object.assign({}, it, { likeCount: it.likeCount + (r.liked ? 1 : -1) }) : it;
-        }); });
       })
-      .catch(function() {});
+      .catch(function() {
+        // Revert on error
+        setLikes(function(prev) { var n = Object.assign({}, prev); n[id] = wasLiked; return n; });
+      });
   }
 
   function loadComments(id) {
@@ -4195,13 +4217,6 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
         setComments(function(prev) { var n = Object.assign({}, prev); n[id] = data || []; return n; });
       })
       .catch(function() {});
-  }
-
-  function openComments(id) {
-    setShowComments(id);
-    setCommentText("");
-    setReplyTo(null);
-    loadComments(id);
   }
 
   function submitComment(contentId) {
@@ -4246,8 +4261,8 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
   ];
 
   // Render comment thread for a content item
-  function CommentsPanel({ contentId }) {
-    var allComments = comments[contentId] || [];
+  function CommentsPanel({ contentId, itemComments }) {
+    var allComments = itemComments || [];
     var topLevel    = allComments.filter(function(c) { return !c.parentId; });
     var getReplies  = function(id) { return allComments.filter(function(c) { return c.parentId === id; }); };
 
@@ -4358,22 +4373,21 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
   }
 
   function ContentCard({ item }) {
-    var isLiked = likes[item.id];
+    var isLiked = likes[item.id] || false;
+    var itemComments = comments[item.id] || [];
     return (
       <div style={{ background: "#111", borderRadius: 16, border: "1px solid #1e1e1e", marginBottom: 16, overflow: "hidden" }}>
 
         {/* Spotify embed */}
         {item.type === "music" && item.embedUrl && (
-          <div>
-            <iframe
-              src={item.embedUrl + "?utm_source=generator&theme=0"}
-              width="100%" height="152"
-              frameBorder="0"
-              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-              loading="lazy"
-              style={{ display: "block", borderRadius: "16px 16px 0 0" }}
-            />
-          </div>
+          <iframe
+            src={item.embedUrl + "?utm_source=generator&theme=0"}
+            width="100%" height="152"
+            frameBorder="0"
+            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+            loading="lazy"
+            style={{ display: "block", borderRadius: "16px 16px 0 0" }}
+          />
         )}
 
         {/* Video player */}
@@ -4387,10 +4401,10 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
             <div style={{ color: "#ccc", fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>{item.caption}</div>
           )}
 
-          {/* Like + Comment row */}
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {/* Like + Open in Spotify row */}
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 14 }}>
             <button onClick={function() { toggleLike(item.id); }}
-              style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
+              style={{ background: "none", border: "none", cursor: currentUser ? "pointer" : "default", padding: 0,
                 display: "flex", alignItems: "center", gap: 6,
                 color: isLiked ? "#EF4444" : "#555" }}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill={isLiked ? "#EF4444" : "none"}
@@ -4400,17 +4414,12 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
               <span style={{ fontSize: 13, fontWeight: 600 }}>{item.likeCount || 0}</span>
             </button>
 
-            <button onClick={function() {
-                if (showComments === item.id) { setShowComments(null); }
-                else { openComments(item.id); }
-              }}
-              style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
-                display: "flex", alignItems: "center", gap: 6, color: "#555" }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round">
+            <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#555" }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
               </svg>
               <span style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>{item.commentCount || 0}</span>
-            </button>
+            </div>
 
             {item.type === "music" && item.spotifyUrl && (
               <button onClick={function() { window.open(item.spotifyUrl, "_blank"); }}
@@ -4425,7 +4434,8 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
             )}
           </div>
 
-          {showComments === item.id && <CommentsPanel contentId={item.id} />}
+          {/* Comments — always visible */}
+          <CommentsPanel contentId={item.id} itemComments={itemComments} />
         </div>
       </div>
     );
