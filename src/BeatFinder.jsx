@@ -4650,16 +4650,15 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
   };
 
   return (
-    <div style={{ paddingBottom: 100 }}>
+    <div style={{ paddingBottom: 100, overflowX: "hidden" }}>
 
       {profile.headerUrl ? (
         <div>
-          {/* Header image */}
-          <div style={{ position: "relative", width: "100%", height: 320, overflow: "hidden", margin: "0 -16px", width: "calc(100% + 32px)" }}>
+          {/* Header image — contained width, no overflow */}
+          <div style={{ position: "relative", width: "100%", height: 220, overflow: "hidden" }}>
             <img src={profile.headerUrl} alt="header"
               style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} />
             <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, transparent 30%, transparent 55%, rgba(10,10,10,0.7) 80%, #0a0a0a 100%)" }} />
-            {/* Back arrow */}
             {onBack && !hideBack && (
               <button onClick={onBack}
                 style={{ position: "absolute", top: 54, left: 16, background: "none", border: "none",
@@ -4669,38 +4668,37 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
               </button>
             )}
           </div>
-          {/* Avatar row — sits just below header, overlapping it */}
-          <div style={{ marginTop: -50, paddingLeft: 0, marginBottom: 12, position: "relative", zIndex: 2 }}>
+          {/* Avatar overlapping header bottom */}
+          <div style={{ marginTop: -46, paddingLeft: 16, marginBottom: 10, position: "relative", zIndex: 2, display: "inline-block" }}>
             {profile.avatarUrl ? (
               <img src={profile.avatarUrl} alt={profile.username}
-                style={{ width: 100, height: 100, borderRadius: "50%", objectFit: "cover",
+                style={{ width: 88, height: 88, borderRadius: "50%", objectFit: "cover",
                   border: "4px solid #0a0a0a", display: "block" }} />
             ) : (
-              <div style={{ width: 100, height: 100, borderRadius: "50%",
+              <div style={{ width: 88, height: 88, borderRadius: "50%",
                 background: profile.avatarColor || "linear-gradient(135deg,#6B21A8,#C026D3)",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 38, color: "white", fontWeight: 800, border: "4px solid #0a0a0a" }}>
+                fontSize: 34, color: "white", fontWeight: 800, border: "4px solid #0a0a0a" }}>
                 {(profile.username || profile.name || "?")[0].toUpperCase()}
               </div>
             )}
-            <div style={{ position: "absolute", bottom: 6, left: 72, width: 16, height: 16,
+            <div style={{ position: "absolute", bottom: 8, left: 64, width: 15, height: 15,
               borderRadius: "50%", background: "#22C55E", border: "3px solid #0a0a0a" }} />
           </div>
         </div>
       ) : (
         <>
           {onBack && !hideBack && (
-            <div style={{ padding: "16px 0 0", display: "flex", alignItems: "center" }}>
+            <div style={{ padding: "16px 16px 0" }}>
               <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 24, cursor: "pointer", padding: 0 }}>&#8592;</button>
             </div>
           )}
-          <div style={{ position: "relative", display: "inline-block", marginBottom: 12, marginTop: 8 }}>
+          <div style={{ padding: "12px 16px 0", position: "relative", display: "inline-block", marginLeft: 16 }}>
             {profile.avatarUrl ? (
               <img src={profile.avatarUrl} alt={profile.username}
-                style={{ width: 90, height: 90, borderRadius: "50%", objectFit: "cover",
-                  border: "3px solid #222", display: "block" }} />
+                style={{ width: 88, height: 88, borderRadius: "50%", objectFit: "cover", border: "3px solid #222", display: "block" }} />
             ) : (
-              <div style={{ width: 90, height: 90, borderRadius: "50%",
+              <div style={{ width: 88, height: 88, borderRadius: "50%",
                 background: profile.avatarColor || "linear-gradient(135deg,#6B21A8,#C026D3)",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 fontSize: 34, color: "white", fontWeight: 800 }}>
