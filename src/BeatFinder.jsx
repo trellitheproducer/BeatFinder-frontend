@@ -4579,7 +4579,15 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
             items.map(function(item) { return <ContentCard key={item.id} item={item} />; })
           ) : (
             <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
-              <div style={{ fontSize: 36, marginBottom: 12 }}>{tab === "music" ? "&#127925;" : "&#127909;"}</div>
+              {tab === "music" ? (
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#444" strokeWidth="1.5" strokeLinecap="round" style={{ marginBottom: 12 }}>
+                  <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+                </svg>
+              ) : (
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#444" strokeWidth="1.5" strokeLinecap="round" style={{ marginBottom: 12 }}>
+                  <rect x="2" y="2" width="20" height="20" rx="3"/><polygon points="10,8 16,12 10,16"/>
+                </svg>
+              )}
               <div style={{ fontSize: 15, color: "#444", fontWeight: 700 }}>
                 {tab === "music" ? "No music posted yet" : "No videos posted yet"}
               </div>
@@ -4689,24 +4697,33 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
           </div>
         </div>
       ) : (
-        <div style={{ padding: "16px 16px 0" }}>
-          {onBack && !hideBack && (
-            <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 24, cursor: "pointer", padding: 0, marginBottom: 12 }}>&#8592;</button>
-          )}
-          <div style={{ position: "relative", display: "inline-block", marginBottom: 12 }}>
-            {profile.avatarUrl ? (
-              <img src={profile.avatarUrl} alt={profile.username}
-                style={{ width: 88, height: 88, borderRadius: "50%", objectFit: "cover", border: "3px solid #222", display: "block" }} />
-            ) : (
-              <div style={{ width: 88, height: 88, borderRadius: "50%",
-                background: profile.avatarColor || "linear-gradient(135deg,#6B21A8,#C026D3)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 34, color: "white", fontWeight: 800 }}>
-                {(profile.username || profile.name || "?")[0].toUpperCase()}
-              </div>
+        <div>
+          {/* Black placeholder header so layout matches */}
+          <div style={{ position: "relative", width: "100%", height: 140, background: "#111", overflow: "hidden" }}>
+            {onBack && !hideBack && (
+              <button onClick={onBack}
+                style={{ position: "absolute", top: 54, left: 16, background: "none", border: "none",
+                  color: "white", fontSize: 26, cursor: "pointer", padding: 4, lineHeight: 1, zIndex: 10 }}>
+                &#8592;
+              </button>
             )}
-            <div style={{ position: "absolute", bottom: 4, right: 4, width: 14, height: 14,
-              borderRadius: "50%", background: "#22C55E", border: "2.5px solid #0a0a0a" }} />
+          </div>
+          <div style={{ padding: "0 16px" }}>
+            <div style={{ marginTop: -46, marginBottom: 10, position: "relative", zIndex: 2, display: "inline-block" }}>
+              {profile.avatarUrl ? (
+                <img src={profile.avatarUrl} alt={profile.username}
+                  style={{ width: 88, height: 88, borderRadius: "50%", objectFit: "cover", border: "4px solid #0a0a0a", display: "block" }} />
+              ) : (
+                <div style={{ width: 88, height: 88, borderRadius: "50%",
+                  background: profile.avatarColor || "linear-gradient(135deg,#6B21A8,#C026D3)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 34, color: "white", fontWeight: 800, border: "4px solid #0a0a0a" }}>
+                  {(profile.username || profile.name || "?")[0].toUpperCase()}
+                </div>
+              )}
+              <div style={{ position: "absolute", bottom: 8, left: 64, width: 15, height: 15,
+                borderRadius: "50%", background: "#22C55E", border: "3px solid #0a0a0a" }} />
+            </div>
           </div>
         </div>
       )}
@@ -4775,7 +4792,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
               )}
             </>
           )}
-          {isOwnProfile && <div style={{ color: "#555", fontSize: 12, flex: 1 }}>This is your public profile</div>}
+          
           <button onClick={() => navigator.clipboard?.writeText("beatfinder.app/u/" + (profile.username || username))}
             style={{ width: 40, height: 40, borderRadius: "50%", background: "transparent", flexShrink: 0,
               border: "1.5px solid #333", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -4786,12 +4803,12 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
           </button>
         </div>
 
-        <div style={{ height: 1, background: "#1a1a1a", marginBottom: 20 }} />
+        <div style={{ height: 1, background: "#1a1a1a", marginBottom: 12 }} />
       </div>
 
       {/* ── Find Me On — social links ── */}
       {(profile.instagram || profile.tiktok || profile.youtube || profile.spotify || profile.appleMusic || profile.website) && (
-        <div style={{ padding: "0 16px", marginBottom: 20 }}>
+        <div style={{ padding: "0 16px", marginBottom: 12 }}>
           <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>FIND ME ON</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {[
@@ -15681,7 +15698,7 @@ export default function BeatFinder() {
       </div>
 
       {searchProfile && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "#0a0a0a", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "#0a0a0a", overflowY: "scroll", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}>
           <PublicProfileScreen
             username={searchProfile}
             onBack={function() { setSearchProfile(null); }}
