@@ -932,6 +932,33 @@ async function fetchBeats(artistName, page, filterTitle, maxResults, extraQuerie
 // =============================================================================
 // AUTH API - register / login / me / upgrade plan
 // =============================================================================
+// ── Owner check — Trelli always has full pro access, no subscription needed ──
+// Checked by username AND is_admin flag so it works even if username changes.
+function isOwnerAccount(u) {
+  if (!u) return false;
+  return u.username === "Trelli" || u.is_admin === true;
+}
+
+// Derive isPro / isArtistPro / subscriptionActive from raw API user object.
+// Owner bypasses subscription checks entirely.
+function normaliseUser(u) {
+  if (!u) return u;
+  if (isOwnerAccount(u)) {
+    return {
+      ...u,
+      isPro:              true,
+      isArtistPro:        true,
+      subscriptionActive: true,  // never shows "expired" banner
+    };
+  }
+  const active = u.subscriptionActive || false;
+  return {
+    ...u,
+    isPro:       u.plan === "producer" && active,
+    isArtistPro: (u.plan === "artist" || u.plan === "producer") && active,
+  };
+}
+
 const AuthAPI = {
   async register(name, email, password) {
     const data = await apiFetch("/api/auth/register", {
@@ -940,8 +967,7 @@ const AuthAPI = {
     });
     saveToken(data.access_token);
     const u = data.user;
-    const active = u.subscriptionActive || false;
-    return { ...u, isPro: u.plan === "producer" && active, isArtistPro: (u.plan === "artist" || u.plan === "producer") && active };
+    return normaliseUser(u);
   },
 
   async login(email, password) {
@@ -951,8 +977,7 @@ const AuthAPI = {
     });
     saveToken(data.access_token);
     const u = data.user;
-    const active = u.subscriptionActive || false;
-    return { ...u, isPro: u.plan === "producer" && active, isArtistPro: (u.plan === "artist" || u.plan === "producer") && active };
+    return normaliseUser(u);
   },
 
   async me() {
@@ -6900,22 +6925,11 @@ function RootAuthScreen({ onLogin, startMode }) {
   const [rememberMe,  setRememberMe]  = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authErr,     setAuthErr]     = useState("");
-  const [selectedPlan,    setSelectedPlan]    = useState("artist");
-  const [selectedBilling, setSelectedBilling] = useState("monthly"); // "monthly"|"annual"
+  const [selectedPlan, setSelectedPlan] = useState("artist"); // "artist" | "producer"
 
   const SIGNUP_PLANS = [
-    {
-      id: "artist", label: "Artist Pro", color: "#F59E0B",
-      monthly: { price: "£4.99/mo",  priceId: "price_1TQDoFFHyNSCxas89UpDKiro" },
-      annual:  { price: "£49.99/yr", priceId: process.env.REACT_APP_STRIPE_ARTIST_ANNUAL || "price_ARTIST_ANNUAL_PLACEHOLDER" },
-      annualSaving: "Save £10",
-    },
-    {
-      id: "producer", label: "Producer Pro", color: "#C026D3",
-      monthly: { price: "£8.99/mo",  priceId: "price_1TQDpBFHyNSCxas8cktbqw1n" },
-      annual:  { price: "£99.99/yr", priceId: process.env.REACT_APP_STRIPE_PRODUCER_ANNUAL || "price_PRODUCER_ANNUAL_PLACEHOLDER" },
-      annualSaving: "Save £8",
-    },
+    { id: "artist",   label: "Artist Pro",   price: "£4.99/mo", priceId: "price_1TQDoFFHyNSCxas89UpDKiro", color: "#F59E0B" },
+    { id: "producer", label: "Producer Pro", price: "£8.99/mo", priceId: "price_1TQDpBFHyNSCxas8cktbqw1n", color: "#C026D3" },
   ];
 
   useEffect(() => {
@@ -6968,35 +6982,18 @@ function RootAuthScreen({ onLogin, startMode }) {
       {mode === "signup" && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ color: "#888", fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>CHOOSE YOUR PLAN</div>
-
-          {/* Billing interval toggle */}
-          <div style={{ display:"flex", background:"#111", borderRadius:10, padding:3, marginBottom:12, border:"1px solid #222" }}>
-            {[{id:"monthly",label:"Monthly"},{id:"annual",label:"Annual"}].map(b => (
-              <button key={b.id} onClick={() => setSelectedBilling(b.id)} style={{
-                flex:1, padding:"8px 0", borderRadius:8, border:"none", cursor:"pointer",
-                fontWeight:700, fontSize:13, transition:"all 0.15s",
-                background: selectedBilling === b.id ? "#C026D3" : "transparent",
-                color: selectedBilling === b.id ? "white" : "#666",
-              }}>{b.label}{b.id==="annual" && <span style={{ fontSize:10, marginLeft:5, color: selectedBilling==="annual" ? "#ffd700" : "#555" }}>Save up to 10%</span>}</button>
-            ))}
-          </div>
-
           <div style={{ display: "flex", gap: 10 }}>
-            {SIGNUP_PLANS.map(p => {
-              const billing = p[selectedBilling];
-              return (
-                <button key={p.id} onClick={() => setSelectedPlan(p.id)} style={{
-                  flex: 1, padding: "12px 8px", borderRadius: 12, cursor: "pointer",
-                  border: "2px solid " + (selectedPlan === p.id ? p.color : "#222"),
-                  background: selectedPlan === p.id ? p.color + "18" : "#111",
-                  textAlign: "left", transition: "all 0.15s",
-                }}>
-                  <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>{p.label}</div>
-                  <div style={{ color: p.color, fontWeight: 700, fontSize: 13 }}>{billing.price}</div>
-                  {selectedBilling === "annual" && <div style={{ color:"#ffd700", fontSize:10, marginTop:2, fontWeight:700 }}>{p.annualSaving}/yr</div>}
-                </button>
-              );
-            })}
+            {SIGNUP_PLANS.map(p => (
+              <button key={p.id} onClick={() => setSelectedPlan(p.id)} style={{
+                flex: 1, padding: "12px 8px", borderRadius: 12, cursor: "pointer",
+                border: "2px solid " + (selectedPlan === p.id ? p.color : "#222"),
+                background: selectedPlan === p.id ? p.color + "18" : "#111",
+                textAlign: "left", transition: "all 0.15s",
+              }}>
+                <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>{p.label}</div>
+                <div style={{ color: p.color, fontWeight: 700, fontSize: 13 }}>{p.price}</div>
+              </button>
+            ))}
           </div>
           <div style={{ color: "#444", fontSize: 11, marginTop: 8, textAlign: "center" }}>
             You'll be taken to Stripe to complete payment after creating your account.
@@ -7025,10 +7022,11 @@ function RootAuthScreen({ onLogin, startMode }) {
               try {
                 const r = await apiFetch("/api/stripe/create-checkout", {
                   method: "POST",
-                  body: JSON.stringify({ plan: selectedPlan, billing: selectedBilling }),
+                  body: JSON.stringify({ price_id: plan.priceId }),
                 });
                 window.location.href = r.checkout_url;
               } catch(e) {
+                // Checkout failed — user still has account, they can subscribe from profile
                 setAuthErr("Account created! To subscribe, go to your Profile.");
               }
             } else {
@@ -7489,19 +7487,14 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
   const PLANS = [
     {
-      id: "artist", label: "Artist Pro", color: "#F59E0B",
-      monthly: { price: "4.99", priceId: "price_1TQDoFFHyNSCxas89UpDKiro" },
-      annual:  { price: "49.99", priceId: process.env.REACT_APP_STRIPE_ARTIST_ANNUAL || "price_ARTIST_ANNUAL_PLACEHOLDER" },
+      id: "artist", label: "Artist Pro", price: "4.99",
       perks: ["Access Exclusive Members area","Bookmark unlimited beats","Artist verified badge","Personalised recommendations"],
     },
     {
-      id: "producer", label: "Producer Pro", color: "#C026D3",
-      monthly: { price: "8.99", priceId: "price_1TQDpBFHyNSCxas8cktbqw1n" },
-      annual:  { price: "99.99", priceId: process.env.REACT_APP_STRIPE_PRODUCER_ANNUAL || "price_PRODUCER_ANNUAL_PLACEHOLDER" },
+      id: "producer", label: "Producer Pro", price: "8.99",
       perks: ["Everything in Artist Pro","Upload beats to Home featured","Featured in rotation","Producer verified badge","Analytics"],
     },
   ];
-  const [upgradeBilling, setUpgradeBilling] = useState("monthly");
 
   // Add activeSection state for dashboard navigation
   const [activeSection, setActiveSection] = useState(null);
@@ -7535,8 +7528,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
     if (!user) return;
     apiFetch("/api/auth/me")
       .then(fresh => {
-        const active = fresh.subscriptionActive || false;
-        setUser(u => ({ ...u, ...fresh, isPro: fresh.plan === "producer" && active, isArtistPro: (fresh.plan === "artist" || fresh.plan === "producer") && active }));
+        setUser(() => normaliseUser(fresh));
         setBio(fresh.bio || "");
         setEditName(fresh.name || "");
         setLocation(fresh.location || "");
@@ -7829,41 +7821,21 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         </div>
       </div>
 
+      
       <div style={{ marginBottom: 20 }}>
         <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>{user.name}</div>
         <div style={{ color: "#666", fontSize: 13 }}>{user.email}</div>
         {user.username && <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>@{user.username}</div>}
         <div style={{ marginTop: 8 }}>
           {user.isPro && (
-            <span onClick={() => setOwnBadgePopup({ type:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 14px", color:"#C026D3", fontWeight:800, fontSize:12, marginRight:6, cursor:"pointer" }}>
+            <span onClick={() => setOwnBadgePopup({ icon:"🎛️", text:"This user is currently subscribed to Producer Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 14px", color:"#C026D3", fontWeight:800, fontSize:12, marginRight:6, cursor:"pointer" }}>
               <VerifiedBadge size={18} /> Producer Pro
             </span>
           )}
-          {user.isArtistPro && !user.isPro && <span onClick={() => setOwnBadgePopup({ type:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ display:"inline-block", background:"rgba(245,158,11,0.2)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 14px", color:"#F59E0B", fontWeight:800, fontSize:12, cursor:"pointer" }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
-          {user.username === "Trelli" && <CEOBadge onClick={() => setOwnBadgePopup({ type:"ceo", text:"Verified Chief Executive Officer" })} />}
+          {user.isArtistPro && !user.isPro && <span onClick={() => setOwnBadgePopup({ icon:"🎤", text:"This user is currently subscribed to Artist Pro" })} style={{ display:"inline-block", background:"rgba(245,158,11,0.2)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 14px", color:"#F59E0B", fontWeight:800, fontSize:12, cursor:"pointer" }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
+          {user.username === "Trelli" && <CEOBadge onClick={() => setOwnBadgePopup({ icon:"👑", text:"Verified Chief Executive Officer" })} />}
         </div>
         <BadgeInfoPopup message={ownBadgePopup} onClose={() => setOwnBadgePopup(null)} />
-
-        {/* Expired subscription banner */}
-        {user.plan !== "free" && !user.subscriptionActive && (
-          <div style={{ marginTop:14, background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.4)", borderRadius:14, padding:"14px 16px", display:"flex", alignItems:"center", gap:12 }}>
-            <span style={{ fontSize:24, flexShrink:0 }}>⚠️</span>
-            <div style={{ flex:1 }}>
-              <div style={{ color:"#f87171", fontWeight:800, fontSize:14 }}>Subscription expired</div>
-              <div style={{ color:"#888", fontSize:12, marginTop:2 }}>Your pro features are paused. Renew to restore access.</div>
-            </div>
-            <button onClick={() => setActiveSection("upgrade")} style={{ flexShrink:0, background:"#ef4444", border:"none", borderRadius:20, color:"white", fontWeight:700, fontSize:12, padding:"8px 14px", cursor:"pointer" }}>
-              Renew
-            </button>
-          </div>
-        )}
-
-        {/* Subscription info for active subscribers */}
-        {user.subscriptionActive && user.subscriptionExpiresAt && (
-          <div style={{ marginTop:10, color:"#555", fontSize:11 }}>
-            {user.billingInterval === "annual" ? "Annual" : "Monthly"} plan · renews {new Date(user.subscriptionExpiresAt).toLocaleDateString("en-GB", { day:"numeric", month:"long", year:"numeric" })}
-          </div>
-        )}
       </div>
 
       
@@ -8343,66 +8315,28 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         <div>
           <SectionBack onBack={() => setActiveSection(null)} label="Back to Dashboard" />
           <div style={{ color: "white", fontWeight: 800, fontSize: 20, marginBottom: 16 }}>Choose Your Plan</div>
-
-          {/* Expired subscription warning */}
-          {user.plan !== "free" && !user.subscriptionActive && (
-            <div style={{ background:"rgba(239,68,68,0.12)", border:"1px solid #ef4444", borderRadius:14, padding:"14px 16px", marginBottom:16, display:"flex", alignItems:"center", gap:10 }}>
-              <span style={{ fontSize:22 }}>⚠️</span>
-              <div>
-                <div style={{ color:"#f87171", fontWeight:800, fontSize:14 }}>Your subscription has expired</div>
-                <div style={{ color:"#888", fontSize:12, marginTop:2 }}>Renew below to restore all pro features.</div>
+          {PLANS.map(plan => (
+            <div key={plan.id} style={{ background: "#111", borderRadius: 16, padding: 20, marginBottom: 14, border: "1.5px solid #333" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>{plan.label}</div>
+                <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 18 }}>£{plan.price}/mo</div>
               </div>
-            </div>
-          )}
-
-          {/* Billing toggle */}
-          <div style={{ display:"flex", background:"#111", borderRadius:10, padding:3, marginBottom:16, border:"1px solid #222" }}>
-            {[{id:"monthly",label:"Monthly"},{id:"annual",label:"Annual"}].map(b => (
-              <button key={b.id} onClick={() => setUpgradeBilling(b.id)} style={{
-                flex:1, padding:"9px 0", borderRadius:8, border:"none", cursor:"pointer",
-                fontWeight:700, fontSize:13, transition:"all 0.15s",
-                background: upgradeBilling === b.id ? "#C026D3" : "transparent",
-                color: upgradeBilling === b.id ? "white" : "#666",
-              }}>
-                {b.label}
-                {b.id==="annual" && <span style={{ fontSize:10, marginLeft:5, color: upgradeBilling==="annual"?"#ffd700":"#555" }}>Save ~10%</span>}
-              </button>
-            ))}
-          </div>
-
-          {PLANS.map(plan => {
-            const billing = plan[upgradeBilling];
-            const period  = upgradeBilling === "annual" ? "yr" : "mo";
-            return (
-              <div key={plan.id} style={{ background: "#111", borderRadius: 16, padding: 20, marginBottom: 14, border: "1.5px solid #333" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-                  <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>{plan.label}</div>
-                  <div style={{ color: plan.color, fontWeight: 800, fontSize: 18 }}>£{billing.price}/{period}</div>
+              {plan.perks.map(perk => (
+                <div key={perk} style={{ color: "#aaa", fontSize: 14, marginBottom: 6, display: "flex", gap: 8 }}>
+                  <span style={{ color: "#C026D3" }}>+</span>{perk}
                 </div>
-                {upgradeBilling === "annual" && (
-                  <div style={{ color:"#ffd700", fontSize:11, fontWeight:700, marginBottom:10 }}>
-                    ✦ Best value — pay once a year
-                  </div>
-                )}
-                {plan.perks.map(perk => (
-                  <div key={perk} style={{ color: "#aaa", fontSize: 14, marginBottom: 6, display: "flex", gap: 8 }}>
-                    <span style={{ color: plan.color }}>+</span>{perk}
-                  </div>
-                ))}
-                <button onClick={async () => {
-                  try {
-                    const r = await apiFetch("/api/stripe/create-checkout", {
-                      method: "POST",
-                      body: JSON.stringify({ plan: plan.id, billing: upgradeBilling }),
-                    });
-                    window.location.href = r.checkout_url;
-                  } catch (e) { alert("Error: " + e.message); }
-                }} style={{ width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 12, color: "white", fontWeight: 800, fontSize: 15, padding: "14px", cursor: "pointer", marginTop: 12 }}>
-                  {user.plan === plan.id && !user.subscriptionActive ? "Renew" : "Subscribe"} — £{billing.price}/{period}
-                </button>
-              </div>
-            );
-          })}
+              ))}
+              <button onClick={async () => {
+                try {
+                  const priceId = plan.id === "artist" ? "price_1TQDoFFHyNSCxas89UpDKiro" : "price_1TQDpBFHyNSCxas8cktbqw1n";
+                  const r = await apiFetch("/api/stripe/create-checkout", { method: "POST", body: JSON.stringify({ price_id: priceId }) });
+                  window.location.href = r.checkout_url;
+                } catch (e) { alert("Error: " + e.message); }
+              }} style={{ width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 12, color: "white", fontWeight: 800, fontSize: 15, padding: "14px", cursor: "pointer", marginTop: 12 }}>
+                Subscribe - £{plan.price}/mo
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -17235,7 +17169,6 @@ export default function BeatFinder() {
 
   // Handle URL routing — reset_token and /u/:username public profiles
   const resetToken = new URLSearchParams(window.location.search).get("reset_token");
-  const urlPaymentSuccess = new URLSearchParams(window.location.search).get("payment") === "success";
   // /u/username — open a public profile directly from a shared link
   const urlUsername = (function() {
     const m = window.location.pathname.match(/^\/u\/([^/]+)/);
@@ -17269,33 +17202,10 @@ export default function BeatFinder() {
     if (!token) return;
     AuthAPI.me()
       .then(u => {
-        const active = u.subscriptionActive || false;
-        setUser({
-          ...u,
-          isPro:       u.plan === "producer" && active,
-          isArtistPro: (u.plan === "artist" || u.plan === "producer") && active,
-        });
+        setUser(normaliseUser(u));
+        // Auto-skip welcome — user already has a valid session
         try { localStorage.setItem("bf_welcomed", "1"); } catch(e) {}
         setWelcomeDone(true);
-        // After returning from Stripe checkout, re-check subscription status
-        if (urlPaymentSuccess) {
-          apiFetch("/api/auth/subscription-status")
-            .then(status => {
-              const a = status.subscriptionActive || false;
-              setUser(prev => ({
-                ...prev,
-                plan:                  status.plan,
-                subscriptionActive:    a,
-                subscriptionExpiresAt: status.subscriptionExpiresAt,
-                billingInterval:       status.billingInterval,
-                isPro:                 status.plan === "producer" && a,
-                isArtistPro:           (status.plan === "artist" || status.plan === "producer") && a,
-              }));
-            })
-            .catch(() => {});
-          // Clean the URL so refreshing doesn't re-trigger
-          try { window.history.replaceState({}, "", window.location.pathname); } catch(e) {}
-        }
       })
       .catch(() => clearToken());
   }, []);
@@ -17417,6 +17327,12 @@ export default function BeatFinder() {
       setShowAuthPrompt(true);
       return;
     }
+    // Studio requires an active pro subscription (owner is always exempt)
+    if (id === "studio" && user && !isOwnerAccount(user) && !user.isPro && !user.isArtistPro) {
+      setPromptReason("studio_pro");
+      setShowAuthPrompt(true);
+      return;
+    }
     setPlaying(null);
     setTab(id);
     if (id === "studio") setStudioVisited(true);
@@ -17533,11 +17449,7 @@ export default function BeatFinder() {
             ←
           </button>
           <RootAuthScreen startMode={authStartMode} onLogin={function(u) {
-            setUser({
-              ...u,
-              isPro:       u.plan === "producer",
-              isArtistPro: u.plan === "artist" || u.plan === "producer",
-            });
+            setUser(normaliseUser(u));
             doWelcome();
           }} />
         </div>
@@ -17680,7 +17592,9 @@ export default function BeatFinder() {
         }}>
         {NAV.filter(function(n){ return !(n.id === 'profile' && !user); }).map(n => {
           const isPro    = user?.isPro || user?.isArtistPro;
-          const locked   = (n.id === "exclusive" && (!user || !isPro)) || (n.id === "studio" && !user);
+          const locked   = (n.id === "exclusive" && (!user || !isPro)) ||
+                           (n.id === "studio" && !user) ||
+                           (n.id === "studio" && !!user && !isOwnerAccount(user) && !isPro);
           const isActive = tab === n.id;
           const activeColor = n.id === "exclusive" ? "#F59E0B" : n.id === "studio" ? "#22C55E" : "#C026D3";
           const isStudio = n.id === "studio";
