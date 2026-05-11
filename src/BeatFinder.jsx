@@ -6145,17 +6145,16 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               try {
                 const fd = new FormData();
                 fd.append("file", file);
-                fd.append("folder", "beatfinder/headers");
                 const token = getToken() || "";
-                const res = await fetch(API_BASE + "/api/auth/avatar", {
+                const res = await fetch(API_BASE + "/api/auth/header", {
                   method: "POST",
                   headers: { Authorization: "Bearer " + token },
                   body: fd,
                 });
                 if (!res.ok) throw new Error("Upload failed");
                 const data = await res.json();
-                setHeaderUrl(data.avatarUrl);
-                setUser(u => ({ ...u, headerUrl: data.avatarUrl }));
+                setHeaderUrl(data.headerUrl);
+                setUser(u => ({ ...u, headerUrl: data.headerUrl }));
                 setBioMsg("Header photo updated!");
                 setTimeout(() => setBioMsg(""), 2500);
               } catch(err) { setBioMsg("Error: " + err.message); }
@@ -6165,29 +6164,47 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
           {/* Header photo preview + upload */}
           <div style={{ marginBottom: 20, position: "relative" }}>
-            <div style={{ height: 120, borderRadius: 14, overflow: "hidden", background: "#111", border: "1px solid #1e1e1e", position: "relative" }}>
+            <div style={{ height: 130, borderRadius: 14, overflow: "hidden", background: "#111", border: "1px solid #1e1e1e", position: "relative" }}>
               {headerUrl ? (
-                <img src={headerUrl} alt="header" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                <img src={headerUrl} alt="header"
+                  style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} />
               ) : (
-                <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center",
-                  background: "linear-gradient(135deg,#1a1a1a,#0a0a0a)", color: "#333", fontSize: 13 }}>
-                  No header photo
+                <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  background: "linear-gradient(135deg,#1a1a1a,#0a0a0a)", gap: 6 }}>
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+                    <polyline points="21 15 16 10 5 21"/>
+                  </svg>
+                  <div style={{ color: "#333", fontSize: 12 }}>No header photo</div>
                 </div>
               )}
-              <button onClick={() => headerFileRef.current && headerFileRef.current.click()}
-                style={{ position: "absolute", bottom: 8, right: 8, background: "rgba(0,0,0,0.7)",
-                  border: "1px solid #333", borderRadius: 20, color: "white", fontSize: 12,
-                  padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-                {headerUploading ? "Uploading..." : (
-                  <>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                      <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-                    </svg>
-                    {headerUrl ? "Change Header" : "Add Header Photo"}
-                  </>
+              {/* Upload / change button */}
+              <button onClick={function() { headerFileRef.current && headerFileRef.current.click(); }}
+                style={{ position: "absolute", bottom: 8, right: 8, background: "rgba(0,0,0,0.75)",
+                  border: "1px solid rgba(255,255,255,0.15)", borderRadius: 20, color: "white", fontSize: 12,
+                  padding: "6px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+                  backdropFilter: "blur(4px)" }}>
+                {headerUploading ? (
+                  <div style={{ width: 12, height: 12, border: "2px solid #555", borderTopColor: "white", borderRadius: "50%" }} />
+                ) : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
                 )}
+                {headerUploading ? "Uploading..." : headerUrl ? "Change Header" : "Add Header Photo"}
               </button>
+              {headerUrl && (
+                <button onClick={function() { setHeaderUrl(""); setUser(u => ({ ...u, headerUrl: "" })); }}
+                  style={{ position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,0.75)",
+                    border: "none", borderRadius: "50%", width: 26, height: 26, color: "white",
+                    fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  &#10005;
+                </button>
+              )}
+            </div>
+            <div style={{ color: "#444", fontSize: 11, marginTop: 6, textAlign: "center" }}>
+              Image will be cropped to fit the banner area
             </div>
           </div>
 
