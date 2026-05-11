@@ -4685,6 +4685,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
               {profile.username || profile.name}
             </div>
             {(isProd || isArtist) && <VerifiedBadge size={20} />}
+            {profile.username === "Trelli" && <GoldVerifiedBadge size={22} />}
           </div>
           {profile.username && <div style={{ color: "#666", fontSize: 14, marginTop: 2 }}>@{profile.username}</div>}
         </div>
@@ -4693,6 +4694,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
             {isProd && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11 }}>Producer Pro</span>}
+            {profile.username === "Trelli" && <CEOBadge />}
             {isArtist && !isProd && <span style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11 }}>Artist Pro</span>}
           </div>
         )}
@@ -9508,6 +9510,58 @@ function GBVUBars({ analyserNode, active }) {
 // VERIFIED BADGE — blue-to-purple gradient seal with white checkmark
 // Matches the Instagram/X-style verification badge design
 // =============================================================================
+
+// Gold verification badge — Trelli only
+function GoldVerifiedBadge({ size = 20 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#FFD700"/>
+          <stop offset="40%" stopColor="#FFA500"/>
+          <stop offset="70%" stopColor="#B8860B"/>
+          <stop offset="100%" stopColor="#000000"/>
+        </linearGradient>
+        <linearGradient id="goldShine" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#FFD700" stopOpacity="0.9"/>
+          <stop offset="50%" stopColor="#FFFACD"/>
+          <stop offset="100%" stopColor="#B8860B" stopOpacity="0.9"/>
+        </linearGradient>
+      </defs>
+      <path d="M50 4 L61 20 L79 14 L79 33 L96 38 L88 55 L96 72 L79 77 L79 96 L61 90 L50 106 L39 90 L21 96 L21 77 L4 72 L12 55 L4 38 L21 33 L21 14 L39 20 Z"
+        fill="url(#goldGrad)" stroke="#FFD700" strokeWidth="1.5"/>
+      <path d="M50 10 L59 24 L75 19 L75 35 L90 40 L83 55 L90 70 L75 75 L75 91 L59 86 L50 100 L41 86 L25 91 L25 75 L10 70 L17 55 L10 40 L25 35 L25 19 L41 24 Z"
+        fill="url(#goldShine)" opacity="0.3"/>
+      <polyline points="34,52 45,63 67,40" stroke="#000" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+      <polyline points="34,52 45,63 67,40" stroke="#FFD700" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    </svg>
+  );
+}
+
+// CEO badge — Trelli only
+function CEOBadge() {
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      background: "linear-gradient(135deg, #000 0%, #1a1a1a 40%, #B8860B 100%)",
+      border: "1.5px solid #FFD700",
+      borderRadius: 20,
+      padding: "3px 10px",
+      color: "#FFD700",
+      fontWeight: 900,
+      fontSize: 10,
+      letterSpacing: 1.5,
+      textTransform: "uppercase",
+      boxShadow: "0 0 8px rgba(255,215,0,0.4)",
+    }}>
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="#FFD700">
+        <path d="M2 20h20v2H2zM4 17l4-8 4 4 4-8 4 8H4z"/>
+      </svg>
+      CEO
+    </span>
+  );
+}
+
 function VerifiedBadge({ size = 20 }) {
   const id = "vbg";
   return (
