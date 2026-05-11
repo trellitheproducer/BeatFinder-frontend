@@ -650,14 +650,15 @@ function LogicTrackHeader({
             }}>{track.clips.length}▾</button>
         )}
 
-        {/* Delete */}
+        {/* Delete — always red, shows confirm modal */}
         <button onClick={e => { e.stopPropagation(); onRemove(); }}
           style={{
-            background:"none", border:"none", color:"#2a2a2a",
+            background:"none", border:"none", color:"#FF3B30",
             fontSize:10, cursor:"pointer", padding:"0 1px", lineHeight:1, flexShrink:0,
+            opacity: 0.7,
           }}
-          onPointerEnter={e => e.currentTarget.style.color="#FF3B30"}
-          onPointerLeave={e => e.currentTarget.style.color="#2a2a2a"}
+          onPointerEnter={e => { e.currentTarget.style.opacity="1"; }}
+          onPointerLeave={e => { e.currentTarget.style.opacity="0.7"; }}
         >✕</button>
       </div>
 
@@ -1478,6 +1479,48 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
     if (node) node.scrollTop = 0;
   }, []);
   const isEditing = initialLyric !== undefined && initialLyric !== null;
+  const autoSaveTimer = React.useRef(null);
+
+  // Autosave lyrics 3 seconds after the user stops typing
+  React.useEffect(function() {
+    if (!text.trim()) return;
+    clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(function() {
+      var lyric = {
+        id:        isEditing ? initialLyric.id : ("lyric_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8)),
+        title:     title.trim() || (beat ? beat.title : "Untitled"),
+        text:      text.trim(),
+        beatTitle: beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
+        beatId:    beat ? beat.videoId : (initialLyric ? initialLyric.beatId : ""),
+        beat:      beat || (initialLyric ? initialLyric.beat : null),
+        savedAt:   isEditing ? initialLyric.savedAt : new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      onSaveLyric(lyric, isEditing ? lyricIndex : null);
+    }, 3000);
+    return function() { clearTimeout(autoSaveTimer.current); };
+  }, [text, title]);
+
+  // Also save immediately when user closes the notepad
+  var closeSaving = React.useRef(false);
+  var handleClose = function() {
+    if (text.trim() && !closeSaving.current) {
+      closeSaving.current = true;
+      clearTimeout(autoSaveTimer.current);
+      var lyric = {
+        id:        isEditing ? initialLyric.id : ("lyric_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8)),
+        title:     title.trim() || (beat ? beat.title : "Untitled"),
+        text:      text.trim(),
+        beatTitle: beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
+        beatId:    beat ? beat.videoId : (initialLyric ? initialLyric.beatId : ""),
+        beat:      beat || (initialLyric ? initialLyric.beat : null),
+        savedAt:   isEditing ? initialLyric.savedAt : new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      onSaveLyric(lyric, isEditing ? lyricIndex : null);
+    }
+    onClose();
+  };
 
   const handleSave = () => {
     if (!text.trim()) return;
@@ -1505,7 +1548,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
     }}>
       <div style={{ background: "#0a0a0a", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderBottom: "1px solid #1a1a1a" }}>
-          <button onClick={onClose} style={{
+          <button onClick={handleClose} style={{
             background: "#1a1a1a", border: "1px solid #333", borderRadius: "50%",
             color: "white", width: 36, height: 36, fontSize: 20, cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center",
@@ -8368,38 +8411,57 @@ function useHistory(initial) {
 class StudioErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { crashed: false, errMsg: "" };
+    this.state = { crashed: false, errMsg: "", saved: false };
   }
   static getDerivedStateFromError(err) {
     return { crashed: true, errMsg: err && err.message ? err.message : String(err) };
   }
   componentDidCatch(err, info) {
     console.error("[BeatFinder] Studio crash:", err, info);
+    // Emergency save: persist whatever state we have in sessionStorage to survive the crash
+    try {
+      const existing = sessionStorage.getItem("bf_studio_state");
+      if (existing) {
+        // Mark as crash-recovered so Studio can offer to restore on next open
+        const snap = JSON.parse(existing);
+        snap._crashRecovered = true;
+        snap._crashMsg = err && err.message ? err.message : String(err);
+        snap._crashAt  = new Date().toISOString();
+        sessionStorage.setItem("bf_studio_crash_recovery", JSON.stringify(snap));
+      }
+    } catch(e) {}
+    this.setState({ saved: true });
   }
   render() {
     if (this.state.crashed) {
       return (
-        <div style={{ background:"#0a0a0a", minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:32, fontFamily:"'DM Sans',sans-serif", gap:20 }}>
-          <div style={{ fontSize:48 }}>⚠️</div>
-          <div style={{ color:"white", fontWeight:800, fontSize:18, textAlign:"center" }}>Studio hit a problem</div>
-          <div style={{ color:"#555", fontSize:13, textAlign:"center", lineHeight:1.6 }}>
+        <div style={{ background:"#0a0a0a", minHeight:"100dvh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:32, fontFamily:"'DM Sans',sans-serif", gap:16 }}>
+          <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <div style={{ color:"white", fontWeight:800, fontSize:20, textAlign:"center" }}>Studio hit a problem</div>
+          <div style={{ color:"#555", fontSize:13, textAlign:"center", lineHeight:1.7, maxWidth:280 }}>
             {this.state.errMsg || "An unexpected error occurred."}
           </div>
+          {this.state.saved && (
+            <div style={{ background:"rgba(34,197,94,0.1)", border:"1px solid rgba(34,197,94,0.3)", borderRadius:10, padding:"10px 18px", color:"#22C55E", fontSize:12, fontWeight:700, textAlign:"center" }}>
+              Your project state has been saved — you can restore it when Studio restarts.
+            </div>
+          )}
           <button
             onClick={function(){
-              // Clear any corrupt project data from the active slot and reload
               try { localStorage.removeItem("bf_studio_active"); } catch(e){}
               window.location.reload();
             }}
-            style={{ background:"#C026D3", border:"none", borderRadius:24, color:"white", fontWeight:800, fontSize:15, padding:"14px 32px", cursor:"pointer" }}
+            style={{ background:"#C026D3", border:"none", borderRadius:24, color:"white", fontWeight:800, fontSize:15, padding:"14px 32px", cursor:"pointer", marginTop:8 }}
           >
             Restart Studio
           </button>
           <button
             onClick={function(){
-              // Nuclear option — wipe saved projects so a corrupt one can't re-crash
               if (window.confirm("This will delete all saved projects. Continue?")) {
-                try { localStorage.removeItem("bf_studio_projects"); } catch(e){}
+                try { localStorage.removeItem("bf_studio_projects"); localStorage.removeItem("bf_studio_crash_recovery"); } catch(e){}
                 window.location.reload();
               }
             }}
@@ -9021,6 +9083,7 @@ function _OceanPlugin({ fx, upd, Knob }) {
   );
 }
 
+var _tkc = 0; // unique counter for TKnob SVG gradient IDs — must be declared before use
 function TKnob({ label, value, min, max, step, unit, onChange, size, color }) {
   const sz     = size || 44;
   const r      = sz / 2 - 4;
@@ -11232,6 +11295,7 @@ function StudioScreen({ user, onExit }) {
   // ── Refs ──────────────────────────────────────────────────────
   const actxRef         = useRef(null);
   const masterStartRef  = useRef(0);
+  const loopRestartingRef = useRef(false); // prevents re-entrant loop restarts
   const playheadAtRef   = useRef(0);
   const animRef         = useRef(null);
   const scrollRef       = useRef(null);
@@ -11271,6 +11335,22 @@ function StudioScreen({ user, onExit }) {
   const monitorCtxRef       = useRef(null); // persistent AudioContext — never closed between sessions
   // Persistent mic stream — requested once on mount, reused for both monitoring and recording
   const micStreamRef        = useRef(null);
+
+  // Re-route iOS audio output back to speaker after mic use.
+  // iOS switches to earpiece when getUserMedia is called; this forces it back.
+  const restoreIOSSpeaker = async function() {
+    try {
+      const ctx = actxRef.current;
+      if (!ctx) return;
+      if (ctx.state === "suspended") { try { await ctx.resume(); } catch(e) {} }
+      const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.05), ctx.sampleRate);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.start();
+      src.stop(ctx.currentTime + 0.05);
+    } catch(e) {}
+  };
   // micReady: true if we've confirmed mic permission this session.
   // We check the Permissions API first — if the browser shows "granted", skip the prompt.
   // If it shows "prompt" or "denied", clear our cached flag and ask again.
@@ -11392,6 +11472,8 @@ function StudioScreen({ user, onExit }) {
           try {
             var stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             stream.getTracks().forEach(function(t) { t.stop(); });
+            // Restore speaker route immediately after mic permission check closes the stream
+            await restoreIOSSpeaker();
             if (!cancelled) {
               setMicReady(true);
               try { localStorage.setItem("bf_mic_granted", "1"); } catch(e) {}
@@ -11434,6 +11516,8 @@ function StudioScreen({ user, onExit }) {
       var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       // Immediately stop — we just needed the permission grant
       stream.getTracks().forEach(function (t) { t.stop(); });
+      // Restore speaker route after mic closes
+      await restoreIOSSpeaker();
       setMicReady(true);
       try { localStorage.setItem("bf_mic_granted", "1"); } catch(e) {}
       setTimeout(checkHeadphones, 300);
@@ -11487,6 +11571,51 @@ function StudioScreen({ user, onExit }) {
   useEffect(function () {
     try { setSavedProjects(JSON.parse(localStorage.getItem("bf_studio_projects") || "[]")); } catch (e) {}
   }, []);
+
+  // ── Autosave ──────────────────────────────────────────────────
+  // Saves project to IndexedDB + localStorage whenever tracks change,
+  // debounced 8s so rapid edits don't hammer storage.
+  // Also runs a periodic hard save every 60s as a safety net.
+  const autosaveTimerRef = useRef(null);
+  const lastAutoSaveRef  = useRef(0);
+
+  useEffect(function() {
+    // Don't autosave if there's nothing to save
+    if (!tracks.length && !projectName) return;
+
+    // Debounce: wait 8s after last change before saving
+    clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(async function() {
+      try {
+        await saveProject(true); // silent autosave
+        lastAutoSaveRef.current = Date.now();
+      } catch(e) { /* autosave failure is silent — user can still save manually */ }
+    }, 8000);
+
+    return function() { clearTimeout(autosaveTimerRef.current); };
+  }, [tracks, projectName, bpm, projectKey]);
+
+  // Periodic hard save every 60s regardless of changes
+  useEffect(function() {
+    var interval = setInterval(async function() {
+      if (!tracks.length && !projectName) return;
+      try { await saveProject(true); } catch(e) {} // silent periodic autosave
+    }, 60000);
+    return function() { clearInterval(interval); };
+  }, [tracks, projectName, bpm, projectKey]);
+
+  // Save immediately when user leaves Studio (tab change, back button)
+  useEffect(function() {
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden" && (tracks.length || projectName)) {
+        clearTimeout(autosaveTimerRef.current);
+        // Fire-and-forget — can't await in event handler
+        saveProject(true).catch(function() {}); // silent visibility-change save
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return function() { document.removeEventListener("visibilitychange", handleVisibilityChange); };
+  }, [tracks, projectName, bpm, projectKey]);
 
   // ── iOS Background Persistence ────────────────────────────────
   // iOS Safari can fully reload the page when the app is backgrounded.
@@ -11980,7 +12109,7 @@ function StudioScreen({ user, onExit }) {
   // ── RAF playback loop ─────────────────────────────────────────
   // Mutates DOM transform directly — no React re-render per frame = smooth 60fps
   useEffect(function () {
-    if (!isPlaying) { cancelAnimationFrame(animRef.current); return; }
+    if (!isPlaying) { cancelAnimationFrame(animRef.current); loopRestartingRef.current = false; return; }
     var lastUIUpdate = 0;
 
     const tick = function (ts) {
@@ -12020,10 +12149,21 @@ function StudioScreen({ user, onExit }) {
       }
 
       if (loopEnabled && loopOut > loopIn && t >= loopOut) {
-        stopAll();
-        doPlay(loopIn);
-        setCurrentTime(loopIn);
-        setIsPlaying(true);
+        // Prevent re-entrant loop restarts: if already looping back, skip
+        if (!loopRestartingRef.current) {
+          loopRestartingRef.current = true;
+          // Reset time refs immediately so the next tick doesn't overshoot
+          playheadAtRef.current = loopIn;
+          liveTimeRef.current   = loopIn;
+          masterStartRef.current = actx.currentTime + 0.05;
+          setCurrentTime(loopIn);
+          updatePlayheadDOM(loopIn);
+          stopAll();
+          doPlay(loopIn).then(function() {
+            loopRestartingRef.current = false;
+            setIsPlaying(true);
+          });
+        }
         animRef.current = requestAnimationFrame(tick);
         return;
       }
@@ -12974,14 +13114,23 @@ function StudioScreen({ user, onExit }) {
     };
 
     tracksRef.current.forEach(function(track) {
-      const clips = track.clips && track.clips.length > 0
-        ? track.clips
-        : track.audioBuffer // legacy flat model
-          ? [{ id:"lg", audioBuffer:track.audioBuffer, url:track.url, startTime:track.startTime||0, duration:track.audioBuffer.duration, trimStart:0, trimEnd:track.audioBuffer.duration, active:true }]
-          : [];
-      if (clips.length === 0) return;
-      const entryNode = buildChain(track);
-      clips.forEach(function(clip){ scheduleClip(track, clip, entryNode); });
+      try {
+        const clips = track.clips && track.clips.length > 0
+          ? track.clips
+          : track.audioBuffer // legacy flat model
+            ? [{ id:"lg", audioBuffer:track.audioBuffer, url:track.url, startTime:track.startTime||0, duration:track.audioBuffer.duration, trimStart:0, trimEnd:track.audioBuffer.duration, active:true }]
+            : [];
+        if (clips.length === 0) return;
+        const entryNode = buildChain(track);
+        clips.forEach(function(clip){
+          try { scheduleClip(track, clip, entryNode); } catch(clipErr) {
+            console.warn("[Studio] clip schedule error on track", track.name, clipErr);
+          }
+        });
+      } catch(trackErr) {
+        // One bad track should never stop others from playing
+        console.warn("[Studio] track chain error on track", track.name, trackErr);
+      }
     });
   };
 
@@ -13105,7 +13254,7 @@ function StudioScreen({ user, onExit }) {
     else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
     rulerDragRef.current = { mode, startX: e.clientX, startT: t };
 
-    if (mode === "new") { setLoopEnabled(true); setLoopIn(t); setLoopOut(snapToBar(t + spb)); }
+    if (mode === "new") { setLoopIn(t); setLoopOut(snapToBar(t + spb)); } // don't auto-enable — user must toggle loop button
 
     const onMove = function (me) {
       const nt = snapToBar(rulerTimeFromClientX(me.clientX));
@@ -13136,7 +13285,7 @@ function StudioScreen({ user, onExit }) {
     else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
     rulerDragRef.current = { mode, startT: t };
 
-    if (mode === "new") { setLoopEnabled(true); setLoopIn(t); setLoopOut(snapToBar(t + spb)); }
+    if (mode === "new") { setLoopIn(t); setLoopOut(snapToBar(t + spb)); } // don't auto-enable — user must toggle loop button
   };
 
   const handleRulerTouchMove = function (e) {
@@ -13248,6 +13397,8 @@ function StudioScreen({ user, onExit }) {
       });
     });
   };
+
+  const [confirmDeleteTrackId, setConfirmDeleteTrackId] = React.useState(null);
 
   const removeTrack = function (id) {
     setTracks(function (prev) { return prev.filter(function(t){ return t.id!==id; }); });
@@ -13570,6 +13721,30 @@ function StudioScreen({ user, onExit }) {
         try { if (recDest) recDest.disconnect(); } catch(e) {}
         try { srcNode.disconnect(); } catch(e) {}
         try { micInputBoost.disconnect(); } catch(e) {}
+
+        // ── iOS speaker re-routing fix ────────────────────────────────────────
+        // When getUserMedia opens the mic, iOS switches AVAudioSession to
+        // playAndRecord with the default output route = earpiece (like a phone call).
+        // Even after all mic tracks are stopped, iOS keeps the earpiece routing
+        // until the audio session is explicitly re-asserted.
+        // Playing a short silent buffer through the AudioContext immediately after
+        // mic teardown forces iOS to re-evaluate the output route and switch back
+        // to the main speaker. This must happen BEFORE decodeAudioData so the
+        // context is in the correct state for playback.
+        try {
+          const forceCtx = actxRef.current || getActx();
+          if (forceCtx) {
+            if (forceCtx.state === "suspended") { await forceCtx.resume(); }
+            const silBuf  = forceCtx.createBuffer(1, forceCtx.sampleRate * 0.1, forceCtx.sampleRate);
+            const silSrc  = forceCtx.createBufferSource();
+            silSrc.buffer = silBuf;
+            silSrc.connect(forceCtx.destination);
+            silSrc.start();
+            silSrc.stop(forceCtx.currentTime + 0.1);
+            // Small pause so iOS has time to complete the route switch
+            await new Promise(function(res) { setTimeout(res, 150); });
+          }
+        } catch(routeErr) { /* non-fatal — proceed regardless */ }
         
         const blob = new Blob(chunksRef.current, { type: mime });
         const url  = URL.createObjectURL(blob);
@@ -14154,9 +14329,9 @@ function StudioScreen({ user, onExit }) {
     } catch(e){ return null; }
   };
 
-  const saveProject = async function () {
+  const saveProject = async function (silent) {
     try {
-      setSaveStatus("Saving...");
+      if (!silent) setSaveStatus("Saving...");
 
       // Generate a stable project id — reuse existing one if this project was already saved
       let list = JSON.parse(localStorage.getItem("bf_studio_projects")||"[]");
@@ -14199,8 +14374,8 @@ function StudioScreen({ user, onExit }) {
       }
 
       setSavedProjects(list); setIsSaved(true);
-      setSaveStatus("Saved! ✓");
-      setTimeout(function(){ setSaveStatus(""); }, 2500);
+      if (!silent) { setSaveStatus("Saved! ✓"); setTimeout(function(){ setSaveStatus(""); }, 2500); }
+      else { setSaveStatus("Autosaved"); setTimeout(function(){ setSaveStatus(""); }, 1500); }
     } catch(e){
       console.error("[BeatFinder] saveProject error:", e);
       setSaveStatus("Save failed — " + (e.message || "unknown error"));
@@ -15213,9 +15388,41 @@ self.onmessage = async function(e) {
             }} style={{ display:"flex",alignItems:"center",gap:12,width:"100%",padding:"13px 16px",background:"none",border:"none",borderBottom:"1px solid #111",color:"white",fontSize:14,cursor:"pointer" }}>
               <span style={{ width:20,textAlign:"center" }}>✏️</span> Rename track
             </button>
-            <button onClick={function(){ removeTrack(contextMenu.track.id); setContextMenu(null); }} style={{ display:"flex",alignItems:"center",gap:12,width:"100%",padding:"13px 16px",background:"none",border:"none",color:"#EF4444",fontSize:14,cursor:"pointer" }}>
-              <span style={{ width:20,textAlign:"center" }}>⌫</span> Delete track
-            </button>
+            {!contextMenu.clip && (
+              <button onClick={function(){ setConfirmDeleteTrackId(contextMenu.track.id); setContextMenu(null); }} style={{ display:"flex",alignItems:"center",gap:12,width:"100%",padding:"13px 16px",background:"none",border:"none",color:"#EF4444",fontSize:14,cursor:"pointer" }}>
+                <span style={{ width:20,textAlign:"center" }}>⌫</span> Delete track
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirm delete track modal ─────────────────────────── */}
+      {confirmDeleteTrackId && (
+        <div style={{ position:"fixed",inset:0,zIndex:9500,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:"32px" }}>
+          <div style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:320,textAlign:"center" }}>
+            <div style={{ width:48,height:48,borderRadius:"50%",background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px" }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+              </svg>
+            </div>
+            <div style={{ color:"white",fontWeight:800,fontSize:17,marginBottom:10 }}>Delete Track?</div>
+            <div style={{ color:"#888",fontSize:13,marginBottom:24,lineHeight:1.7 }}>
+              Are you sure you want to delete this track and all of its contents? This cannot be undone.
+            </div>
+            <div style={{ display:"flex",gap:10 }}>
+              <button onClick={function(){ setConfirmDeleteTrackId(null); }}
+                style={{ flex:1,background:"none",border:"1px solid #2a2a2a",borderRadius:12,color:"#888",fontWeight:700,fontSize:14,padding:"13px",cursor:"pointer" }}>
+                Cancel
+              </button>
+              <button onClick={function(){
+                removeTrack(confirmDeleteTrackId);
+                setConfirmDeleteTrackId(null);
+              }}
+                style={{ flex:1,background:"rgba(239,68,68,0.2)",border:"1px solid rgba(239,68,68,0.4)",borderRadius:12,color:"#EF4444",fontWeight:800,fontSize:14,padding:"13px",cursor:"pointer" }}>
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -15847,7 +16054,7 @@ userPickedMicRef.current = true;
                       onSolo={function(){ toggleSolo(track.id); }}
                       onFx={function(){ setFxTrackId(function(v){ return v===track.id?null:track.id; }); }}
                       onTakes={function(){ setShowTakes(function(v){ return v===track.id?null:track.id; }); }}
-                      onRemove={function(){ removeTrack(track.id); }}
+                      onRemove={function(){ setConfirmDeleteTrackId(track.id); }}
                       updateTrack={updateTrack}
                       analyserNode={trackAnalysersRef.current[track.id] || null}
                       isPlaying={isPlaying}
