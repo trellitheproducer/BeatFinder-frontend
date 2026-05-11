@@ -724,8 +724,10 @@ function useGlobalPreviewStop(myId, stopFn) {
 function SpotifyEmbed({ embedUrl, height, style, itemId }) {
   var [active, setActive] = React.useState(false);
   var idRef = React.useRef("spotify_" + itemId);
+  var h = height || 152;
+  var br = (style && style.borderRadius) ? style.borderRadius : 0;
 
-  // Listen for another embed activating — deactivate self
+  // Listen for another preview activating — deactivate self (unmounts autoplay iframe)
   React.useEffect(function() {
     function handler(e) {
       if (e.detail.except !== idRef.current) setActive(false);
@@ -735,45 +737,49 @@ function SpotifyEmbed({ embedUrl, height, style, itemId }) {
   }, []);
 
   function activate() {
-    // Tell all beat previews and other Spotify embeds to stop
     startGlobalPreview(idRef.current);
     setActive(true);
   }
 
-  if (!active) {
-    return (
-      <div onClick={activate} style={Object.assign({}, style, {
-        height: height || 152,
-        background: "#111",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        cursor: "pointer", position: "relative",
-        borderRadius: style && style.borderRadius ? style.borderRadius : 0,
-      })}>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 52, height: 52, borderRadius: "50%",
-            background: "#1DB954",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: "0 0 20px rgba(29,185,84,0.4)" }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
-              <polygon points="5,3 19,12 5,21"/>
-            </svg>
-          </div>
-          <span style={{ color: "#aaa", fontSize: 12, fontWeight: 600 }}>Tap to play</span>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <iframe
-      src={embedUrl + "?utm_source=generator&theme=0"}
-      width="100%"
-      height={height || 152}
-      frameBorder="0"
-      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-      loading="eager"
-      style={style}
-    />
+    <div style={Object.assign({}, style, {
+      position: "relative", height: h, overflow: "hidden", borderRadius: br,
+    })}>
+      {/* Always render the iframe so album art / track name shows through */}
+      <iframe
+        src={active
+          ? (embedUrl + "?utm_source=generator&theme=0&autoplay=1")
+          : (embedUrl + "?utm_source=generator&theme=0")}
+        width="100%"
+        height={h}
+        frameBorder="0"
+        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+        loading="lazy"
+        style={{ display: "block", border: "none" }}
+      />
+      {/* Semi-transparent overlay with play button — disappears when active */}
+      {!active && (
+        <div onClick={activate} style={{
+          position: "absolute", inset: 0,
+          background: "rgba(0,0,0,0.45)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          cursor: "pointer", borderRadius: br,
+        }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 52, height: 52, borderRadius: "50%",
+              background: "#1DB954",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              boxShadow: "0 0 24px rgba(29,185,84,0.6)" }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
+                <polygon points="5,3 19,12 5,21"/>
+              </svg>
+            </div>
+            <span style={{ color: "white", fontSize: 12, fontWeight: 700,
+              textShadow: "0 1px 4px rgba(0,0,0,0.8)" }}>Tap to play</span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
