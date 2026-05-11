@@ -4793,12 +4793,11 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
           </div>
         )}
 
-        {!isOwnProfile && <div style={{ height: 1, background: "#1a1a1a", marginBottom: 0 }} />}
-      </div>
+        {!isOwnProfile && <div style={{ height: 1, background: "#1a1a1a", marginTop: 4, marginBottom: 8 }} />}
 
-      {/* ── Find Me On — social links ── */}
-      {(profile.instagram || profile.tiktok || profile.youtube || profile.spotify || profile.appleMusic || profile.website) && (
-        <div style={{ padding: "10px 16px 12px" }}>
+        {/* ── Find Me On — social links ── */}
+        {(profile.instagram || profile.tiktok || profile.youtube || profile.spotify || profile.appleMusic || profile.website) && (
+        <div style={{ marginTop: isOwnProfile ? 8 : 0 }}>
           <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>FIND ME ON</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {[
@@ -4872,7 +4871,8 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
             ))}
           </div>
         </div>
-      )}
+        )}
+      </div>
 
       {/* ── Content tabs: Beats / Music / Videos ── */}
       <ContentTabs username={username} profile={profile} currentUser={currentUser} onPlay={onPlay} savedIds={savedIds} onSave={onSave} />
@@ -15634,7 +15634,7 @@ export default function BeatFinder() {
       )}
 
       {publicProfile && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "#0a0a0a", overflowY: "auto", overscrollBehavior: "contain" }} onTouchMove={function(e){ e.stopPropagation(); }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "#0a0a0a", overflowY: "auto", overscrollBehavior: "none", WebkitOverflowScrolling: "touch" }} onTouchMove={function(e){ e.stopPropagation(); }}>
           <PublicProfileScreen username={publicProfile} onBack={() => setPublicProfile(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} currentUser={user} onMessage={u => { setPublicProfile(null); setMessageThread(u); setShowMessages(true); }} />
         </div>
       )}
@@ -15799,4 +15799,3 @@ export default function BeatFinder() {
     </div>
   );
 }
-o
