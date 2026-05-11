@@ -932,33 +932,6 @@ async function fetchBeats(artistName, page, filterTitle, maxResults, extraQuerie
 // =============================================================================
 // AUTH API - register / login / me / upgrade plan
 // =============================================================================
-// ── Owner check — Trelli always has full pro access, no subscription needed ──
-// Checked by username AND is_admin flag so it works even if username changes.
-function isOwnerAccount(u) {
-  if (!u) return false;
-  return u.username === "Trelli" || u.is_admin === true;
-}
-
-// Derive isPro / isArtistPro / subscriptionActive from raw API user object.
-// Owner bypasses subscription checks entirely.
-function normaliseUser(u) {
-  if (!u) return u;
-  if (isOwnerAccount(u)) {
-    return {
-      ...u,
-      isPro:              true,
-      isArtistPro:        true,
-      subscriptionActive: true,  // never shows "expired" banner
-    };
-  }
-  const active = u.subscriptionActive || false;
-  return {
-    ...u,
-    isPro:       u.plan === "producer" && active,
-    isArtistPro: (u.plan === "artist" || u.plan === "producer") && active,
-  };
-}
-
 const AuthAPI = {
   async register(name, email, password) {
     const data = await apiFetch("/api/auth/register", {
@@ -967,7 +940,7 @@ const AuthAPI = {
     });
     saveToken(data.access_token);
     const u = data.user;
-    return normaliseUser(u);
+    return { ...u, isPro: u.plan === "producer", isArtistPro: u.plan === "artist" || u.plan === "producer" };
   },
 
   async login(email, password) {
@@ -977,7 +950,7 @@ const AuthAPI = {
     });
     saveToken(data.access_token);
     const u = data.user;
-    return normaliseUser(u);
+    return { ...u, isPro: u.plan === "producer", isArtistPro: u.plan === "artist" || u.plan === "producer" };
   },
 
   async me() {
@@ -6021,7 +5994,6 @@ function fmtCount(n) {
 
 // ── Followers / Following list screen ────────────────────────────
 function FollowListScreen({ username, mode, onBack, onViewProfile }) {
-  // mode: "followers" | "following"
   const [users,   setUsers]   = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error,   setError]   = React.useState(null);
@@ -6034,41 +6006,50 @@ function FollowListScreen({ username, mode, onBack, onViewProfile }) {
   }, [username, mode]);
 
   return (
-    <div style={{ background:"#0a0a0a", minHeight:"100%", color:"white", fontFamily:"inherit" }}>
-      {/* Header */}
-      <div style={{ display:"flex", alignItems:"center", padding:"16px 16px 12px", borderBottom:"1px solid #1a1a1a", position:"sticky", top:0, background:"#0a0a0a", zIndex:10 }}>
-        <button onClick={onBack} style={{ background:"none", border:"none", color:"white", fontSize:20, cursor:"pointer", padding:"4px 8px 4px 0", marginRight:8 }}>‹</button>
-        <span style={{ fontWeight:800, fontSize:17, textTransform:"capitalize" }}>{mode === "followers" ? "Followers" : "Following"}</span>
+    <div style={{
+      display:"flex", flexDirection:"column",
+      position:"absolute", inset:0,
+      background:"#0a0a0a", color:"white", fontFamily:"inherit",
+    }}>
+      {/* Header — clears the notch */}
+      <div style={{
+        display:"flex", alignItems:"center",
+        padding:"12px 16px 12px",
+        paddingTop:"calc(12px + env(safe-area-inset-top))",
+        borderBottom:"1px solid #1a1a1a",
+        background:"#0a0a0a", flexShrink:0,
+      }}>
+        <button onClick={onBack} style={{ background:"none", border:"none", color:"white", fontSize:22, cursor:"pointer", padding:"4px 12px 4px 0", lineHeight:1 }}>‹</button>
+        <span style={{ fontWeight:800, fontSize:17 }}>{mode === "followers" ? "Followers" : "Following"}</span>
       </div>
 
-      {loading && <div style={{ textAlign:"center", padding:40, color:"#555" }}>Loading...</div>}
-      {error   && <div style={{ textAlign:"center", padding:40, color:"#e44" }}>{error}</div>}
-      {!loading && !error && users.length === 0 && (
-        <div style={{ textAlign:"center", padding:40, color:"#555" }}>
-          {mode === "followers" ? "No followers yet" : "Not following anyone yet"}
-        </div>
-      )}
-
-      {users.map(u => (
-        <div key={u.username} onClick={() => onViewProfile(u.username)}
-          style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #111", cursor:"pointer", gap:12 }}>
-          {/* Avatar */}
-          <div style={{ width:48, height:48, borderRadius:"50%", overflow:"hidden", flexShrink:0, background:"#222", display:"flex", alignItems:"center", justifyContent:"center" }}>
-            {u.avatarUrl
-              ? <img src={u.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-              : <span style={{ fontSize:20, color:"#555" }}>👤</span>
-            }
+      {/* Scrollable list — bottom padding clears home indicator */}
+      <div style={{ flex:1, overflowY:"auto", paddingBottom:"calc(24px + env(safe-area-inset-bottom))" }}>
+        {loading && <div style={{ textAlign:"center", padding:40, color:"#555" }}>Loading...</div>}
+        {error   && <div style={{ textAlign:"center", padding:40, color:"#e44" }}>{error}</div>}
+        {!loading && !error && users.length === 0 && (
+          <div style={{ textAlign:"center", padding:40, color:"#555" }}>
+            {mode === "followers" ? "No followers yet" : "Not following anyone yet"}
           </div>
-          {/* Name + username */}
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontWeight:700, fontSize:14, color:"white", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{u.name || u.username}</div>
-            <div style={{ color:"#555", fontSize:12, marginTop:1 }}>@{u.username}</div>
+        )}
+        {users.map(u => (
+          <div key={u.username} onClick={() => onViewProfile(u.username)}
+            style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #111", cursor:"pointer", gap:12 }}>
+            <div style={{ width:48, height:48, borderRadius:"50%", overflow:"hidden", flexShrink:0, background:"#222", display:"flex", alignItems:"center", justifyContent:"center" }}>
+              {u.avatarUrl
+                ? <img src={u.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                : <span style={{ fontSize:20, color:"#555" }}>👤</span>
+              }
+            </div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontWeight:700, fontSize:14, color:"white", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{u.name || u.username}</div>
+              <div style={{ color:"#555", fontSize:12, marginTop:1 }}>@{u.username}</div>
+            </div>
+            {u.plan === "producer" && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 8px", color:"#C026D3", fontWeight:700, fontSize:10 }}>Pro</span>}
+            {u.plan === "artist"   && <span style={{ background:"rgba(245,158,11,0.15)",  border:"1px solid #F59E0B", borderRadius:20, padding:"2px 8px", color:"#F59E0B",  fontWeight:700, fontSize:10 }}>Artist</span>}
           </div>
-          {/* Plan badge */}
-          {u.plan === "producer" && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 8px", color:"#C026D3", fontWeight:700, fontSize:10 }}>Pro</span>}
-          {u.plan === "artist"   && <span style={{ background:"rgba(245,158,11,0.15)",  border:"1px solid #F59E0B", borderRadius:20, padding:"2px 8px", color:"#F59E0B",  fontWeight:700, fontSize:10 }}>Artist</span>}
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
@@ -6120,7 +6101,9 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
     </div>
   );
 
-  const isProd = profile.plan === "producer";
+  // Profile badges are shown based on plan only — a public profile stays
+  // visible and badged even if the subscription has since lapsed.
+  const isProd   = profile.plan === "producer";
   const isArtist = profile.plan === "artist" || isProd;
   const isOwnProfile = currentUser && username && currentUser.username && 
     currentUser.username.toLowerCase() === username.toLowerCase();
@@ -6139,7 +6122,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
       {/* ── Follow list overlay ── */}
       {followList && (
-        <div style={{ position:"fixed", inset:0, zIndex:5000, background:"#0a0a0a", overflowY:"auto" }}>
+        <div style={{ position:"fixed", inset:0, zIndex:5000, background:"#0a0a0a" }}>
           <FollowListScreen
             username={username}
             mode={followList}
@@ -6238,9 +6221,9 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {/* Plan tags */}
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-            {isProd && <span onClick={() => setBadgePopup({ icon:"🎛️", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
-            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"👑", text:"Verified Chief Executive Officer" })} />}
-            {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"🎤", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
+            {isProd && <span onClick={() => setBadgePopup({ type:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
+            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ type:"ceo", text:"Chief Executive Officer" })} />}
+            {isArtist && !isProd && <span onClick={() => setBadgePopup({ type:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
           </div>
         )}
 
@@ -7528,7 +7511,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
     if (!user) return;
     apiFetch("/api/auth/me")
       .then(fresh => {
-        setUser(() => normaliseUser(fresh));
+        setUser(u => ({ ...u, ...fresh, isPro: fresh.plan === "producer", isArtistPro: fresh.plan === "artist" || fresh.plan === "producer" }));
         setBio(fresh.bio || "");
         setEditName(fresh.name || "");
         setLocation(fresh.location || "");
@@ -7828,12 +7811,12 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         {user.username && <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>@{user.username}</div>}
         <div style={{ marginTop: 8 }}>
           {user.isPro && (
-            <span onClick={() => setOwnBadgePopup({ icon:"🎛️", text:"This user is currently subscribed to Producer Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 14px", color:"#C026D3", fontWeight:800, fontSize:12, marginRight:6, cursor:"pointer" }}>
+            <span onClick={() => setOwnBadgePopup({ type:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 14px", color:"#C026D3", fontWeight:800, fontSize:12, marginRight:6, cursor:"pointer" }}>
               <VerifiedBadge size={18} /> Producer Pro
             </span>
           )}
-          {user.isArtistPro && !user.isPro && <span onClick={() => setOwnBadgePopup({ icon:"🎤", text:"This user is currently subscribed to Artist Pro" })} style={{ display:"inline-block", background:"rgba(245,158,11,0.2)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 14px", color:"#F59E0B", fontWeight:800, fontSize:12, cursor:"pointer" }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
-          {user.username === "Trelli" && <CEOBadge onClick={() => setOwnBadgePopup({ icon:"👑", text:"Verified Chief Executive Officer" })} />}
+          {user.isArtistPro && !user.isPro && <span onClick={() => setOwnBadgePopup({ type:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ display:"inline-block", background:"rgba(245,158,11,0.2)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 14px", color:"#F59E0B", fontWeight:800, fontSize:12, cursor:"pointer" }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
+          {user.username === "Trelli" && <CEOBadge onClick={() => setOwnBadgePopup({ type:"ceo", text:"Chief Executive Officer" })} />}
         </div>
         <BadgeInfoPopup message={ownBadgePopup} onClose={() => setOwnBadgePopup(null)} />
       </div>
@@ -11396,6 +11379,12 @@ function CEOBadge({ onClick }) {
 
 function BadgeInfoPopup({ message, onClose }) {
   if (!message) return null;
+  const BadgeIcon = () => {
+    if (message.type === "producer") return <VerifiedBadge size={52} />;
+    if (message.type === "artist")   return <VerifiedBadge size={52} />;
+    if (message.type === "ceo")      return <GoldVerifiedBadge size={52} />;
+    return null;
+  };
   return (
     <>
       <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:99998, background:"rgba(0,0,0,0.6)" }}/>
@@ -11406,7 +11395,7 @@ function BadgeInfoPopup({ message, onClose }) {
         boxShadow:"0 16px 60px rgba(0,0,0,0.85)",
         display:"flex", flexDirection:"column", alignItems:"center", gap:14, textAlign:"center",
       }}>
-        <div style={{ fontSize:38 }}>{message.icon}</div>
+        <BadgeIcon />
         <div style={{ color:"white", fontSize:15, fontWeight:600, lineHeight:1.5 }}>{message.text}</div>
         <button onClick={onClose} style={{
           marginTop:4, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.15)",
@@ -13450,53 +13439,73 @@ function StudioScreen({ user, onExit }) {
     }
   };
 
-  // ── Ruler tap/drag → set loop in/out points ONLY ─────────────
-  // Tapping the ruler only creates/adjusts the loop region.
-  // It never seeks the playhead or interrupts playback.
-  // First tap on empty area: sets loop-in, second tap to the right: sets loop-out.
-  // Dragging: if tap lands within 0.3s of loopIn → drag loopIn,
-  //           if tap lands within 0.3s of loopOut → drag loopOut,
-  //           otherwise start a new loop region from that point.
-  // rulerDragRef declared at top of component (Rules of Hooks)
+  // ── Ruler interaction ─────────────────────────────────────────
+  // Rules:
+  //   • loopEnabled=false      → ruler is fully inert (no interaction)
+  //   • Tap/drag LEFT edge     → drag loopIn  (22px grab zone in time units)
+  //   • Tap/drag RIGHT edge    → drag loopOut (22px grab zone in time units)
+  //   • Press inside blue bar  → drag entire region (span preserved)
+  //   • Tap on empty space     → do nothing at all
+  //
+  // Move handlers always read from rulerDragRef snapshot, never from stale
+  // React state closure — this is what prevented drag from working correctly.
   const rulerTimeFromClientX = function (clientX) {
     const el = scrollRef.current;
     if (!el) return 0;
     const rect  = el.getBoundingClientRect();
-    // scrollRef is now the right-side lanes only (no sidebar) so no SIDEBAR_W offset needed
     const laneX = clientX - rect.left + el.scrollLeft;
     return Math.max(0, laneX / effectivePPS);
   };
 
-  // Ruler snaps to the nearest BEAT boundary (not just bars).
-  // This allows loop regions to start/end on any individual beat,
-  // making 1-bar, 2-bar, half-bar loops all equally easy to set.
   const snapToBar = function (t) {
     if (spb <= 0) return Math.max(0, t);
-    // Snap to nearest beat
-    const snappedBeat = Math.max(0, Math.round(t / spb) * spb);
-    return snappedBeat;
+    return Math.max(0, Math.round(t / spb) * spb);
   };
+
+  // Convert a fixed pixel grab zone to seconds at current zoom
+  const grabSecs = function (px) { return px / Math.max(1, effectivePPS); };
 
   const handleRulerMouseDown = function (e) {
     e.preventDefault();
-    const raw = rulerTimeFromClientX(e.clientX);
-    const t   = snapToBar(raw);
-    // Grab threshold: half a beat (so handles feel magnetic near beat boundaries)
-    const grabThresh = Math.max(0.15, spb * 0.5);
-    let mode = "new";
-    if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
-    else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
-    rulerDragRef.current = { mode, startX: e.clientX, startT: t };
+    if (!loopEnabled) return;                          // ruler inert when loop off
 
-    if (mode === "new") { setLoopIn(t); setLoopOut(snapToBar(t + spb)); } // don't auto-enable — user must toggle loop button
+    const raw  = rulerTimeFromClientX(e.clientX);
+    const grab = grabSecs(22);
+
+    let mode = null;
+    if      (Math.abs(raw - loopIn)  < grab)   mode = "in";
+    else if (Math.abs(raw - loopOut) < grab)    mode = "out";
+    else if (raw > loopIn && raw < loopOut)     mode = "move";
+    // tap outside region on empty space → do nothing
+    if (!mode) return;
+
+    // Snapshot current values into the drag ref so the move closure
+    // never reads stale React state.
+    rulerDragRef.current = {
+      mode,
+      startT:  snapToBar(raw),
+      snapIn:  loopIn,
+      snapOut: loopOut,
+    };
 
     const onMove = function (me) {
+      const d = rulerDragRef.current;
+      if (!d) return;
       const nt = snapToBar(rulerTimeFromClientX(me.clientX));
-      if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
-      else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spb)); }
-      else {
-        if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spb));
-        else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
+      if (d.mode === "in") {
+        const v = Math.max(0, Math.min(nt, d.snapOut - spb));
+        setLoopIn(v);
+        d.snapIn = v;
+      } else if (d.mode === "out") {
+        const v = Math.max(nt, d.snapIn + spb);
+        setLoopOut(v);
+        d.snapOut = v;
+      } else {
+        // move — shift whole region, keep span fixed
+        const delta = nt - d.startT;
+        const ni    = Math.max(0, snapToBar(d.snapIn  + delta));
+        const no    = snapToBar(d.snapOut + delta);
+        if (no > ni) { setLoopIn(ni); setLoopOut(no); }
       }
     };
     const onUp = function () {
@@ -13511,27 +13520,45 @@ function StudioScreen({ user, onExit }) {
   const handleRulerTouchStart = function (e) {
     e.preventDefault();
     e.stopPropagation();
-    const raw = rulerTimeFromClientX(e.touches[0].clientX);
-    const t   = snapToBar(raw);
-    const grabThresh = Math.max(0.15, spb * 0.5);
-    let mode = "new";
-    if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
-    else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
-    rulerDragRef.current = { mode, startT: t };
+    if (!loopEnabled) return;
 
-    if (mode === "new") { setLoopIn(t); setLoopOut(snapToBar(t + spb)); } // don't auto-enable — user must toggle loop button
+    const raw  = rulerTimeFromClientX(e.touches[0].clientX);
+    const grab = grabSecs(26);          // slightly larger on touch
+
+    let mode = null;
+    if      (Math.abs(raw - loopIn)  < grab)   mode = "in";
+    else if (Math.abs(raw - loopOut) < grab)    mode = "out";
+    else if (raw > loopIn && raw < loopOut)     mode = "move";
+    if (!mode) return;
+
+    rulerDragRef.current = {
+      mode,
+      startT:  snapToBar(raw),
+      snapIn:  loopIn,
+      snapOut: loopOut,
+    };
   };
 
   const handleRulerTouchMove = function (e) {
     e.preventDefault();
     e.stopPropagation();
-    if (!rulerDragRef.current) return;
+    const d = rulerDragRef.current;
+    if (!d) return;
+
     const nt = snapToBar(rulerTimeFromClientX(e.touches[0].clientX));
-    if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
-    else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spb)); }
-    else {
-      if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spb));
-      else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
+    if (d.mode === "in") {
+      const v = Math.max(0, Math.min(nt, d.snapOut - spb));
+      setLoopIn(v);
+      d.snapIn = v;
+    } else if (d.mode === "out") {
+      const v = Math.max(nt, d.snapIn + spb);
+      setLoopOut(v);
+      d.snapOut = v;
+    } else {
+      const delta = nt - d.startT;
+      const ni    = Math.max(0, snapToBar(d.snapIn  + delta));
+      const no    = snapToBar(d.snapOut + delta);
+      if (no > ni) { setLoopIn(ni); setLoopOut(no); }
     }
   };
 
@@ -17202,7 +17229,11 @@ export default function BeatFinder() {
     if (!token) return;
     AuthAPI.me()
       .then(u => {
-        setUser(normaliseUser(u));
+        setUser({
+          ...u,
+          isPro:       u.plan === "producer",
+          isArtistPro: u.plan === "artist" || u.plan === "producer",
+        });
         // Auto-skip welcome — user already has a valid session
         try { localStorage.setItem("bf_welcomed", "1"); } catch(e) {}
         setWelcomeDone(true);
@@ -17327,12 +17358,6 @@ export default function BeatFinder() {
       setShowAuthPrompt(true);
       return;
     }
-    // Studio requires an active pro subscription (owner is always exempt)
-    if (id === "studio" && user && !isOwnerAccount(user) && !user.isPro && !user.isArtistPro) {
-      setPromptReason("studio_pro");
-      setShowAuthPrompt(true);
-      return;
-    }
     setPlaying(null);
     setTab(id);
     if (id === "studio") setStudioVisited(true);
@@ -17449,7 +17474,11 @@ export default function BeatFinder() {
             ←
           </button>
           <RootAuthScreen startMode={authStartMode} onLogin={function(u) {
-            setUser(normaliseUser(u));
+            setUser({
+              ...u,
+              isPro:       u.plan === "producer",
+              isArtistPro: u.plan === "artist" || u.plan === "producer",
+            });
             doWelcome();
           }} />
         </div>
@@ -17592,9 +17621,7 @@ export default function BeatFinder() {
         }}>
         {NAV.filter(function(n){ return !(n.id === 'profile' && !user); }).map(n => {
           const isPro    = user?.isPro || user?.isArtistPro;
-          const locked   = (n.id === "exclusive" && (!user || !isPro)) ||
-                           (n.id === "studio" && !user) ||
-                           (n.id === "studio" && !!user && !isOwnerAccount(user) && !isPro);
+          const locked   = (n.id === "exclusive" && (!user || !isPro)) || (n.id === "studio" && !user);
           const isActive = tab === n.id;
           const activeColor = n.id === "exclusive" ? "#F59E0B" : n.id === "studio" ? "#22C55E" : "#C026D3";
           const isStudio = n.id === "studio";
