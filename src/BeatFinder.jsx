@@ -5981,6 +5981,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
   const [error,     setError]     = useState(null);
   const [following, setFollowing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
+  const [badgePopup, setBadgePopup] = useState(null);
 
   useEffect(() => {
     const endpoint = currentUser
@@ -6122,11 +6123,12 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {/* Plan tags */}
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-            {isProd && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11 }}>Producer Pro</span>}
-            {profile.username === "Trelli" && <CEOBadge />}
-            {isArtist && !isProd && <span style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11 }}>Artist Pro</span>}
+            {isProd && <span onClick={() => setBadgePopup({ icon:"🎛️", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
+            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"👑", text:"Verified Chief Executive Officer" })} />}
+            {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"🎤", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
           </div>
         )}
+        <BadgeInfoPopup message={badgePopup} onClose={() => setBadgePopup(null)} />
 
         {/* Bio */}
         {profile.bio && (
@@ -7328,6 +7330,7 @@ function PostVideoSection({ user, onBack }) {
 
 function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric, onOpenMessages }) {
   const [mode,        setMode]        = useState("landing");
+  const [ownBadgePopup, setOwnBadgePopup] = useState(null);
   const [email,       setEmail]       = useState(() => {
     try { return localStorage.getItem("bf_remember") === "1" ? (localStorage.getItem("bf_saved_email") || "") : ""; } catch { return ""; }
   });
@@ -7707,12 +7710,14 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         {user.username && <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>@{user.username}</div>}
         <div style={{ marginTop: 8 }}>
           {user.isPro && (
-            <span style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 14px", color:"#C026D3", fontWeight:800, fontSize:12, marginRight:6 }}>
+            <span onClick={() => setOwnBadgePopup({ icon:"🎛️", text:"This user is currently subscribed to Producer Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 14px", color:"#C026D3", fontWeight:800, fontSize:12, marginRight:6, cursor:"pointer" }}>
               <VerifiedBadge size={18} /> Producer Pro
             </span>
           )}
-          {user.isArtistPro && !user.isPro && <span style={{ display: "inline-block", background: "rgba(245,158,11,0.2)", border: "1px solid #F59E0B", borderRadius: 20, padding: "4px 14px", color: "#F59E0B", fontWeight: 800, fontSize: 12 }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
+          {user.isArtistPro && !user.isPro && <span onClick={() => setOwnBadgePopup({ icon:"🎤", text:"This user is currently subscribed to Artist Pro" })} style={{ display:"inline-block", background:"rgba(245,158,11,0.2)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 14px", color:"#F59E0B", fontWeight:800, fontSize:12, cursor:"pointer" }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
+          {user.username === "Trelli" && <CEOBadge onClick={() => setOwnBadgePopup({ icon:"👑", text:"Verified Chief Executive Officer" })} />}
         </div>
+        <BadgeInfoPopup message={ownBadgePopup} onClose={() => setOwnBadgePopup(null)} />
       </div>
 
       
@@ -11253,9 +11258,9 @@ function GoldVerifiedBadge({ size = 20 }) {
 }
 
 // CEO badge — Trelli only
-function CEOBadge() {
+function CEOBadge({ onClick }) {
   return (
-    <span style={{
+    <span onClick={onClick} style={{
       display: "inline-flex", alignItems: "center", gap: 4,
       background: "linear-gradient(135deg, #000 0%, #1a1a1a 40%, #B8860B 100%)",
       border: "1.5px solid #FFD700",
@@ -11267,12 +11272,52 @@ function CEOBadge() {
       letterSpacing: 1.5,
       textTransform: "uppercase",
       boxShadow: "0 0 8px rgba(255,215,0,0.4)",
+      cursor: onClick ? "pointer" : "default",
     }}>
       <svg width="10" height="10" viewBox="0 0 24 24" fill="#FFD700">
         <path d="M2 20h20v2H2zM4 17l4-8 4 4 4-8 4 8H4z"/>
       </svg>
       CEO
     </span>
+  );
+}
+
+function BadgeInfoPopup({ message, onClose }) {
+  if (!message) return null;
+  return (
+    <>
+      <div onClick={onClose} style={{
+        position:"fixed", inset:0, zIndex:99998,
+        background:"rgba(0,0,0,0.6)",
+      }}/>
+      <div style={{
+        position:"fixed", top:"50%", left:"50%",
+        transform:"translate(-50%,-50%)",
+        zIndex:99999,
+        background:"#1a1a1a",
+        border:"1px solid rgba(255,255,255,0.12)",
+        borderRadius:20,
+        padding:"28px 28px 22px",
+        minWidth:260, maxWidth:320,
+        boxShadow:"0 16px 60px rgba(0,0,0,0.85)",
+        display:"flex", flexDirection:"column", alignItems:"center", gap:14,
+        textAlign:"center",
+      }}>
+        <div style={{ fontSize:38 }}>{message.icon}</div>
+        <div style={{ color:"white", fontSize:15, fontWeight:600, lineHeight:1.5 }}>
+          {message.text}
+        </div>
+        <button onClick={onClose} style={{
+          marginTop:4,
+          background:"rgba(255,255,255,0.08)",
+          border:"1px solid rgba(255,255,255,0.15)",
+          borderRadius:50, color:"white",
+          fontWeight:700, fontSize:13,
+          padding:"9px 30px",
+          cursor:"pointer",
+        }}>Got it</button>
+      </div>
+    </>
   );
 }
 
@@ -13309,16 +13354,14 @@ function StudioScreen({ user, onExit }) {
     }
   };
 
-  // ── Ruler tap/drag → set loop in/out points ONLY ─────────────
-  // Rules (Logic Pro model):
-  //   • Tap near loopIn handle  → drag loopIn
-  //   • Tap near loopOut handle → drag loopOut
-  //   • Tap inside existing region (not near a handle) → drag the whole region
-  //   • Tap outside the region → start a new region from that beat
+  // ── Ruler interaction — Logic Pro model ──────────────────────
+  // • Drag the LEFT edge  (within 18px) → move loopIn
+  // • Drag the RIGHT edge (within 18px) → move loopOut
+  // • Press-and-hold INSIDE the region  → drag the whole region
+  // • Tap/touch anywhere ELSE           → do nothing (no reset)
   //
-  // IMPORTANT: all drag move/end handlers read loopIn/loopOut from
-  // rulerDragRef (snapshotted at pointerdown), never from the React
-  // state closure — this eliminates the stale-closure reset bug.
+  // All move handlers read loopIn/loopOut from rulerDragRef (snapshotted
+  // at pointerdown) — never from the stale React closure.
   const rulerTimeFromClientX = function (clientX) {
     const el = scrollRef.current;
     if (!el) return 0;
@@ -13332,85 +13375,54 @@ function StudioScreen({ user, onExit }) {
     return Math.max(0, Math.round(t / spb) * spb);
   };
 
-  // Grab threshold: 18px in timeline-time units — feels correct on a phone
-  // regardless of zoom level.
-  const rulerGrabThreshSecs = function () {
-    return 18 / Math.max(1, effectivePPS);
-  };
+  // 18px grab zone — constant physical size regardless of zoom
+  const pxToSecs = function (px) { return px / Math.max(1, effectivePPS); };
 
   const handleRulerMouseDown = function (e) {
     e.preventDefault();
-    const raw   = rulerTimeFromClientX(e.clientX);
-    const t     = snapToBar(raw);
-    const grab  = rulerGrabThreshSecs();
+    const raw  = rulerTimeFromClientX(e.clientX);
+    const grab = pxToSecs(18);
 
-    // Snapshot current loop state into the drag ref so move handlers
-    // never read stale React state.
-    const snapIn  = loopIn;
-    const snapOut = loopOut;
-
-    let mode;
-    if (Math.abs(raw - snapIn)  < grab) {
+    let mode = null;
+    if (Math.abs(raw - loopIn)  < grab) {
       mode = "in";
-    } else if (Math.abs(raw - snapOut) < grab) {
+    } else if (Math.abs(raw - loopOut) < grab) {
       mode = "out";
-    } else if (raw > snapIn && raw < snapOut) {
-      // Tap inside existing region — drag the whole region
+    } else if (raw > loopIn && raw < loopOut) {
       mode = "move";
-    } else {
-      mode = "new";
     }
+    // Tap outside region and not near a handle → ignore entirely
+    if (!mode) return;
 
     rulerDragRef.current = {
       mode,
-      startT:   t,
       startRaw: raw,
-      snapIn,
-      snapOut,
-      span:     snapOut - snapIn,
+      startT:   snapToBar(raw),
+      snapIn:   loopIn,
+      snapOut:  loopOut,
     };
-
-    if (mode === "new") {
-      setLoopIn(t);
-      setLoopOut(snapToBar(t + spb));
-      rulerDragRef.current.snapIn  = t;
-      rulerDragRef.current.snapOut = snapToBar(t + spb);
-    }
 
     const onMove = function (me) {
       const d = rulerDragRef.current;
       if (!d) return;
-      const nt = snapToBar(rulerTimeFromClientX(me.clientX));
-      // Always read in/out from the drag snapshot, never from React state
+      const nt     = snapToBar(rulerTimeFromClientX(me.clientX));
       const curIn  = d.snapIn;
       const curOut = d.snapOut;
 
       if (d.mode === "in") {
-        const newIn = Math.min(nt, curOut - spb);
-        setLoopIn(Math.max(0, newIn));
-        d.snapIn = Math.max(0, newIn);
+        const newIn = Math.max(0, Math.min(nt, curOut - spb));
+        setLoopIn(newIn);
+        d.snapIn = newIn;
       } else if (d.mode === "out") {
         const newOut = Math.max(nt, curIn + spb);
         setLoopOut(newOut);
         d.snapOut = newOut;
-      } else if (d.mode === "move") {
-        const delta   = nt - d.startT;
-        const newIn   = Math.max(0, snapToBar(d.snapIn  + delta));
-        const newOut  = snapToBar(d.snapOut + delta);
-        if (newOut > newIn) { setLoopIn(newIn); setLoopOut(newOut); }
       } else {
-        // "new" — expanding a brand-new region
-        if (nt > d.startT) {
-          const newOut = Math.max(nt, snapToBar(d.startT + spb));
-          setLoopOut(newOut);
-          d.snapOut = newOut;
-        } else {
-          const newIn = Math.min(nt, d.startT);
-          setLoopIn(Math.max(0, newIn));
-          setLoopOut(d.startT);
-          d.snapIn  = Math.max(0, newIn);
-          d.snapOut = d.startT;
-        }
+        // move — shift whole region keeping span fixed
+        const delta  = nt - d.startT;
+        const newIn  = Math.max(0, snapToBar(d.snapIn  + delta));
+        const newOut = snapToBar(d.snapOut + delta);
+        if (newOut > newIn) { setLoopIn(newIn); setLoopOut(newOut); }
       }
     };
     const onUp = function () {
@@ -13425,39 +13437,26 @@ function StudioScreen({ user, onExit }) {
   const handleRulerTouchStart = function (e) {
     e.preventDefault();
     e.stopPropagation();
-    const raw   = rulerTimeFromClientX(e.touches[0].clientX);
-    const t     = snapToBar(raw);
-    const grab  = rulerGrabThreshSecs();
+    const raw  = rulerTimeFromClientX(e.touches[0].clientX);
+    const grab = pxToSecs(22); // slightly larger on touch
 
-    const snapIn  = loopIn;
-    const snapOut = loopOut;
-
-    let mode;
-    if (Math.abs(raw - snapIn)  < grab) {
+    let mode = null;
+    if (Math.abs(raw - loopIn)  < grab) {
       mode = "in";
-    } else if (Math.abs(raw - snapOut) < grab) {
+    } else if (Math.abs(raw - loopOut) < grab) {
       mode = "out";
-    } else if (raw > snapIn && raw < snapOut) {
+    } else if (raw > loopIn && raw < loopOut) {
       mode = "move";
-    } else {
-      mode = "new";
     }
+    if (!mode) return; // tap outside — do nothing
 
     rulerDragRef.current = {
       mode,
-      startT:   t,
       startRaw: raw,
-      snapIn,
-      snapOut,
-      span:     snapOut - snapIn,
+      startT:   snapToBar(raw),
+      snapIn:   loopIn,
+      snapOut:  loopOut,
     };
-
-    if (mode === "new") {
-      setLoopIn(t);
-      setLoopOut(snapToBar(t + spb));
-      rulerDragRef.current.snapIn  = t;
-      rulerDragRef.current.snapOut = snapToBar(t + spb);
-    }
   };
 
   const handleRulerTouchMove = function (e) {
@@ -13478,24 +13477,11 @@ function StudioScreen({ user, onExit }) {
       const newOut = Math.max(nt, curIn + spb);
       setLoopOut(newOut);
       d.snapOut = newOut;
-    } else if (d.mode === "move") {
+    } else {
       const delta  = nt - d.startT;
       const newIn  = Math.max(0, snapToBar(d.snapIn  + delta));
       const newOut = snapToBar(d.snapOut + delta);
       if (newOut > newIn) { setLoopIn(newIn); setLoopOut(newOut); }
-    } else {
-      // "new" — expanding region
-      if (nt > d.startT) {
-        const newOut = Math.max(nt, snapToBar(d.startT + spb));
-        setLoopOut(newOut);
-        d.snapOut = newOut;
-      } else {
-        const newIn = Math.max(0, Math.min(nt, d.startT));
-        setLoopIn(newIn);
-        setLoopOut(d.startT);
-        d.snapIn  = newIn;
-        d.snapOut = d.startT;
-      }
     }
   };
 
