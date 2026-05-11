@@ -5981,7 +5981,6 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
   const [error,     setError]     = useState(null);
   const [following, setFollowing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
-  const [publicBadgePopup, setPublicBadgePopup] = useState(null);
 
   useEffect(() => {
     const endpoint = currentUser
@@ -6123,12 +6122,11 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {/* Plan tags */}
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-            {isProd && <span onClick={() => setPublicBadgePopup({ icon: "🎛️", text: "This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
-            {profile.username === "Trelli" && <CEOBadge onClick={() => setPublicBadgePopup({ icon: "👑", text: "Verified Chief Executive Officer" })} />}
-            {isArtist && !isProd && <span onClick={() => setPublicBadgePopup({ icon: "🎤", text: "This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
+            {isProd && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11 }}>Producer Pro</span>}
+            {profile.username === "Trelli" && <CEOBadge />}
+            {isArtist && !isProd && <span style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11 }}>Artist Pro</span>}
           </div>
         )}
-        <BadgeInfoPopup message={publicBadgePopup} onClose={() => setPublicBadgePopup(null)} />
 
         {/* Bio */}
         {profile.bio && (
@@ -7330,7 +7328,6 @@ function PostVideoSection({ user, onBack }) {
 
 function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric, onOpenMessages }) {
   const [mode,        setMode]        = useState("landing");
-  const [ownBadgePopup, setOwnBadgePopup] = useState(null);
   const [email,       setEmail]       = useState(() => {
     try { return localStorage.getItem("bf_remember") === "1" ? (localStorage.getItem("bf_saved_email") || "") : ""; } catch { return ""; }
   });
@@ -7861,18 +7858,16 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             {/* Plan badge */}
             <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
               {user.isPro && (
-                <span onClick={() => setOwnBadgePopup({ icon: "🎛️", text: "This user is currently subscribed to Producer Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 12px", color:"#C026D3", fontWeight:800, fontSize:12, cursor:"pointer" }}>
+                <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 12px", color:"#C026D3", fontWeight:800, fontSize:12 }}>
                   <VerifiedBadge size={14} /> Producer Pro
                 </span>
               )}
               {user.isArtistPro && !user.isPro && (
-                <span onClick={() => setOwnBadgePopup({ icon: "🎤", text: "This user is currently subscribed to Artist Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 12px", color:"#F59E0B", fontWeight:800, fontSize:12, cursor:"pointer" }}>
+                <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 12px", color:"#F59E0B", fontWeight:800, fontSize:12 }}>
                   <VerifiedBadge size={14}/> Artist Pro
                 </span>
               )}
-              {user.username === "Trelli" && <CEOBadge onClick={() => setOwnBadgePopup({ icon: "👑", text: "Verified Chief Executive Officer" })} />}
             </div>
-            <BadgeInfoPopup message={ownBadgePopup} onClose={() => setOwnBadgePopup(null)} />
           </div>
 
           {/* Name */}
@@ -11258,9 +11253,9 @@ function GoldVerifiedBadge({ size = 20 }) {
 }
 
 // CEO badge — Trelli only
-function CEOBadge({ onClick }) {
+function CEOBadge() {
   return (
-    <span onClick={onClick} style={{
+    <span style={{
       display: "inline-flex", alignItems: "center", gap: 4,
       background: "linear-gradient(135deg, #000 0%, #1a1a1a 40%, #B8860B 100%)",
       border: "1.5px solid #FFD700",
@@ -11272,58 +11267,12 @@ function CEOBadge({ onClick }) {
       letterSpacing: 1.5,
       textTransform: "uppercase",
       boxShadow: "0 0 8px rgba(255,215,0,0.4)",
-      cursor: onClick ? "pointer" : "default",
     }}>
       <svg width="10" height="10" viewBox="0 0 24 24" fill="#FFD700">
         <path d="M2 20h20v2H2zM4 17l4-8 4 4 4-8 4 8H4z"/>
       </svg>
       CEO
     </span>
-  );
-}
-
-// Badge info popup — shared by both profile screens
-function BadgeInfoPopup({ message, onClose }) {
-  if (!message) return null;
-  return (
-    <>
-      <div onClick={onClose} style={{
-        position: "fixed", inset: 0, zIndex: 99998,
-        background: "rgba(0,0,0,0.55)",
-      }} />
-      <div style={{
-        position: "fixed", top: "50%", left: "50%",
-        transform: "translate(-50%, -50%)",
-        zIndex: 99999,
-        background: "#141414",
-        border: "1px solid rgba(255,255,255,0.1)",
-        borderRadius: 20,
-        padding: "28px 28px 22px",
-        minWidth: 260, maxWidth: 320,
-        boxShadow: "0 12px 60px rgba(0,0,0,0.8)",
-        display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
-        animation: "bf-scale-in 0.2s cubic-bezier(0.22,1,0.36,1) both",
-        textAlign: "center",
-        fontFamily: "inherit",
-      }}>
-        <div style={{ fontSize: 36 }}>{message.icon}</div>
-        <div style={{ color: "white", fontSize: 14, fontWeight: 600, lineHeight: 1.5 }}>
-          {message.text}
-        </div>
-        <button onClick={onClose} style={{
-          marginTop: 4,
-          background: "rgba(255,255,255,0.08)",
-          border: "1px solid rgba(255,255,255,0.12)",
-          borderRadius: 50,
-          color: "white",
-          fontWeight: 700,
-          fontSize: 13,
-          padding: "8px 28px",
-          cursor: "pointer",
-          fontFamily: "inherit",
-        }}>Got it</button>
-      </div>
-    </>
   );
 }
 
@@ -11474,6 +11423,14 @@ function StudioScreen({ user, onExit }) {
   const loopRestartingRef = useRef(false); // prevents re-entrant loop restarts
   const playheadAtRef   = useRef(0);
   const animRef         = useRef(null);
+  // ── Stable loop-state refs — always current, never stale in closures ──
+  // These mirror the React state and are written every render so RAF/audio
+  // callbacks always read the latest value without being in dep arrays.
+  const loopEnabledRef  = useRef(false);
+  const loopInRef       = useRef(0);
+  const loopOutRef      = useRef(0);
+  // ── Loop cycle scheduler handle — cleared on stopAll ────────────────────
+  const loopTimerRef    = useRef(null);
   const scrollRef       = useRef(null);
   const playheadRef     = useRef(null); // direct DOM ref — updated without React re-render
   const trackContainerRef = useRef(null);
@@ -11625,6 +11582,11 @@ function StudioScreen({ user, onExit }) {
   useEffect(function () { zoomRef.current = zoom; }, [zoom]);
   useEffect(function () { isPlayingRef.current = isPlaying; }, [isPlaying]);
   useEffect(function () { tracksRef.current = tracks; }, [tracks]);
+  // Keep stable loop refs in sync — written every render so audio callbacks
+  // always see the latest values without stale-closure problems.
+  useEffect(function () { loopEnabledRef.current = loopEnabled; }, [loopEnabled]);
+  useEffect(function () { loopInRef.current  = loopIn;  }, [loopIn]);
+  useEffect(function () { loopOutRef.current = loopOut; }, [loopOut]);
 
   // Set initial position — Bar1 under centred playhead at t=0
   useEffect(function () {
@@ -12251,39 +12213,51 @@ function StudioScreen({ user, onExit }) {
   };
 
   // ── RAF playback loop ─────────────────────────────────────────
-  // Mutates DOM transform directly — no React re-render per frame = smooth 60fps
+  // Responsibility: drive the playhead visual and update React time state only.
+  // Loop boundary detection and audio rescheduling are handled entirely on the
+  // Web Audio clock inside doPlay() / scheduleLoopCycle() — NOT here.
   useEffect(function () {
-    if (!isPlaying) { cancelAnimationFrame(animRef.current); loopRestartingRef.current = false; return; }
+    if (!isPlaying) { cancelAnimationFrame(animRef.current); return; }
     var lastUIUpdate = 0;
 
     const tick = function (ts) {
       const actx = actxRef.current;
       if (!actx) return;
+
+      // ── Derive current timeline position from the audio clock ──
+      // playheadAtRef  = timeline position when masterStartRef was set
+      // masterStartRef = actx.currentTime at that moment (+ 50ms pre-roll offset)
+      // This subtraction is always valid because doPlay() writes both atomically.
       const elapsed = actx.currentTime - masterStartRef.current;
-      const t       = playheadAtRef.current + elapsed;
+      // Clamp to loopIn so the visual never runs past loopOut between cycles.
+      // The audio engine has already pre-scheduled the next cycle at this point.
+      let t = playheadAtRef.current + elapsed;
+      if (loopEnabledRef.current && loopOutRef.current > loopInRef.current) {
+        const span = loopOutRef.current - loopInRef.current;
+        if (span > 0) {
+          // Wrap t into [loopIn, loopOut) so the playhead mirrors the audio engine
+          const rel = t - loopInRef.current;
+          if (rel >= span) {
+            t = loopInRef.current + (rel % span);
+          }
+        }
+      }
       liveTimeRef.current = t;
 
       const el = scrollRef.current;
       if (el) {
-        const viewW          = el.clientWidth;
-        const playheadPx     = t * effectivePPS;         // playhead in content space
-        const playheadViewX  = playheadPx - el.scrollLeft; // playhead within viewport
+        const viewW         = el.clientWidth;
+        const playheadPx    = t * effectivePPS;
+        const playheadViewX = playheadPx - el.scrollLeft;
 
-        // Only auto-scroll if the user isn't manually scrolling
         if (userScrolledAt.current === null) {
-          // Scroll forward to keep playhead at 75% of viewport once it hits that mark
           const pinAt    = viewW * 0.75;
           const targetSL = playheadPx - pinAt;
-          if (targetSL > el.scrollLeft) {
-            el.scrollLeft = targetSL;
-          }
-          // If playhead goes out of view entirely (e.g. after rewind), snap it back immediately
+          if (targetSL > el.scrollLeft) el.scrollLeft = targetSL;
           if (playheadViewX < 0 || playheadViewX > viewW) {
             el.scrollLeft = Math.max(0, playheadPx - pinAt);
           }
         }
-
-        // Always draw playhead at its true audio position regardless of scroll
         updatePlayheadDOM(t, el.scrollLeft);
       }
 
@@ -12292,30 +12266,11 @@ function StudioScreen({ user, onExit }) {
         lastUIUpdate = ts;
       }
 
-      if (loopEnabled && loopOut > loopIn && t >= loopOut) {
-        // Prevent re-entrant loop restarts: if already looping back, skip
-        if (!loopRestartingRef.current) {
-          loopRestartingRef.current = true;
-          // Reset time refs immediately so the next tick doesn't overshoot
-          playheadAtRef.current = loopIn;
-          liveTimeRef.current   = loopIn;
-          masterStartRef.current = actx.currentTime + 0.05;
-          setCurrentTime(loopIn);
-          updatePlayheadDOM(loopIn);
-          stopAll();
-          doPlay(loopIn).then(function() {
-            loopRestartingRef.current = false;
-            setIsPlaying(true);
-          });
-        }
-        animRef.current = requestAnimationFrame(tick);
-        return;
-      }
       animRef.current = requestAnimationFrame(tick);
     };
     animRef.current = requestAnimationFrame(tick);
     return function () { cancelAnimationFrame(animRef.current); };
-  }, [isPlaying, effectivePPS, loopEnabled, loopIn, loopOut]);
+  }, [isPlaying, effectivePPS]);
 
   // ── Audio engine — gain nodes persist so mute/solo works in real-time ──
   // gainNodesRef, masterGainRef, fxNodesRef declared at top of component (Rules of Hooks)
@@ -12626,6 +12581,9 @@ function StudioScreen({ user, onExit }) {
   // ── Stop all audio nodes — hard stop, no glitch ──────────────
   const stopAll = function () {
     cancelAnimationFrame(animRef.current);
+    // Cancel any pending loop-cycle pre-schedule timer
+    if (loopTimerRef.current) { clearTimeout(loopTimerRef.current); loopTimerRef.current = null; }
+    loopRestartingRef.current = false;
     if (scrollSeekTimer.current) { clearTimeout(scrollSeekTimer.current); scrollSeekTimer.current = null; }
     userScrolledAt.current = null;
     // Stop and disconnect every scheduled source node immediately
@@ -13232,51 +13190,215 @@ function StudioScreen({ user, onExit }) {
       return node; // clips connect here
     };
 
-    const scheduleClip = function (track, clip, entryNode) {
+    // ── scheduleClip ────────────────────────────────────────────────────────
+    // Schedules one clip's BufferSource on the Web Audio clock.
+    //
+    // Parameters:
+    //   track     – track object
+    //   clip      – clip object (audioBuffer, startTime, trimStart, trimEnd)
+    //   entryNode – first gain node of this track's FX chain
+    //   cycleStart – timeline time that maps to actx time `now` for this cycle
+    //   hardEnd    – timeline time at which playback must stop (loopOut, or Infinity)
+    //                Audio is capped at this boundary — no bleed across loop turns.
+    const scheduleClip = function (track, clip, entryNode, cycleStart, hardEnd) {
       if (clip.active === false || !clip.audioBuffer) return;
       try {
-        const buf      = clip.audioBuffer;
-        const trimS    = clip.trimStart || 0;
-        const trimE    = clip.trimEnd   || buf.duration;
-        const trimDur  = Math.max(0, trimE - trimS);
+        const buf     = clip.audioBuffer;
+        const trimS   = clip.trimStart || 0;
+        const trimE   = clip.trimEnd   || buf.duration;
+        const trimDur = Math.max(0, trimE - trimS);
         if (trimDur <= 0) return;
+
         const clipStart = clip.startTime || 0;
         const clipEnd   = clipStart + trimDur;
-        if (clipEnd <= fromTime) return;
+
+        // Skip clips that end at or before our playback window start
+        if (clipEnd <= cycleStart) return;
+        // Skip clips that start at or after the hard boundary
+        if (clipStart >= hardEnd) return;
 
         const src = actx.createBufferSource();
         src.buffer = buf;
-
         src.connect(entryNode);
 
         let when, bufOff;
-        if (fromTime <= clipStart) { when=now+(clipStart-fromTime); bufOff=trimS; }
-        else                       { when=now; bufOff=trimS+(fromTime-clipStart); }
-        const remain = (trimS + trimDur) - bufOff;
-        if (remain > 0) { src.start(when, bufOff, remain); scheduledRef.current.push(src); }
+        if (cycleStart <= clipStart) {
+          // Clip starts after our window — schedule it in the future
+          when   = now + (clipStart - cycleStart);
+          bufOff = trimS;
+        } else {
+          // We're starting mid-clip — seek into the buffer
+          when   = now;
+          bufOff = trimS + (cycleStart - clipStart);
+        }
+
+        // Remaining audio from bufOff to trim end, capped at the hard boundary
+        const bufRemain   = (trimS + trimDur) - bufOff;
+        // How much wall-clock time until hardEnd relative to `when`
+        const timeToHard  = hardEnd - Math.max(cycleStart, clipStart);
+        const playDur     = Math.min(bufRemain, timeToHard);
+
+        if (playDur > 0.001) {
+          src.start(when, bufOff, playDur);
+          scheduledRef.current.push(src);
+        }
       } catch(e) {}
     };
+
+    // ── scheduleLoopCycle ────────────────────────────────────────────────────
+    // Pre-schedules the next loop iteration before the current one ends.
+    // This is the Logic Pro model: the audio engine commits the next cycle to the
+    // hardware scheduler ~100ms before the boundary — completely eliminating the
+    // stopAll/doPlay teardown that caused glitches.
+    //
+    // Architecture:
+    //   • Called once at the END of doPlay() when loop mode is active
+    //   • Sets a JS timeout to fire ~LOOKAHEAD seconds before the loop boundary
+    //   • At that moment, schedules all clip sources for the next cycle, starting
+    //     at the exact actx time that corresponds to loopOut (= next loopIn)
+    //   • Then reschedules itself for the cycle after that (infinite chain)
+    //   • stopAll() kills loopTimerRef, breaking the chain on stop/pause
+    const LOOP_LOOKAHEAD = 0.15; // seconds — pre-schedule this far before boundary
+    const scheduleLoopCycle = function (cycleActxStart, cycleTimelineStart) {
+      // cycleActxStart  : actx.currentTime when this cycle's audio begins playing
+      // cycleTimelineStart: timeline position (loopIn) for this cycle
+      const li = loopInRef.current;
+      const lo = loopOutRef.current;
+      if (!loopEnabledRef.current || lo <= li) return;
+
+      const span         = lo - li;                          // loop region duration
+      const cycleActxEnd = cycleActxStart + span;            // actx time when this cycle ends
+      const fireAt       = cycleActxEnd - LOOP_LOOKAHEAD;    // wall-clock time to fire timer
+      const msUntilFire  = (fireAt - actx.currentTime) * 1000;
+
+      loopTimerRef.current = setTimeout(function () {
+        // Bail if playback was stopped or loop was disabled while we waited
+        if (!isPlayingRef.current || !loopEnabledRef.current) return;
+        // Re-read in case the user moved the loop markers while playing
+        const li2 = loopInRef.current;
+        const lo2 = loopOutRef.current;
+        if (lo2 <= li2) return;
+
+        const span2          = lo2 - li2;
+        const nextActxStart  = cycleActxEnd;   // exactly where the previous cycle ends
+        const nextTimelineStart = li2;
+
+        // Update the master timing anchor atomically:
+        // playheadAtRef = loopIn, masterStartRef = nextActxStart
+        // The RAF reads elapsed = actx.currentTime - masterStartRef, so
+        // t = loopIn + elapsed — which correctly wraps to loopIn at the boundary.
+        playheadAtRef.current  = nextTimelineStart;
+        masterStartRef.current = nextActxStart;
+
+        // Schedule all clips for the next cycle, hard-bounded at lo2
+        tracksRef.current.forEach(function (track) {
+          try {
+            const clips = track.clips && track.clips.length > 0
+              ? track.clips
+              : track.audioBuffer
+                ? [{ id:"lg", audioBuffer:track.audioBuffer, url:track.url, startTime:track.startTime||0, duration:track.audioBuffer.duration, trimStart:0, trimEnd:track.audioBuffer.duration, active:true }]
+                : [];
+            if (clips.length === 0) return;
+            // Reuse the existing gain node — avoids FX chain reconstruction glitch
+            const entryNode = gainNodesRef.current[track.id];
+            if (!entryNode) return;
+            // Reconnect to master if needed (master doesn't change between cycles)
+            clips.forEach(function (clip) {
+              try {
+                // Override `now` with nextActxStart for correct scheduling
+                const savedNow = now;
+                // We can't reassign `now` (const) so we inline the override:
+                // scheduleClip uses closure `now` — call a local variant instead
+                scheduleClipAt(track, clip, entryNode, nextActxStart, nextTimelineStart, lo2);
+              } catch(e) {}
+            });
+          } catch(e) {}
+        });
+
+        // Chain: schedule the cycle after this one
+        scheduleLoopCycle(nextActxStart, nextTimelineStart);
+      }, Math.max(0, msUntilFire));
+    };
+
+    // Variant of scheduleClip that takes an explicit `atActxTime` instead of closure `now`
+    const scheduleClipAt = function (track, clip, entryNode, atActxTime, cycleStart, hardEnd) {
+      if (clip.active === false || !clip.audioBuffer) return;
+      try {
+        const buf     = clip.audioBuffer;
+        const trimS   = clip.trimStart || 0;
+        const trimE   = clip.trimEnd   || buf.duration;
+        const trimDur = Math.max(0, trimE - trimS);
+        if (trimDur <= 0) return;
+
+        const clipStart = clip.startTime || 0;
+        const clipEnd   = clipStart + trimDur;
+        if (clipEnd <= cycleStart) return;
+        if (clipStart >= hardEnd)  return;
+
+        const src = actx.createBufferSource();
+        src.buffer = buf;
+        src.connect(entryNode);
+
+        let when, bufOff;
+        if (cycleStart <= clipStart) {
+          when   = atActxTime + (clipStart - cycleStart);
+          bufOff = trimS;
+        } else {
+          when   = atActxTime;
+          bufOff = trimS + (cycleStart - clipStart);
+        }
+
+        const bufRemain  = (trimS + trimDur) - bufOff;
+        const timeToHard = hardEnd - Math.max(cycleStart, clipStart);
+        const playDur    = Math.min(bufRemain, timeToHard);
+
+        if (playDur > 0.001) {
+          src.start(when, bufOff, playDur);
+          scheduledRef.current.push(src);
+        }
+      } catch(e) {}
+    };
+
+    // ── Schedule all tracks for the initial cycle ────────────────────────────
+    // hardEnd = loopOut when loop is active, otherwise Infinity
+    const hardEnd = (loopEnabledRef.current && loopOutRef.current > loopInRef.current)
+      ? loopOutRef.current
+      : Infinity;
 
     tracksRef.current.forEach(function(track) {
       try {
         const clips = track.clips && track.clips.length > 0
           ? track.clips
-          : track.audioBuffer // legacy flat model
+          : track.audioBuffer
             ? [{ id:"lg", audioBuffer:track.audioBuffer, url:track.url, startTime:track.startTime||0, duration:track.audioBuffer.duration, trimStart:0, trimEnd:track.audioBuffer.duration, active:true }]
             : [];
         if (clips.length === 0) return;
         const entryNode = buildChain(track);
         clips.forEach(function(clip){
-          try { scheduleClip(track, clip, entryNode); } catch(clipErr) {
+          try { scheduleClip(track, clip, entryNode, fromTime, hardEnd); } catch(clipErr) {
             console.warn("[Studio] clip schedule error on track", track.name, clipErr);
           }
         });
       } catch(trackErr) {
-        // One bad track should never stop others from playing
         console.warn("[Studio] track chain error on track", track.name, trackErr);
       }
     });
-  };
+
+    // ── Arm the loop pre-scheduler if loop mode is active ───────────────────
+    if (loopEnabledRef.current && loopOutRef.current > loopInRef.current) {
+      // The current cycle starts at `now` on the audio clock, at `fromTime` on the timeline.
+      // The cycle's actx end = now + (loopOut - fromTime)  [remaining span from entry point]
+      // For a full cycle starting at loopIn, it's now + span.
+      // When entering mid-loop (fromTime > loopIn), the first cycle is shorter.
+      const li        = loopInRef.current;
+      const lo        = loopOutRef.current;
+      const remaining = lo - fromTime;             // time left in first (possibly partial) cycle
+      if (remaining > 0.001) {
+        const firstCycleActxEnd = now + remaining;
+        scheduleLoopCycle(firstCycleActxEnd, li);
+      }
+    }
+  }; // end doPlay
 
   const togglePlay = function () {
     if (isPlaying) {
