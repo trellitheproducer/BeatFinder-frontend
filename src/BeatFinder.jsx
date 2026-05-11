@@ -4654,11 +4654,11 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
       {profile.headerUrl ? (
         <div>
-          {/* Header image — contained width, no overflow */}
-          <div style={{ position: "relative", width: "100%", height: 220, overflow: "hidden" }}>
+          {/* Header image — pulled to very top, breaks out of parent padding */}
+          <div style={{ position: "relative", width: "calc(100% + 32px)", height: 240, overflow: "hidden", margin: "-16px -16px 0 -16px" }}>
             <img src={profile.headerUrl} alt="header"
               style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} />
-            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, transparent 30%, transparent 55%, rgba(10,10,10,0.7) 80%, #0a0a0a 100%)" }} />
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(0,0,0,0.05) 0%, transparent 35%, transparent 55%, rgba(10,10,10,0.7) 80%, #0a0a0a 100%)" }} />
             {onBack && !hideBack && (
               <button onClick={onBack}
                 style={{ position: "absolute", top: 54, left: 16, background: "none", border: "none",
@@ -4669,7 +4669,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
             )}
           </div>
           {/* Avatar overlapping header bottom */}
-          <div style={{ marginTop: -46, paddingLeft: 16, marginBottom: 10, position: "relative", zIndex: 2, display: "inline-block" }}>
+          <div style={{ marginTop: -46, paddingLeft: 0, marginBottom: 10, position: "relative", zIndex: 2, display: "inline-block" }}>
             {profile.avatarUrl ? (
               <img src={profile.avatarUrl} alt={profile.username}
                 style={{ width: 88, height: 88, borderRadius: "50%", objectFit: "cover",
