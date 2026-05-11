@@ -4759,7 +4759,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         )}
 
         {/* Stats inline */}
-        <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: isOwnProfile ? 10 : 14 }}>
           {[
             { val: profile.followerCount || 0, label: "Followers" },
             { val: profile.followingCount || 0, label: "Following" },
@@ -4793,12 +4793,12 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
           </div>
         )}
 
-        <div style={{ height: isOwnProfile ? 0 : 1, background: "#1a1a1a", marginBottom: isOwnProfile ? 0 : 10 }} />
+        {!isOwnProfile && <div style={{ height: 1, background: "#1a1a1a", marginBottom: 0 }} />}
       </div>
 
       {/* ── Find Me On — social links ── */}
       {(profile.instagram || profile.tiktok || profile.youtube || profile.spotify || profile.appleMusic || profile.website) && (
-        <div style={{ padding: isOwnProfile ? "4px 16px 12px" : "10px 16px 12px", marginBottom: 0 }}>
+        <div style={{ padding: "10px 16px 12px" }}>
           <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>FIND ME ON</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {[
