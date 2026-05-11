@@ -5161,6 +5161,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
   var [postLikes, setPostLikes] = React.useState({});
   var [postComments, setPostComments] = React.useState({});
   var [lightbox, setLightbox] = React.useState(null); // { images: [], index: 0 }
+  var [openMenu, setOpenMenu] = React.useState(null);  // post/content id with menu open
 
   function loadPosts() {
     setLoading(true); setPosts([]);
@@ -5395,16 +5396,32 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
           )}
 
           {/* Like + Open in Spotify row */}
-          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 14 }}>
-            {isOwner && (
-              <button onClick={function() { deleteContent(item.id); }}
-                style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.25)",
-                  borderRadius: 8, color: "#F87171", fontSize: 11, fontWeight: 700,
-                  padding: "4px 10px", cursor: "pointer", marginLeft: "auto", marginBottom: 0 }}>
-                Delete
-              </button>
-            )}
-          </div>
+          {isOwner && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+              <div style={{ position: "relative" }}>
+                <button onClick={function(e) { e.stopPropagation(); setOpenMenu(openMenu === item.id ? null : item.id); }}
+                  style={{ background: "none", border: "none", color: "#555", cursor: "pointer",
+                    fontSize: 20, padding: "2px 6px", lineHeight: 1, borderRadius: 6 }}>
+                  •••
+                </button>
+                {openMenu === item.id && (
+                  <div style={{ position: "absolute", right: 0, top: "100%", zIndex: 100,
+                    background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 10,
+                    minWidth: 120, boxShadow: "0 4px 20px rgba(0,0,0,0.6)", overflow: "hidden" }}>
+                    <button onClick={function(e) { e.stopPropagation(); setOpenMenu(null); deleteContent(item.id); }}
+                      style={{ width: "100%", background: "none", border: "none", padding: "12px 16px",
+                        color: "#F87171", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                        textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F87171" strokeWidth="2" strokeLinecap="round">
+                        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                      </svg>
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 14 }}>
             <button onClick={function() { toggleLike(item.id); }}
               style={{ background: "none", border: "none", cursor: currentUser ? "pointer" : "default", padding: 0,
@@ -5446,7 +5463,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
   }
 
   return (
-    <div style={{ marginTop: 8 }}>
+    <div style={{ marginTop: 8 }} onClick={function() { if (openMenu) setOpenMenu(null); }}>
       {lightbox && (
         <ImageLightbox
           images={lightbox.images}
@@ -5520,12 +5537,28 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
                       <div style={{ color: "#444", fontSize: 11 }}>{new Date(post.createdAt).toLocaleDateString()}</div>
                     </div>
                     {isOwner && (
-                      <button onClick={function() { deletePost(post.id); }}
-                        style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.25)",
-                          borderRadius: 8, color: "#F87171", fontSize: 11, fontWeight: 700,
-                          padding: "4px 10px", cursor: "pointer", flexShrink: 0 }}>
-                        Delete
-                      </button>
+                      <div style={{ position: "relative", flexShrink: 0 }}>
+                        <button onClick={function(e) { e.stopPropagation(); setOpenMenu(openMenu === post.id ? null : post.id); }}
+                          style={{ background: "none", border: "none", color: "#555", cursor: "pointer",
+                            fontSize: 20, padding: "2px 6px", lineHeight: 1, borderRadius: 6 }}>
+                          •••
+                        </button>
+                        {openMenu === post.id && (
+                          <div style={{ position: "absolute", right: 0, top: "100%", zIndex: 100,
+                            background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 10,
+                            minWidth: 120, boxShadow: "0 4px 20px rgba(0,0,0,0.6)", overflow: "hidden" }}>
+                            <button onClick={function(e) { e.stopPropagation(); setOpenMenu(null); deletePost(post.id); }}
+                              style={{ width: "100%", background: "none", border: "none", padding: "12px 16px",
+                                color: "#F87171", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                                textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F87171" strokeWidth="2" strokeLinecap="round">
+                                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                              </svg>
+                              Delete Post
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
 
