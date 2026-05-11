@@ -4151,6 +4151,350 @@ function LyricCard({ lyric, lyricIndex, onDelete, onEditLyric }) {
 // =============================================================================
 // PUBLIC PROFILE SCREEN
 // =============================================================================
+
+// =============================================================================
+// CONTENT TABS — shown on every public profile (Beats / Music / Videos)
+// =============================================================================
+function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave }) {
+  var [tab, setTab]           = React.useState("beats");
+  var [items, setItems]       = React.useState([]);
+  var [loading, setLoading]   = React.useState(false);
+  var [comments, setComments] = React.useState({});  // contentId -> comments[]
+  var [showComments, setShowComments] = React.useState(null); // contentId
+  var [commentText, setCommentText]   = React.useState("");
+  var [replyTo, setReplyTo]           = React.useState(null); // {id, username}
+  var [likes, setLikes]               = React.useState({});   // contentId -> bool
+  var [submitting, setSubmitting]     = React.useState(false);
+
+  function loadContent(type) {
+    setLoading(true); setItems([]);
+    apiFetch("/api/content/profile/" + encodeURIComponent(username) + "?type=" + type)
+      .then(function(data) { setItems(data || []); setLoading(false); })
+      .catch(function() { setLoading(false); });
+  }
+
+  React.useEffect(function() {
+    if (tab === "music" || tab === "video") loadContent(tab);
+  }, [tab, username]);
+
+  function toggleLike(id) {
+    if (!currentUser) return;
+    apiFetch("/api/content/" + id + "/like", { method: "POST" })
+      .then(function(r) {
+        setLikes(function(prev) { var n = Object.assign({}, prev); n[id] = r.liked; return n; });
+        setItems(function(prev) { return prev.map(function(it) {
+          return it.id === id ? Object.assign({}, it, { likeCount: it.likeCount + (r.liked ? 1 : -1) }) : it;
+        }); });
+      })
+      .catch(function() {});
+  }
+
+  function loadComments(id) {
+    apiFetch("/api/content/" + id + "/comments")
+      .then(function(data) {
+        setComments(function(prev) { var n = Object.assign({}, prev); n[id] = data || []; return n; });
+      })
+      .catch(function() {});
+  }
+
+  function openComments(id) {
+    setShowComments(id);
+    setCommentText("");
+    setReplyTo(null);
+    loadComments(id);
+  }
+
+  function submitComment(contentId) {
+    if (!commentText.trim() || !currentUser) return;
+    setSubmitting(true);
+    apiFetch("/api/content/" + contentId + "/comments", {
+      method: "POST",
+      body: JSON.stringify({ text: commentText.trim(), parentId: replyTo ? replyTo.id : null })
+    }).then(function(newComment) {
+      setComments(function(prev) {
+        var n = Object.assign({}, prev);
+        n[contentId] = [...(n[contentId] || []), newComment];
+        return n;
+      });
+      setItems(function(prev) { return prev.map(function(it) {
+        return it.id === contentId ? Object.assign({}, it, { commentCount: it.commentCount + 1 }) : it;
+      }); });
+      setCommentText("");
+      setReplyTo(null);
+      setSubmitting(false);
+    }).catch(function() { setSubmitting(false); });
+  }
+
+  function deleteComment(contentId, commentId) {
+    apiFetch("/api/content/" + contentId + "/comments/" + commentId, { method: "DELETE" })
+      .then(function() {
+        setComments(function(prev) {
+          var n = Object.assign({}, prev);
+          n[contentId] = (n[contentId] || []).filter(function(c) { return c.id !== commentId; });
+          return n;
+        });
+        setItems(function(prev) { return prev.map(function(it) {
+          return it.id === contentId ? Object.assign({}, it, { commentCount: Math.max(0, it.commentCount - 1) }) : it;
+        }); });
+      }).catch(function() {});
+  }
+
+  var tabs = [
+    { id: "beats", label: "Beats" },
+    { id: "music", label: "Music" },
+    { id: "video", label: "Videos" },
+  ];
+
+  // Render comment thread for a content item
+  function CommentsPanel({ contentId }) {
+    var allComments = comments[contentId] || [];
+    var topLevel    = allComments.filter(function(c) { return !c.parentId; });
+    var getReplies  = function(id) { return allComments.filter(function(c) { return c.parentId === id; }); };
+
+    return (
+      <div style={{ borderTop: "1px solid #1a1a1a", marginTop: 12, paddingTop: 12 }}>
+        <div style={{ color: "#888", fontSize: 12, fontWeight: 700, marginBottom: 10 }}>COMMENTS</div>
+
+        {topLevel.length === 0 && (
+          <div style={{ color: "#444", fontSize: 13, marginBottom: 12 }}>No comments yet. Be the first!</div>
+        )}
+
+        {topLevel.map(function(c) {
+          var replies = getReplies(c.id);
+          return (
+            <div key={c.id} style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <div style={{ width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+                  background: "linear-gradient(135deg,#6B21A8,#C026D3)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "white", fontWeight: 800, fontSize: 13, overflow: "hidden" }}>
+                  {c.avatarUrl
+                    ? <img src={c.avatarUrl} alt={c.username} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    : (c.username || "?")[0].toUpperCase()}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                    <span style={{ color: "white", fontWeight: 700, fontSize: 13 }}>@{c.username}</span>
+                    <span style={{ color: "#444", fontSize: 11 }}>{new Date(c.createdAt).toLocaleDateString()}</span>
+                  </div>
+                  <div style={{ color: "#ccc", fontSize: 13, lineHeight: 1.5 }}>{c.text}</div>
+                  <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
+                    {currentUser && (
+                      <button onClick={function() { setReplyTo({ id: c.id, username: c.username }); setCommentText("@" + c.username + " "); }}
+                        style={{ background: "none", border: "none", color: "#C026D3", fontSize: 12, cursor: "pointer", padding: 0, fontWeight: 600 }}>
+                        Reply
+                      </button>
+                    )}
+                    {currentUser && currentUser.username === c.username && (
+                      <button onClick={function() { deleteComment(contentId, c.id); }}
+                        style={{ background: "none", border: "none", color: "#444", fontSize: 12, cursor: "pointer", padding: 0 }}>
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {replies.map(function(r) {
+                return (
+                  <div key={r.id} style={{ marginLeft: 42, marginTop: 8, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <div style={{ width: 26, height: 26, borderRadius: "50%", flexShrink: 0,
+                      background: "linear-gradient(135deg,#6B21A8,#C026D3)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      color: "white", fontWeight: 800, fontSize: 11, overflow: "hidden" }}>
+                      {r.avatarUrl
+                        ? <img src={r.avatarUrl} alt={r.username} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        : (r.username || "?")[0].toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 2 }}>
+                        <span style={{ color: "white", fontWeight: 700, fontSize: 12 }}>@{r.username}</span>
+                        <span style={{ color: "#444", fontSize: 11 }}>{new Date(r.createdAt).toLocaleDateString()}</span>
+                      </div>
+                      <div style={{ color: "#ccc", fontSize: 12, lineHeight: 1.5 }}>{r.text}</div>
+                      {currentUser && currentUser.username === r.username && (
+                        <button onClick={function() { deleteComment(contentId, r.id); }}
+                          style={{ background: "none", border: "none", color: "#444", fontSize: 11, cursor: "pointer", padding: 0, marginTop: 4 }}>
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+
+        {currentUser ? (
+          <div style={{ marginTop: 8 }}>
+            {replyTo && (
+              <div style={{ color: "#C026D3", fontSize: 12, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                Replying to @{replyTo.username}
+                <button onClick={function() { setReplyTo(null); setCommentText(""); }}
+                  style={{ background: "none", border: "none", color: "#444", cursor: "pointer", padding: 0, fontSize: 14 }}>
+                  &#10005;
+                </button>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={commentText} onChange={function(e) { setCommentText(e.target.value); }}
+                onKeyDown={function(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(contentId); } }}
+                placeholder="Add a comment..."
+                style={{ flex: 1, background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 20,
+                  padding: "8px 14px", color: "white", fontSize: 13, outline: "none" }} />
+              <button onClick={function() { submitComment(contentId); }} disabled={submitting || !commentText.trim()}
+                style={{ background: "#C026D3", border: "none", borderRadius: 20, color: "white",
+                  fontWeight: 700, fontSize: 13, padding: "8px 16px", cursor: "pointer", opacity: submitting ? 0.6 : 1 }}>
+                Post
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ color: "#444", fontSize: 12, marginTop: 8 }}>Sign in to comment</div>
+        )}
+      </div>
+    );
+  }
+
+  function ContentCard({ item }) {
+    var isLiked = likes[item.id];
+    return (
+      <div style={{ background: "#111", borderRadius: 16, border: "1px solid #1e1e1e", marginBottom: 16, overflow: "hidden" }}>
+
+        {/* Spotify embed */}
+        {item.type === "music" && item.embedUrl && (
+          <div>
+            <iframe
+              src={item.embedUrl + "?utm_source=generator&theme=0"}
+              width="100%" height="152"
+              frameBorder="0"
+              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+              loading="lazy"
+              style={{ display: "block", borderRadius: "16px 16px 0 0" }}
+            />
+          </div>
+        )}
+
+        {/* Video player */}
+        {item.type === "video" && item.videoUrl && (
+          <video controls style={{ width: "100%", maxHeight: 400, background: "#000", display: "block" }}
+            src={item.videoUrl} />
+        )}
+
+        <div style={{ padding: "12px 16px" }}>
+          {item.caption && (
+            <div style={{ color: "#ccc", fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>{item.caption}</div>
+          )}
+
+          {/* Like + Comment row */}
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <button onClick={function() { toggleLike(item.id); }}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
+                display: "flex", alignItems: "center", gap: 6,
+                color: isLiked ? "#EF4444" : "#555" }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill={isLiked ? "#EF4444" : "none"}
+                stroke={isLiked ? "#EF4444" : "#555"} strokeWidth="2" strokeLinecap="round">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+              </svg>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{item.likeCount || 0}</span>
+            </button>
+
+            <button onClick={function() {
+                if (showComments === item.id) { setShowComments(null); }
+                else { openComments(item.id); }
+              }}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
+                display: "flex", alignItems: "center", gap: 6, color: "#555" }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>{item.commentCount || 0}</span>
+            </button>
+
+            {item.type === "music" && item.spotifyUrl && (
+              <button onClick={function() { window.open(item.spotifyUrl, "_blank"); }}
+                style={{ marginLeft: "auto", background: "#1DB954", border: "none", borderRadius: 20,
+                  color: "white", fontWeight: 700, fontSize: 12, padding: "6px 14px", cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 6 }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
+                  <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+                </svg>
+                Open in Spotify
+              </button>
+            )}
+          </div>
+
+          {showComments === item.id && <CommentsPanel contentId={item.id} />}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      {/* Tab bar */}
+      <div style={{ display: "flex", borderBottom: "1px solid #1a1a1a", marginBottom: 16 }}>
+        {tabs.map(function(t) {
+          return (
+            <button key={t.id} onClick={function() { setTab(t.id); }}
+              style={{ flex: 1, padding: "12px 0", background: "none", border: "none",
+                borderBottom: tab === t.id ? "2px solid #C026D3" : "2px solid transparent",
+                color: tab === t.id ? "white" : "#555", fontWeight: 700, fontSize: 13,
+                cursor: "pointer", transition: "all 0.15s" }}>
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Beats tab */}
+      {tab === "beats" && (
+        <div style={{ padding: "0 16px" }}>
+          {profile && profile.beats && profile.beats.length > 0 ? (
+            profile.beats.map(function(beat) {
+              return (
+                <div key={beat.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid #1e1e1e" }}>
+                  <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{beat.title}</div>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                    {beat.genre && <div style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>}
+                    <div style={{ background: beat.price === "free" ? "rgba(34,197,94,0.12)" : "rgba(192,38,211,0.12)", border: "1px solid " + (beat.price === "free" ? "rgba(34,197,94,0.25)" : "rgba(192,38,211,0.25)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: beat.price === "free" ? "#22C55E" : "#C026D3", fontWeight: 700 }}>{beat.price === "free" ? "FREE" : beat.price}</div>
+                    <div style={{ color: "#444", fontSize: 11 }}>{beat.downloads || 0} downloads</div>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
+              <AppIcon id="note" size={40} />
+              <div style={{ fontSize: 15, marginTop: 12, color: "#444", fontWeight: 700 }}>No beats yet</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Music / Video tabs */}
+      {(tab === "music" || tab === "video") && (
+        <div style={{ padding: "0 16px" }}>
+          {loading ? (
+            <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>Loading...</div>
+          ) : items.length > 0 ? (
+            items.map(function(item) { return <ContentCard key={item.id} item={item} />; })
+          ) : (
+            <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
+              <div style={{ fontSize: 36, marginBottom: 12 }}>{tab === "music" ? "&#127925;" : "&#127909;"}</div>
+              <div style={{ fontSize: 15, color: "#444", fontWeight: 700 }}>
+                {tab === "music" ? "No music posted yet" : "No videos posted yet"}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, currentUser, onMessage, hideBack }) {
   const [profile,   setProfile]   = useState(null);
   const [loading,   setLoading]   = useState(true);
@@ -4388,31 +4732,8 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         </div>
       )}
 
-      {/* ── Beats / activity ── */}
-      {profile.beats && profile.beats.length > 0 ? (
-        <div style={{ padding: "0 16px" }}>
-          <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 14 }}>BEATS</div>
-          {profile.beats.map(beat => (
-            <div key={beat.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid #1e1e1e" }}>
-              <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{beat.title}</div>
-              <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-                {beat.genre && <div style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>}
-                <div style={{ background: beat.price === "free" ? "rgba(34,197,94,0.12)" : "rgba(192,38,211,0.12)", border: "1px solid " + (beat.price === "free" ? "rgba(34,197,94,0.25)" : "rgba(192,38,211,0.25)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: beat.price === "free" ? "#22C55E" : "#C026D3", fontWeight: 700 }}>{beat.price === "free" ? "FREE" : beat.price}</div>
-                <div style={{ color: "#444", fontSize: 11 }}>{beat.downloads || 0} downloads</div>
-              </div>
-              <button onClick={() => handleDownload(beat)} style={{ width: "100%", borderRadius: 12, padding: "12px", background: "linear-gradient(135deg,#F59E0B,#EF4444)", border: "none", color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                <AppIcon id="download" size={16} /> Download MP3
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div style={{ textAlign: "center", padding: "60px 24px", color: "#555" }}>
-          <AppIcon id="note" size={48} />
-          <div style={{ fontSize: 16, marginTop: 14, color: "#444", fontWeight: 700 }}>No activity yet</div>
-          <div style={{ fontSize: 13, color: "#333", marginTop: 6 }}>Beats uploaded by this user will appear here</div>
-        </div>
-      )}
+      {/* ── Content tabs: Beats / Music / Videos ── */}
+      <ContentTabs username={username} profile={profile} currentUser={currentUser} onPlay={onPlay} savedIds={savedIds} onSave={onSave} />
     </div>
   );
 }
@@ -5094,6 +5415,219 @@ function SectionBack({ label, onBack }) {
   );
 }
 
+
+// =============================================================================
+// POST MUSIC SECTION — paste Spotify link
+// =============================================================================
+function PostMusicSection({ user, onBack }) {
+  var [url,       setUrl]       = React.useState("");
+  var [caption,   setCaption]   = React.useState("");
+  var [loading,   setLoading]   = React.useState(false);
+  var [msg,       setMsg]       = React.useState("");
+  var [posts,     setPosts]     = React.useState([]);
+
+  React.useEffect(function() {
+    if (!user) return;
+    apiFetch("/api/content/profile/" + encodeURIComponent(user.username) + "?type=music")
+      .then(function(data) { setPosts(data || []); })
+      .catch(function() {});
+  }, [user]);
+
+  function submit() {
+    if (!url.trim()) return;
+    setLoading(true); setMsg("");
+    apiFetch("/api/content/music", {
+      method: "POST",
+      body: JSON.stringify({ spotifyUrl: url.trim(), caption: caption.trim() })
+    }).then(function(data) {
+      setPosts(function(prev) { return [data, ...prev]; });
+      setUrl(""); setCaption("");
+      setMsg("Posted successfully!");
+      setLoading(false);
+      setTimeout(function() { setMsg(""); }, 3000);
+    }).catch(function(err) {
+      setMsg("Error: " + err.message);
+      setLoading(false);
+    });
+  }
+
+  function deletePost(id) {
+    apiFetch("/api/content/" + id, { method: "DELETE" })
+      .then(function() { setPosts(function(prev) { return prev.filter(function(p) { return p.id !== id; }); }); })
+      .catch(function() {});
+  }
+
+  return (
+    <div>
+      <SectionBack onBack={onBack} label="Back to Dashboard" />
+      <div style={{ color: "white", fontWeight: 800, fontSize: 20, marginBottom: 6 }}>Post Music</div>
+      <div style={{ color: "#555", fontSize: 13, marginBottom: 20 }}>Share a Spotify track on your profile</div>
+
+      <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #1e1e1e", marginBottom: 20 }}>
+        <div style={{ color: "#888", fontSize: 12, marginBottom: 8 }}>Spotify Track URL</div>
+        <input value={url} onChange={function(e) { setUrl(e.target.value); }}
+          placeholder="https://open.spotify.com/track/..."
+          style={{ width: "100%", background: "#0a0a0a", border: "1px solid #2a2a2a", borderRadius: 10,
+            padding: "12px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 12 }} />
+
+        <div style={{ color: "#888", fontSize: 12, marginBottom: 8 }}>Caption (optional)</div>
+        <textarea value={caption} onChange={function(e) { setCaption(e.target.value); }}
+          placeholder="Say something about this track..."
+          rows={3}
+          style={{ width: "100%", background: "#0a0a0a", border: "1px solid #2a2a2a", borderRadius: 10,
+            padding: "12px 14px", color: "white", fontSize: 14, outline: "none",
+            resize: "none", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 14 }} />
+
+        <button onClick={submit} disabled={loading || !url.trim()}
+          style={{ width: "100%", background: "linear-gradient(135deg,#1DB954,#22C55E)",
+            border: "none", borderRadius: 12, color: "white", fontWeight: 800,
+            fontSize: 15, padding: "14px", cursor: "pointer", opacity: loading ? 0.7 : 1 }}>
+          {loading ? "Posting..." : "Post to Profile"}
+        </button>
+
+        {msg && <div style={{ color: msg.startsWith("Error") ? "#EF4444" : "#22C55E", fontSize: 13, marginTop: 10, textAlign: "center" }}>{msg}</div>}
+      </div>
+
+      {posts.length > 0 && (
+        <div>
+          <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>YOUR MUSIC POSTS</div>
+          {posts.map(function(p) {
+            return (
+              <div key={p.id} style={{ background: "#111", borderRadius: 14, border: "1px solid #1e1e1e", marginBottom: 12, overflow: "hidden" }}>
+                <iframe src={p.embedUrl + "?utm_source=generator&theme=0"}
+                  width="100%" height="152" frameBorder="0"
+                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                  loading="lazy" style={{ display: "block" }} />
+                <div style={{ padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  {p.caption && <div style={{ color: "#aaa", fontSize: 13, flex: 1 }}>{p.caption}</div>}
+                  <button onClick={function() { deletePost(p.id); }}
+                    style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.3)",
+                      borderRadius: 8, color: "#F87171", fontSize: 12, padding: "4px 10px", cursor: "pointer", flexShrink: 0 }}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// =============================================================================
+// POST VIDEO SECTION — upload from device
+// =============================================================================
+function PostVideoSection({ user, onBack }) {
+  var [caption,   setCaption]   = React.useState("");
+  var [loading,   setLoading]   = React.useState(false);
+  var [msg,       setMsg]       = React.useState("");
+  var [posts,     setPosts]     = React.useState([]);
+  var fileRef                   = React.useRef(null);
+
+  React.useEffect(function() {
+    if (!user) return;
+    apiFetch("/api/content/profile/" + encodeURIComponent(user.username) + "?type=video")
+      .then(function(data) { setPosts(data || []); })
+      .catch(function() {});
+  }, [user]);
+
+  function upload(file) {
+    if (!file) return;
+    if (file.size > 100 * 1024 * 1024) { setMsg("Video too large — max 100MB"); return; }
+    setLoading(true); setMsg("");
+    var fd = new FormData();
+    fd.append("file", file);
+    fd.append("caption", caption.trim());
+    var token = getToken() || "";
+    fetch(API_BASE + "/api/content/video", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token },
+      body: fd,
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.detail) throw new Error(data.detail);
+        setPosts(function(prev) { return [data, ...prev]; });
+        setCaption("");
+        setMsg("Video posted!");
+        setLoading(false);
+        setTimeout(function() { setMsg(""); }, 3000);
+      })
+      .catch(function(err) {
+        setMsg("Error: " + err.message);
+        setLoading(false);
+      });
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  function deletePost(id) {
+    apiFetch("/api/content/" + id, { method: "DELETE" })
+      .then(function() { setPosts(function(prev) { return prev.filter(function(p) { return p.id !== id; }); }); })
+      .catch(function() {});
+  }
+
+  return (
+    <div>
+      <SectionBack onBack={onBack} label="Back to Dashboard" />
+      <div style={{ color: "white", fontWeight: 800, fontSize: 20, marginBottom: 6 }}>Post a Video</div>
+      <div style={{ color: "#555", fontSize: 13, marginBottom: 20 }}>Share a video clip on your profile</div>
+
+      <input ref={fileRef} type="file" accept="video/*" style={{ display: "none" }}
+        onChange={function(e) { upload(e.target.files && e.target.files[0]); }} />
+
+      <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #1e1e1e", marginBottom: 20 }}>
+        <div style={{ color: "#888", fontSize: 12, marginBottom: 8 }}>Caption (optional)</div>
+        <textarea value={caption} onChange={function(e) { setCaption(e.target.value); }}
+          placeholder="Say something about this video..."
+          rows={3}
+          style={{ width: "100%", background: "#0a0a0a", border: "1px solid #2a2a2a", borderRadius: 10,
+            padding: "12px 14px", color: "white", fontSize: 14, outline: "none",
+            resize: "none", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 14 }} />
+
+        <button onClick={function() { if (fileRef.current) fileRef.current.click(); }}
+          disabled={loading}
+          style={{ width: "100%", background: "linear-gradient(135deg,#3B82F6,#6366F1)",
+            border: "none", borderRadius: 12, color: "white", fontWeight: 800,
+            fontSize: 15, padding: "14px", cursor: "pointer", opacity: loading ? 0.7 : 1,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          {loading ? "Uploading..." : "Choose Video from Phone"}
+        </button>
+
+        {msg && <div style={{ color: msg.startsWith("Error") ? "#EF4444" : "#22C55E", fontSize: 13, marginTop: 10, textAlign: "center" }}>{msg}</div>}
+      </div>
+
+      {posts.length > 0 && (
+        <div>
+          <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>YOUR VIDEO POSTS</div>
+          {posts.map(function(p) {
+            return (
+              <div key={p.id} style={{ background: "#111", borderRadius: 14, border: "1px solid #1e1e1e", marginBottom: 12, overflow: "hidden" }}>
+                <video controls style={{ width: "100%", maxHeight: 300, background: "#000", display: "block" }} src={p.videoUrl} />
+                <div style={{ padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  {p.caption && <div style={{ color: "#aaa", fontSize: 13, flex: 1 }}>{p.caption}</div>}
+                  <button onClick={function() { deletePost(p.id); }}
+                    style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.3)",
+                      borderRadius: 8, color: "#F87171", fontSize: 12, padding: "4px 10px", cursor: "pointer", flexShrink: 0 }}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric }) {
   const [mode,        setMode]        = useState("landing");
   const [email,       setEmail]       = useState(() => {
@@ -5390,8 +5924,10 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                   <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>ARTIST TOOLS</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     {[
-                      { id: "lyrics",  icon: "edit",  label: "My Lyrics",    desc: savedLyrics.length + " saved", color: "#C026D3" },
-                      { id: "members", icon: "note",  label: "Members Area", desc: "Exclusive beats",              color: "#F59E0B" },
+                      { id: "lyrics",    icon: "edit",    label: "My Lyrics",    desc: savedLyrics.length + " saved", color: "#C026D3" },
+                      { id: "members",   icon: "note",    label: "Members Area", desc: "Exclusive beats",              color: "#F59E0B" },
+                      { id: "postmusic", icon: "note",    label: "Post Music",   desc: "Add Spotify track",            color: "#1DB954" },
+                      { id: "postvideo", icon: "vocalmic",label: "Post Video",   desc: "Upload from phone",            color: "#3B82F6" },
                     ].map(item => (
                       <button key={item.id} onClick={() => { setToolsOpen(false); goSection(item.id); }}
                         style={{ background: "#0f0f0f", borderRadius: 12, padding: "12px 10px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
@@ -5424,10 +5960,12 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                   <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>PRODUCER TOOLS</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     {[
-                      { id: "upload", icon: "upload", label: "Upload Beat",    desc: "Add new beat",                                                           color: "#C026D3" },
-                      { id: "manage", icon: "knobs",  label: "My Uploads",     desc: uploads.length + " beats",                                               color: "#F59E0B" },
-                      { id: "stripe", icon: "stripe", label: "Stripe Payouts", desc: producerStats?.stripeConnected ? "Connected" : "Not connected",           color: "#22C55E" },
-                      { id: "stats",  icon: "grid",   label: "Analytics",      desc: producerStats ? producerStats.totalDownloads + " downloads" : "Loading...", color: "#818CF8" },
+                      { id: "upload",      icon: "upload", label: "Upload Beat",    desc: "Add new beat",                                                           color: "#C026D3" },
+                      { id: "manage",      icon: "knobs",  label: "My Uploads",     desc: uploads.length + " beats",                                               color: "#F59E0B" },
+                      { id: "postmusic",   icon: "note",   label: "Post Music",     desc: "Add Spotify track",                                                     color: "#1DB954" },
+                      { id: "postvideo",   icon: "vocalmic", label: "Post Video",   desc: "Upload from phone",                                                     color: "#3B82F6" },
+                      { id: "stripe",      icon: "stripe", label: "Stripe Payouts", desc: producerStats?.stripeConnected ? "Connected" : "Not connected",           color: "#22C55E" },
+                      { id: "stats",       icon: "grid",   label: "Analytics",      desc: producerStats ? producerStats.totalDownloads + " downloads" : "Loading...", color: "#818CF8" },
                     ].map(item => (
                       <button key={item.id} onClick={() => { setToolsOpen(false); goSection(item.id); }}
                         style={{ background: "#0f0f0f", borderRadius: 12, padding: "12px 10px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
@@ -5841,6 +6379,16 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Post Music (Spotify) ── */}
+      {activeSection === "postmusic" && (
+        <PostMusicSection user={user} onBack={() => setActiveSection(null)} />
+      )}
+
+      {/* ── Post Video ── */}
+      {activeSection === "postvideo" && (
+        <PostVideoSection user={user} onBack={() => setActiveSection(null)} />
       )}
 
       {activeSection === "upgrade" && (
