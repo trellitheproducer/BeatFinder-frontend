@@ -4773,43 +4773,32 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
           ))}
         </div>
 
-        {/* Action buttons */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
-          {currentUser && !isOwnProfile && (
-            <>
-              <button onClick={toggleFollow} disabled={followLoading}
-                style={{ flex: 1, padding: "10px 0", borderRadius: 20, fontWeight: 800, fontSize: 14, cursor: "pointer",
-                  background: following ? "transparent" : "#C026D3",
-                  border: "1.5px solid " + (following ? "#444" : "#C026D3"),
-                  color: following ? "#777" : "white" }}>
-                {followLoading ? "..." : following ? "Following" : "Follow"}
+        {/* Action buttons — only show for other users */}
+        {currentUser && !isOwnProfile && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
+            <button onClick={toggleFollow} disabled={followLoading}
+              style={{ flex: 1, padding: "10px 0", borderRadius: 20, fontWeight: 800, fontSize: 14, cursor: "pointer",
+                background: following ? "transparent" : "#C026D3",
+                border: "1.5px solid " + (following ? "#444" : "#C026D3"),
+                color: following ? "#777" : "white" }}>
+              {followLoading ? "..." : following ? "Following" : "Follow"}
+            </button>
+            {onMessage && (
+              <button onClick={() => onMessage(username)}
+                style={{ padding: "10px 18px", borderRadius: 20, fontWeight: 700, fontSize: 13, cursor: "pointer",
+                  background: "transparent", border: "1.5px solid #333", color: "#aaa" }}>
+                Message
               </button>
-              {onMessage && (
-                <button onClick={() => onMessage(username)}
-                  style={{ padding: "10px 18px", borderRadius: 20, fontWeight: 700, fontSize: 13, cursor: "pointer",
-                    background: "transparent", border: "1.5px solid #333", color: "#aaa" }}>
-                  Message
-                </button>
-              )}
-            </>
-          )}
-          
-          <button onClick={() => navigator.clipboard?.writeText("beatfinder.app/u/" + (profile.username || username))}
-            style={{ width: 40, height: 40, borderRadius: "50%", background: "transparent", flexShrink: 0,
-              border: "1.5px solid #333", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#aaa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
-              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
-            </svg>
-          </button>
-        </div>
+            )}
+          </div>
+        )}
 
-        <div style={{ height: 1, background: "#1a1a1a", marginBottom: 0 }} />
+        <div style={{ height: 1, background: "#1a1a1a", marginBottom: 10 }} />
       </div>
 
       {/* ── Find Me On — social links ── */}
       {(profile.instagram || profile.tiktok || profile.youtube || profile.spotify || profile.appleMusic || profile.website) && (
-        <div style={{ padding: "0 16px", marginBottom: 12 }}>
+        <div style={{ padding: "10px 16px 12px", marginBottom: 0 }}>
           <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>FIND ME ON</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {[
@@ -5781,7 +5770,7 @@ function PostVideoSection({ user, onBack }) {
 }
 
 
-function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric }) {
+function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric, onOpenMessages }) {
   const [mode,        setMode]        = useState("landing");
   const [email,       setEmail]       = useState(() => {
     try { return localStorage.getItem("bf_remember") === "1" ? (localStorage.getItem("bf_saved_email") || "") : ""; } catch { return ""; }
@@ -6473,6 +6462,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             savedIds={new Set()}
             onSave={() => {}}
             currentUser={user}
+            onMessage={u => { setActiveSection(null); onOpenMessages && onOpenMessages(u); }}
           />
         </div>
       )}
@@ -15693,7 +15683,7 @@ export default function BeatFinder() {
               setShowAuthWall(false);
               setAuthStartMode("login");
               goTab("home");
-            }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} />
+            }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} onOpenMessages={u => { setMessageThread(u); setShowMessages(true); }} />
           </div>
         )}
       </div>
@@ -15705,7 +15695,8 @@ export default function BeatFinder() {
             username={searchProfile}
             onBack={function() { setSearchProfile(null); }}
             onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} currentUser={user}
-            hideBack={false} />
+            hideBack={false}
+            onMessage={function(u) { setSearchProfile(null); setMessageThread(u); setShowMessages(true); }} />
         </div>
       )}
 
