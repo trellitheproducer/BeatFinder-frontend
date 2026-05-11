@@ -4651,23 +4651,33 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
   return (
     <div style={{ paddingBottom: 100 }}>
-      {onBack && !hideBack && (
-        <div style={{ padding: "16px 16px 0", display: "flex", alignItems: "center" }}>
-          <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 24, cursor: "pointer", padding: 0 }}>&#8592;</button>
+
+      {/* Header photo — full bleed to top, back arrow floats over it */}
+      {profile.headerUrl ? (
+        <div style={{ position: "relative", height: 280, margin: "0 -16px", overflow: "hidden" }}>
+          <img src={profile.headerUrl} alt="header"
+            style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} />
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 30%, rgba(10,10,10,0.5) 60%, #0a0a0a 85%, #0a0a0a 100%)" }} />
+          {/* Back arrow over header */}
+          {onBack && !hideBack && (
+            <button onClick={onBack}
+              style={{ position: "absolute", top: 52, left: 16, background: "none", border: "none",
+                color: "white", fontSize: 26, cursor: "pointer", padding: 0,
+                textShadow: "0 1px 4px rgba(0,0,0,0.8)", zIndex: 10 }}>
+              &#8592;
+            </button>
+          )}
         </div>
+      ) : (
+        onBack && !hideBack && (
+          <div style={{ padding: "16px 16px 0", display: "flex", alignItems: "center" }}>
+            <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 24, cursor: "pointer", padding: 0 }}>&#8592;</button>
+          </div>
+        )
       )}
 
       {/* ── BandLab-style header ── */}
-      <div style={{ padding: "16px 16px 0" }}>
-
-        {/* Header photo */}
-        {profile.headerUrl && (
-          <div style={{ margin: "0 -16px", position: "relative", height: 260, marginBottom: -70, overflow: "hidden" }}>
-            <img src={profile.headerUrl} alt="header" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} />
-            {/* Bottom fade into page */}
-            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 40%, rgba(10,10,10,0.6) 70%, #0a0a0a 100%)" }} />
-          </div>
-        )}
+      <div style={{ padding: profile.headerUrl ? "0 16px" : "16px 16px 0", marginTop: profile.headerUrl ? -70 : 0 }}>
 
         {/* Avatar */}
         <div style={{ position: "relative", display: "inline-block", marginBottom: 12, zIndex: 2 }}>
