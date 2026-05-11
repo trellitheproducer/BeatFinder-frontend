@@ -723,11 +723,12 @@ function useGlobalPreviewStop(myId, stopFn) {
 // thumbnail when inactive so the user can switch between tracks.
 function SpotifyEmbed({ embedUrl, height, style, itemId }) {
   var [active, setActive] = React.useState(false);
-  var idRef = React.useRef("spotify_" + itemId);
-  var h = height || 152;
+  var idRef    = React.useRef("spotify_" + itemId);
+  var iframeRef = React.useRef(null);
+  var h  = height || 152;
   var br = (style && style.borderRadius) ? style.borderRadius : 0;
 
-  // Listen for another preview activating — deactivate self (unmounts autoplay iframe)
+  // Listen for another preview activating — deactivate self
   React.useEffect(function() {
     function handler(e) {
       if (e.detail.except !== idRef.current) setActive(false);
@@ -735,6 +736,30 @@ function SpotifyEmbed({ embedUrl, height, style, itemId }) {
     window.addEventListener("bf:stopPreview", handler);
     return function() { window.removeEventListener("bf:stopPreview", handler); };
   }, []);
+
+  // When activated, send postMessage to the Spotify embed to trigger play.
+  // Spotify's embed listens for { command: "toggle" } from the parent window.
+  // We retry a few times to handle iframe load timing.
+  React.useEffect(function() {
+    if (!active) return;
+    var attempts = 0;
+    var maxAttempts = 8;
+    function sendPlay() {
+      if (!iframeRef.current) return;
+      try {
+        iframeRef.current.contentWindow.postMessage(
+          JSON.stringify({ command: "toggle" }), "*"
+        );
+      } catch(e) {}
+      attempts++;
+      if (attempts < maxAttempts) {
+        setTimeout(sendPlay, 400);
+      }
+    }
+    // Give iframe a moment to load before first attempt
+    var t = setTimeout(sendPlay, 300);
+    return function() { clearTimeout(t); };
+  }, [active]);
 
   function activate() {
     startGlobalPreview(idRef.current);
@@ -745,11 +770,10 @@ function SpotifyEmbed({ embedUrl, height, style, itemId }) {
     <div style={Object.assign({}, style, {
       position: "relative", height: h, overflow: "hidden", borderRadius: br,
     })}>
-      {/* Always render the iframe so album art / track name shows through */}
+      {/* Always render iframe so artwork/track name shows through */}
       <iframe
-        src={active
-          ? (embedUrl + "?utm_source=generator&theme=0&autoplay=1")
-          : (embedUrl + "?utm_source=generator&theme=0")}
+        ref={iframeRef}
+        src={embedUrl + "?utm_source=generator&theme=0"}
         width="100%"
         height={h}
         frameBorder="0"
@@ -757,7 +781,7 @@ function SpotifyEmbed({ embedUrl, height, style, itemId }) {
         loading="lazy"
         style={{ display: "block", border: "none" }}
       />
-      {/* Semi-transparent overlay with play button — disappears when active */}
+      {/* Semi-transparent overlay — tap to play */}
       {!active && (
         <div onClick={activate} style={{
           position: "absolute", inset: 0,
