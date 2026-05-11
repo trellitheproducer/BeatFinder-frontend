@@ -4730,7 +4730,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
       )}
 
       {/* ── Profile content ── */}
-      <div style={{ padding: "0 16px", paddingBottom: 100 }}>
+      <div style={{ padding: "0 16px" }}>
 
         {/* Name + username */}
         <div style={{ marginBottom: 6 }}>
@@ -4875,7 +4875,9 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
       </div>
 
       {/* ── Content tabs: Beats / Music / Videos ── */}
-      <ContentTabs username={username} profile={profile} currentUser={currentUser} onPlay={onPlay} savedIds={savedIds} onSave={onSave} />
+      <div style={{ paddingBottom: 100 }}>
+        <ContentTabs username={username} profile={profile} currentUser={currentUser} onPlay={onPlay} savedIds={savedIds} onSave={onSave} />
+      </div>
     </div>
   );
 }
