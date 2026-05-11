@@ -4646,7 +4646,8 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
   const isProd = profile.plan === "producer";
   const isArtist = profile.plan === "artist" || isProd;
-  const isOwnProfile = currentUser?.username === username;
+  const isOwnProfile = currentUser && username && currentUser.username && 
+    currentUser.username.toLowerCase() === username.toLowerCase();
 
   const handleDownload = async (beat) => {
     try {
@@ -4773,7 +4774,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         </div>
 
         {/* Action buttons */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 20, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
           {currentUser && !isOwnProfile && (
             <>
               <button onClick={toggleFollow} disabled={followLoading}
@@ -4803,7 +4804,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
           </button>
         </div>
 
-        <div style={{ height: 1, background: "#1a1a1a", marginBottom: 12 }} />
+        <div style={{ height: 1, background: "#1a1a1a", marginBottom: 0 }} />
       </div>
 
       {/* ── Find Me On — social links ── */}
@@ -15698,7 +15699,8 @@ export default function BeatFinder() {
       </div>
 
       {searchProfile && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "#0a0a0a", overflowY: "scroll", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: "#0a0a0a", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "none" }}
+          onTouchMove={function(e) { e.stopPropagation(); }}>
           <PublicProfileScreen
             username={searchProfile}
             onBack={function() { setSearchProfile(null); }}
