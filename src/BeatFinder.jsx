@@ -690,6 +690,32 @@ function LogicTrackHeader({
 // Set this to your Render/Railway URL after deployment.
 const API_BASE = "https://beatfinder-backend.onrender.com";
 
+// =============================================================================
+// GLOBAL PREVIEW COORDINATOR
+// Ensures only one beat/track preview plays at a time across all components.
+// Any component that starts a preview calls startGlobalPreview(id).
+// Any component that wants to stop another's preview listens with useGlobalPreviewStop.
+// =============================================================================
+var _activePreviewId = null;
+function startGlobalPreview(id) {
+  if (_activePreviewId && _activePreviewId !== id) {
+    window.dispatchEvent(new CustomEvent("bf:stopPreview", { detail: { except: id } }));
+  }
+  _activePreviewId = id;
+}
+function clearGlobalPreview(id) {
+  if (_activePreviewId === id) _activePreviewId = null;
+}
+function useGlobalPreviewStop(myId, stopFn) {
+  React.useEffect(function() {
+    function handler(e) {
+      if (e.detail.except !== myId) stopFn();
+    }
+    window.addEventListener("bf:stopPreview", handler);
+    return function() { window.removeEventListener("bf:stopPreview", handler); };
+  }, [myId, stopFn]);
+}
+
 // Global content-deletion event bus
 // Any component that deletes content dispatches this; any that displays it listens.
 function dispatchContentDeleted(id, kind) {
@@ -3227,13 +3253,17 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
   const isFree  = beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
 
   // Enforce 30-second hard stop — no scrubbing, no skipping
+  var previewId = React.useRef("lease_" + beat.id);
+
   function startPreview() {
     if (previewing) { stopPreview(); return; }
+    startGlobalPreview(previewId.current);
     setPreviewing(true);
     setPreviewTime(0);
   }
 
   function stopPreview() {
+    clearGlobalPreview(previewId.current);
     setPreviewing(false);
     setPreviewTime(0);
     clearInterval(timerRef.current);
@@ -3242,6 +3272,13 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
       audioRef.current.currentTime = 0;
     }
   }
+
+  useGlobalPreviewStop(previewId.current, React.useCallback(function() {
+    setPreviewing(false);
+    setPreviewTime(0);
+    clearInterval(timerRef.current);
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
+  }, []));
 
   // When audio starts playing, enforce the 30s limit via a timer
   function onAudioPlay(e) {
@@ -3616,11 +3653,22 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
     const tRef = React.useRef(null);
     const isFree = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
 
-    function startPrev() { if (prev) { stopPrev(); return; } setPrev(true); setPTime(0); }
+    var prevId = React.useRef("producer_" + beat.id);
+
+    function startPrev() {
+      if (prev) { stopPrev(); return; }
+      startGlobalPreview(prevId.current);
+      setPrev(true); setPTime(0);
+    }
     function stopPrev() {
+      clearGlobalPreview(prevId.current);
       setPrev(false); setPTime(0); clearInterval(tRef.current);
       if (aRef.current) { aRef.current.pause(); aRef.current.currentTime = 0; }
     }
+    useGlobalPreviewStop(prevId.current, React.useCallback(function() {
+      setPrev(false); setPTime(0); clearInterval(tRef.current);
+      if (aRef.current) { aRef.current.pause(); aRef.current.currentTime = 0; }
+    }, []));
     function onPlay() {
       clearInterval(tRef.current);
       var start = Date.now();
@@ -5086,12 +5134,24 @@ function ProfileBeatCard({ beat, currentUser }) {
   var timerRef  = React.useRef(null);
   var isFree    = beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
 
-  function startPreview() { if (previewing) { stopPreview(); return; } setPreviewing(true); setPreviewTime(0); }
+  var previewId = React.useRef("profile_" + beat.id);
+
+  function startPreview() {
+    if (previewing) { stopPreview(); return; }
+    startGlobalPreview(previewId.current);
+    setPreviewing(true); setPreviewTime(0);
+  }
 
   function stopPreview() {
+    clearGlobalPreview(previewId.current);
     setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
   }
+
+  useGlobalPreviewStop(previewId.current, React.useCallback(function() {
+    setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
+  }, []));
 
   function onAudioPlay() {
     clearInterval(timerRef.current);
