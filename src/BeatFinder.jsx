@@ -745,14 +745,15 @@ function SpotifyEmbed({ embedUrl, height, style, itemId }) {
     <div style={Object.assign({}, style, {
       position: "relative", height: h, overflow: "hidden", borderRadius: br,
     })}>
-      {/* Always render iframe so artwork/track name shows through */}
+      {/* Iframe — key changes when deactivated so React unmounts it, stopping playback */}
       <iframe
+        key={active ? "active" : "inactive"}
         src={embedUrl + "?utm_source=generator&theme=0"}
         width="100%"
         height={h}
         frameBorder="0"
         allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-        loading="lazy"
+        loading={active ? "eager" : "lazy"}
         style={{ display: "block", border: "none" }}
       />
       {/* Semi-transparent overlay — removed when user taps */}
