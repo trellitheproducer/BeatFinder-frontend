@@ -4660,12 +4660,20 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
       {/* ── BandLab-style header ── */}
       <div style={{ padding: "16px 16px 0" }}>
 
+        {/* Header photo */}
+        {profile.headerUrl && (
+          <div style={{ margin: "0 -16px", position: "relative", height: 140, marginBottom: -40, overflow: "hidden" }}>
+            <img src={profile.headerUrl} alt="header" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 30%, #0a0a0a 100%)" }} />
+          </div>
+        )}
+
         {/* Avatar */}
-        <div style={{ position: "relative", display: "inline-block", marginBottom: 12 }}>
+        <div style={{ position: "relative", display: "inline-block", marginBottom: 12, zIndex: 2 }}>
           {profile.avatarUrl ? (
             <img src={profile.avatarUrl} alt={profile.username}
               style={{ width: 80, height: 80, borderRadius: "50%", objectFit: "cover",
-                border: "3px solid #222", display: "block" }} />
+                border: "3px solid #0a0a0a", display: "block" }} />
           ) : (
             <div style={{ width: 80, height: 80, borderRadius: "50%",
               background: profile.avatarColor || "linear-gradient(135deg,#6B21A8,#C026D3)",
@@ -5785,7 +5793,10 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   const [avatarUrl,        setAvatarUrl]        = useState(user?.avatarUrl || "");
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [avatarUploading,  setAvatarUploading]  = useState(false);
+  const [headerUrl,        setHeaderUrl]        = useState(user?.headerUrl || "");
+  const [headerUploading,  setHeaderUploading]  = useState(false);
   const avatarFileRef = React.useRef(null);
+  const headerFileRef = React.useRef(null);
   const [tiktok,        setTiktok]        = useState(user?.tiktok || "");
   const [youtube,       setYoutube]       = useState(user?.youtube || "");
   const [spotify,       setSpotify]       = useState(user?.spotify || "");
@@ -5816,6 +5827,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         setAppleMusic(fresh.appleMusic || "");
         setAvatarColor(fresh.avatarColor || "linear-gradient(135deg,#6B21A8,#C026D3)");
         setAvatarUrl(fresh.avatarUrl || "");
+        setHeaderUrl(fresh.headerUrl || "");
         setNewUsername(fresh.username || "");
       })
       .catch(() => {});
@@ -6123,6 +6135,62 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
           {/* ── Avatar ── tap to change photo */}
           {/* Hidden file input */}
+          {/* Hidden header file input */}
+          <input ref={headerFileRef} type="file" accept="image/*" style={{ display: "none" }}
+            onChange={async function(e) {
+              const file = e.target.files && e.target.files[0];
+              if (!file) return;
+              if (file.size > 10 * 1024 * 1024) { setBioMsg("Image too large - max 10MB"); return; }
+              setHeaderUploading(true);
+              try {
+                const fd = new FormData();
+                fd.append("file", file);
+                fd.append("folder", "beatfinder/headers");
+                const token = getToken() || "";
+                const res = await fetch(API_BASE + "/api/auth/avatar", {
+                  method: "POST",
+                  headers: { Authorization: "Bearer " + token },
+                  body: fd,
+                });
+                if (!res.ok) throw new Error("Upload failed");
+                const data = await res.json();
+                setHeaderUrl(data.avatarUrl);
+                setUser(u => ({ ...u, headerUrl: data.avatarUrl }));
+                setBioMsg("Header photo updated!");
+                setTimeout(() => setBioMsg(""), 2500);
+              } catch(err) { setBioMsg("Error: " + err.message); }
+              setHeaderUploading(false);
+              e.target.value = "";
+            }} />
+
+          {/* Header photo preview + upload */}
+          <div style={{ marginBottom: 20, position: "relative" }}>
+            <div style={{ height: 120, borderRadius: 14, overflow: "hidden", background: "#111", border: "1px solid #1e1e1e", position: "relative" }}>
+              {headerUrl ? (
+                <img src={headerUrl} alt="header" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              ) : (
+                <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center",
+                  background: "linear-gradient(135deg,#1a1a1a,#0a0a0a)", color: "#333", fontSize: 13 }}>
+                  No header photo
+                </div>
+              )}
+              <button onClick={() => headerFileRef.current && headerFileRef.current.click()}
+                style={{ position: "absolute", bottom: 8, right: 8, background: "rgba(0,0,0,0.7)",
+                  border: "1px solid #333", borderRadius: 20, color: "white", fontSize: 12,
+                  padding: "6px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+                {headerUploading ? "Uploading..." : (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    {headerUrl ? "Change Header" : "Add Header Photo"}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
           <input ref={avatarFileRef} type="file" accept="image/*" style={{ display: "none" }}
             onChange={async function(e) {
               const file = e.target.files && e.target.files[0];
@@ -6287,7 +6355,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                     name: editName.trim(), location: location.trim(),
                     instagram: instagram.trim(), tiktok: tiktok.trim(),
                     youtube: youtube.trim(), spotify: spotify.trim(), website: website.trim(),
-                    bio: bio.trim(), avatarColor: avatarColor, avatarUrl: avatarUrl, appleMusic: appleMusic.trim(),
+                    bio: bio.trim(), avatarColor: avatarColor, avatarUrl: avatarUrl, appleMusic: appleMusic.trim(), headerUrl: headerUrl,
                   })}),
                   newUsername.trim() && newUsername.trim() !== user.username
                     ? apiFetch("/api/auth/set-username", { method: "POST", body: JSON.stringify({ username: newUsername.trim() }) })
@@ -6295,7 +6363,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 ]);
                 if (editName.trim()) setUser(u => ({ ...u, name: editName.trim() }));
                 if (newUsername.trim()) setUser(u => ({ ...u, username: newUsername.trim() }));
-                setUser(u => ({ ...u, bio: bio.trim(), location: location.trim(), instagram: instagram.trim(), tiktok: tiktok.trim(), youtube: youtube.trim(), spotify: spotify.trim(), website: website.trim(), appleMusic: appleMusic.trim(), avatarColor, avatarUrl }));
+                setUser(u => ({ ...u, bio: bio.trim(), location: location.trim(), instagram: instagram.trim(), tiktok: tiktok.trim(), youtube: youtube.trim(), spotify: spotify.trim(), website: website.trim(), appleMusic: appleMusic.trim(), avatarColor, avatarUrl, headerUrl }));
                 setBioMsg("Profile saved!"); setTimeout(() => setBioMsg(""), 3000);
               } catch(e) { setBioMsg("Error: " + e.message); setTimeout(() => setBioMsg(""), 3000); }
               setProfileSaving(false);
