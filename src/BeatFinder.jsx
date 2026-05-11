@@ -4793,12 +4793,12 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
           </div>
         )}
 
-        <div style={{ height: 1, background: "#1a1a1a", marginBottom: 10 }} />
+        <div style={{ height: isOwnProfile ? 0 : 1, background: "#1a1a1a", marginBottom: isOwnProfile ? 0 : 10 }} />
       </div>
 
       {/* ── Find Me On — social links ── */}
       {(profile.instagram || profile.tiktok || profile.youtube || profile.spotify || profile.appleMusic || profile.website) && (
-        <div style={{ padding: "10px 16px 12px", marginBottom: 0 }}>
+        <div style={{ padding: isOwnProfile ? "4px 16px 12px" : "10px 16px 12px", marginBottom: 0 }}>
           <div style={{ color: "#888", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 12 }}>FIND ME ON</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {[
