@@ -5981,6 +5981,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
   const [error,     setError]     = useState(null);
   const [following, setFollowing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
+  const [publicBadgePopup, setPublicBadgePopup] = useState(null);
 
   useEffect(() => {
     const endpoint = currentUser
@@ -6122,11 +6123,12 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {/* Plan tags */}
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-            {isProd && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11 }}>Producer Pro</span>}
-            {profile.username === "Trelli" && <CEOBadge />}
-            {isArtist && !isProd && <span style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11 }}>Artist Pro</span>}
+            {isProd && <span onClick={() => setPublicBadgePopup({ icon: "🎛️", text: "This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
+            {profile.username === "Trelli" && <CEOBadge onClick={() => setPublicBadgePopup({ icon: "👑", text: "Verified Chief Executive Officer" })} />}
+            {isArtist && !isProd && <span onClick={() => setPublicBadgePopup({ icon: "🎤", text: "This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
           </div>
         )}
+        <BadgeInfoPopup message={publicBadgePopup} onClose={() => setPublicBadgePopup(null)} />
 
         {/* Bio */}
         {profile.bio && (
@@ -7328,6 +7330,7 @@ function PostVideoSection({ user, onBack }) {
 
 function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric, onOpenMessages }) {
   const [mode,        setMode]        = useState("landing");
+  const [ownBadgePopup, setOwnBadgePopup] = useState(null);
   const [email,       setEmail]       = useState(() => {
     try { return localStorage.getItem("bf_remember") === "1" ? (localStorage.getItem("bf_saved_email") || "") : ""; } catch { return ""; }
   });
@@ -7858,16 +7861,18 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             {/* Plan badge */}
             <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
               {user.isPro && (
-                <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 12px", color:"#C026D3", fontWeight:800, fontSize:12 }}>
+                <span onClick={() => setOwnBadgePopup({ icon: "🎛️", text: "This user is currently subscribed to Producer Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 12px", color:"#C026D3", fontWeight:800, fontSize:12, cursor:"pointer" }}>
                   <VerifiedBadge size={14} /> Producer Pro
                 </span>
               )}
               {user.isArtistPro && !user.isPro && (
-                <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 12px", color:"#F59E0B", fontWeight:800, fontSize:12 }}>
+                <span onClick={() => setOwnBadgePopup({ icon: "🎤", text: "This user is currently subscribed to Artist Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 12px", color:"#F59E0B", fontWeight:800, fontSize:12, cursor:"pointer" }}>
                   <VerifiedBadge size={14}/> Artist Pro
                 </span>
               )}
+              {user.username === "Trelli" && <CEOBadge onClick={() => setOwnBadgePopup({ icon: "👑", text: "Verified Chief Executive Officer" })} />}
             </div>
+            <BadgeInfoPopup message={ownBadgePopup} onClose={() => setOwnBadgePopup(null)} />
           </div>
 
           {/* Name */}
@@ -11253,9 +11258,9 @@ function GoldVerifiedBadge({ size = 20 }) {
 }
 
 // CEO badge — Trelli only
-function CEOBadge() {
+function CEOBadge({ onClick }) {
   return (
-    <span style={{
+    <span onClick={onClick} style={{
       display: "inline-flex", alignItems: "center", gap: 4,
       background: "linear-gradient(135deg, #000 0%, #1a1a1a 40%, #B8860B 100%)",
       border: "1.5px solid #FFD700",
@@ -11267,12 +11272,58 @@ function CEOBadge() {
       letterSpacing: 1.5,
       textTransform: "uppercase",
       boxShadow: "0 0 8px rgba(255,215,0,0.4)",
+      cursor: onClick ? "pointer" : "default",
     }}>
       <svg width="10" height="10" viewBox="0 0 24 24" fill="#FFD700">
         <path d="M2 20h20v2H2zM4 17l4-8 4 4 4-8 4 8H4z"/>
       </svg>
       CEO
     </span>
+  );
+}
+
+// Badge info popup — shared by both profile screens
+function BadgeInfoPopup({ message, onClose }) {
+  if (!message) return null;
+  return (
+    <>
+      <div onClick={onClose} style={{
+        position: "fixed", inset: 0, zIndex: 99998,
+        background: "rgba(0,0,0,0.55)",
+      }} />
+      <div style={{
+        position: "fixed", top: "50%", left: "50%",
+        transform: "translate(-50%, -50%)",
+        zIndex: 99999,
+        background: "#141414",
+        border: "1px solid rgba(255,255,255,0.1)",
+        borderRadius: 20,
+        padding: "28px 28px 22px",
+        minWidth: 260, maxWidth: 320,
+        boxShadow: "0 12px 60px rgba(0,0,0,0.8)",
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
+        animation: "bf-scale-in 0.2s cubic-bezier(0.22,1,0.36,1) both",
+        textAlign: "center",
+        fontFamily: "inherit",
+      }}>
+        <div style={{ fontSize: 36 }}>{message.icon}</div>
+        <div style={{ color: "white", fontSize: 14, fontWeight: 600, lineHeight: 1.5 }}>
+          {message.text}
+        </div>
+        <button onClick={onClose} style={{
+          marginTop: 4,
+          background: "rgba(255,255,255,0.08)",
+          border: "1px solid rgba(255,255,255,0.12)",
+          borderRadius: 50,
+          color: "white",
+          fontWeight: 700,
+          fontSize: 13,
+          padding: "8px 28px",
+          cursor: "pointer",
+          fontFamily: "inherit",
+        }}>Got it</button>
+      </div>
+    </>
   );
 }
 
