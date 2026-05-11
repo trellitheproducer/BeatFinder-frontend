@@ -716,6 +716,67 @@ function useGlobalPreviewStop(myId, stopFn) {
   }, [myId, stopFn]);
 }
 
+// Spotify embed coordinator — only one embed loads at a time.
+// Spotify iframes can't be paused via JS (cross-origin) so we unmount
+// all others when one is activated, keeping the active one alive.
+// SpotifyEmbed renders the iframe only when active, and a tap-to-play
+// thumbnail when inactive so the user can switch between tracks.
+function SpotifyEmbed({ embedUrl, height, style, itemId }) {
+  var [active, setActive] = React.useState(false);
+  var idRef = React.useRef("spotify_" + itemId);
+
+  // Listen for another embed activating — deactivate self
+  React.useEffect(function() {
+    function handler(e) {
+      if (e.detail.except !== idRef.current) setActive(false);
+    }
+    window.addEventListener("bf:stopPreview", handler);
+    return function() { window.removeEventListener("bf:stopPreview", handler); };
+  }, []);
+
+  function activate() {
+    // Tell all beat previews and other Spotify embeds to stop
+    startGlobalPreview(idRef.current);
+    setActive(true);
+  }
+
+  if (!active) {
+    return (
+      <div onClick={activate} style={Object.assign({}, style, {
+        height: height || 152,
+        background: "#111",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        cursor: "pointer", position: "relative",
+        borderRadius: style && style.borderRadius ? style.borderRadius : 0,
+      })}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 52, height: 52, borderRadius: "50%",
+            background: "#1DB954",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 0 20px rgba(29,185,84,0.4)" }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
+              <polygon points="5,3 19,12 5,21"/>
+            </svg>
+          </div>
+          <span style={{ color: "#aaa", fontSize: 12, fontWeight: 600 }}>Tap to play</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <iframe
+      src={embedUrl + "?utm_source=generator&theme=0"}
+      width="100%"
+      height={height || 152}
+      frameBorder="0"
+      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+      loading="eager"
+      style={style}
+    />
+  );
+}
+
 // Global content-deletion event bus
 // Any component that deletes content dispatches this; any that displays it listens.
 function dispatchContentDeleted(id, kind) {
@@ -5598,12 +5659,10 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
 
         {/* Spotify embed */}
         {item.type === "music" && item.embedUrl && (
-          <iframe
-            src={item.embedUrl + "?utm_source=generator&theme=0"}
-            width="100%" height="152"
-            frameBorder="0"
-            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            loading="lazy"
+          <SpotifyEmbed
+            embedUrl={item.embedUrl}
+            itemId={item.id}
+            height={152}
             style={{ display: "block", borderRadius: "16px 16px 0 0" }}
           />
         )}
@@ -5821,10 +5880,12 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
 
                   {/* Spotify embed */}
                   {post.type === "music" && post.embedUrl && (
-                    <iframe src={post.embedUrl + "?utm_source=generator&theme=0"}
-                      width="100%" height="152" frameBorder="0"
-                      allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                      loading="lazy" style={{ display: "block" }} />
+                    <SpotifyEmbed
+                      embedUrl={post.embedUrl}
+                      itemId={post.id}
+                      height={152}
+                      style={{ display: "block" }}
+                    />
                   )}
 
                   {/* Video */}
@@ -7123,10 +7184,12 @@ function PostMusicSection({ user, onBack }) {
           {posts.map(function(p) {
             return (
               <div key={p.id} style={{ background: "#111", borderRadius: 14, border: "1px solid #1e1e1e", marginBottom: 12, overflow: "hidden" }}>
-                <iframe src={p.embedUrl + "?utm_source=generator&theme=0"}
-                  width="100%" height="152" frameBorder="0"
-                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                  loading="lazy" style={{ display: "block" }} />
+                <SpotifyEmbed
+                  embedUrl={p.embedUrl}
+                  itemId={p.id}
+                  height={152}
+                  style={{ display: "block" }}
+                />
                 <div style={{ padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   {p.caption && <div style={{ color: "#aaa", fontSize: 13, flex: 1 }}>{p.caption}</div>}
                   <button onClick={function() { deletePost(p.id); }}
