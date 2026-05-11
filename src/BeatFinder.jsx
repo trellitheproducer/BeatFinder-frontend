@@ -5993,60 +5993,122 @@ function fmtCount(n) {
 }
 
 // ── Followers / Following list screen ────────────────────────────
-function FollowListScreen({ username, mode, onBack, onViewProfile }) {
-  // mode: "followers" | "following"
+function FollowListScreen({ username, mode, onBack, onViewProfile, currentUser }) {
   const [users,   setUsers]   = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error,   setError]   = React.useState(null);
+  // Track which usernames the current user is following
+  const [followingSet, setFollowingSet] = React.useState(new Set());
+  const [followLoading, setFollowLoading] = React.useState(new Set());
 
   React.useEffect(() => {
     setLoading(true);
     apiFetch("/api/auth/" + mode + "/" + encodeURIComponent(username))
-      .then(d  => { setUsers(d); setLoading(false); })
+      .then(d => { setUsers(d); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
   }, [username, mode]);
 
+  const toggleFollow = async (targetUsername) => {
+    if (!currentUser) return;
+    const isFollowing = followingSet.has(targetUsername);
+    setFollowLoading(s => new Set([...s, targetUsername]));
+    try {
+      await apiFetch("/api/auth/follow/" + encodeURIComponent(targetUsername), {
+        method: isFollowing ? "DELETE" : "POST"
+      });
+      setFollowingSet(s => {
+        const next = new Set(s);
+        isFollowing ? next.delete(targetUsername) : next.add(targetUsername);
+        return next;
+      });
+    } catch(e) {}
+    setFollowLoading(s => { const next = new Set(s); next.delete(targetUsername); return next; });
+  };
+
   return (
-    <div style={{ background:"#0a0a0a", minHeight:"100%", color:"white", fontFamily:"inherit" }}>
-      {/* Header */}
-      <div style={{ display:"flex", alignItems:"center", padding:"16px 16px 12px", borderBottom:"1px solid #1a1a1a", position:"sticky", top:0, background:"#0a0a0a", zIndex:10 }}>
-        <button onClick={onBack} style={{ background:"none", border:"none", color:"white", fontSize:20, cursor:"pointer", padding:"4px 8px 4px 0", marginRight:8 }}>‹</button>
-        <span style={{ fontWeight:800, fontSize:17, textTransform:"capitalize" }}>{mode === "followers" ? "Followers" : "Following"}</span>
+    <div style={{
+      display:"flex", flexDirection:"column",
+      height:"100%", background:"#0a0a0a", color:"white", fontFamily:"inherit",
+    }}>
+      {/* Header — accounts for notch */}
+      <div style={{
+        display:"flex", alignItems:"center",
+        padding:"12px 16px",
+        paddingTop:"calc(12px + env(safe-area-inset-top))",
+        borderBottom:"1px solid #1a1a1a",
+        background:"#0a0a0a", flexShrink:0,
+      }}>
+        <button onClick={onBack} style={{ background:"none", border:"none", color:"white", fontSize:22, cursor:"pointer", padding:"4px 12px 4px 0", lineHeight:1 }}>‹</button>
+        <span style={{ fontWeight:800, fontSize:17 }}>{mode === "followers" ? "Followers" : "Following"}</span>
       </div>
 
-      {loading && <div style={{ textAlign:"center", padding:40, color:"#555" }}>Loading...</div>}
-      {error   && <div style={{ textAlign:"center", padding:40, color:"#e44" }}>{error}</div>}
-      {!loading && !error && users.length === 0 && (
-        <div style={{ textAlign:"center", padding:40, color:"#555" }}>
-          {mode === "followers" ? "No followers yet" : "Not following anyone yet"}
-        </div>
-      )}
+      {/* Scrollable list — bottom padding clears home indicator */}
+      <div style={{ flex:1, overflowY:"auto", paddingBottom:"calc(20px + env(safe-area-inset-bottom))" }}>
+        {loading && <div style={{ textAlign:"center", padding:40, color:"#555" }}>Loading...</div>}
+        {error   && <div style={{ textAlign:"center", padding:40, color:"#e44" }}>{error}</div>}
+        {!loading && !error && users.length === 0 && (
+          <div style={{ textAlign:"center", padding:40, color:"#555" }}>
+            {mode === "followers" ? "No followers yet" : "Not following anyone yet"}
+          </div>
+        )}
 
-      {users.map(u => (
-        <div key={u.username} onClick={() => onViewProfile(u.username)}
-          style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #111", cursor:"pointer", gap:12 }}>
-          {/* Avatar */}
-          <div style={{ width:48, height:48, borderRadius:"50%", overflow:"hidden", flexShrink:0, background:"#222", display:"flex", alignItems:"center", justifyContent:"center" }}>
-            {u.avatarUrl
-              ? <img src={u.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-              : <span style={{ fontSize:20, color:"#555" }}>👤</span>
-            }
-          </div>
-          {/* Name + username */}
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontWeight:700, fontSize:14, color:"white", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{u.name || u.username}</div>
-            <div style={{ color:"#555", fontSize:12, marginTop:1 }}>@{u.username}</div>
-          </div>
-          {/* Plan badge */}
-          {u.plan === "producer" && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 8px", color:"#C026D3", fontWeight:700, fontSize:10 }}>Pro</span>}
-          {u.plan === "artist"   && <span style={{ background:"rgba(245,158,11,0.15)",  border:"1px solid #F59E0B", borderRadius:20, padding:"2px 8px", color:"#F59E0B",  fontWeight:700, fontSize:10 }}>Artist</span>}
-        </div>
-      ))}
+        {users.map(u => {
+          const isMe = currentUser && currentUser.username === u.username;
+          const isFollowing = followingSet.has(u.username);
+          const isLoading   = followLoading.has(u.username);
+          return (
+            <div key={u.username}
+              style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #111", gap:12 }}>
+
+              {/* Avatar — tappable → view profile */}
+              <div onClick={() => onViewProfile(u.username)}
+                style={{ width:48, height:48, borderRadius:"50%", overflow:"hidden", flexShrink:0, background:"#222", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}>
+                {u.avatarUrl
+                  ? <img src={u.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                  : <span style={{ fontSize:20, color:"#555" }}>👤</span>
+                }
+              </div>
+
+              {/* Name + username — tappable → view profile */}
+              <div onClick={() => onViewProfile(u.username)} style={{ flex:1, minWidth:0, cursor:"pointer" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <span style={{ fontWeight:700, fontSize:14, color:"white", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{u.name || u.username}</span>
+                  {u.plan === "producer" && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"1px 7px", color:"#C026D3", fontWeight:700, fontSize:9, flexShrink:0 }}>Pro</span>}
+                  {u.plan === "artist"   && <span style={{ background:"rgba(245,158,11,0.15)",  border:"1px solid #F59E0B", borderRadius:20, padding:"1px 7px", color:"#F59E0B",  fontWeight:700, fontSize:9, flexShrink:0 }}>Artist</span>}
+                </div>
+                <div style={{ color:"#555", fontSize:12, marginTop:1 }}>@{u.username}</div>
+              </div>
+
+              {/* Follow button — hidden for own account */}
+              {currentUser && !isMe && (
+                <button
+                  disabled={isLoading}
+                  onClick={() => toggleFollow(u.username)}
+                  style={{
+                    flexShrink:0,
+                    padding:"7px 16px",
+                    borderRadius:20,
+                    fontWeight:700,
+                    fontSize:12,
+                    cursor:"pointer",
+                    border: isFollowing ? "1px solid #333" : "1px solid #C026D3",
+                    background: isFollowing ? "transparent" : "#C026D3",
+                    color: isFollowing ? "#666" : "white",
+                    opacity: isLoading ? 0.5 : 1,
+                    minWidth:76,
+                  }}>
+                  {isLoading ? "..." : isFollowing ? "Following" : "Follow"}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, currentUser, onMessage, hideBack }) {
+function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, currentUser, onMessage, hideBack, onViewProfile }) {
   const [profile,      setProfile]      = useState(null);
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState(null);
@@ -6112,12 +6174,16 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
       {/* ── Follow list overlay ── */}
       {followList && (
-        <div style={{ position:"fixed", inset:0, zIndex:5000, background:"#0a0a0a", overflowY:"auto" }}>
+        <div style={{ position:"fixed", inset:0, zIndex:5000, background:"#0a0a0a", display:"flex", flexDirection:"column" }}>
           <FollowListScreen
             username={username}
             mode={followList}
+            currentUser={currentUser}
             onBack={() => setFollowList(null)}
-            onViewProfile={(u) => { setFollowList(null); /* parent handles navigation */ onBack && typeof onBack === "function" && onBack(u); }}
+            onViewProfile={(u) => {
+              setFollowList(null);
+              if (onViewProfile) onViewProfile(u);
+            }}
           />
         </div>
       )}
@@ -6211,9 +6277,9 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {/* Plan tags */}
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-            {isProd && <span onClick={() => setBadgePopup({ icon:"🎛️", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
-            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"👑", text:"Verified Chief Executive Officer" })} />}
-            {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"🎤", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
+            {isProd && <span onClick={() => setBadgePopup({ type:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
+            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ type:"ceo", text:"Verified Chief Executive Officer" })} />}
+            {isArtist && !isProd && <span onClick={() => setBadgePopup({ type:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
           </div>
         )}
 
@@ -7801,12 +7867,12 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         {user.username && <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>@{user.username}</div>}
         <div style={{ marginTop: 8 }}>
           {user.isPro && (
-            <span onClick={() => setOwnBadgePopup({ icon:"🎛️", text:"This user is currently subscribed to Producer Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 14px", color:"#C026D3", fontWeight:800, fontSize:12, marginRight:6, cursor:"pointer" }}>
+            <span onClick={() => setOwnBadgePopup({ type:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 14px", color:"#C026D3", fontWeight:800, fontSize:12, marginRight:6, cursor:"pointer" }}>
               <VerifiedBadge size={18} /> Producer Pro
             </span>
           )}
-          {user.isArtistPro && !user.isPro && <span onClick={() => setOwnBadgePopup({ icon:"🎤", text:"This user is currently subscribed to Artist Pro" })} style={{ display:"inline-block", background:"rgba(245,158,11,0.2)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 14px", color:"#F59E0B", fontWeight:800, fontSize:12, cursor:"pointer" }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
-          {user.username === "Trelli" && <CEOBadge onClick={() => setOwnBadgePopup({ icon:"👑", text:"Verified Chief Executive Officer" })} />}
+          {user.isArtistPro && !user.isPro && <span onClick={() => setOwnBadgePopup({ type:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ display:"inline-block", background:"rgba(245,158,11,0.2)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 14px", color:"#F59E0B", fontWeight:800, fontSize:12, cursor:"pointer" }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
+          {user.username === "Trelli" && <CEOBadge onClick={() => setOwnBadgePopup({ type:"ceo", text:"Verified Chief Executive Officer" })} />}
         </div>
         <BadgeInfoPopup message={ownBadgePopup} onClose={() => setOwnBadgePopup(null)} />
       </div>
@@ -11369,6 +11435,13 @@ function CEOBadge({ onClick }) {
 
 function BadgeInfoPopup({ message, onClose }) {
   if (!message) return null;
+  // Render the correct badge SVG instead of an emoji
+  const BadgeIcon = () => {
+    if (message.type === "producer") return <VerifiedBadge size={48} />;
+    if (message.type === "artist")   return <VerifiedBadge size={48} />;
+    if (message.type === "ceo")      return <GoldVerifiedBadge size={48} />;
+    return null;
+  };
   return (
     <>
       <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:99998, background:"rgba(0,0,0,0.6)" }}/>
@@ -11379,7 +11452,7 @@ function BadgeInfoPopup({ message, onClose }) {
         boxShadow:"0 16px 60px rgba(0,0,0,0.85)",
         display:"flex", flexDirection:"column", alignItems:"center", gap:14, textAlign:"center",
       }}>
-        <div style={{ fontSize:38 }}>{message.icon}</div>
+        <BadgeIcon />
         <div style={{ color:"white", fontSize:15, fontWeight:600, lineHeight:1.5 }}>{message.text}</div>
         <button onClick={onClose} style={{
           marginTop:4, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.15)",
@@ -17467,7 +17540,7 @@ export default function BeatFinder() {
 
       {publicProfile && (
         <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "#0a0a0a", overflowY: "auto", overscrollBehavior: "none", WebkitOverflowScrolling: "touch" }} onTouchMove={function(e){ e.stopPropagation(); }}>
-          <PublicProfileScreen username={publicProfile} onBack={() => setPublicProfile(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} currentUser={user} onMessage={u => { setPublicProfile(null); setMessageThread(u); setShowMessages(true); }} />
+          <PublicProfileScreen username={publicProfile} onBack={() => setPublicProfile(null)} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} currentUser={user} onMessage={u => { setPublicProfile(null); setMessageThread(u); setShowMessages(true); }} onViewProfile={u => setPublicProfile(u)} />
         </div>
       )}
 
