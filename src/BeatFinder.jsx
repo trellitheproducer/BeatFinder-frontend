@@ -2384,7 +2384,106 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
   );
 }
 
-function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric, onGoTrending, onGoStudio, onGoArtists, onShowProducerPrompt, onOpenMessages, onViewOwnProfile, onOpenPost }) {
+// =============================================================================
+// NOTIFICATIONS PANEL
+// =============================================================================
+function NotificationsPanel({ user, onClose }) {
+  var [notifs,  setNotifs]  = React.useState([]);
+  var [loading, setLoading] = React.useState(true);
+
+  React.useEffect(function() {
+    if (!user) { setLoading(false); return; }
+    apiFetch("/api/notifications")
+      .then(function(d) { setNotifs(d || []); setLoading(false); })
+      .catch(function() { setLoading(false); });
+    // Mark all read when panel opens
+    apiFetch("/api/notifications/mark-read", { method: "POST" }).catch(function() {});
+  }, [user]);
+
+  function iconForType(type) {
+    if (type === "like") return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="#EF4444" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+    );
+    if (type === "comment") return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2" strokeLinecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    );
+    if (type === "purchase") return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2" strokeLinecap="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+    );
+    if (type === "message") return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    );
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    );
+  }
+
+  function timeAgo(iso) {
+    var diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (diff < 60) return "just now";
+    if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+    if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+    return Math.floor(diff / 86400) + "d ago";
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9500, background: "rgba(0,0,0,0.7)" }}
+      onClick={function(e) { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ position: "absolute", top: 0, right: 0, width: "min(360px, 100vw)",
+        height: "100dvh", background: "#0d0d0d", borderLeft: "1px solid #1a1a1a",
+        display: "flex", flexDirection: "column",
+        paddingTop: "env(safe-area-inset-top)" }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "16px 16px 12px", borderBottom: "1px solid #1a1a1a", flexShrink: 0 }}>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>Notifications</div>
+          <button onClick={onClose}
+            style={{ background: "none", border: "none", color: "#555", fontSize: 22, cursor: "pointer", padding: 4 }}>
+            ✕
+          </button>
+        </div>
+
+        {/* List */}
+        <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}
+          onTouchMove={function(e) { e.stopPropagation(); }}>
+          {loading && (
+            <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>Loading...</div>
+          )}
+          {!loading && notifs.length === 0 && (
+            <div style={{ textAlign: "center", padding: "60px 24px" }}>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round" style={{ marginBottom: 12 }}>
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+              <div style={{ color: "#444", fontWeight: 700, fontSize: 15 }}>No notifications yet</div>
+              <div style={{ color: "#333", fontSize: 13, marginTop: 6 }}>Activity from likes, comments and purchases will appear here</div>
+            </div>
+          )}
+          {!loading && notifs.map(function(n) {
+            return (
+              <div key={n.id} style={{ display: "flex", alignItems: "flex-start", gap: 12,
+                padding: "14px 16px", borderBottom: "1px solid #111",
+                background: n.read ? "transparent" : "rgba(192,38,211,0.05)" }}>
+                <div style={{ width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
+                  background: "#1a1a1a", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {iconForType(n.type)}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: "white", fontSize: 13, lineHeight: 1.5 }}>{n.text}</div>
+                  <div style={{ color: "#555", fontSize: 11, marginTop: 4 }}>{timeAgo(n.createdAt)}</div>
+                </div>
+                {!n.read && (
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#C026D3", flexShrink: 0, marginTop: 4 }} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric, onGoTrending, onGoStudio, onGoArtists, onShowProducerPrompt, onOpenMessages, onViewOwnProfile, onOpenPost, onOpenNotifications, unreadMessages, unreadNotifications }) {
   const [heroIndex, setHeroIndex] = useState(0);
 
   const HERO_SLIDES = [
@@ -2536,11 +2635,33 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
               </svg>
             </button>
           )}
+          {/* Bell notifications icon */}
+          {user && (
+            <button onClick={onOpenNotifications} style={{ background: "none", border: "none", padding: 8, cursor: "pointer", position: "relative" }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#aaa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+              {unreadNotifications > 0 && (
+                <div style={{ position: "absolute", top: 4, right: 4, width: 16, height: 16, borderRadius: "50%",
+                  background: "#EF4444", display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "white", fontSize: 9, fontWeight: 800 }}>
+                  {unreadNotifications > 9 ? "9+" : unreadNotifications}
+                </div>
+              )}
+            </button>
+          )}
           {/* Messages icon */}
           <button onClick={onOpenMessages} style={{ background: "none", border: "none", padding: 8, cursor: "pointer", position: "relative" }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#aaa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
+            {unreadMessages > 0 && (
+              <div style={{ position: "absolute", top: 4, right: 4, width: 16, height: 16, borderRadius: "50%",
+                background: "#C026D3", display: "flex", alignItems: "center", justifyContent: "center",
+                color: "white", fontSize: 9, fontWeight: 800 }}>
+                {unreadMessages > 9 ? "9+" : unreadMessages}
+              </div>
+            )}
           </button>
         </div>
       </div>
@@ -5994,10 +6115,15 @@ function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
   const [conversations, setConversations] = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [activeThread,  setActiveThread]  = useState(initialThread || null);
+  const [threadAvatar,  setThreadAvatar]  = useState("");
   const [messages,      setMessages]      = useState([]);
   const [msgInput,      setMsgInput]      = useState("");
   const [sending,       setSending]       = useState(false);
-  const msgEndRef = React.useRef(null);
+  const [holdMenu,      setHoldMenu]      = useState(null); // message id being held
+  const [confirmDelete, setConfirmDelete] = useState(null); // username to delete thread
+  const msgEndRef  = React.useRef(null);
+  const pollRef    = React.useRef(null);
+  const latestMsgAt = React.useRef(null);
 
   // Load conversations list
   useEffect(() => {
@@ -6007,12 +6133,50 @@ function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
       .catch(() => setLoading(false));
   }, [user]);
 
-  // Load messages for active thread
+  // Load thread + start polling for read receipts & new messages
   useEffect(() => {
-    if (!activeThread || !user) return;
+    if (!activeThread || !user) { clearInterval(pollRef.current); return; }
+    setConversations(prev => prev.map(c => c.username === activeThread ? { ...c, unread: 0 } : c));
+
+    // Find avatar from conversations
+    const conv = conversations.find(c => c.username === activeThread);
+    if (conv?.avatarUrl) setThreadAvatar(conv.avatarUrl);
+
     apiFetch("/api/messages/thread/" + encodeURIComponent(activeThread))
-      .then(d => { setMessages(d || []); })
+      .then(d => {
+        const msgs = d || [];
+        setMessages(msgs);
+        if (msgs.length > 0) latestMsgAt.current = msgs[msgs.length - 1].createdAt;
+      })
       .catch(() => {});
+
+    // Poll every 4s for new messages and read receipt updates
+    clearInterval(pollRef.current);
+    pollRef.current = setInterval(() => {
+      const afterParam = latestMsgAt.current
+        ? "?after=" + encodeURIComponent(latestMsgAt.current) : "";
+      apiFetch("/api/messages/thread/" + encodeURIComponent(activeThread) + "/updates" + afterParam)
+        .then(data => {
+          // Merge new messages
+          if (data.messages && data.messages.length > 0) {
+            setMessages(prev => {
+              const existingIds = new Set(prev.map(m => m.id));
+              const newMsgs = data.messages.filter(m => !existingIds.has(m.id));
+              if (newMsgs.length === 0) return prev;
+              latestMsgAt.current = data.messages[data.messages.length - 1].createdAt;
+              return [...prev, ...newMsgs];
+            });
+          }
+          // Update read status on our sent messages
+          if (data.readIds && data.readIds.length > 0) {
+            const readSet = new Set(data.readIds);
+            setMessages(prev => prev.map(m => readSet.has(m.id) ? { ...m, read: true } : m));
+          }
+        })
+        .catch(() => {});
+    }, 4000);
+
+    return () => clearInterval(pollRef.current);
   }, [activeThread]);
 
   // Scroll to bottom on new messages
@@ -6025,78 +6189,188 @@ function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
     setSending(true);
     const text = msgInput.trim();
     setMsgInput("");
-    // Optimistic update
-    setMessages(prev => [...prev, { from: user.username, text, createdAt: new Date().toISOString(), sending: true }]);
+    const tempId = "tmp_" + Date.now();
+    setMessages(prev => [...prev, { id: tempId, from: user.username, text, createdAt: new Date().toISOString(), sending: true, delivered: false, read: false }]);
     try {
-      await apiFetch("/api/messages/send", { method: "POST", body: JSON.stringify({ to: activeThread, text }) });
-      setMessages(prev => prev.map(m => m.sending ? { ...m, sending: false } : m));
+      const sent = await apiFetch("/api/messages/send", { method: "POST", body: JSON.stringify({ to: activeThread, text }) });
+      latestMsgAt.current = sent.createdAt;
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...sent, delivered: true } : m));
     } catch(e) {
-      setMessages(prev => prev.filter(m => !m.sending));
+      setMessages(prev => prev.filter(m => m.id !== tempId));
       setMsgInput(text);
     }
     setSending(false);
   };
 
+  const unsendMessage = async (msgId) => {
+    setHoldMenu(null);
+    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, unsent: true, text: "" } : m));
+    apiFetch("/api/messages/" + msgId + "/unsend", { method: "DELETE" }).catch(() => {});
+  };
+
+  const deleteThread = async (username) => {
+    setConfirmDelete(null);
+    await apiFetch("/api/messages/thread/" + encodeURIComponent(username), { method: "DELETE" }).catch(() => {});
+    setConversations(prev => prev.filter(c => c.username !== username));
+    if (activeThread === username) setActiveThread(null);
+  };
+
+  function Avatar({ src, name, size }) {
+    return (
+      <div style={{ width: size, height: size, borderRadius: "50%", flexShrink: 0,
+        background: "linear-gradient(135deg,#6B21A8,#C026D3)", overflow: "hidden",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        color: "white", fontWeight: 800, fontSize: size * 0.38 }}>
+        {src
+          ? <img src={src} alt={name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          : (name || "?")[0].toUpperCase()}
+      </div>
+    );
+  }
+
   const inp = {
-    background: "#111", border: "1px solid #222", borderRadius: 12,
+    background: "#111", border: "1px solid #222", borderRadius: 24,
     padding: "12px 16px", color: "white", fontSize: 14, outline: "none",
     fontFamily: "inherit",
   };
 
-  // Thread view
-  if (activeThread) return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh" }}>
-      {/* Thread header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px", borderBottom: "1px solid #1a1a1a", flexShrink: 0, paddingTop: "calc(16px + env(safe-area-inset-top))" }}>
-        <button onClick={() => setActiveThread(null)} style={{ background: "none", border: "none", color: "white", fontSize: 22, cursor: "pointer", padding: 0 }}>←</button>
-        <button onClick={() => onViewProfile && onViewProfile(activeThread)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#6B21A8,#C026D3)", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 800, fontSize: 14 }}>
-            {activeThread[0].toUpperCase()}
-          </div>
-          <div style={{ color: "white", fontWeight: 700, fontSize: 16 }}>@{activeThread}</div>
-        </button>
-      </div>
+  // ── Thread view ───────────────────────────────────────────────────────────
+  if (activeThread) {
+    const lastMyMsg = [...messages].reverse().find(m => m.from === user?.username && !m.sending);
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100dvh" }}
+        onClick={() => holdMenu && setHoldMenu(null)}>
+        {/* Thread header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px", borderBottom: "1px solid #1a1a1a", flexShrink: 0, paddingTop: "calc(16px + env(safe-area-inset-top))", background: "#0a0a0a" }}>
+          <button onClick={() => setActiveThread(null)} style={{ background: "none", border: "none", color: "white", fontSize: 22, cursor: "pointer", padding: 0, flexShrink: 0 }}>←</button>
+          <button onClick={() => onViewProfile && onViewProfile(activeThread)}
+            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, flex: 1 }}>
+            <Avatar src={threadAvatar} name={activeThread} size={36} />
+            <div style={{ color: "white", fontWeight: 700, fontSize: 16 }}>@{activeThread}</div>
+          </button>
+          {/* Delete thread button */}
+          <button onClick={() => setConfirmDelete(activeThread)}
+            style={{ background: "none", border: "none", color: "#444", cursor: "pointer", padding: 4, flexShrink: 0 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round">
+              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+            </svg>
+          </button>
+        </div>
 
-      {/* Messages */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "16px", display: "flex", flexDirection: "column", gap: 8 }}>
-        {messages.length === 0 && (
-          <div style={{ textAlign: "center", color: "#333", fontSize: 13, paddingTop: 40 }}>
-            Start a conversation with @{activeThread}
-          </div>
-        )}
-        {messages.map((m, i) => {
-          const isMe = m.from === user?.username;
-          return (
-            <div key={i} style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start" }}>
-              <div style={{ maxWidth: "75%", padding: "10px 14px", borderRadius: isMe ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-                background: isMe ? "#C026D3" : "#1a1a1a",
-                color: "white", fontSize: 14, lineHeight: 1.5, opacity: m.sending ? 0.6 : 1 }}>
-                {m.text}
+        {/* Confirm delete thread */}
+        {confirmDelete && (
+          <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.8)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+            <div style={{ background: "#111", borderRadius: 16, padding: 24, width: "100%", maxWidth: 320, border: "1px solid #2a2a2a" }}>
+              <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 8 }}>Delete conversation?</div>
+              <div style={{ color: "#888", fontSize: 13, marginBottom: 20 }}>This will permanently delete all messages in this thread for both users.</div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setConfirmDelete(null)}
+                  style={{ flex: 1, background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, color: "#aaa", fontWeight: 700, padding: 12, cursor: "pointer" }}>
+                  Cancel
+                </button>
+                <button onClick={() => deleteThread(confirmDelete)}
+                  style={{ flex: 1, background: "rgba(220,38,38,0.2)", border: "1px solid rgba(220,38,38,0.4)", borderRadius: 10, color: "#F87171", fontWeight: 700, padding: 12, cursor: "pointer" }}>
+                  Delete
+                </button>
               </div>
             </div>
-          );
-        })}
-        <div ref={msgEndRef} />
-      </div>
+          </div>
+        )}
 
-      {/* Input */}
-      <div style={{ padding: "12px 16px", paddingBottom: "calc(12px + env(safe-area-inset-bottom))", borderTop: "1px solid #1a1a1a", display: "flex", gap: 8, flexShrink: 0 }}>
-        <input value={msgInput} onChange={e => setMsgInput(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && sendMessage()}
-          placeholder="Send a message..."
-          style={{ ...inp, flex: 1 }} />
-        <button onClick={sendMessage} disabled={sending || !msgInput.trim()}
-          style={{ background: "#C026D3", border: "none", borderRadius: 12, color: "white", fontWeight: 700, fontSize: 13, padding: "12px 18px", cursor: "pointer", opacity: !msgInput.trim() ? 0.4 : 1 }}>
-          Send
-        </button>
-      </div>
-    </div>
-  );
+        {/* Messages */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", display: "flex", flexDirection: "column", gap: 4 }}
+          onTouchMove={e => e.stopPropagation()}>
+          {messages.length === 0 && (
+            <div style={{ textAlign: "center", color: "#333", fontSize: 13, paddingTop: 40 }}>
+              Start a conversation with @{activeThread}
+            </div>
+          )}
+          {messages.map((m, i) => {
+            const isMe = m.from === user?.username;
+            const isLast = i === messages.length - 1;
+            const showAvatar = !isMe && (i === 0 || messages[i - 1].from !== m.from);
+            const isLastMine = isMe && lastMyMsg?.id === m.id;
+            return (
+              <div key={m.id || i}>
+                <div style={{ display: "flex", justifyContent: isMe ? "flex-end" : "flex-start",
+                  alignItems: "flex-end", gap: 8, marginTop: showAvatar ? 10 : 2 }}>
+                  {/* Other person avatar */}
+                  {!isMe && (
+                    <div style={{ width: 28, flexShrink: 0, marginBottom: 2 }}>
+                      {showAvatar && <Avatar src={threadAvatar} name={activeThread} size={28} />}
+                    </div>
+                  )}
+                  {/* Bubble */}
+                  <div
+                    onTouchStart={isMe && !m.unsent ? (function(e) {
+                      var key = m.id || i;
+                      var t = setTimeout(function() { setHoldMenu(key); }, 500);
+                      e.currentTarget._holdTimer = t;
+                    }) : undefined}
+                    onTouchEnd={isMe && !m.unsent ? (function(e) {
+                      clearTimeout(e.currentTarget._holdTimer);
+                    }) : undefined}
+                    onTouchMove={isMe && !m.unsent ? (function(e) {
+                      clearTimeout(e.currentTarget._holdTimer);
+                    }) : undefined}
+                    onContextMenu={isMe && !m.unsent ? (function(e) { e.preventDefault(); setHoldMenu(m.id || i); }) : undefined}
+                    style={{ maxWidth: "72%", padding: m.unsent ? "8px 12px" : "10px 14px",
+                      borderRadius: isMe ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+                      background: m.unsent ? "transparent" : isMe ? "#C026D3" : "#1a1a1a",
+                      border: m.unsent ? "1px solid #2a2a2a" : "none",
+                      color: m.unsent ? "#555" : "white",
+                      fontSize: m.unsent ? 13 : 14, lineHeight: 1.5,
+                      fontStyle: m.unsent ? "italic" : "normal",
+                      opacity: m.sending ? 0.5 : 1,
+                      cursor: isMe && !m.unsent ? "pointer" : "default",
+                      userSelect: "none", WebkitUserSelect: "none",
+                    }}>
+                    {m.unsent ? "Message unsent" : m.text}
+                  </div>
+                </div>
+                {/* Hold menu — unsend option */}
+                {holdMenu === (m.id || i) && isMe && !m.unsent && (
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4, marginRight: 0 }}>
+                    <button onClick={() => unsendMessage(m.id)}
+                      style={{ background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 10,
+                        color: "#F87171", fontSize: 12, fontWeight: 700, padding: "6px 14px", cursor: "pointer" }}>
+                      Unsend
+                    </button>
+                  </div>
+                )}
+                {/* Read / Delivered receipt — only on last sent message */}
+                {isLastMine && !m.sending && (
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 2 }}>
+                    <span style={{ color: m.read ? "#C026D3" : "#555", fontSize: 10, fontWeight: 600 }}>
+                      {m.read ? "Seen" : m.delivered || !m.sending ? "Delivered" : "Sending..."}
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <div ref={msgEndRef} />
+        </div>
 
-  // Conversations list
+        {/* Input */}
+        <div style={{ padding: "10px 16px", paddingBottom: "calc(10px + env(safe-area-inset-bottom))", borderTop: "1px solid #1a1a1a", display: "flex", gap: 8, flexShrink: 0, background: "#0a0a0a" }}>
+          <input value={msgInput} onChange={e => setMsgInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && sendMessage()}
+            placeholder="Send a message..."
+            style={{ ...inp, flex: 1 }} />
+          <button onClick={sendMessage} disabled={sending || !msgInput.trim()}
+            style={{ background: "#C026D3", border: "none", borderRadius: 22, color: "white", fontWeight: 700, fontSize: 13, padding: "12px 18px", cursor: "pointer", opacity: !msgInput.trim() ? 0.4 : 1, flexShrink: 0 }}>
+            Send
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Conversations list ────────────────────────────────────────────────────
   return (
     <div style={{ paddingBottom: 100 }}>
-      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px", borderBottom: "1px solid #1a1a1a", paddingTop: "calc(16px + env(safe-area-inset-top))" }}>
         <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 22, cursor: "pointer", padding: 0 }}>←</button>
         <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>Messages</div>
@@ -6111,11 +6385,7 @@ function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
           <div style={{ fontSize: 13, color: "#333" }}>Create an account to send direct messages to other users</div>
         </div>
       )}
-
-      {user && loading && (
-        <div style={{ textAlign: "center", padding: "60px 24px", color: "#555", fontSize: 14 }}>Loading...</div>
-      )}
-
+      {user && loading && <div style={{ textAlign: "center", padding: "60px 24px", color: "#555", fontSize: 14 }}>Loading...</div>}
       {user && !loading && conversations.length === 0 && (
         <div style={{ textAlign: "center", padding: "60px 24px", color: "#555" }}>
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 12 }}>
@@ -6125,20 +6395,24 @@ function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
           <div style={{ fontSize: 13, color: "#333" }}>Visit a user's profile and tap Message to start a conversation</div>
         </div>
       )}
-
       {user && !loading && conversations.map(c => (
-        <button key={c.username} onClick={() => setActiveThread(c.username)}
+        <button key={c.username} onClick={() => { setThreadAvatar(c.avatarUrl || ""); setActiveThread(c.username); }}
           style={{ width: "100%", display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
             background: "none", border: "none", borderBottom: "1px solid #111", cursor: "pointer", textAlign: "left" }}>
-          <div style={{ width: 46, height: 46, borderRadius: "50%", flexShrink: 0,
-            background: "linear-gradient(135deg,#6B21A8,#C026D3)",
+          {/* Profile picture */}
+          <div style={{ width: 50, height: 50, borderRadius: "50%", flexShrink: 0,
+            background: "linear-gradient(135deg,#6B21A8,#C026D3)", overflow: "hidden",
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: "white", fontWeight: 800, fontSize: 18 }}>
-            {c.username[0].toUpperCase()}
+            color: "white", fontWeight: 800, fontSize: 20 }}>
+            {c.avatarUrl
+              ? <img src={c.avatarUrl} alt={c.username} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : c.username[0].toUpperCase()}
           </div>
           <div style={{ flex: 1, overflow: "hidden" }}>
             <div style={{ color: "white", fontWeight: 700, fontSize: 15 }}>@{c.username}</div>
-            <div style={{ color: "#555", fontSize: 13, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.lastMessage || "Start chatting"}</div>
+            <div style={{ color: c.unread > 0 ? "#aaa" : "#555", fontSize: 13, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: c.unread > 0 ? 600 : 400 }}>
+              {c.lastMessage || "Start chatting"}
+            </div>
           </div>
           {c.unread > 0 && (
             <div style={{ width: 20, height: 20, borderRadius: "50%", background: "#C026D3",
@@ -16519,6 +16793,35 @@ export default function BeatFinder() {
       .catch(() => clearToken());
   }, []);
 
+  // Poll unread counts every 30s when logged in
+  useEffect(() => {
+    if (!user) { setUnreadMessages(0); setUnreadNotifications(0); return; }
+    function fetchUnread() {
+      apiFetch("/api/notifications/unread-count")
+        .then(function(d) {
+          setUnreadMessages(d.messages || 0);
+          setUnreadNotifications(d.notifications || 0);
+        })
+        .catch(function() {});
+    }
+    fetchUnread();
+    var interval = setInterval(fetchUnread, 30000);
+    return function() { clearInterval(interval); };
+  }, [user]);
+
+  // When user opens messages, clear message badge
+  function openMessages(thread) {
+    setMessageThread(thread || null);
+    setShowMessages(true);
+    setUnreadMessages(0);
+  }
+
+  // When notifications panel closes, clear badge
+  function openNotifications() {
+    setShowNotifications(true);
+    setUnreadNotifications(0);
+  }
+
   // When user logs in, merge local guest beats with their backend library
   useEffect(() => {
     if (!user) return;
@@ -16620,9 +16923,12 @@ export default function BeatFinder() {
   const [editingIndex,  setEditingIndex]  = useState(null);
   const [publicProfile, setPublicProfile] = useState(null);
   const [searchProfile, setSearchProfile] = useState(null);
-  const [showMessages,  setShowMessages]  = useState(false);
-  const [showPost,      setShowPost]      = useState(false);
-  const [messageThread, setMessageThread] = useState(null); // username to DM
+  const [showMessages,       setShowMessages]       = useState(false);
+  const [showPost,           setShowPost]           = useState(false);
+  const [messageThread,      setMessageThread]      = useState(null);
+  const [showNotifications,  setShowNotifications]  = useState(false);
+  const [unreadMessages,     setUnreadMessages]     = useState(0);
+  const [unreadNotifications,setUnreadNotifications]= useState(0);
   const [savedLyrics,   setSavedLyrics]   = useState(() => {
     try { return JSON.parse(localStorage.getItem("bf_lyrics") || "[]"); } catch { return []; }
   });
@@ -16795,7 +17101,7 @@ export default function BeatFinder() {
           }}
           onTouchMove={t !== "studio" ? function(e){ e.stopPropagation(); } : undefined}
           >
-            {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => setShowMessages(true)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} onOpenPost={() => setShowPost(true)} />}
+            {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => openMessages(null)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} onOpenPost={() => setShowPost(true)} onOpenNotifications={openNotifications} unreadMessages={unreadMessages} unreadNotifications={unreadNotifications} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} onViewProfile={function(u) { setPublicProfile(u); }} user={user} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} currentUser={user} onViewProfile={function(u) { setSearchProfile(u); }} />}
@@ -16815,13 +17121,17 @@ export default function BeatFinder() {
               setShowAuthWall(false);
               setAuthStartMode("login");
               goTab("home");
-            }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} onOpenMessages={u => { setMessageThread(u); setShowMessages(true); }} />
+            }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} onOpenMessages={u => { openMessages(u); }} />
           </div>
         )}
       </div>
 
       {showPost && (
         <PostSheet user={user} onClose={() => setShowPost(false)} onPosted={() => setShowPost(false)} />
+      )}
+
+      {showNotifications && (
+        <NotificationsPanel user={user} onClose={() => setShowNotifications(false)} />
       )}
 
       {searchProfile && (
