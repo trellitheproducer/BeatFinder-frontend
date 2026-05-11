@@ -4662,12 +4662,10 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
         {/* Header photo */}
         {profile.headerUrl && (
-          <div style={{ margin: "0 -16px", position: "relative", height: 180, marginBottom: -50, overflow: "hidden" }}>
+          <div style={{ margin: "0 -16px", position: "relative", height: 260, marginBottom: -70, overflow: "hidden" }}>
             <img src={profile.headerUrl} alt="header" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} />
-            {/* Top fade */}
-            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, #0a0a0a 0%, transparent 25%, transparent 50%, #0a0a0a 100%)" }} />
-            {/* Left/right side fade */}
-            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, #0a0a0a 0%, transparent 15%, transparent 85%, #0a0a0a 100%)" }} />
+            {/* Bottom fade into page */}
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 40%, rgba(10,10,10,0.6) 70%, #0a0a0a 100%)" }} />
           </div>
         )}
 
@@ -4675,13 +4673,13 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         <div style={{ position: "relative", display: "inline-block", marginBottom: 12, zIndex: 2 }}>
           {profile.avatarUrl ? (
             <img src={profile.avatarUrl} alt={profile.username}
-              style={{ width: 80, height: 80, borderRadius: "50%", objectFit: "cover",
-                border: "3px solid #0a0a0a", display: "block" }} />
+              style={{ width: 90, height: 90, borderRadius: "50%", objectFit: "cover",
+                border: profile.headerUrl ? "3px solid #0a0a0a" : "3px solid #222", display: "block" }} />
           ) : (
-            <div style={{ width: 80, height: 80, borderRadius: "50%",
+            <div style={{ width: 90, height: 90, borderRadius: "50%",
               background: profile.avatarColor || "linear-gradient(135deg,#6B21A8,#C026D3)",
               display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 30, color: "white", fontWeight: 800 }}>
+              fontSize: 34, color: "white", fontWeight: 800 }}>
               {(profile.username || profile.name || "?")[0].toUpperCase()}
             </div>
           )}
