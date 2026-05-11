@@ -11423,14 +11423,6 @@ function StudioScreen({ user, onExit }) {
   const loopRestartingRef = useRef(false); // prevents re-entrant loop restarts
   const playheadAtRef   = useRef(0);
   const animRef         = useRef(null);
-  // ── Stable loop-state refs — always current, never stale in closures ──
-  // These mirror the React state and are written every render so RAF/audio
-  // callbacks always read the latest value without being in dep arrays.
-  const loopEnabledRef  = useRef(false);
-  const loopInRef       = useRef(0);
-  const loopOutRef      = useRef(0);
-  // ── Loop cycle scheduler handle — cleared on stopAll ────────────────────
-  const loopTimerRef    = useRef(null);
   const scrollRef       = useRef(null);
   const playheadRef     = useRef(null); // direct DOM ref — updated without React re-render
   const trackContainerRef = useRef(null);
@@ -11582,11 +11574,6 @@ function StudioScreen({ user, onExit }) {
   useEffect(function () { zoomRef.current = zoom; }, [zoom]);
   useEffect(function () { isPlayingRef.current = isPlaying; }, [isPlaying]);
   useEffect(function () { tracksRef.current = tracks; }, [tracks]);
-  // Keep stable loop refs in sync — written every render so audio callbacks
-  // always see the latest values without stale-closure problems.
-  useEffect(function () { loopEnabledRef.current = loopEnabled; }, [loopEnabled]);
-  useEffect(function () { loopInRef.current  = loopIn;  }, [loopIn]);
-  useEffect(function () { loopOutRef.current = loopOut; }, [loopOut]);
 
   // Set initial position — Bar1 under centred playhead at t=0
   useEffect(function () {
@@ -12213,51 +12200,39 @@ function StudioScreen({ user, onExit }) {
   };
 
   // ── RAF playback loop ─────────────────────────────────────────
-  // Responsibility: drive the playhead visual and update React time state only.
-  // Loop boundary detection and audio rescheduling are handled entirely on the
-  // Web Audio clock inside doPlay() / scheduleLoopCycle() — NOT here.
+  // Mutates DOM transform directly — no React re-render per frame = smooth 60fps
   useEffect(function () {
-    if (!isPlaying) { cancelAnimationFrame(animRef.current); return; }
+    if (!isPlaying) { cancelAnimationFrame(animRef.current); loopRestartingRef.current = false; return; }
     var lastUIUpdate = 0;
 
     const tick = function (ts) {
       const actx = actxRef.current;
       if (!actx) return;
-
-      // ── Derive current timeline position from the audio clock ──
-      // playheadAtRef  = timeline position when masterStartRef was set
-      // masterStartRef = actx.currentTime at that moment (+ 50ms pre-roll offset)
-      // This subtraction is always valid because doPlay() writes both atomically.
       const elapsed = actx.currentTime - masterStartRef.current;
-      // Clamp to loopIn so the visual never runs past loopOut between cycles.
-      // The audio engine has already pre-scheduled the next cycle at this point.
-      let t = playheadAtRef.current + elapsed;
-      if (loopEnabledRef.current && loopOutRef.current > loopInRef.current) {
-        const span = loopOutRef.current - loopInRef.current;
-        if (span > 0) {
-          // Wrap t into [loopIn, loopOut) so the playhead mirrors the audio engine
-          const rel = t - loopInRef.current;
-          if (rel >= span) {
-            t = loopInRef.current + (rel % span);
-          }
-        }
-      }
+      const t       = playheadAtRef.current + elapsed;
       liveTimeRef.current = t;
 
       const el = scrollRef.current;
       if (el) {
-        const viewW         = el.clientWidth;
-        const playheadPx    = t * effectivePPS;
-        const playheadViewX = playheadPx - el.scrollLeft;
+        const viewW          = el.clientWidth;
+        const playheadPx     = t * effectivePPS;         // playhead in content space
+        const playheadViewX  = playheadPx - el.scrollLeft; // playhead within viewport
 
+        // Only auto-scroll if the user isn't manually scrolling
         if (userScrolledAt.current === null) {
+          // Scroll forward to keep playhead at 75% of viewport once it hits that mark
           const pinAt    = viewW * 0.75;
           const targetSL = playheadPx - pinAt;
-          if (targetSL > el.scrollLeft) el.scrollLeft = targetSL;
+          if (targetSL > el.scrollLeft) {
+            el.scrollLeft = targetSL;
+          }
+          // If playhead goes out of view entirely (e.g. after rewind), snap it back immediately
           if (playheadViewX < 0 || playheadViewX > viewW) {
             el.scrollLeft = Math.max(0, playheadPx - pinAt);
           }
         }
+
+        // Always draw playhead at its true audio position regardless of scroll
         updatePlayheadDOM(t, el.scrollLeft);
       }
 
@@ -12266,11 +12241,30 @@ function StudioScreen({ user, onExit }) {
         lastUIUpdate = ts;
       }
 
+      if (loopEnabled && loopOut > loopIn && t >= loopOut) {
+        // Prevent re-entrant loop restarts: if already looping back, skip
+        if (!loopRestartingRef.current) {
+          loopRestartingRef.current = true;
+          // Reset time refs immediately so the next tick doesn't overshoot
+          playheadAtRef.current = loopIn;
+          liveTimeRef.current   = loopIn;
+          masterStartRef.current = actx.currentTime + 0.05;
+          setCurrentTime(loopIn);
+          updatePlayheadDOM(loopIn);
+          stopAll();
+          doPlay(loopIn).then(function() {
+            loopRestartingRef.current = false;
+            setIsPlaying(true);
+          });
+        }
+        animRef.current = requestAnimationFrame(tick);
+        return;
+      }
       animRef.current = requestAnimationFrame(tick);
     };
     animRef.current = requestAnimationFrame(tick);
     return function () { cancelAnimationFrame(animRef.current); };
-  }, [isPlaying, effectivePPS]);
+  }, [isPlaying, effectivePPS, loopEnabled, loopIn, loopOut]);
 
   // ── Audio engine — gain nodes persist so mute/solo works in real-time ──
   // gainNodesRef, masterGainRef, fxNodesRef declared at top of component (Rules of Hooks)
@@ -12581,9 +12575,6 @@ function StudioScreen({ user, onExit }) {
   // ── Stop all audio nodes — hard stop, no glitch ──────────────
   const stopAll = function () {
     cancelAnimationFrame(animRef.current);
-    // Cancel any pending loop-cycle pre-schedule timer
-    if (loopTimerRef.current) { clearTimeout(loopTimerRef.current); loopTimerRef.current = null; }
-    loopRestartingRef.current = false;
     if (scrollSeekTimer.current) { clearTimeout(scrollSeekTimer.current); scrollSeekTimer.current = null; }
     userScrolledAt.current = null;
     // Stop and disconnect every scheduled source node immediately
@@ -13190,215 +13181,51 @@ function StudioScreen({ user, onExit }) {
       return node; // clips connect here
     };
 
-    // ── scheduleClip ────────────────────────────────────────────────────────
-    // Schedules one clip's BufferSource on the Web Audio clock.
-    //
-    // Parameters:
-    //   track     – track object
-    //   clip      – clip object (audioBuffer, startTime, trimStart, trimEnd)
-    //   entryNode – first gain node of this track's FX chain
-    //   cycleStart – timeline time that maps to actx time `now` for this cycle
-    //   hardEnd    – timeline time at which playback must stop (loopOut, or Infinity)
-    //                Audio is capped at this boundary — no bleed across loop turns.
-    const scheduleClip = function (track, clip, entryNode, cycleStart, hardEnd) {
+    const scheduleClip = function (track, clip, entryNode) {
       if (clip.active === false || !clip.audioBuffer) return;
       try {
-        const buf     = clip.audioBuffer;
-        const trimS   = clip.trimStart || 0;
-        const trimE   = clip.trimEnd   || buf.duration;
-        const trimDur = Math.max(0, trimE - trimS);
+        const buf      = clip.audioBuffer;
+        const trimS    = clip.trimStart || 0;
+        const trimE    = clip.trimEnd   || buf.duration;
+        const trimDur  = Math.max(0, trimE - trimS);
         if (trimDur <= 0) return;
-
         const clipStart = clip.startTime || 0;
         const clipEnd   = clipStart + trimDur;
-
-        // Skip clips that end at or before our playback window start
-        if (clipEnd <= cycleStart) return;
-        // Skip clips that start at or after the hard boundary
-        if (clipStart >= hardEnd) return;
+        if (clipEnd <= fromTime) return;
 
         const src = actx.createBufferSource();
         src.buffer = buf;
+
         src.connect(entryNode);
 
         let when, bufOff;
-        if (cycleStart <= clipStart) {
-          // Clip starts after our window — schedule it in the future
-          when   = now + (clipStart - cycleStart);
-          bufOff = trimS;
-        } else {
-          // We're starting mid-clip — seek into the buffer
-          when   = now;
-          bufOff = trimS + (cycleStart - clipStart);
-        }
-
-        // Remaining audio from bufOff to trim end, capped at the hard boundary
-        const bufRemain   = (trimS + trimDur) - bufOff;
-        // How much wall-clock time until hardEnd relative to `when`
-        const timeToHard  = hardEnd - Math.max(cycleStart, clipStart);
-        const playDur     = Math.min(bufRemain, timeToHard);
-
-        if (playDur > 0.001) {
-          src.start(when, bufOff, playDur);
-          scheduledRef.current.push(src);
-        }
+        if (fromTime <= clipStart) { when=now+(clipStart-fromTime); bufOff=trimS; }
+        else                       { when=now; bufOff=trimS+(fromTime-clipStart); }
+        const remain = (trimS + trimDur) - bufOff;
+        if (remain > 0) { src.start(when, bufOff, remain); scheduledRef.current.push(src); }
       } catch(e) {}
     };
-
-    // ── scheduleLoopCycle ────────────────────────────────────────────────────
-    // Pre-schedules the next loop iteration before the current one ends.
-    // This is the Logic Pro model: the audio engine commits the next cycle to the
-    // hardware scheduler ~100ms before the boundary — completely eliminating the
-    // stopAll/doPlay teardown that caused glitches.
-    //
-    // Architecture:
-    //   • Called once at the END of doPlay() when loop mode is active
-    //   • Sets a JS timeout to fire ~LOOKAHEAD seconds before the loop boundary
-    //   • At that moment, schedules all clip sources for the next cycle, starting
-    //     at the exact actx time that corresponds to loopOut (= next loopIn)
-    //   • Then reschedules itself for the cycle after that (infinite chain)
-    //   • stopAll() kills loopTimerRef, breaking the chain on stop/pause
-    const LOOP_LOOKAHEAD = 0.15; // seconds — pre-schedule this far before boundary
-    const scheduleLoopCycle = function (cycleActxStart, cycleTimelineStart) {
-      // cycleActxStart  : actx.currentTime when this cycle's audio begins playing
-      // cycleTimelineStart: timeline position (loopIn) for this cycle
-      const li = loopInRef.current;
-      const lo = loopOutRef.current;
-      if (!loopEnabledRef.current || lo <= li) return;
-
-      const span         = lo - li;                          // loop region duration
-      const cycleActxEnd = cycleActxStart + span;            // actx time when this cycle ends
-      const fireAt       = cycleActxEnd - LOOP_LOOKAHEAD;    // wall-clock time to fire timer
-      const msUntilFire  = (fireAt - actx.currentTime) * 1000;
-
-      loopTimerRef.current = setTimeout(function () {
-        // Bail if playback was stopped or loop was disabled while we waited
-        if (!isPlayingRef.current || !loopEnabledRef.current) return;
-        // Re-read in case the user moved the loop markers while playing
-        const li2 = loopInRef.current;
-        const lo2 = loopOutRef.current;
-        if (lo2 <= li2) return;
-
-        const span2          = lo2 - li2;
-        const nextActxStart  = cycleActxEnd;   // exactly where the previous cycle ends
-        const nextTimelineStart = li2;
-
-        // Update the master timing anchor atomically:
-        // playheadAtRef = loopIn, masterStartRef = nextActxStart
-        // The RAF reads elapsed = actx.currentTime - masterStartRef, so
-        // t = loopIn + elapsed — which correctly wraps to loopIn at the boundary.
-        playheadAtRef.current  = nextTimelineStart;
-        masterStartRef.current = nextActxStart;
-
-        // Schedule all clips for the next cycle, hard-bounded at lo2
-        tracksRef.current.forEach(function (track) {
-          try {
-            const clips = track.clips && track.clips.length > 0
-              ? track.clips
-              : track.audioBuffer
-                ? [{ id:"lg", audioBuffer:track.audioBuffer, url:track.url, startTime:track.startTime||0, duration:track.audioBuffer.duration, trimStart:0, trimEnd:track.audioBuffer.duration, active:true }]
-                : [];
-            if (clips.length === 0) return;
-            // Reuse the existing gain node — avoids FX chain reconstruction glitch
-            const entryNode = gainNodesRef.current[track.id];
-            if (!entryNode) return;
-            // Reconnect to master if needed (master doesn't change between cycles)
-            clips.forEach(function (clip) {
-              try {
-                // Override `now` with nextActxStart for correct scheduling
-                const savedNow = now;
-                // We can't reassign `now` (const) so we inline the override:
-                // scheduleClip uses closure `now` — call a local variant instead
-                scheduleClipAt(track, clip, entryNode, nextActxStart, nextTimelineStart, lo2);
-              } catch(e) {}
-            });
-          } catch(e) {}
-        });
-
-        // Chain: schedule the cycle after this one
-        scheduleLoopCycle(nextActxStart, nextTimelineStart);
-      }, Math.max(0, msUntilFire));
-    };
-
-    // Variant of scheduleClip that takes an explicit `atActxTime` instead of closure `now`
-    const scheduleClipAt = function (track, clip, entryNode, atActxTime, cycleStart, hardEnd) {
-      if (clip.active === false || !clip.audioBuffer) return;
-      try {
-        const buf     = clip.audioBuffer;
-        const trimS   = clip.trimStart || 0;
-        const trimE   = clip.trimEnd   || buf.duration;
-        const trimDur = Math.max(0, trimE - trimS);
-        if (trimDur <= 0) return;
-
-        const clipStart = clip.startTime || 0;
-        const clipEnd   = clipStart + trimDur;
-        if (clipEnd <= cycleStart) return;
-        if (clipStart >= hardEnd)  return;
-
-        const src = actx.createBufferSource();
-        src.buffer = buf;
-        src.connect(entryNode);
-
-        let when, bufOff;
-        if (cycleStart <= clipStart) {
-          when   = atActxTime + (clipStart - cycleStart);
-          bufOff = trimS;
-        } else {
-          when   = atActxTime;
-          bufOff = trimS + (cycleStart - clipStart);
-        }
-
-        const bufRemain  = (trimS + trimDur) - bufOff;
-        const timeToHard = hardEnd - Math.max(cycleStart, clipStart);
-        const playDur    = Math.min(bufRemain, timeToHard);
-
-        if (playDur > 0.001) {
-          src.start(when, bufOff, playDur);
-          scheduledRef.current.push(src);
-        }
-      } catch(e) {}
-    };
-
-    // ── Schedule all tracks for the initial cycle ────────────────────────────
-    // hardEnd = loopOut when loop is active, otherwise Infinity
-    const hardEnd = (loopEnabledRef.current && loopOutRef.current > loopInRef.current)
-      ? loopOutRef.current
-      : Infinity;
 
     tracksRef.current.forEach(function(track) {
       try {
         const clips = track.clips && track.clips.length > 0
           ? track.clips
-          : track.audioBuffer
+          : track.audioBuffer // legacy flat model
             ? [{ id:"lg", audioBuffer:track.audioBuffer, url:track.url, startTime:track.startTime||0, duration:track.audioBuffer.duration, trimStart:0, trimEnd:track.audioBuffer.duration, active:true }]
             : [];
         if (clips.length === 0) return;
         const entryNode = buildChain(track);
         clips.forEach(function(clip){
-          try { scheduleClip(track, clip, entryNode, fromTime, hardEnd); } catch(clipErr) {
+          try { scheduleClip(track, clip, entryNode); } catch(clipErr) {
             console.warn("[Studio] clip schedule error on track", track.name, clipErr);
           }
         });
       } catch(trackErr) {
+        // One bad track should never stop others from playing
         console.warn("[Studio] track chain error on track", track.name, trackErr);
       }
     });
-
-    // ── Arm the loop pre-scheduler if loop mode is active ───────────────────
-    if (loopEnabledRef.current && loopOutRef.current > loopInRef.current) {
-      // The current cycle starts at `now` on the audio clock, at `fromTime` on the timeline.
-      // The cycle's actx end = now + (loopOut - fromTime)  [remaining span from entry point]
-      // For a full cycle starting at loopIn, it's now + span.
-      // When entering mid-loop (fromTime > loopIn), the first cycle is shorter.
-      const li        = loopInRef.current;
-      const lo        = loopOutRef.current;
-      const remaining = lo - fromTime;             // time left in first (possibly partial) cycle
-      if (remaining > 0.001) {
-        const firstCycleActxEnd = now + remaining;
-        scheduleLoopCycle(firstCycleActxEnd, li);
-      }
-    }
-  }; // end doPlay
+  };
 
   const togglePlay = function () {
     if (isPlaying) {
@@ -13483,52 +13310,107 @@ function StudioScreen({ user, onExit }) {
   };
 
   // ── Ruler tap/drag → set loop in/out points ONLY ─────────────
-  // Tapping the ruler only creates/adjusts the loop region.
-  // It never seeks the playhead or interrupts playback.
-  // First tap on empty area: sets loop-in, second tap to the right: sets loop-out.
-  // Dragging: if tap lands within 0.3s of loopIn → drag loopIn,
-  //           if tap lands within 0.3s of loopOut → drag loopOut,
-  //           otherwise start a new loop region from that point.
-  // rulerDragRef declared at top of component (Rules of Hooks)
+  // Rules (Logic Pro model):
+  //   • Tap near loopIn handle  → drag loopIn
+  //   • Tap near loopOut handle → drag loopOut
+  //   • Tap inside existing region (not near a handle) → drag the whole region
+  //   • Tap outside the region → start a new region from that beat
+  //
+  // IMPORTANT: all drag move/end handlers read loopIn/loopOut from
+  // rulerDragRef (snapshotted at pointerdown), never from the React
+  // state closure — this eliminates the stale-closure reset bug.
   const rulerTimeFromClientX = function (clientX) {
     const el = scrollRef.current;
     if (!el) return 0;
     const rect  = el.getBoundingClientRect();
-    // scrollRef is now the right-side lanes only (no sidebar) so no SIDEBAR_W offset needed
     const laneX = clientX - rect.left + el.scrollLeft;
     return Math.max(0, laneX / effectivePPS);
   };
 
-  // Ruler snaps to the nearest BEAT boundary (not just bars).
-  // This allows loop regions to start/end on any individual beat,
-  // making 1-bar, 2-bar, half-bar loops all equally easy to set.
   const snapToBar = function (t) {
     if (spb <= 0) return Math.max(0, t);
-    // Snap to nearest beat
-    const snappedBeat = Math.max(0, Math.round(t / spb) * spb);
-    return snappedBeat;
+    return Math.max(0, Math.round(t / spb) * spb);
+  };
+
+  // Grab threshold: 18px in timeline-time units — feels correct on a phone
+  // regardless of zoom level.
+  const rulerGrabThreshSecs = function () {
+    return 18 / Math.max(1, effectivePPS);
   };
 
   const handleRulerMouseDown = function (e) {
     e.preventDefault();
-    const raw = rulerTimeFromClientX(e.clientX);
-    const t   = snapToBar(raw);
-    // Grab threshold: half a beat (so handles feel magnetic near beat boundaries)
-    const grabThresh = Math.max(0.15, spb * 0.5);
-    let mode = "new";
-    if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
-    else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
-    rulerDragRef.current = { mode, startX: e.clientX, startT: t };
+    const raw   = rulerTimeFromClientX(e.clientX);
+    const t     = snapToBar(raw);
+    const grab  = rulerGrabThreshSecs();
 
-    if (mode === "new") { setLoopIn(t); setLoopOut(snapToBar(t + spb)); } // don't auto-enable — user must toggle loop button
+    // Snapshot current loop state into the drag ref so move handlers
+    // never read stale React state.
+    const snapIn  = loopIn;
+    const snapOut = loopOut;
+
+    let mode;
+    if (Math.abs(raw - snapIn)  < grab) {
+      mode = "in";
+    } else if (Math.abs(raw - snapOut) < grab) {
+      mode = "out";
+    } else if (raw > snapIn && raw < snapOut) {
+      // Tap inside existing region — drag the whole region
+      mode = "move";
+    } else {
+      mode = "new";
+    }
+
+    rulerDragRef.current = {
+      mode,
+      startT:   t,
+      startRaw: raw,
+      snapIn,
+      snapOut,
+      span:     snapOut - snapIn,
+    };
+
+    if (mode === "new") {
+      setLoopIn(t);
+      setLoopOut(snapToBar(t + spb));
+      rulerDragRef.current.snapIn  = t;
+      rulerDragRef.current.snapOut = snapToBar(t + spb);
+    }
 
     const onMove = function (me) {
+      const d = rulerDragRef.current;
+      if (!d) return;
       const nt = snapToBar(rulerTimeFromClientX(me.clientX));
-      if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
-      else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spb)); }
-      else {
-        if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spb));
-        else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
+      // Always read in/out from the drag snapshot, never from React state
+      const curIn  = d.snapIn;
+      const curOut = d.snapOut;
+
+      if (d.mode === "in") {
+        const newIn = Math.min(nt, curOut - spb);
+        setLoopIn(Math.max(0, newIn));
+        d.snapIn = Math.max(0, newIn);
+      } else if (d.mode === "out") {
+        const newOut = Math.max(nt, curIn + spb);
+        setLoopOut(newOut);
+        d.snapOut = newOut;
+      } else if (d.mode === "move") {
+        const delta   = nt - d.startT;
+        const newIn   = Math.max(0, snapToBar(d.snapIn  + delta));
+        const newOut  = snapToBar(d.snapOut + delta);
+        if (newOut > newIn) { setLoopIn(newIn); setLoopOut(newOut); }
+      } else {
+        // "new" — expanding a brand-new region
+        if (nt > d.startT) {
+          const newOut = Math.max(nt, snapToBar(d.startT + spb));
+          setLoopOut(newOut);
+          d.snapOut = newOut;
+        } else {
+          const newIn = Math.min(nt, d.startT);
+          setLoopIn(Math.max(0, newIn));
+          setLoopOut(d.startT);
+          d.snapIn  = Math.max(0, newIn);
+          d.snapOut = d.startT;
+        }
       }
     };
     const onUp = function () {
@@ -13543,27 +13425,77 @@ function StudioScreen({ user, onExit }) {
   const handleRulerTouchStart = function (e) {
     e.preventDefault();
     e.stopPropagation();
-    const raw = rulerTimeFromClientX(e.touches[0].clientX);
-    const t   = snapToBar(raw);
-    const grabThresh = Math.max(0.15, spb * 0.5);
-    let mode = "new";
-    if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
-    else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
-    rulerDragRef.current = { mode, startT: t };
+    const raw   = rulerTimeFromClientX(e.touches[0].clientX);
+    const t     = snapToBar(raw);
+    const grab  = rulerGrabThreshSecs();
 
-    if (mode === "new") { setLoopIn(t); setLoopOut(snapToBar(t + spb)); } // don't auto-enable — user must toggle loop button
+    const snapIn  = loopIn;
+    const snapOut = loopOut;
+
+    let mode;
+    if (Math.abs(raw - snapIn)  < grab) {
+      mode = "in";
+    } else if (Math.abs(raw - snapOut) < grab) {
+      mode = "out";
+    } else if (raw > snapIn && raw < snapOut) {
+      mode = "move";
+    } else {
+      mode = "new";
+    }
+
+    rulerDragRef.current = {
+      mode,
+      startT:   t,
+      startRaw: raw,
+      snapIn,
+      snapOut,
+      span:     snapOut - snapIn,
+    };
+
+    if (mode === "new") {
+      setLoopIn(t);
+      setLoopOut(snapToBar(t + spb));
+      rulerDragRef.current.snapIn  = t;
+      rulerDragRef.current.snapOut = snapToBar(t + spb);
+    }
   };
 
   const handleRulerTouchMove = function (e) {
     e.preventDefault();
     e.stopPropagation();
-    if (!rulerDragRef.current) return;
-    const nt = snapToBar(rulerTimeFromClientX(e.touches[0].clientX));
-    if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
-    else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spb)); }
-    else {
-      if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spb));
-      else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
+    const d = rulerDragRef.current;
+    if (!d) return;
+
+    const nt     = snapToBar(rulerTimeFromClientX(e.touches[0].clientX));
+    const curIn  = d.snapIn;
+    const curOut = d.snapOut;
+
+    if (d.mode === "in") {
+      const newIn = Math.max(0, Math.min(nt, curOut - spb));
+      setLoopIn(newIn);
+      d.snapIn = newIn;
+    } else if (d.mode === "out") {
+      const newOut = Math.max(nt, curIn + spb);
+      setLoopOut(newOut);
+      d.snapOut = newOut;
+    } else if (d.mode === "move") {
+      const delta  = nt - d.startT;
+      const newIn  = Math.max(0, snapToBar(d.snapIn  + delta));
+      const newOut = snapToBar(d.snapOut + delta);
+      if (newOut > newIn) { setLoopIn(newIn); setLoopOut(newOut); }
+    } else {
+      // "new" — expanding region
+      if (nt > d.startT) {
+        const newOut = Math.max(nt, snapToBar(d.startT + spb));
+        setLoopOut(newOut);
+        d.snapOut = newOut;
+      } else {
+        const newIn = Math.max(0, Math.min(nt, d.startT));
+        setLoopIn(newIn);
+        setLoopOut(d.startT);
+        d.snapIn  = newIn;
+        d.snapOut = d.startT;
+      }
     }
   };
 
