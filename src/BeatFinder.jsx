@@ -7276,6 +7276,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
             </div>
             {(isProd || isArtist) && <VerifiedBadge size={20} />}
             {profile.username === "Trelli" && <GoldVerifiedBadge size={22} />}
+            {profile.username === "Mikez"  && <GreenVerifiedBadge size={22} />}
           </div>
           {profile.username && <div style={{ color: "#666", fontSize: 14, marginTop: 2 }}>@{profile.username}</div>}
         </div>
@@ -7286,6 +7287,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
             {isProd && <span onClick={() => setBadgePopup({ icon:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
             {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Verified Chief Executive Officer" })} />}
             {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
+            {profile.username === "Mikez" && <BrandAmbassadorBadge onClick={() => setBadgePopup({ icon:"brand_ambassador", text:"Verified Brand Ambassador of BeatFinder" })} />}
           </div>
         )}
 
@@ -12752,6 +12754,51 @@ function GBVUBars({ analyserNode, active }) {
 // =============================================================================
 
 // Gold verification badge — Trelli only
+// Green verified badge — Brand Ambassadors
+function GreenVerifiedBadge({ size = 20 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#22C55E"/>
+          <stop offset="50%" stopColor="#16A34A"/>
+          <stop offset="100%" stopColor="#14532D"/>
+        </linearGradient>
+        <linearGradient id="greenShine" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#4ADE80" stopOpacity="0.9"/>
+          <stop offset="50%" stopColor="#86EFAC"/>
+          <stop offset="100%" stopColor="#22C55E" stopOpacity="0.9"/>
+        </linearGradient>
+      </defs>
+      <path d="M50 4 L61 20 L79 14 L79 33 L96 38 L88 55 L96 72 L79 77 L79 96 L61 90 L50 106 L39 90 L21 96 L21 77 L4 72 L12 55 L4 38 L21 33 L21 14 L39 20 Z"
+        fill="url(#greenGrad)" stroke="#22C55E" strokeWidth="1.5"/>
+      <path d="M50 10 L59 24 L75 19 L75 35 L90 40 L83 55 L90 70 L75 75 L75 91 L59 86 L50 100 L41 86 L25 91 L25 75 L10 70 L17 55 L10 40 L25 35 L25 19 L41 24 Z"
+        fill="url(#greenShine)" opacity="0.3"/>
+      <polyline points="34,52 45,63 67,40" stroke="#000" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+      <polyline points="34,52 45,63 67,40" stroke="#4ADE80" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    </svg>
+  );
+}
+
+// Brand Ambassador badge
+function BrandAmbassadorBadge({ onClick }) {
+  return (
+    <span onClick={onClick} style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      background: "linear-gradient(135deg,#052e16 0%,#14532D 40%,#15803D 100%)",
+      border: "1.5px solid #22C55E", borderRadius: 20, padding: "3px 10px",
+      color: "#4ADE80", fontWeight: 900, fontSize: 10, letterSpacing: 1.5,
+      textTransform: "uppercase", boxShadow: "0 0 8px rgba(34,197,94,0.4)",
+      cursor: onClick ? "pointer" : "default",
+    }}>
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="#4ADE80">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
+      </svg>
+      B.A
+    </span>
+  );
+}
+
 function GoldVerifiedBadge({ size = 20 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -12802,6 +12849,7 @@ function BadgeInfoPopup({ message, onClose }) {
   function BadgeIcon({ type }) {
     if (type === "ceo") return <GoldVerifiedBadge size={44} />;
     if (type === "producer") return <VerifiedBadge size={44} />;
+    if (type === "brand_ambassador") return <GreenVerifiedBadge size={44} />;
     if (type === "artist") return (
       <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="1.5" strokeLinecap="round">
         <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
