@@ -8559,6 +8559,9 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   const [usernameMsg,      setUsernameMsg]      = useState("");
   const [uploadGenre,      setUploadGenre]      = useState("");
   const [uploadPrice,      setUploadPrice]      = useState("");
+  const [uploadBpm,        setUploadBpm]        = useState("");
+  const [uploadKey,        setUploadKey]        = useState("");
+  const [uploadDesc,       setUploadDesc]       = useState("");
   const [uploadFile,       setUploadFile]       = useState(null);
   const uploadFileRef = React.useRef(null);
   const [uploadLoading,    setUploadLoading]    = useState(false);
@@ -9314,6 +9317,46 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             <input value={ytLink} onChange={e => setYtLink(e.target.value)} placeholder="Beat title e.g. Dark Trap Beat" style={inp} />
             <input value={uploadGenre || ""} onChange={e => setUploadGenre(e.target.value)} placeholder="Genre e.g. Trap, R&B, Afrobeats" style={inp} />
             <input value={uploadPrice || ""} onChange={e => setUploadPrice(e.target.value)} placeholder="Price e.g. £9.99 (enter £0 for free)" style={inp} />
+
+            {/* BPM + Key row */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ color: "#666", fontSize: 11, fontWeight: 700, marginBottom: 4, letterSpacing: 0.5 }}>BPM</div>
+                <input
+                  type="number" min={40} max={300}
+                  value={uploadBpm}
+                  onChange={e => setUploadBpm(e.target.value)}
+                  placeholder="e.g. 140"
+                  style={{ ...inp, marginBottom: 0 }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ color: "#666", fontSize: 11, fontWeight: 700, marginBottom: 4, letterSpacing: 0.5 }}>KEY</div>
+                <select
+                  value={uploadKey}
+                  onChange={e => setUploadKey(e.target.value)}
+                  style={{ ...inp, marginBottom: 0, color: uploadKey ? "white" : "#555" }}
+                >
+                  <option value="">Select key</option>
+                  {["C Major","C Minor","C# Major","C# Minor","D Major","D Minor","D# Major","D# Minor","E Major","E Minor","F Major","F Minor","F# Major","F# Minor","G Major","G Minor","G# Major","G# Minor","A Major","A Minor","A# Major","A# Minor","B Major","B Minor"].map(k => (
+                    <option key={k} value={k}>{k}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Description */}
+            <div style={{ color: "#666", fontSize: 11, fontWeight: 700, marginBottom: 4, letterSpacing: 0.5 }}>DESCRIPTION</div>
+            <textarea
+              value={uploadDesc}
+              onChange={e => setUploadDesc(e.target.value)}
+              placeholder="Tell listeners about this beat — mood, inspiration, usage rights..."
+              maxLength={500}
+              rows={3}
+              style={{ ...inp, resize: "none", fontFamily: "inherit", marginBottom: 4 }}
+            />
+            <div style={{ color: "#444", fontSize: 10, textAlign: "right", marginBottom: 12 }}>{uploadDesc.length}/500</div>
+
             <input ref={uploadFileRef} type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac,.aiff,.opus" onChange={e => setUploadFile(e.target.files[0])}
               style={{ width: "100%", marginBottom: 12, color: "#aaa", fontSize: 14 }} />
             <button disabled={uploadLoading} onClick={async () => {
@@ -9322,14 +9365,24 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               try {
                 const fd = new FormData();
                 var priceVal = (uploadPrice || "").trim();
-                // Treat £0, 0, £0.00, 0.00 as free
                 if (priceVal === "0" || priceVal === "£0" || priceVal === "0.00" || priceVal === "£0.00" || priceVal === "") priceVal = "free";
-                fd.append("title", ytLink.trim()); fd.append("genre", uploadGenre || ""); fd.append("price", priceVal); fd.append("file", uploadFile);
+                fd.append("title",       ytLink.trim());
+                fd.append("genre",       uploadGenre || "");
+                fd.append("price",       priceVal);
+                fd.append("bpm",         uploadBpm ? String(parseInt(uploadBpm)) : "0");
+                fd.append("key",         uploadKey || "");
+                fd.append("description", uploadDesc || "");
+                fd.append("file",        uploadFile);
                 const token = typeof getToken === "function" ? getToken() : (localStorage.getItem("bf_token") || "");
                 const res = await fetch(API_BASE + "/api/producer/upload", { method: "POST", headers: { "Authorization": "Bearer " + token }, body: fd });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || "Upload failed");
-                setUploads(prev => [data.beat, ...prev]); setUploadMsg("Beat uploaded!"); setYtLink(""); setUploadGenre(""); setUploadPrice(""); setUploadFile(null); if (uploadFileRef.current) uploadFileRef.current.value = "";
+                setUploads(prev => [data.beat, ...prev]);
+                setUploadMsg("Beat uploaded!");
+                setYtLink(""); setUploadGenre(""); setUploadPrice("");
+                setUploadBpm(""); setUploadKey(""); setUploadDesc("");
+                setUploadFile(null);
+                if (uploadFileRef.current) uploadFileRef.current.value = "";
               } catch (e) { setUploadMsg("Error: " + e.message); }
               setUploadLoading(false);
             }} style={{ width: "100%", background: uploadLoading ? "#333" : "#C026D3", border: "none", borderRadius: 12, color: "white", fontWeight: 800, fontSize: 15, padding: "14px", cursor: uploadLoading ? "not-allowed" : "pointer" }}>
