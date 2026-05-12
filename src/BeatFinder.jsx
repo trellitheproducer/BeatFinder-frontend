@@ -1086,7 +1086,7 @@ const GRAD = [
 ];
 const initials = n => n.split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase();
 const watchUrl  = id => `https://www.youtube.com/watch?v=${id}`;
-const embedUrl  = id => `https://www.youtube.com/embed/${id}?autoplay=1&playsinline=1&rel=0&modestbranding=1`;
+const embedUrl  = id => `https://www.youtube.com/embed/${id}?autoplay=1&playsinline=1&rel=0&modestbranding=1&disablekb=1&iv_load_policy=3&fs=0&color=white`;
 
 // =============================================================================
 // ARTIST DATABASE
@@ -1796,12 +1796,11 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
           <div style={{ borderBottom: "1px solid #1a1a1a", background: "#000" }}>
             <iframe
               key={beat.videoId}
-              src={"https://www.youtube.com/embed/" + beat.videoId + "?autoplay=0&rel=0"}
+              src={"https://www.youtube.com/embed/" + beat.videoId + "?autoplay=0&rel=0&modestbranding=1&disablekb=1&iv_load_policy=3&fs=0"}
               width="100%"
               height="160"
               style={{ display: "block", border: "none" }}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
               title={beat.title}
             />
             <div style={{ padding: "8px 16px", background: "#0d0d0d" }}>
@@ -1911,15 +1910,27 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
           <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>{beat.channel}</div>
         </div>
       </div>
-      <iframe
-        key={beat.videoId}
-        src={embedUrl(beat.videoId)}
-        width="100%" height="220"
-        style={{ display: "block", border: "none", background: "#000", flexShrink: 0 }}
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-        allowFullScreen
-        title={beat.title}
-      />
+      {/* Wrap iframe in a relative container with a transparent overlay.
+          The overlay blocks clicks on YouTube's suggested videos (top ~80% of player)
+          while the bottom controls area remains interactive via pointer-events. */}
+      <div style={{ position: "relative", width: "100%", height: 220, flexShrink: 0, background: "#000" }}>
+        <iframe
+          key={beat.videoId}
+          src={embedUrl(beat.videoId)}
+          width="100%" height="220"
+          style={{ display: "block", border: "none", background: "#000", position: "absolute", top: 0, left: 0 }}
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          title={beat.title}
+        />
+        {/* Transparent overlay covering the top portion where suggested videos appear.
+            Blocks navigation away from BeatFinder. Bottom 44px left clear for YouTube controls. */}
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0,
+          bottom: 44,
+          zIndex: 10,
+          background: "transparent",
+        }} />
+      </div>
       <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
         <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4, lineHeight: 1.4 }}>
           {beat.title}
@@ -1927,21 +1938,9 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
         <div style={{ color: "#888", fontSize: 13 }}>{beat.channel}</div>
       </div>
       <div style={{ padding: "16px", background: "#0a0a0a", flex: 1 }}>
-        <div style={{ color: "#555", fontSize: 12, marginBottom: 12, lineHeight: 1.6 }}>
-          If the video does not play in-app, tap below to open in YouTube.
+        <div style={{ color: "#333", fontSize: 11, marginBottom: 12, textAlign: "center", fontStyle: "italic" }}>
+          Play the beat above, then write your lyrics or save it below.
         </div>
-        <a
-          href={watchUrl(beat.videoId)}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-            background: "#FF0000", borderRadius: 14, color: "white",
-            fontWeight: 800, fontSize: 16, padding: "15px", textDecoration: "none",
-          }}
-        >
-          ▶ Open in YouTube
-        </a>
         <button
           onClick={() => onSave(beat)}
           style={{
@@ -6875,7 +6874,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
             {isProd && <span onClick={() => setBadgePopup({ icon:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
-            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Chief Executive Officer" })} />}
+            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Verified Chief Executive Officer" })} />}
             {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
           </div>
         )}
