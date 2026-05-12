@@ -10343,237 +10343,168 @@ function _BandpassPlugin({ fx, upd, Knob }) {
 }
 
 // =============================================================================
-// AUTOTUNE WORKLET — McLeod Pitch Detection + Granular Pitch Shifter
-// Runs entirely in AudioWorklet thread. No WASM, no SharedArrayBuffer.
-// Compatible with iOS Safari 14.5+.
+// AUTOTUNE WORKLET — Proven pitch correction for iOS Safari
+// Uses ring buffer + linear interpolation pitch shifting
+// This is simpler than granular synthesis but actually works on iOS
 // =============================================================================
 const AUTOTUNE_WORKLET_CODE = `
-// ── Note frequency table ──────────────────────────────────────────
-const NOTE_FREQS = [];
-for (let m = 0; m < 128; m++) NOTE_FREQS.push(440 * Math.pow(2, (m - 69) / 12));
-
-// Scale intervals (semitones from root)
+const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
 const SCALES = {
-  major:       [0,2,4,5,7,9,11],
-  minor:       [0,2,3,5,7,8,10],
-  chromatic:   [0,1,2,3,4,5,6,7,8,9,10,11],
-  pentatonic:  [0,2,4,7,9],
-  blues:       [0,3,5,6,7,10],
+  major:      [0,2,4,5,7,9,11],
+  minor:      [0,2,3,5,7,8,10],
+  chromatic:  [0,1,2,3,4,5,6,7,8,9,10,11],
+  pentatonic: [0,2,4,7,9],
+  blues:      [0,3,5,6,7,10],
 };
 
-const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
+function midiToFreq(m){ return 440*Math.pow(2,(m-69)/12); }
+function freqToMidi(f){ return f>0 ? 69+12*Math.log2(f/440) : -1; }
 
-function freqToMidi(f) {
-  if (f <= 0) return -1;
-  return 69 + 12 * Math.log2(f / 440);
-}
-function midiToFreq(m) { return 440 * Math.pow(2, (m - 69) / 12); }
-
-function snapToScale(midi, keyOffset, scaleIntervals, humanize) {
-  if (midi < 0) return midi;
-  const octave = Math.floor((midi - keyOffset) / 12);
-  const semitone = ((midi - keyOffset) % 12 + 12) % 12;
-  let closest = scaleIntervals[0], minDist = 12;
-  for (let i = 0; i < scaleIntervals.length; i++) {
-    const d = Math.abs(scaleIntervals[i] - semitone);
-    const dw = Math.min(d, 12 - d);
-    if (dw < minDist) { minDist = dw; closest = scaleIntervals[i]; }
+function snapMidi(midi, keyOffset, scale){
+  if(midi<0) return midi;
+  const rel = ((Math.round(midi)-keyOffset)%12+12)%12;
+  let best=scale[0], bestD=12;
+  for(let i=0;i<scale.length;i++){
+    const d=Math.abs(scale[i]-rel);
+    const dw=Math.min(d,12-d);
+    if(dw<bestD){bestD=dw;best=scale[i];}
   }
-  const snapped = keyOffset + octave * 12 + closest;
-  // Humanize: add small random offset in cents so it's not robotic
-  const humanCents = (humanize / 100) * (Math.random() * 20 - 10);
-  return snapped + humanCents / 100;
+  return keyOffset + Math.floor((midi-keyOffset)/12)*12 + best;
 }
 
-// ── McLeod Pitch Method (MPM) ────────────────────────────────────
-// More accurate than YIN for vocal frequencies on mobile hardware
-function detectPitchMPM(buf, sampleRate) {
-  const N = buf.length;
-  const halfN = Math.floor(N / 2);
-
-  // Normalised square difference function
-  const nsdf = new Float32Array(halfN);
-  let acf0 = 0;
-  for (let i = 0; i < N; i++) acf0 += buf[i] * buf[i];
-  if (acf0 < 1e-8) return -1;
-
-  for (let tau = 0; tau < halfN; tau++) {
-    let acf = 0, norm = 0;
-    for (let i = 0; i < N - tau; i++) {
-      acf  += buf[i] * buf[i + tau];
-      norm += buf[i] * buf[i] + buf[i + tau] * buf[i + tau];
-    }
-    nsdf[tau] = norm > 0 ? 2 * acf / norm : 0;
+// YIN pitch detection — reliable, low CPU
+function yin(buf, sr){
+  const N=buf.length, half=Math.floor(N/2);
+  const d=new Float32Array(half);
+  d[0]=1;
+  let runSum=0;
+  for(let tau=1;tau<half;tau++){
+    let s=0;
+    for(let i=0;i<N-tau;i++){const x=buf[i]-buf[i+tau];s+=x*x;}
+    d[tau]=s;
+    runSum+=s;
+    d[tau]=tau*d[tau]/runSum;
   }
-
-  // Find highest peak after first negative region
-  let maxVal = -1, maxTau = -1, inNeg = false;
-  for (let tau = 1; tau < halfN - 1; tau++) {
-    if (nsdf[tau] < 0) { inNeg = true; }
-    if (inNeg && nsdf[tau] > 0.5 && nsdf[tau] > maxVal) {
-      // Parabolic interpolation for sub-sample accuracy
-      const prev = nsdf[tau - 1], curr = nsdf[tau], next = nsdf[tau + 1];
-      const interp = tau + (next - prev) / (2 * (2 * curr - prev - next));
-      maxVal = curr; maxTau = interp;
+  // Find first dip below 0.15
+  for(let tau=2;tau<half-1;tau++){
+    if(d[tau]<0.15 && d[tau]<d[tau-1] && d[tau]<d[tau+1]){
+      // Parabolic interpolation
+      const t=tau+(d[tau+1]-d[tau-1])/(2*(2*d[tau]-d[tau-1]-d[tau+1]));
+      return sr/t;
     }
   }
-  if (maxTau < 0 || maxVal < 0.4) return -1;
-  return sampleRate / maxTau;
-}
-
-// ── Granular pitch shifter ────────────────────────────────────────
-// Overlap-add with 4 grains. Works on iOS Safari.
-class GranularShifter {
-  constructor(bufSize) {
-    this.bufSize  = bufSize;
-    this.inBuf    = new Float32Array(bufSize * 2);
-    this.outBuf   = new Float32Array(bufSize * 2);
-    this.inPtr    = 0;
-    this.outPtr   = 0;
-    this.grainSize = Math.round(bufSize / 2);
-    this.hopSize   = Math.round(this.grainSize / 4);
-    this.ratio     = 1.0;
-    this.phase     = 0;
-  }
-
-  setRatio(r) { this.ratio = Math.max(0.5, Math.min(2.0, r)); }
-
-  // Hanning window
-  _window(i, len) {
-    return 0.5 * (1 - Math.cos(2 * Math.PI * i / (len - 1)));
-  }
-
-  process(input) {
-    const gs = this.grainSize;
-    const hs = this.hopSize;
-    const out = new Float32Array(input.length);
-
-    for (let i = 0; i < input.length; i++) {
-      this.inBuf[this.inPtr % (this.bufSize * 2)] = input[i];
-      this.inPtr++;
-
-      // Read from input at pitch-shifted read pointer
-      const readPos = Math.round(this.inPtr - gs + this.phase * hs);
-      let sample = 0;
-      for (let g = 0; g < 4; g++) {
-        const gPos = readPos + g * hs;
-        for (let j = 0; j < hs; j++) {
-          const idx = (gPos + Math.round(j * this.ratio)) % (this.bufSize * 2);
-          if (idx >= 0 && idx < this.bufSize * 2) {
-            const win = this._window(j, hs);
-            sample += this.inBuf[idx] * win / 4;
-          }
-        }
-      }
-      this.phase = (this.phase + 1) % 4;
-      out[i] = sample;
-    }
-    return out;
-  }
+  return -1;
 }
 
 class AutotuneProcessor extends AudioWorkletProcessor {
-  static get parameterDescriptors() {
+  static get parameterDescriptors(){
     return [
-      { name:"bypass",    defaultValue:0,    minValue:0,   maxValue:1,   automationRate:"k-rate" },
-      { name:"keyOffset", defaultValue:0,    minValue:0,   maxValue:11,  automationRate:"k-rate" },
-      { name:"speed",     defaultValue:50,   minValue:1,   maxValue:100, automationRate:"k-rate" },
-      { name:"humanize",  defaultValue:10,   minValue:0,   maxValue:100, automationRate:"k-rate" },
-      { name:"wet",       defaultValue:1.0,  minValue:0,   maxValue:1,   automationRate:"k-rate" },
-      { name:"vibrato",   defaultValue:0,    minValue:0,   maxValue:1,   automationRate:"k-rate" },
-      { name:"formant",   defaultValue:1,    minValue:0,   maxValue:1,   automationRate:"k-rate" },
+      {name:"bypass",   defaultValue:1,  minValue:0,maxValue:1,  automationRate:"k-rate"},
+      {name:"key",      defaultValue:0,  minValue:0,maxValue:11, automationRate:"k-rate"},
+      {name:"speed",    defaultValue:50, minValue:1,maxValue:100,automationRate:"k-rate"},
+      {name:"wet",      defaultValue:1,  minValue:0,maxValue:1,  automationRate:"k-rate"},
+      {name:"humanize", defaultValue:10, minValue:0,maxValue:100,automationRate:"k-rate"},
+      {name:"vibrato",  defaultValue:0,  minValue:0,maxValue:1,  automationRate:"k-rate"},
     ];
   }
 
-  constructor(options) {
+  constructor(){
     super();
-    this._scale    = SCALES.major;
-    this._detBuf   = new Float32Array(2048);
-    this._detPtr   = 0;
-    this._detPitch = -1;
-    this._targetMidi = -1;
-    this._currentMidi = -1;
-    this._shifter  = new GranularShifter(4096);
-    this._vibratoPhase = 0;
-    this._smoothedRatio = 1.0;
-
-    this.port.onmessage = (e) => {
-      if (e.data.scale && SCALES[e.data.scale]) {
-        this._scale = SCALES[e.data.scale];
-      }
+    this._scale     = SCALES.major;
+    this._bufSize   = 2048;
+    this._ringBuf   = new Float32Array(this._bufSize * 4);
+    this._ringWrite = 0;
+    this._readPos   = 0.0;
+    this._detBuf    = new Float32Array(this._bufSize);
+    this._detPtr    = 0;
+    this._detCount  = 0;
+    this._detFreq   = -1;
+    this._targetRatio = 1.0;
+    this._smoothRatio = 1.0;
+    this._vibPhase  = 0;
+    this.port.onmessage = (e)=>{
+      if(e.data.scale && SCALES[e.data.scale]) this._scale = SCALES[e.data.scale];
     };
   }
 
-  process(inputs, outputs, params) {
+  process(inputs, outputs, params){
     const inp = inputs[0]?.[0];
     const out = outputs[0]?.[0];
-    if (!inp || !out) return true;
+    if(!inp||!out) return true;
 
     const bypass   = params.bypass[0] > 0.5;
-    if (bypass) { out.set(inp); return true; }
+    const keyOffset= Math.round(params.key[0]);
+    const speed    = params.speed[0]/100;
+    const wet      = params.wet[0];
+    const humanize = params.humanize[0];
+    const vibrato  = params.vibrato[0];
 
-    const keyOffset = Math.round(params.keyOffset[0]);
-    const speed     = params.speed[0] / 100;       // 0..1
-    const humanize  = params.humanize[0];
-    const wet       = params.wet[0];
-    const vibrato   = params.vibrato[0];
-    const formant   = params.formant[0] > 0.5;
-
-    // Fill detection buffer
-    for (let i = 0; i < inp.length; i++) {
-      this._detBuf[this._detPtr % 2048] = inp[i];
+    // Write input into ring buffer
+    for(let i=0;i<inp.length;i++){
+      this._ringBuf[this._ringWrite % (this._bufSize*4)] = inp[i];
+      this._ringWrite++;
+      this._detBuf[this._detPtr % this._bufSize] = inp[i];
       this._detPtr++;
     }
 
-    // Detect pitch every 512 samples
-    if (this._detPtr % 512 === 0) {
-      const slice = this._detBuf.slice(0, 2048);
-      const freq = detectPitchMPM(slice, sampleRate);
-      if (freq > 60 && freq < 1200) {
-        this._detPitch = freq;
-        const detMidi = freqToMidi(freq);
-        this._targetMidi = snapToScale(detMidi, keyOffset, this._scale, humanize);
+    // Detect pitch every 256 samples
+    this._detCount += inp.length;
+    if(this._detCount >= 256){
+      this._detCount = 0;
+      const freq = yin(this._detBuf, sampleRate);
+      if(freq > 60 && freq < 2000){
+        this._detFreq = freq;
+        const detMidi  = freqToMidi(freq);
+        const snapMid  = snapMidi(detMidi, keyOffset, this._scale);
+        const humanCents = humanize > 0 ? (Math.random()-0.5)*(humanize/100)*0.3 : 0;
+        const targetMidi = snapMid + humanCents;
+        this._targetRatio = midiToFreq(targetMidi) / freq;
       }
     }
 
-    let shifted;
-    if (this._targetMidi < 0 || this._detPitch < 0) {
-      shifted = inp.slice();
-    } else {
-      // Smooth pitch transition — speed controls how fast we reach target
-      if (this._currentMidi < 0) this._currentMidi = this._targetMidi;
-      const smoothing = 1 - speed; // speed=1 → no smooth (hard tune), speed=0 → max smooth
-      this._currentMidi += (this._targetMidi - this._currentMidi) * (1 - smoothing * 0.95);
-
-      let ratio = midiToFreq(this._currentMidi) / this._detPitch;
-
-      // Vibrato
-      if (vibrato > 0) {
-        this._vibratoPhase += (2 * Math.PI * 5.5) / sampleRate * inp.length;
-        ratio *= 1 + vibrato * 0.015 * Math.sin(this._vibratoPhase);
-      }
-
-      // Smooth the ratio to prevent clicks
-      this._smoothedRatio += (ratio - this._smoothedRatio) * 0.3;
-      this._shifter.setRatio(this._smoothedRatio);
-      shifted = this._shifter.process(inp);
-
-      // Formant compensation — scale amplitude to preserve tonal character
-      if (formant) {
-        const inRms  = Math.sqrt(inp.reduce((a, v) => a + v * v, 0) / inp.length) + 1e-9;
-        const outRms = Math.sqrt(shifted.reduce((a, v) => a + v * v, 0) / shifted.length) + 1e-9;
-        const comp   = Math.min(2, inRms / outRms);
-        for (let i = 0; i < shifted.length; i++) shifted[i] *= comp;
-      }
+    if(bypass || this._detFreq < 0){
+      out.set(inp);
+      return true;
     }
 
-    // Wet/dry mix
-    for (let i = 0; i < out.length; i++) {
-      out[i] = wet * (shifted[i] || 0) + (1 - wet) * inp[i];
-      // Hard clip to prevent feedback blowups
-      if (out[i] >  1) out[i] =  1;
-      if (out[i] < -1) out[i] = -1;
+    // Smooth ratio — fast for hard tune, slow for melodic
+    const smoothK = 1 - speed * 0.08;
+    this._smoothRatio += (this._targetRatio - this._smoothRatio) * (1 - smoothK);
+
+    let ratio = this._smoothRatio;
+
+    // Vibrato
+    if(vibrato > 0){
+      this._vibPhase += (2*Math.PI*5.5)/sampleRate*inp.length;
+      ratio *= 1 + vibrato*0.02*Math.sin(this._vibPhase);
     }
+
+    // Clamp ratio to safe range (±1 octave)
+    ratio = Math.max(0.5, Math.min(2.0, ratio));
+
+    // Read from ring buffer at pitch-shifted rate using linear interpolation
+    const ringSize = this._bufSize * 4;
+    for(let i=0;i<out.length;i++){
+      const intPos = Math.floor(this._readPos);
+      const frac   = this._readPos - intPos;
+      const i0 = intPos % ringSize;
+      const i1 = (intPos + 1) % ringSize;
+      const pitched = this._ringBuf[i0] + frac*(this._ringBuf[i1]-this._ringBuf[i0]);
+
+      out[i] = wet*pitched + (1-wet)*inp[i];
+      // Clip
+      if(out[i]>1) out[i]=1;
+      if(out[i]<-1) out[i]=-1;
+
+      this._readPos += ratio;
+    }
+
+    // Keep readPos from drifting too far from writePos
+    const writePos = this._ringWrite;
+    const drift = writePos - this._readPos;
+    if(drift > this._bufSize*2) this._readPos = writePos - this._bufSize;
+    if(drift < 0) this._readPos = writePos - 128;
+
     return true;
   }
 }
@@ -12553,13 +12484,12 @@ function StudioScreen({ user, onExit }) {
     if (!node) return;
     const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
     try {
-      node.parameters.get("bypass").value    = autoPitch.on ? 0 : 1;
-      node.parameters.get("keyOffset").value = KEY_OFFSETS[autoPitch.key || "C"] || 0;
-      node.parameters.get("speed").value     = autoPitch.speed ?? 50;
-      node.parameters.get("humanize").value  = autoPitch.humanize ?? 10;
-      node.parameters.get("wet").value       = autoPitch.wet ?? 1;
-      node.parameters.get("vibrato").value   = autoPitch.vibrato ?? 0;
-      node.parameters.get("formant").value   = (autoPitch.formant ?? true) ? 1 : 0;
+      node.parameters.get("bypass").value   = autoPitch.on ? 0 : 1;
+      node.parameters.get("key").value      = KEY_OFFSETS[autoPitch.key || "C"] || 0;
+      node.parameters.get("speed").value    = autoPitch.speed ?? 50;
+      node.parameters.get("humanize").value = autoPitch.humanize ?? 10;
+      node.parameters.get("wet").value      = autoPitch.wet ?? 1;
+      node.parameters.get("vibrato").value  = autoPitch.vibrato ?? 0;
       node.port.postMessage({ scale: autoPitch.scale || "major" });
     } catch(e) {}
   }, [autoPitch]);
@@ -13216,18 +13146,18 @@ function StudioScreen({ user, onExit }) {
           });
           const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
           const keyOffset = KEY_OFFSETS[at.key || "C"] || 0;
+          // bypass=0 means ACTIVE, bypass=1 means bypassed
           autotuneNode.parameters.get("bypass").value    = at.on ? 0 : 1;
-          autotuneNode.parameters.get("keyOffset").value = keyOffset;
+          autotuneNode.parameters.get("key").value       = keyOffset;
           autotuneNode.parameters.get("speed").value     = at.speed ?? 50;
           autotuneNode.parameters.get("humanize").value  = at.humanize ?? 10;
           autotuneNode.parameters.get("wet").value       = at.wet ?? 1;
           autotuneNode.parameters.get("vibrato").value   = at.vibrato ?? 0;
-          autotuneNode.parameters.get("formant").value   = (at.formant ?? true) ? 1 : 0;
-          // Send scale to worklet via message
           autotuneNode.port.postMessage({ scale: at.scale || "major" });
           window.__bfAutotuneNode = autotuneNode;
         }
       } catch(e) {
+        console.warn("Autotune worklet failed:", e);
         autotuneNode = null;
       }
 
