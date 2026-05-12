@@ -1670,33 +1670,61 @@ function RhymeFinder({ onClose, onInsert }) {
 
       {/* Results — independently scrollable */}
       {results && (
-        <div
-          ref={resultsRef}
-          style={{
-            overflowY: "scroll",
-            WebkitOverflowScrolling: "touch",
-            overscrollBehavior: "contain",
-            padding: "12px 16px 24px",
-            flex: 1,
-            minHeight: 0,
-            // Custom subtle scrollbar
-            scrollbarWidth: "thin",
-            scrollbarColor: "rgba(6,182,212,0.3) transparent",
-          }}
-        >
-          {results.perfect.length === 0 && results.near.length === 0 ? (
-            <div style={{ color: "#444", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
-              No rhymes found for "{searched}"
-            </div>
-          ) : (
-            <div>
-              {results.isMultiWord && results.multiSyllable && results.multiSyllable.length > 0 && (
-                <Section title="MULTI-SYLLABLE RHYMES" words={results.multiSyllable} color="#C026D3" />
-              )}
-              <Section title="PERFECT RHYMES" words={results.perfect} color="#06B6D4" />
-              <Section title="NEAR RHYMES" words={results.near} color="#F59E0B" />
-            </div>
-          )}
+        <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex", flexDirection: "column" }}>
+          {/* Scroll UP arrow */}
+          <button
+            onTouchStart={function(e){ e.stopPropagation(); }}
+            onClick={function(){ if (resultsRef.current) resultsRef.current.scrollBy({ top: -120, behavior: "smooth" }); }}
+            style={{
+              position: "absolute", top: 4, right: 8, zIndex: 20,
+              background: "rgba(6,182,212,0.15)", border: "1px solid rgba(6,182,212,0.3)",
+              borderRadius: "50%", width: 30, height: 30,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer", color: "#06B6D4",
+            }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#06B6D4" strokeWidth="2.5" strokeLinecap="round"><path d="M18 15l-6-6-6 6"/></svg>
+          </button>
+          {/* Scroll DOWN arrow */}
+          <button
+            onTouchStart={function(e){ e.stopPropagation(); }}
+            onClick={function(){ if (resultsRef.current) resultsRef.current.scrollBy({ top: 120, behavior: "smooth" }); }}
+            style={{
+              position: "absolute", bottom: 8, right: 8, zIndex: 20,
+              background: "rgba(6,182,212,0.15)", border: "1px solid rgba(6,182,212,0.3)",
+              borderRadius: "50%", width: 30, height: 30,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer", color: "#06B6D4",
+            }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#06B6D4" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+
+          <div
+            ref={resultsRef}
+            style={{
+              overflowY: "scroll",
+              WebkitOverflowScrolling: "touch",
+              overscrollBehavior: "contain",
+              padding: "12px 16px 24px",
+              flex: 1,
+              minHeight: 0,
+              scrollbarWidth: "thin",
+              scrollbarColor: "rgba(6,182,212,0.3) transparent",
+            }}
+          >
+            {results.perfect.length === 0 && results.near.length === 0 ? (
+              <div style={{ color: "#444", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
+                No rhymes found for "{searched}"
+              </div>
+            ) : (
+              <div>
+                {results.isMultiWord && results.multiSyllable && results.multiSyllable.length > 0 && (
+                  <Section title="MULTI-SYLLABLE RHYMES" words={results.multiSyllable} color="#C026D3" />
+                )}
+                <Section title="PERFECT RHYMES" words={results.perfect} color="#06B6D4" />
+                <Section title="NEAR RHYMES" words={results.near} color="#F59E0B" />
+              </div>
+            )}
+          </div>
         </div>
       )}
 
