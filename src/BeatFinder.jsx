@@ -3427,14 +3427,33 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
 // BEAT LEASE CARD
 // =============================================================================
 // ── Download helper ───────────────────────────────────────────────
-// iOS Safari 13+ shows a native "Download" confirmation popup when a new tab
-// opens a URL that returns Content-Disposition: attachment.
-// Using window.open(_blank) keeps the app tab open and in focus.
-function downloadMp3(url, title, beatId) {
+// In PWA standalone mode window.open(_blank) opens an external Safari tab.
+// The correct approach is fetching via the proxy and triggering a blob download,
+// which shows the native iOS share/save sheet without leaving the app.
+async function downloadMp3(url, title, beatId) {
   var proxyUrl = beatId
     ? API_BASE + "/api/producer/beats/" + beatId + "/file"
     : url;
-  window.open(proxyUrl, "_blank");
+  var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
+  try {
+    var res  = await fetch(proxyUrl);
+    if (!res.ok) throw new Error("fetch failed");
+    var blob = await res.blob();
+    var burl = URL.createObjectURL(blob);
+    var a    = document.createElement("a");
+    a.href     = burl;
+    a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(burl);
+    }, 5000);
+  } catch(e) {
+    // Fallback: open proxy URL directly
+    window.location.href = proxyUrl;
+  }
 }
 
 // ── Shared 30s PreviewBar ─────────────────────────────────────────
@@ -3596,8 +3615,11 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
 
         {/* Producer row */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.05)", borderBottom: "1px solid rgba(255,255,255,0.05)", marginBottom: 14 }}>
-          <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, background: "linear-gradient(135deg," + accentClr + "55,#0a0a0a)", border: "1.5px solid " + accentClr + "55", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ color: accentClr, fontWeight: 800, fontSize: 13 }}>{(beat.producer || "?")[0].toUpperCase()}</span>
+          <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, background: "linear-gradient(135deg," + accentClr + "55,#0a0a0a)", border: "1.5px solid " + accentClr + "55", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+            {beat.producer_avatar
+              ? <img src={beat.producer_avatar} alt={beat.producer} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              : <span style={{ color: accentClr, fontWeight: 800, fontSize: 13 }}>{(beat.producer || "?")[0].toUpperCase()}</span>
+            }
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ color: "#555", fontSize: 9, fontWeight: 700, letterSpacing: 1 }}>PRODUCER</div>
@@ -5565,10 +5587,12 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
             background: "linear-gradient(135deg," + accentClr + "55,#0a0a0a)",
             border: "1.5px solid " + accentClr + "55",
             display: "flex", alignItems: "center", justifyContent: "center",
+            overflow: "hidden",
           }}>
-            <span style={{ color: accentClr, fontWeight: 800, fontSize: 13 }}>
-              {(beat.producer || "?")[0].toUpperCase()}
-            </span>
+            {beat.producer_avatar
+              ? <img src={beat.producer_avatar} alt={beat.producer} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              : <span style={{ color: accentClr, fontWeight: 800, fontSize: 13 }}>{(beat.producer || "?")[0].toUpperCase()}</span>
+            }
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ color: "#555", fontSize: 9, fontWeight: 700, letterSpacing: 1 }}>PRODUCER</div>
