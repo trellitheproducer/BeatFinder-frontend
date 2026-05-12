@@ -2006,8 +2006,8 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
 // Stripe price IDs — replace YEARLY_ placeholders with your real annual price IDs
 // from your Stripe dashboard once created.
 var PLAN_PRICES = {
-  artist:   { monthly: "price_1TQDoFFHyNSCxas89UpDKiro",  yearly: "price_1TW9CXFHyNSCxas8TM826ULo" },
-  producer: { monthly: "price_1TQDpBFHyNSCxas8cktbqw1n", yearly: "price_1TW9BnFHyNSCxas8vHDrVwB6" },
+  artist:   { monthly: "price_1TQDoFFHyNSCxas89UpDKiro",  yearly: "price_artist_yearly_REPLACE" },
+  producer: { monthly: "price_1TQDpBFHyNSCxas8cktbqw1n", yearly: "price_producer_yearly_REPLACE" },
 };
 
 function PlanPicker({ onSelectPlan, compact }) {
@@ -3430,21 +3430,37 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
 // Fetches the file as a blob so the browser triggers "Save to Files"
 // instead of opening a web player. Falls back to anchor click on error.
 async function downloadMp3(url, title, beatId) {
+  // Use the backend proxy route — it streams with Content-Disposition: attachment
+  // which forces iOS to show "Save to Files" instead of opening a media player.
   if (beatId) {
-    apiFetch("/api/producer/beats/" + beatId + "/download", { method: "POST" }).catch(function(){});
+    var proxyUrl = API_BASE + "/api/producer/beats/" + beatId + "/file";
+    var token = getToken();
+    try {
+      var res  = await fetch(proxyUrl, token ? { headers: { Authorization: "Bearer " + token } } : {});
+      var blob = await res.blob();
+      var burl = URL.createObjectURL(blob);
+      var a    = document.createElement("a");
+      a.href     = burl;
+      a.download = (title || "beat") + ".mp3";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function() { URL.revokeObjectURL(burl); }, 10000);
+      return;
+    } catch(e) {
+      // Fall through to direct open
+      window.open(proxyUrl, "_blank");
+      return;
+    }
   }
-  // iOS Safari cannot trigger blob downloads from cross-origin URLs.
-  // Detect iOS and open the file URL directly so the system sheet appears.
+  // No beatId (purchased lease) — try blob fetch, fallback to open
   var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  if (isIOS) {
-    window.open(url, "_blank");
-    return;
-  }
+  if (isIOS) { window.open(url, "_blank"); return; }
   try {
-    const res  = await fetch(url);
-    const blob = await res.blob();
-    const burl = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
+    var res  = await fetch(url);
+    var blob = await res.blob();
+    var burl = URL.createObjectURL(blob);
+    var a    = document.createElement("a");
     a.href     = burl;
     a.download = (title || "beat") + ".mp3";
     document.body.appendChild(a);
@@ -3452,7 +3468,6 @@ async function downloadMp3(url, title, beatId) {
     document.body.removeChild(a);
     setTimeout(function() { URL.revokeObjectURL(burl); }, 10000);
   } catch(e) {
-    // Fallback — open directly
     window.open(url, "_blank");
   }
 }
@@ -3531,8 +3546,8 @@ function BeatCardShell({ beat, accentColor, children, onViewProfile, extraStats 
             <div>
               <div style={{ color: "#888", fontSize: 10, fontWeight: 600, letterSpacing: 0.5 }}>PRODUCER</div>
               <span
-                onClick={function(e) { e.stopPropagation(); if (onViewProfile && beat.producer) onViewProfile(beat.producer); }}
-                style={{ color: accentColor || "#C026D3", fontWeight: 700, fontSize: 13, cursor: onViewProfile && beat.producer ? "pointer" : "default" }}>
+                onClick={function(e) { e.stopPropagation(); if (onViewProfile && (beat.producer_username || beat.producer)) onViewProfile(beat.producer_username || beat.producer); }}
+                style={{ color: accentColor || "#C026D3", fontWeight: 700, fontSize: 13, cursor: onViewProfile && (beat.producer_username || beat.producer) ? "pointer" : "default" }}>
                 {beat.producer}
               </span>
             </div>
@@ -5375,7 +5390,7 @@ function PostSheet({ user, onClose, onPosted }) {
 // PROFILE BEAT CARD — preview + buy from public profiles
 // Reuses the same 30-second enforced preview as BeatLeaseCard
 // =============================================================================
-function ProfileBeatCard({ beat, currentUser }) {
+function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   var [previewing,  setPreviewing]  = React.useState(false);
   var [previewTime, setPreviewTime] = React.useState(0);
   var [buyLoading,  setBuyLoading]  = React.useState(false);
@@ -5466,7 +5481,8 @@ function ProfileBeatCard({ beat, currentUser }) {
     : null;
 
   return (
-    <BeatCardShell beat={beat} accentColor={isFree ? "#22C55E" : "#F59E0B"} extraStats={extraStats}>
+    <BeatCardShell beat={beat} accentColor={isFree ? "#22C55E" : "#F59E0B"} extraStats={extraStats}
+      onViewProfile={onViewProfile ? function() { onViewProfile(beat.producer_username || beat.producer); } : undefined}>
       {buyErr && <div style={{ color: "#F87171", fontSize: 12, marginBottom: 8 }}>{buyErr}</div>}
 
       {beat.url && (
@@ -5612,7 +5628,7 @@ function ImageLightbox({ images, startIndex, onClose }) {
 // =============================================================================
 // CONTENT TABS — shown on every public profile (Beats / Music / Videos)
 // =============================================================================
-function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave }) {
+function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave, onViewProfile }) {
   var [tab, setTab]           = React.useState("posts");
   var [items, setItems]       = React.useState([]);
   var [loading, setLoading]   = React.useState(false);
@@ -5966,7 +5982,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave 
         <div style={{ padding: "0 16px" }}>
           {profile && profile.beats && profile.beats.length > 0 ? (
             profile.beats.map(function(beat) {
-              return <ProfileBeatCard key={beat.id} beat={beat} currentUser={currentUser} />;
+              return <ProfileBeatCard key={beat.id} beat={beat} currentUser={currentUser} onViewProfile={onViewProfile} />;
             })
           ) : (
             <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
@@ -6304,8 +6320,8 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
   const [following,    setFollowing]    = useState(false);
   const [followLoading,setFollowLoading]= useState(false);
   const [badgePopup,   setBadgePopup]   = useState(null);
-  // followList: null | "followers" | "following"
   const [followList,   setFollowList]   = useState(null);
+  const [nestedProfile,setNestedProfile]= useState(null);
 
   useEffect(() => {
     const endpoint = currentUser
@@ -6364,7 +6380,23 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
             mode={followList}
             currentUser={currentUser}
             onBack={() => setFollowList(null)}
-            onViewProfile={(u) => { setFollowList(null); /* parent handles navigation */ onBack && typeof onBack === "function" && onBack(u); }}
+            onViewProfile={(u) => { setFollowList(null); setNestedProfile(u); }}
+          />
+        </div>
+      )}
+
+      {/* ── Nested profile overlay (producer name tapped on beat card) ── */}
+      {nestedProfile && (
+        <div style={{ position:"fixed", inset:0, zIndex:6000, background:"#0a0a0a", overflowY:"auto", WebkitOverflowScrolling:"touch" }}
+          onTouchMove={function(e){ e.stopPropagation(); }}>
+          <PublicProfileScreen
+            username={nestedProfile}
+            onBack={() => setNestedProfile(null)}
+            onPlay={onPlay}
+            savedIds={savedIds}
+            onSave={onSave}
+            currentUser={currentUser}
+            hideBack={false}
           />
         </div>
       )}
@@ -6459,7 +6491,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
             {isProd && <span onClick={() => setBadgePopup({ icon:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
-            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Chief Executive Officer" })} />}
+            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Verified Chief Executive Officer" })} />}
             {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
           </div>
         )}
@@ -6606,7 +6638,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
       {/* ── Content tabs: Beats / Music / Videos ── */}
       <div style={{ paddingBottom: "calc(100px + env(safe-area-inset-bottom))" }}>
-        <ContentTabs username={username} profile={profile} currentUser={currentUser} onPlay={onPlay} savedIds={savedIds} onSave={onSave} />
+        <ContentTabs username={username} profile={profile} currentUser={currentUser} onPlay={onPlay} savedIds={savedIds} onSave={onSave} onViewProfile={function(u){ setNestedProfile(u); }} />
       </div>
     </div>
   );
