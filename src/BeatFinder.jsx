@@ -1921,9 +1921,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           title={beat.title}
         />
-        {/* BeatFinder branded overlay — covers YouTube suggested videos and UI
-            while allowing audio to play through. Pointer events disabled so
-            the YouTube play/pause controls still work underneath. */}
+        {/* BeatFinder branded overlay — visual only, no pointer events */}
         <img
           src={BF_OVERLAY_IMG}
           alt=""
@@ -1936,18 +1934,24 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
             userSelect: "none",
           }}
         />
-        {/* Bottom-left blocker — covers timestamp + skip-back button area */}
+        {/* Touch blocker — bottom-left: suggested video thumbnail */}
         <div style={{
           position: "absolute", bottom: 0, left: 0,
-          width: "38%", height: 52,
-          zIndex: 20, background: "transparent",
-        }} />
-        {/* Bottom-right blocker — covers suggested video thumbnail area */}
+          width: "45%", height: 90,
+          zIndex: 20,
+        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
+        {/* Touch blocker — bottom-right: channel icon / more videos */}
         <div style={{
           position: "absolute", bottom: 0, right: 0,
-          width: "38%", height: 52,
-          zIndex: 20, background: "transparent",
-        }} />
+          width: "45%", height: 90,
+          zIndex: 20,
+        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
+        {/* Touch blocker — top bar: title, settings, CC icons */}
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0,
+          height: 50,
+          zIndex: 20,
+        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
       </div>
       <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
         <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4, lineHeight: 1.4 }}>
