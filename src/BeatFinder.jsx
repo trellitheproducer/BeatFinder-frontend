@@ -4012,8 +4012,6 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
         />
       </div>
     );
-      </div>
-    );
   };
 
   const SectionHeader = ({ emoji, title, subtitle, color }) => (
