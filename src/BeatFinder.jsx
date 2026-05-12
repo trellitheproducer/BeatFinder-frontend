@@ -1472,10 +1472,52 @@ function barQuality(bar) {
 // RHYME FINDER
 // =============================================================================
 function RhymeFinder({ onClose, onInsert }) {
+  // ── All hooks first ──────────────────────────────────────────────────────
   const [word,     setWord]     = useState("");
   const [results,  setResults]  = useState(null);
   const [loading,  setLoading]  = useState(false);
   const [searched, setSearched] = useState("");
+  var resultsRef = React.useRef(null);
+  var [atTop,    setAtTop]    = React.useState(true);
+  var [atBottom, setAtBottom] = React.useState(false);
+
+  function onResultsScroll() {
+    var el = resultsRef.current;
+    if (!el) return;
+    setAtTop(el.scrollTop <= 4);
+    setAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 4);
+  }
+
+  React.useEffect(function() {
+    var el = resultsRef.current;
+    if (!el) return;
+    setAtTop(true);
+    setAtBottom(el.scrollHeight <= el.clientHeight + 4);
+    el.scrollTop = 0;
+  }, [results]);
+
+  React.useEffect(function() {
+    var el = resultsRef.current;
+    if (!el) return;
+    function onTouchMove(e) {
+      var top    = el.scrollTop === 0;
+      var bot    = el.scrollTop + el.clientHeight >= el.scrollHeight;
+      var goUp   = e.touches[0] && e._touchStartY > e.touches[0].clientY;
+      var goDown = e.touches[0] && e._touchStartY < e.touches[0].clientY;
+      if ((top && goDown) || (bot && goUp)) e.preventDefault();
+      e.stopPropagation();
+    }
+    function onTouchStart(e) {
+      e._touchStartY = e.touches[0] ? e.touches[0].clientY : 0;
+    }
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove",  onTouchMove,  { passive: false });
+    return function() {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove",  onTouchMove);
+    };
+  }, []);
+  // ── End hooks ─────────────────────────────────────────────────────────────
 
   const findRhymes = function() {
     var w = word.trim().toLowerCase();
@@ -1596,51 +1638,6 @@ function RhymeFinder({ onClose, onInsert }) {
       </div>
     );
   };
-
-  // Scroll position tracking for arrow visibility
-  var resultsRef = React.useRef(null);
-  var [atTop,    setAtTop]    = React.useState(true);
-  var [atBottom, setAtBottom] = React.useState(false);
-
-  function onResultsScroll() {
-    var el = resultsRef.current;
-    if (!el) return;
-    setAtTop(el.scrollTop <= 4);
-    setAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 4);
-  }
-
-  // Reset scroll state when new results arrive
-  React.useEffect(function() {
-    var el = resultsRef.current;
-    if (!el) return;
-    setAtTop(true);
-    setAtBottom(el.scrollHeight <= el.clientHeight + 4);
-    el.scrollTop = 0;
-  }, [results]);
-  React.useEffect(function() {
-    var el = resultsRef.current;
-    if (!el) return;
-    function onTouchMove(e) {
-      // Allow scroll only if the element itself is scrollable and not at the boundary
-      var atTop    = el.scrollTop === 0;
-      var atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight;
-      var goingUp  = e.touches[0] && e._touchStartY > e.touches[0].clientY;
-      var goingDown= e.touches[0] && e._touchStartY < e.touches[0].clientY;
-      if ((atTop && goingDown) || (atBottom && goingUp)) {
-        e.preventDefault();
-      }
-      e.stopPropagation();
-    }
-    function onTouchStart(e) {
-      e._touchStartY = e.touches[0] ? e.touches[0].clientY : 0;
-    }
-    el.addEventListener("touchstart", onTouchStart, { passive: true });
-    el.addEventListener("touchmove",  onTouchMove,  { passive: false });
-    return function() {
-      el.removeEventListener("touchstart", onTouchStart);
-      el.removeEventListener("touchmove",  onTouchMove);
-    };
-  }, []);
 
   return (
     <div style={{
