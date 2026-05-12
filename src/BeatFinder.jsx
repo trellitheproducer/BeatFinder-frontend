@@ -3426,24 +3426,15 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
 // =============================================================================
 // BEAT LEASE CARD
 // =============================================================================
-// ── Shared download helper ────────────────────────────────────────
-// ── Forced download helper ────────────────────────────────────────
-// iOS Safari cannot trigger downloads via programmatic <a> clicks or blob URLs.
-// The ONLY reliable method is navigating directly to a backend route that
-// returns Content-Disposition: attachment — Safari then shows its native
-// download/save dialog automatically.
-async function downloadMp3(url, title, beatId) {
-  if (beatId) {
-    var proxyUrl = API_BASE + "/api/producer/beats/" + beatId + "/file";
-    // On ALL platforms: navigate directly to the proxy URL.
-    // The backend returns Content-Disposition: attachment; filename="..."
-    // which triggers Safari's native download dialog on iOS.
-    // On desktop Chrome/Firefox the browser will also download it directly.
-    window.location.href = proxyUrl;
-    return;
-  }
-  // No beatId (purchased lease URL) — same approach
-  window.location.href = url;
+// ── Download helper ───────────────────────────────────────────────
+// iOS Safari 13+ shows a native "Download" confirmation popup when a new tab
+// opens a URL that returns Content-Disposition: attachment.
+// Using window.open(_blank) keeps the app tab open and in focus.
+function downloadMp3(url, title, beatId) {
+  var proxyUrl = beatId
+    ? API_BASE + "/api/producer/beats/" + beatId + "/file"
+    : url;
+  window.open(proxyUrl, "_blank");
 }
 
 // ── Shared 30s PreviewBar ─────────────────────────────────────────
@@ -5374,7 +5365,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   var timerRef  = React.useRef(null);
   var playedRef = React.useRef(false);
   var isFree    = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
-  var accentClr = isFree ? "#22C55E" : "#C026D3";
+  var accentClr = isFree ? "#C026D3" : "#F59E0B";
   var previewId = React.useRef("profile_" + beat.id);
 
   function startPreview() {
@@ -5457,17 +5448,16 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
           {/* Thumbnail */}
           <div style={{
             width: 80, height: 80, borderRadius: 12, flexShrink: 0, overflow: "hidden",
-            background: "linear-gradient(135deg,#1a1a2e," + accentClr + "44)",
+            background: "#0a0a0a",
             border: "1px solid " + accentClr + "33",
             display: "flex", alignItems: "center", justifyContent: "center",
             position: "relative",
           }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ color: accentClr, opacity: 0.6, marginBottom: 2 }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-              </div>
-              <div style={{ color: "#333", fontSize: 7, fontWeight: 700, letterSpacing: 1 }}>BEATFINDER</div>
-            </div>
+            <img
+              src="https://i.ibb.co/v4wcZVJW/IMG-9119.jpg"
+              alt="BeatFinder"
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            />
           </div>
 
           {/* Title + badges */}
@@ -5487,16 +5477,16 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
               {isFree ? (
                 <span style={{
                   display: "inline-flex", alignItems: "center", gap: 5,
-                  background: "rgba(34,197,94,0.12)", border: "1.5px solid #22C55E",
-                  borderRadius: 20, padding: "3px 10px", color: "#22C55E", fontSize: 10, fontWeight: 800,
+                  background: "rgba(192,38,211,0.12)", border: "1.5px solid #C026D3",
+                  borderRadius: 20, padding: "3px 10px", color: "#C026D3", fontSize: 10, fontWeight: 800,
                 }}>
-                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/></svg>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/></svg>
                   FREE DOWNLOAD
                 </span>
               ) : (
                 <span style={{
-                  background: "rgba(192,38,211,0.12)", border: "1.5px solid #C026D3",
-                  borderRadius: 20, padding: "3px 10px", color: "#C026D3", fontSize: 10, fontWeight: 800,
+                  background: "rgba(245,158,11,0.12)", border: "1.5px solid #F59E0B",
+                  borderRadius: 20, padding: "3px 10px", color: "#F59E0B", fontSize: 10, fontWeight: 800,
                 }}>
                   {beat.price}
                 </span>
@@ -5610,13 +5600,13 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
           <button onClick={function(){ downloadMp3(beat.url, beat.title, beat.id); }} style={{
             width: "100%", borderRadius: 14, padding: "15px",
             background: "transparent",
-            border: "2px solid #22C55E",
-            color: "#22C55E", fontWeight: 800, fontSize: 15,
+            border: "2px solid #C026D3",
+            color: "#C026D3", fontWeight: 800, fontSize: 15,
             cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase",
             display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-            boxShadow: "0 0 18px rgba(34,197,94,0.2), inset 0 0 18px rgba(34,197,94,0.04)",
+            boxShadow: "0 0 18px rgba(192,38,211,0.2), inset 0 0 18px rgba(192,38,211,0.04)",
           }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
             Save MP3 to Device
           </button>
 
@@ -5644,12 +5634,12 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
         <div style={{ padding: "0 16px 16px" }}>
           <button onClick={handleBuy} disabled={buyLoading} style={{
             width: "100%", borderRadius: 14, padding: "15px",
-            background: buyLoading ? "transparent" : "linear-gradient(135deg,#C026D3,#7C3AED)",
-            border: "2px solid " + (buyLoading ? "#333" : "#C026D3"),
+            background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
+            border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"),
             color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 15,
             cursor: buyLoading ? "not-allowed" : "pointer", letterSpacing: 0.5,
             display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-            boxShadow: buyLoading ? "none" : "0 0 18px rgba(192,38,211,0.25)",
+            boxShadow: buyLoading ? "none" : "0 0 18px rgba(245,158,11,0.25)",
           }}>
             {buyLoading ? "Loading..." : "Buy Lease — " + beat.price}
           </button>
@@ -6614,7 +6604,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
             {isProd && <span onClick={() => setBadgePopup({ icon:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
-            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Verified Chief Executive Officer" })} />}
+            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Chief Executive Officer" })} />}
             {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
           </div>
         )}
