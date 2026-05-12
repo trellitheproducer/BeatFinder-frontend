@@ -3313,6 +3313,13 @@ async function downloadMp3(url, title, beatId) {
   if (beatId) {
     apiFetch("/api/producer/beats/" + beatId + "/download", { method: "POST" }).catch(function(){});
   }
+  // iOS Safari cannot trigger blob downloads from cross-origin URLs.
+  // Detect iOS and open the file URL directly so the system sheet appears.
+  var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (isIOS) {
+    window.open(url, "_blank");
+    return;
+  }
   try {
     const res  = await fetch(url);
     const blob = await res.blob();
@@ -3325,13 +3332,8 @@ async function downloadMp3(url, title, beatId) {
     document.body.removeChild(a);
     setTimeout(function() { URL.revokeObjectURL(burl); }, 10000);
   } catch(e) {
-    // Fallback — at minimum triggers download attribute
-    const a    = document.createElement("a");
-    a.href     = url;
-    a.download = (title || "beat") + ".mp3";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    // Fallback — open directly
+    window.open(url, "_blank");
   }
 }
 
@@ -3371,48 +3373,63 @@ function PreviewBar({ previewTime, onStop }) {
 function BeatCardShell({ beat, accentColor, children, onViewProfile, extraStats }) {
   const isFree = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
   const priceColor = isFree ? "#22C55E" : (accentColor || "#C026D3");
-  const borderColor = isFree ? "rgba(34,197,94,0.25)" : (accentColor ? accentColor + "40" : "rgba(192,38,211,0.25)");
+  const borderColor = isFree ? "rgba(34,197,94,0.3)" : (accentColor ? accentColor + "55" : "rgba(192,38,211,0.3)");
   return (
     <div style={{
-      background: "linear-gradient(160deg,#141414,#0f0f0f)",
+      background: "linear-gradient(160deg,#181818 0%,#111 60%,#0d0d0d 100%)",
       borderRadius: 18,
       border: "1px solid " + borderColor,
       marginBottom: 14,
       overflow: "hidden",
-      boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
+      boxShadow: "0 6px 28px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)",
     }}>
       {/* Coloured top accent bar */}
-      <div style={{ height: 3, background: "linear-gradient(90deg," + priceColor + "88,transparent)" }} />
+      <div style={{ height: 3, background: "linear-gradient(90deg," + priceColor + "cc, " + priceColor + "22)" }} />
       <div style={{ padding: "16px 16px 18px" }}>
         {/* Title */}
-        <div style={{ color: "white", fontWeight: 800, fontSize: 16, lineHeight: 1.3, marginBottom: 10 }}>
+        <div style={{ color: "white", fontWeight: 800, fontSize: 16, lineHeight: 1.3, marginBottom: 10, letterSpacing: -0.2 }}>
           {beat.title}
         </div>
         {/* Badges row */}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10, alignItems: "center" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12, alignItems: "center" }}>
           {beat.genre && (
-            <span style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>
+            <span style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 20, padding: "4px 11px", fontSize: 11, color: "#F59E0B", fontWeight: 700, letterSpacing: 0.3 }}>
               {beat.genre}
             </span>
           )}
-          <span style={{ background: isFree ? "rgba(34,197,94,0.1)" : "rgba(192,38,211,0.1)", border: "1px solid " + (isFree ? "rgba(34,197,94,0.3)" : "rgba(192,38,211,0.3)"), borderRadius: 20, padding: "3px 10px", fontSize: 11, color: isFree ? "#22C55E" : "#C026D3", fontWeight: 800 }}>
-            {isFree ? "FREE" : beat.price}
+          <span style={{ background: isFree ? "rgba(34,197,94,0.12)" : "rgba(192,38,211,0.12)", border: "1px solid " + (isFree ? "rgba(34,197,94,0.4)" : "rgba(192,38,211,0.4)"), borderRadius: 20, padding: "4px 11px", fontSize: 11, color: isFree ? "#22C55E" : "#C026D3", fontWeight: 800, letterSpacing: 0.3 }}>
+            {isFree ? "FREE DOWNLOAD" : beat.price}
           </span>
           {extraStats}
         </div>
         {/* Producer + stats */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <div style={{ color: "#555", fontSize: 12 }}>
-            By{" "}
-            <span
-              onClick={function(e) { e.stopPropagation(); if (onViewProfile && beat.producer) onViewProfile(beat.producer); }}
-              style={{ color: accentColor || "#C026D3", fontWeight: 700, cursor: onViewProfile && beat.producer ? "pointer" : "default" }}>
-              {beat.producer}
-            </span>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <div style={{ width: 26, height: 26, borderRadius: "50%", background: "linear-gradient(135deg," + (accentColor || "#C026D3") + "55,#0a0a0a)", display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid " + (accentColor || "#C026D3") + "44", flexShrink: 0 }}>
+              <span style={{ color: accentColor || "#C026D3", fontSize: 11, fontWeight: 800 }}>{(beat.producer || "?")[0].toUpperCase()}</span>
+            </div>
+            <div>
+              <div style={{ color: "#888", fontSize: 10, fontWeight: 600, letterSpacing: 0.5 }}>PRODUCER</div>
+              <span
+                onClick={function(e) { e.stopPropagation(); if (onViewProfile && beat.producer) onViewProfile(beat.producer); }}
+                style={{ color: accentColor || "#C026D3", fontWeight: 700, fontSize: 13, cursor: onViewProfile && beat.producer ? "pointer" : "default" }}>
+                {beat.producer}
+              </span>
+            </div>
           </div>
-          <div style={{ color: "#444", fontSize: 11, display: "flex", gap: 10 }}>
-            {beat.downloads > 0 && <span>↓ {beat.downloads}</span>}
-            {beat.playCount > 0 && <span>▷ {fmtCount(beat.playCount)}</span>}
+          <div style={{ color: "#555", fontSize: 11, display: "flex", gap: 10, alignItems: "center" }}>
+            {beat.downloads > 0 && (
+              <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+                {beat.downloads}
+              </span>
+            )}
+            {beat.playCount > 0 && (
+              <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="#555"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg>
+                {fmtCount(beat.playCount)}
+              </span>
+            )}
           </div>
         </div>
         {/* Action area — preview button, player, download/buy */}
@@ -6248,9 +6265,9 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {/* Plan tags */}
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-            {isProd && <span onClick={() => setBadgePopup({ icon:"🎛️", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
-            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"👑", text:"Verified Chief Executive Officer" })} />}
-            {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"🎤", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
+            {isProd && <span onClick={() => setBadgePopup({ icon:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
+            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Verified Chief Executive Officer" })} />}
+            {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
           </div>
         )}
 
@@ -6260,18 +6277,18 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         )}
 
         {/* Stats inline */}
-        <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: isOwnProfile ? 10 : 14 }}>
+        <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: isOwnProfile ? 10 : 14, flexWrap: "wrap" }}>
           {[
             { val: profile.followerCount || 0, label: "Followers", onClick: () => setFollowList("followers") },
             { val: profile.followingCount || 0, label: "Following", onClick: () => setFollowList("following") },
             { val: profile.beats?.length || 0,  label: "Beats",     onClick: null },
-            { val: profile.playCount || 0,      label: "Plays",     onClick: null, icon: "▶" },
+            { val: profile.playCount || 0,      label: "Plays",     onClick: null, icon: "play" },
           ].map((s, i) => (
             <div key={s.label}
               onClick={s.onClick || undefined}
               style={{ display: "flex", alignItems: "center", gap: 4, cursor: s.onClick ? "pointer" : "default" }}>
               {i > 0 && <span style={{ color: "#333", marginRight: 4 }}>·</span>}
-              {s.icon && <span style={{ color: "#555", fontSize: 12 }}>{s.icon}</span>}
+              {s.icon && <svg width="11" height="11" viewBox="0 0 24 24" fill="#555" style={{flexShrink:0}}><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg>}
               <span style={{ color: s.onClick ? "white" : "white", fontWeight: 700, fontSize: 14 }}>{fmtCount(s.val)}</span>
               <span style={{ color: s.onClick ? "#aaa" : "#555", fontSize: 13, marginLeft: 2, textDecoration: s.onClick ? "underline" : "none", textDecorationColor: "#444" }}>{s.label}</span>
             </div>
@@ -6395,7 +6412,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
       </div>
 
       {/* ── Content tabs: Beats / Music / Videos ── */}
-      <div style={{ paddingBottom: 100 }}>
+      <div style={{ paddingBottom: "calc(100px + env(safe-area-inset-bottom))" }}>
         <ContentTabs username={username} profile={profile} currentUser={currentUser} onPlay={onPlay} savedIds={savedIds} onSave={onSave} />
       </div>
     </div>
@@ -7838,12 +7855,12 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         {user.username && <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>@{user.username}</div>}
         <div style={{ marginTop: 8 }}>
           {user.isPro && (
-            <span onClick={() => setOwnBadgePopup({ icon:"🎛️", text:"This user is currently subscribed to Producer Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 14px", color:"#C026D3", fontWeight:800, fontSize:12, marginRight:6, cursor:"pointer" }}>
+            <span onClick={() => setOwnBadgePopup({ icon:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 14px", color:"#C026D3", fontWeight:800, fontSize:12, marginRight:6, cursor:"pointer" }}>
               <VerifiedBadge size={18} /> Producer Pro
             </span>
           )}
-          {user.isArtistPro && !user.isPro && <span onClick={() => setOwnBadgePopup({ icon:"🎤", text:"This user is currently subscribed to Artist Pro" })} style={{ display:"inline-block", background:"rgba(245,158,11,0.2)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 14px", color:"#F59E0B", fontWeight:800, fontSize:12, cursor:"pointer" }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
-          {user.username === "Trelli" && <CEOBadge onClick={() => setOwnBadgePopup({ icon:"👑", text:"Verified Chief Executive Officer" })} />}
+          {user.isArtistPro && !user.isPro && <span onClick={() => setOwnBadgePopup({ icon:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ display:"inline-block", background:"rgba(245,158,11,0.2)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 14px", color:"#F59E0B", fontWeight:800, fontSize:12, cursor:"pointer" }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
+          {user.username === "Trelli" && <CEOBadge onClick={() => setOwnBadgePopup({ icon:"ceo", text:"Verified Chief Executive Officer" })} />}
         </div>
         <BadgeInfoPopup message={ownBadgePopup} onClose={() => setOwnBadgePopup(null)} />
       </div>
@@ -11406,6 +11423,16 @@ function CEOBadge({ onClick }) {
 
 function BadgeInfoPopup({ message, onClose }) {
   if (!message) return null;
+  function BadgeIcon({ type }) {
+    if (type === "ceo") return <GoldVerifiedBadge size={44} />;
+    if (type === "producer") return <VerifiedBadge size={44} />;
+    if (type === "artist") return (
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="1.5" strokeLinecap="round">
+        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+      </svg>
+    );
+    return null;
+  }
   return (
     <>
       <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:99998, background:"rgba(0,0,0,0.6)" }}/>
@@ -11416,7 +11443,7 @@ function BadgeInfoPopup({ message, onClose }) {
         boxShadow:"0 16px 60px rgba(0,0,0,0.85)",
         display:"flex", flexDirection:"column", alignItems:"center", gap:14, textAlign:"center",
       }}>
-        <div style={{ fontSize:38 }}>{message.icon}</div>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center" }}><BadgeIcon type={message.icon} /></div>
         <div style={{ color:"white", fontSize:15, fontWeight:600, lineHeight:1.5 }}>{message.text}</div>
         <button onClick={onClose} style={{
           marginTop:4, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.15)",
@@ -13496,12 +13523,19 @@ function StudioScreen({ user, onExit }) {
     let mode = "new";
     if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
     else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
-    rulerDragRef.current = { mode, startX: e.clientX, startT: t };
+    rulerDragRef.current = { mode, startX: e.clientX, startT: t, committed: mode !== "new" };
 
-    if (mode === "new") { setLoopIn(t); setLoopOut(snapToBar(t + spb)); } // don't auto-enable — user must toggle loop button
-
+    // Do NOT auto-create loop region on mousedown for empty areas — wait for drag
     const onMove = function (me) {
       const nt = snapToBar(rulerTimeFromClientX(me.clientX));
+      if (!rulerDragRef.current) return;
+      const dx = Math.abs(me.clientX - rulerDragRef.current.startX);
+      // Commit new loop only once user has dragged at least 4px
+      if (!rulerDragRef.current.committed && dx > 4) {
+        rulerDragRef.current.committed = true;
+        if (rulerDragRef.current.mode === "new") { setLoopIn(rulerDragRef.current.startT); setLoopOut(snapToBar(rulerDragRef.current.startT + spb)); }
+      }
+      if (!rulerDragRef.current.committed) return;
       if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
       else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spb)); }
       else {
@@ -13527,9 +13561,9 @@ function StudioScreen({ user, onExit }) {
     let mode = "new";
     if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
     else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
-    rulerDragRef.current = { mode, startT: t };
+    rulerDragRef.current = { mode, startT: t, startX: e.touches[0].clientX, committed: mode !== "new" };
 
-    if (mode === "new") { setLoopIn(t); setLoopOut(snapToBar(t + spb)); } // don't auto-enable — user must toggle loop button
+    // Do NOT auto-create loop region on touch — wait for drag movement
   };
 
   const handleRulerTouchMove = function (e) {
@@ -13537,7 +13571,18 @@ function StudioScreen({ user, onExit }) {
     e.stopPropagation();
     if (!rulerDragRef.current) return;
     const nt = snapToBar(rulerTimeFromClientX(e.touches[0].clientX));
-    if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
+    const dx = Math.abs(e.touches[0].clientX - (rulerDragRef.current.startX || 0));
+    if (!rulerDragRef.current.committed && dx > 4) {
+      rulerDragRef.current.committed = true;
+      if (rulerDragRef.current.mode === "new") { setLoopIn(rulerDragRef.current.startT); setLoopOut(snapToBar(rulerDragRef.current.startT + spb)); }
+    }
+    if (!rulerDragRef.current.committed) return;
+    if (rulerDragRef.current.mode === "moveLoop") {
+      const dtMove = (e.touches[0].clientX - rulerDragRef.current.startX) / effectivePPS;
+      const newIn = Math.max(0, snapToBar(rulerDragRef.current.startIn + dtMove));
+      setLoopIn(newIn);
+      setLoopOut(newIn + rulerDragRef.current.duration);
+    } else if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
     else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spb)); }
     else {
       if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spb));
@@ -16366,8 +16411,33 @@ userPickedMicRef.current = true;
                   );
                 })}
                 {loopEnabled&&loopOut>loopIn&&(
-                  <div style={{ position:"absolute", left:loopIn*effectivePPS, width:(loopOut-loopIn)*effectivePPS, top:0, bottom:0, background:"rgba(59,130,246,0.1)", borderLeft:"2px solid #3B82F6", borderRight:"2px solid #3B82F6", pointerEvents:"none" }}>
-                    <span style={{ position:"absolute", top:4, left:4, color:"#3B82F6", fontSize:8, fontWeight:700 }}>LOOP</span>
+                  <div
+                    onMouseDown={function(e){
+                      e.stopPropagation();
+                      const startX = e.clientX;
+                      const startIn = loopIn;
+                      const startOut = loopOut;
+                      const duration = startOut - startIn;
+                      const onMove = function(me){
+                        const dx = me.clientX - startX;
+                        const dt = dx / effectivePPS;
+                        const newIn = Math.max(0, snapToBar(startIn + dt));
+                        setLoopIn(newIn);
+                        setLoopOut(newIn + duration);
+                      };
+                      const onUp = function(){ document.removeEventListener("mousemove",onMove); document.removeEventListener("mouseup",onUp); };
+                      document.addEventListener("mousemove",onMove);
+                      document.addEventListener("mouseup",onUp);
+                    }}
+                    onTouchStart={function(e){
+                      e.stopPropagation();
+                      const startX = e.touches[0].clientX;
+                      const startIn = loopIn;
+                      const duration = loopOut - startIn;
+                      rulerDragRef.current = { mode:"moveLoop", startX, startIn, duration, committed:false };
+                    }}
+                    style={{ position:"absolute", left:loopIn*effectivePPS, width:(loopOut-loopIn)*effectivePPS, top:0, bottom:0, background:"rgba(59,130,246,0.15)", borderLeft:"2px solid #3B82F6", borderRight:"2px solid #3B82F6", cursor:"grab", touchAction:"none" }}>
+                    <span style={{ position:"absolute", top:4, left:4, color:"#3B82F6", fontSize:8, fontWeight:700, pointerEvents:"none", userSelect:"none" }}>LOOP</span>
                   </div>
                 )}
               </div>
