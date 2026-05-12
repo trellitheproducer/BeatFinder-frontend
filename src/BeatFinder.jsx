@@ -3563,18 +3563,38 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
 // BEAT LEASE CARD
 // =============================================================================
 // ── Download helper ───────────────────────────────────────────────
-// On iOS Safari, the ONLY way to get the native "Do you want to download?"
-// popup is window.open(_blank) pointing to a URL that returns
-// Content-Disposition: attachment. Blob fetch + a.click() opens an
-// external page instead. This is an iOS Safari limitation.
+// iOS Safari download behaviour:
+// - window.open(_blank)  → opens new tab, shows blank/frozen page
+// - blob fetch + a.click → downloads blob but opens external player page
+// - window.location.href → navigates current page away (bad)
+// - <a href download>    → ignored by iOS Safari (cross-origin)
+//
+// CORRECT approach for iOS Safari:
+// Create a hidden <a> with the proxy URL and click it from a user gesture.
+// Safari sees Content-Disposition: attachment and shows the native
+// "Do you want to download?" popup WITHOUT opening a new page.
+// The CORS headers on the backend allow this cross-origin.
 function downloadMp3(url, title, beatId) {
   var proxyUrl = beatId
     ? API_BASE + "/api/producer/beats/" + beatId + "/file"
     : url;
-  window.open(proxyUrl, "_blank");
+  var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
+
+  // Hidden anchor click — the industry standard forced download trigger.
+  // Must happen synchronously inside the user gesture (onClick) to work on iOS.
+  var a = document.createElement("a");
+  a.href     = proxyUrl;
+  a.download = filename;          // hint filename to Safari
+  a.rel      = "noopener";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function() {
+    document.body.removeChild(a);
+  }, 1000);
 }
 
-// ── Download Button — no loading state needed (opens instantly) ───
+// ── Download Button ───────────────────────────────────────────────
 function DownloadButton({ url, title, beatId, style, children }) {
   return (
     <button
@@ -6855,7 +6875,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
             {isProd && <span onClick={() => setBadgePopup({ icon:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
-            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Verified Chief Executive Officer" })} />}
+            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Chief Executive Officer" })} />}
             {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
           </div>
         )}
