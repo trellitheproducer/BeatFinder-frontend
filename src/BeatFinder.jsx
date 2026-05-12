@@ -1086,7 +1086,7 @@ const GRAD = [
 ];
 const initials = n => n.split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase();
 const watchUrl  = id => `https://www.youtube.com/watch?v=${id}`;
-const embedUrl  = id => `https://www.youtube.com/embed/${id}?autoplay=1&playsinline=1&rel=0&modestbranding=1&disablekb=1&iv_load_policy=3&fs=0&color=white`;
+const embedUrl  = id => `https://www.youtube.com/embed/${id}?autoplay=1&playsinline=1&rel=0&modestbranding=1&disablekb=1&iv_load_policy=3&fs=0&color=white&showinfo=0&controls=1&loop=1&playlist=${id}`;
 
 // =============================================================================
 // ARTIST DATABASE
@@ -1913,22 +1913,57 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
       {/* Wrap iframe in a relative container with a transparent overlay.
           The suggested videos and "Watch on YouTube" bar appear at the BOTTOM.
           Overlay covers bottom 50px to block those clicks while play button in middle works. */}
-      <div style={{ position: "relative", width: "100%", height: 220, flexShrink: 0, background: "#000" }}>
+      <div style={{ position: "relative", width: "100%", height: 220, flexShrink: 0, background: "#000" }}
+        ref={function(el){
+          if (!el) return;
+          // Thumbnail-first: show thumbnail, load iframe only on tap
+          if (el._atInit) return;
+          el._atInit = true;
+          el._playing = false;
+
+          // Create thumbnail overlay
+          const overlay = document.createElement("div");
+          overlay.style.cssText = "position:absolute;inset:0;z-index:20;cursor:pointer;background:#000;";
+
+          const thumb = document.createElement("img");
+          thumb.src = "https://img.youtube.com/vi/" + beat.videoId + "/hqdefault.jpg";
+          thumb.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.85;";
+
+          const playBtn = document.createElement("div");
+          playBtn.style.cssText = "position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:60px;height:60px;border-radius:50%;background:rgba(255,0,0,0.85);display:flex;align-items:center;justify-content:center;box-shadow:0 0 20px rgba(0,0,0,0.6);";
+          playBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>';
+
+          overlay.appendChild(thumb);
+          overlay.appendChild(playBtn);
+
+          // Bottom blocker — always present over iframe to block suggested videos
+          const bottomBlock = document.createElement("div");
+          bottomBlock.style.cssText = "position:absolute;bottom:0;left:0;right:0;height:55px;z-index:15;background:transparent;";
+
+          overlay.addEventListener("click", function() {
+            if (el._playing) return;
+            el._playing = true;
+            const iframe = el.querySelector("iframe");
+            if (iframe) iframe.src = embedUrl(beat.videoId);
+            overlay.style.display = "none";
+            el.appendChild(bottomBlock);
+          });
+          overlay.addEventListener("touchend", function(e) {
+            e.preventDefault();
+            overlay.click();
+          });
+
+          el.appendChild(overlay);
+        }}
+      >
         <iframe
           key={beat.videoId}
-          src={embedUrl(beat.videoId)}
+          src="about:blank"
           width="100%" height="220"
           style={{ display: "block", border: "none", background: "#000", position: "absolute", top: 0, left: 0 }}
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           title={beat.title}
         />
-        {/* Block the bottom bar where "Watch on YouTube" and suggested video links appear */}
-        <div style={{
-          position: "absolute", bottom: 0, left: 0, right: 0,
-          height: 50,
-          zIndex: 10,
-          background: "transparent",
-        }} />
       </div>
       <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
         <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4, lineHeight: 1.4 }}>
