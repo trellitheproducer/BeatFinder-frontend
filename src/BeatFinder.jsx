@@ -3306,85 +3306,167 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
 // =============================================================================
 // BEAT LEASE CARD
 // =============================================================================
+// ── Shared download helper ────────────────────────────────────────
+// Fetches the file as a blob so the browser triggers "Save to Files"
+// instead of opening a web player. Falls back to anchor click on error.
+async function downloadMp3(url, title, beatId) {
+  if (beatId) {
+    apiFetch("/api/producer/beats/" + beatId + "/download", { method: "POST" }).catch(function(){});
+  }
+  try {
+    const res  = await fetch(url);
+    const blob = await res.blob();
+    const burl = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = burl;
+    a.download = (title || "beat") + ".mp3";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(burl); }, 10000);
+  } catch(e) {
+    // Fallback — at minimum triggers download attribute
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = (title || "beat") + ".mp3";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+}
+
+// ── Shared 30s PreviewBar ─────────────────────────────────────────
+function PreviewBar({ previewTime, onStop }) {
+  return (
+    <div style={{
+      background: "linear-gradient(135deg,#0d0d0d,#111)",
+      border: "1px solid #1e1e1e", borderRadius: 12,
+      padding: "10px 14px", display: "flex", alignItems: "center", gap: 12,
+      marginBottom: 8,
+    }}>
+      <button onClick={onStop} style={{
+        background: "rgba(99,91,255,0.15)", border: "1px solid #635BFF",
+        borderRadius: 8, color: "#635BFF", cursor: "pointer",
+        width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center",
+        flexShrink: 0, fontSize: 12, fontWeight: 900,
+      }}>■</button>
+      <div style={{ flex: 1, height: 4, background: "#222", borderRadius: 2, overflow: "hidden" }}>
+        <div style={{
+          height: "100%", borderRadius: 2,
+          background: "linear-gradient(90deg,#635BFF,#C026D3)",
+          width: (previewTime / 30 * 100) + "%",
+          transition: "width 0.1s linear",
+        }} />
+      </div>
+      <span style={{ color: "#555", fontSize: 11, fontWeight: 700, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
+        {Math.floor(previewTime)}s / 30s
+      </span>
+    </div>
+  );
+}
+
+// ── Shared beat card shell ────────────────────────────────────────
+// Renders title, genre/price badges, producer, stats row, and action area.
+// Used by BeatLeaseCard, ProfileBeatCard, and the MembersBeatsTab free card.
+function BeatCardShell({ beat, accentColor, children, onViewProfile, extraStats }) {
+  const isFree = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
+  const priceColor = isFree ? "#22C55E" : (accentColor || "#C026D3");
+  const borderColor = isFree ? "rgba(34,197,94,0.25)" : (accentColor ? accentColor + "40" : "rgba(192,38,211,0.25)");
+  return (
+    <div style={{
+      background: "linear-gradient(160deg,#141414,#0f0f0f)",
+      borderRadius: 18,
+      border: "1px solid " + borderColor,
+      marginBottom: 14,
+      overflow: "hidden",
+      boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
+    }}>
+      {/* Coloured top accent bar */}
+      <div style={{ height: 3, background: "linear-gradient(90deg," + priceColor + "88,transparent)" }} />
+      <div style={{ padding: "16px 16px 18px" }}>
+        {/* Title */}
+        <div style={{ color: "white", fontWeight: 800, fontSize: 16, lineHeight: 1.3, marginBottom: 10 }}>
+          {beat.title}
+        </div>
+        {/* Badges row */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10, alignItems: "center" }}>
+          {beat.genre && (
+            <span style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "3px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>
+              {beat.genre}
+            </span>
+          )}
+          <span style={{ background: isFree ? "rgba(34,197,94,0.1)" : "rgba(192,38,211,0.1)", border: "1px solid " + (isFree ? "rgba(34,197,94,0.3)" : "rgba(192,38,211,0.3)"), borderRadius: 20, padding: "3px 10px", fontSize: 11, color: isFree ? "#22C55E" : "#C026D3", fontWeight: 800 }}>
+            {isFree ? "FREE" : beat.price}
+          </span>
+          {extraStats}
+        </div>
+        {/* Producer + stats */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <div style={{ color: "#555", fontSize: 12 }}>
+            By{" "}
+            <span
+              onClick={function(e) { e.stopPropagation(); if (onViewProfile && beat.producer) onViewProfile(beat.producer); }}
+              style={{ color: accentColor || "#C026D3", fontWeight: 700, cursor: onViewProfile && beat.producer ? "pointer" : "default" }}>
+              {beat.producer}
+            </span>
+          </div>
+          <div style={{ color: "#444", fontSize: 11, display: "flex", gap: 10 }}>
+            {beat.downloads > 0 && <span>↓ {beat.downloads}</span>}
+            {beat.playCount > 0 && <span>▷ {fmtCount(beat.playCount)}</span>}
+          </div>
+        </div>
+        {/* Action area — preview button, player, download/buy */}
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function BeatLeaseCard({ beat, user, onViewProfile }) {
   const [loading,     setLoading]     = useState(false);
   const [err,         setErr]         = useState("");
   const [previewing,  setPreviewing]  = useState(false);
-  const [previewTime, setPreviewTime] = useState(0);   // 0-30 seconds elapsed
-  const audioRef    = React.useRef(null);
-  const timerRef    = React.useRef(null);
-  const isFree  = beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
-
-  // Enforce 30-second hard stop — no scrubbing, no skipping
-  var previewId = React.useRef("lease_" + beat.id);
+  const [previewTime, setPreviewTime] = useState(0);
+  const audioRef = React.useRef(null);
+  const timerRef = React.useRef(null);
+  const isFree   = beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
+  var previewId  = React.useRef("lease_" + beat.id);
 
   function startPreview() {
     if (previewing) { stopPreview(); return; }
     startGlobalPreview(previewId.current);
-    setPreviewing(true);
-    setPreviewTime(0);
+    setPreviewing(true); setPreviewTime(0);
   }
-
   function stopPreview() {
     clearGlobalPreview(previewId.current);
-    setPreviewing(false);
-    setPreviewTime(0);
-    clearInterval(timerRef.current);
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-    }
+    setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
   }
-
   useGlobalPreviewStop(previewId.current, React.useCallback(function() {
-    setPreviewing(false);
-    setPreviewTime(0);
-    clearInterval(timerRef.current);
+    setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
   }, []));
-
-  // When audio starts playing, enforce the 30s limit via a timer
-  function onAudioPlay(e) {
+  function onAudioPlay() {
     clearInterval(timerRef.current);
     var start = Date.now() - (previewTime * 1000);
     timerRef.current = setInterval(function() {
-      var elapsed = (Date.now() - start) / 1000;
-      setPreviewTime(Math.min(elapsed, 30));
-      if (elapsed >= 30) {
-        clearInterval(timerRef.current);
-        stopPreview();
-      }
+      var el = (Date.now() - start) / 1000;
+      setPreviewTime(Math.min(el, 30));
+      if (el >= 30) { clearInterval(timerRef.current); stopPreview(); }
     }, 100);
   }
-
-  function onAudioPause() {
-    clearInterval(timerRef.current);
-  }
-
-  // Lock currentTime to the preview window — prevent scrubbing past 30s
   function onTimeUpdate(e) {
-    var el = e.target;
-    var maxTime = (el.dataset.startTime ? parseFloat(el.dataset.startTime) : 0) + 30;
-    if (el.currentTime >= maxTime) {
-      el.pause();
-      stopPreview();
-    }
-    // Also lock backward scrubbing before startTime
-    var startT = el.dataset.startTime ? parseFloat(el.dataset.startTime) : 0;
-    if (el.currentTime < startT) {
-      el.currentTime = startT;
-    }
+    var el = e.target, st = parseFloat(el.dataset.startTime || 0);
+    if (el.currentTime >= st + 30) { el.pause(); stopPreview(); }
+    if (el.currentTime < st) el.currentTime = st;
   }
-
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
 
   const handleBuyLease = async () => {
     if (!user) { setErr("Please log in to purchase a lease"); return; }
-    setLoading(true);
-    setErr("");
+    setLoading(true); setErr("");
     try {
       const result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
-      // Reset loading if user returns from Stripe without completing payment
       const resetOnReturn = () => {
         if (document.visibilityState === "visible") {
           document.removeEventListener("visibilitychange", resetOnReturn);
@@ -3393,125 +3475,60 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
       };
       document.addEventListener("visibilitychange", resetOnReturn);
       window.location.href = result.checkout_url;
-    } catch (e) {
-      setErr(e.message);
-      setLoading(false);
-    }
-  };
-
-  const handleDownload = async () => {
-    try {
-      await apiFetch("/api/producer/beats/" + beat.id + "/download", { method: "POST" });
-      const a = document.createElement("a");
-      a.href     = beat.url;
-      a.download = beat.title + ".mp3";
-      a.target   = "_blank";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch (e) {
-      console.error("Download error:", e);
-    }
+    } catch (e) { setErr(e.message); setLoading(false); }
   };
 
   return (
-    <div style={{ background: "#111", borderRadius: 14, padding: "16px", marginBottom: 14, border: "1px solid rgba(245,158,11,0.2)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ color: "white", fontWeight: 700, fontSize: 15, lineHeight: 1.4, marginBottom: 6 }}>
-            {beat.title}
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>
-              {beat.genre}
-            </div>
-            <div style={{ background: isFree ? "rgba(34,197,94,0.15)" : "rgba(192,38,211,0.15)", border: "1px solid " + (isFree ? "rgba(34,197,94,0.3)" : "rgba(192,38,211,0.3)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: isFree ? "#22C55E" : "#C026D3", fontWeight: 700 }}>
-              {isFree ? "FREE" : beat.price}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>
-        By <span onClick={function(e) { e.stopPropagation(); if (onViewProfile && beat.producer) onViewProfile(beat.producer); }} style={{ color: "#C026D3", fontWeight: 700, cursor: onViewProfile && beat.producer ? "pointer" : "default" }}>{beat.producer}</span> • {beat.downloads} downloads
-      </div>
-
+    <BeatCardShell beat={beat} accentColor={isFree ? "#22C55E" : "#C026D3"} onViewProfile={onViewProfile}>
       {err && <div style={{ color: "#F87171", fontSize: 12, marginBottom: 10 }}>{err}</div>}
 
-      <button
-        onClick={startPreview}
-        style={{
-          width: "100%", borderRadius: 12, padding: "11px",
-          background: previewing ? "rgba(99,91,255,0.2)" : "transparent",
-          border: "1.5px solid " + (previewing ? "#635BFF" : "#333"),
-          color: previewing ? "#635BFF" : "#888",
-          fontWeight: 700, fontSize: 14, cursor: "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-          marginBottom: 10,
-        }}
-      >
-        {previewing ? "■ Stop Preview" : "▶ Preview Beat"}
+      {/* Preview toggle */}
+      <button onClick={startPreview} style={{
+        width: "100%", borderRadius: 12, padding: "11px",
+        background: previewing ? "rgba(99,91,255,0.15)" : "rgba(255,255,255,0.03)",
+        border: "1.5px solid " + (previewing ? "#635BFF" : "#2a2a2a"),
+        color: previewing ? "#635BFF" : "#666",
+        fontWeight: 700, fontSize: 14, cursor: "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        marginBottom: 10,
+      }}>
+        {previewing
+          ? <><span style={{ fontSize:12 }}>■</span> Stop Preview</>
+          : <><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg> Preview Beat</>
+        }
       </button>
 
       {previewing && beat.url && (
-        <div style={{ marginBottom: 10 }}>
-          {/* Hidden audio — no controls so users cannot scrub or seek */}
-          <audio
-            ref={audioRef}
-            src={beat.url + "#t=45"}
-            autoPlay
-            data-start-time="45"
-            onPlay={onAudioPlay}
-            onPause={onAudioPause}
-            onTimeUpdate={onTimeUpdate}
-            onEnded={stopPreview}
-          />
-          {/* Custom minimal preview bar — shows time only, no scrubbing */}
-          <div style={{ background: "#1a1a1a", borderRadius: 10, padding: "10px 14px",
-            border: "1px solid #2a2a2a", display: "flex", alignItems: "center", gap: 12 }}>
-            <button onClick={stopPreview}
-              style={{ background: "none", border: "none", color: "#635BFF", cursor: "pointer",
-                fontSize: 18, padding: 0, flexShrink: 0, lineHeight: 1 }}>
-              ■
-            </button>
-            {/* Progress bar — display only, not interactive */}
-            <div style={{ flex: 1, height: 4, background: "#333", borderRadius: 2, overflow: "hidden" }}>
-              <div style={{ height: "100%", borderRadius: 2,
-                background: "linear-gradient(90deg,#635BFF,#C026D3)",
-                width: (previewTime / 30 * 100) + "%",
-                transition: "width 0.1s linear" }} />
-            </div>
-            <div style={{ color: "#888", fontSize: 12, fontWeight: 600, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
-              {Math.floor(previewTime)}s / 30s
-            </div>
-          </div>
-          <div style={{ color: "#555", fontSize: 11, textAlign: "center", marginTop: 6 }}>
-            30s preview only
-          </div>
-        </div>
+        <>
+          <audio ref={audioRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
+            onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
+            onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
+          <PreviewBar previewTime={previewTime} onStop={stopPreview} />
+        </>
       )}
 
       {isFree ? (
-        <button onClick={handleDownload} style={{
-          width: "100%", borderRadius: 12, padding: "14px",
+        <button onClick={function(){ downloadMp3(beat.url, beat.title, beat.id); }} style={{
+          width: "100%", borderRadius: 12, padding: "14px", border: "none",
           background: "linear-gradient(135deg,#22C55E,#16A34A)",
-          border: "none", color: "white", fontWeight: 800, fontSize: 15,
-          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          color: "white", fontWeight: 800, fontSize: 15, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
         }}>
-          ↓ Download Free MP3
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+          Save MP3 to Device
         </button>
       ) : (
         <button onClick={handleBuyLease} disabled={loading} style={{
-          width: "100%", borderRadius: 12, padding: "14px",
-          background: loading ? "#333" : "linear-gradient(135deg,#C026D3,#7C3AED)",
-          border: "none", color: "white", fontWeight: 800, fontSize: 15,
+          width: "100%", borderRadius: 12, padding: "14px", border: "none",
+          background: loading ? "#1a1a1a" : "linear-gradient(135deg,#C026D3,#7C3AED)",
+          color: loading ? "#555" : "white", fontWeight: 800, fontSize: 15,
           cursor: loading ? "not-allowed" : "pointer",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
         }}>
-          {loading ? "Loading..." : "Buy Lease - " + beat.price}
+          {loading ? "Loading..." : "Buy Lease — " + beat.price}
         </button>
       )}
-    </div>
+    </BeatCardShell>
   );
 }
 
@@ -3593,17 +3610,10 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
               <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{lease.beat_title}</div>
               <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>By {lease.producer} • {lease.price} • {new Date(lease.purchased_at).toLocaleDateString()}</div>
               <button
-                onClick={() => {
-                  const a = document.createElement("a");
-                  a.href = lease.beat_url;
-                  a.download = lease.beat_title + ".mp3";
-                  a.target = "_blank";
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                }}
-                style={{ width: "100%", borderRadius: 12, padding: "13px", background: "linear-gradient(135deg,#22C55E,#16A34A)", border: "none", color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
-                ↓ Download Your Lease MP3
+                onClick={() => { downloadMp3(lease.beat_url, lease.beat_title, null); }}
+                style={{ width: "100%", borderRadius: 12, padding: "13px", background: "linear-gradient(135deg,#22C55E,#16A34A)", border: "none", color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+                Save Lease MP3 to Device
               </button>
             </div>
           ))}
@@ -3706,7 +3716,7 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
     );
   };
 
-  // Producer carousel card (no videoId)
+  // Rising producer card — full card in horizontal scroll
   const ProducerCard = ({ beat, user }) => {
     const [prev,       setPrev]       = React.useState(false);
     const [pTime,      setPTime]      = React.useState(0);
@@ -3715,7 +3725,6 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
     const aRef = React.useRef(null);
     const tRef = React.useRef(null);
     const isFree = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
-
     var prevId = React.useRef("producer_" + beat.id);
 
     function startPrev() {
@@ -3761,62 +3770,57 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
         window.location.href = result.checkout_url;
       } catch(e) { setBuyErr(e.message); setBuyLoading(false); }
     }
-    function handleDownload() {
-      apiFetch("/api/producer/beats/" + beat.id + "/download", { method: "POST" }).catch(function(){});
-      var a = document.createElement("a");
-      a.href = beat.url; a.download = (beat.title || "beat") + ".mp3"; a.target = "_blank";
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    }
     React.useEffect(function() { return function() { clearInterval(tRef.current); }; }, []);
 
     return (
-      <div style={{ flexShrink: 0, width: 220, background: "#111", borderRadius: 14, border: "1px solid rgba(34,197,94,0.2)", overflow: "hidden" }}>
-        <div style={{ height: 80, background: "linear-gradient(135deg,#052e16,#166534)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <AppIcon id="note" size={28} />
-        </div>
-        <div style={{ padding: "10px 10px 12px" }}>
-          {/* Title */}
-          <div style={{ color: "white", fontSize: 12, fontWeight: 700, lineHeight: 1.4, marginBottom: 4, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{beat.title}</div>
-          {/* Producer + price badge */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-            <div onClick={function(e) { e.stopPropagation(); if (onViewProfile && beat.producer) onViewProfile(beat.producer); }}
-              style={{ color: "#22C55E", fontSize: 11, fontWeight: 600, cursor: onViewProfile && beat.producer ? "pointer" : "default" }}>
-              {beat.producer}
-            </div>
-            <div style={{ background: isFree ? "rgba(34,197,94,0.15)" : "rgba(192,38,211,0.15)", border: "1px solid " + (isFree ? "rgba(34,197,94,0.3)" : "rgba(192,38,211,0.3)"), borderRadius: 20, padding: "1px 8px", fontSize: 10, color: isFree ? "#22C55E" : "#C026D3", fontWeight: 700 }}>
-              {isFree ? "FREE" : beat.price}
-            </div>
-          </div>
-          {/* 30s preview */}
+      <div style={{ flexShrink: 0, width: 230 }}>
+        <BeatCardShell beat={beat} accentColor={isFree ? "#22C55E" : "#C026D3"} onViewProfile={onViewProfile}>
+          {buyErr && <div style={{ color:"#F87171", fontSize:10, marginBottom:6 }}>{buyErr}</div>}
           {beat.url && (
+            <button onClick={startPrev} style={{
+              width: "100%", borderRadius: 10, padding: "8px",
+              background: prev ? "rgba(99,91,255,0.15)" : "rgba(255,255,255,0.03)",
+              border: "1px solid " + (prev ? "#635BFF" : "#2a2a2a"),
+              color: prev ? "#635BFF" : "#666",
+              fontSize: 12, fontWeight: 700, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              marginBottom: 8,
+            }}>
+              {prev
+                ? <><span style={{ fontSize:10 }}>■</span> Stop</>
+                : <><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg> Preview</>
+              }
+            </button>
+          )}
+          {prev && beat.url && (
             <>
-              <button onClick={startPrev} style={{ width: "100%", background: prev ? "rgba(99,91,255,0.2)" : "transparent", border: "1px solid " + (prev ? "#635BFF" : "#333"), borderRadius: 8, color: prev ? "#635BFF" : "#888", fontSize: 11, fontWeight: 700, padding: "5px 0", cursor: "pointer", marginBottom: 6 }}>
-                {prev ? "■ Stop" : "▶ Preview"}
-              </button>
-              {prev && (
-                <div style={{ background: "#1a1a1a", borderRadius: 6, padding: "5px 8px", display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <audio ref={aRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
-                    onPlay={onPlay} onPause={function() { clearInterval(tRef.current); }} onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
-                  <div style={{ flex: 1, height: 3, background: "#333", borderRadius: 2, overflow: "hidden" }}>
-                    <div style={{ height: "100%", background: "linear-gradient(90deg,#635BFF,#C026D3)", width: (pTime / 30 * 100) + "%", transition: "width 0.1s linear" }} />
-                  </div>
-                  <span style={{ color: "#666", fontSize: 10, fontVariantNumeric: "tabular-nums" }}>{Math.floor(pTime)}s</span>
-                </div>
-              )}
+              <audio ref={aRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
+                onPlay={onPlay} onPause={function(){ clearInterval(tRef.current); }}
+                onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
+              <PreviewBar previewTime={pTime} onStop={stopPrev} />
             </>
           )}
-          {/* Buy or Download */}
-          {buyErr && <div style={{ color: "#F87171", fontSize: 10, marginBottom: 4 }}>{buyErr}</div>}
           {isFree ? (
-            <button onClick={handleDownload} style={{ width: "100%", background: "linear-gradient(135deg,#22C55E,#16A34A)", border: "none", borderRadius: 8, color: "white", fontWeight: 800, fontSize: 11, padding: "7px 0", cursor: "pointer" }}>
-              ↓ Free Download
+            <button onClick={function(){ downloadMp3(beat.url, beat.title, beat.id); }} style={{
+              width: "100%", borderRadius: 10, padding: "8px", border: "none",
+              background: "linear-gradient(135deg,#22C55E,#16A34A)",
+              color: "white", fontWeight: 800, fontSize: 12, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+              Save to Device
             </button>
           ) : (
-            <button onClick={handleBuy} disabled={buyLoading} style={{ width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 8, color: "white", fontWeight: 800, fontSize: 11, padding: "7px 0", cursor: "pointer", opacity: buyLoading ? 0.6 : 1 }}>
+            <button onClick={handleBuy} disabled={buyLoading} style={{
+              width: "100%", borderRadius: 10, padding: "8px", border: "none",
+              background: buyLoading ? "#1a1a1a" : "linear-gradient(135deg,#C026D3,#7C3AED)",
+              color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 12,
+              cursor: buyLoading ? "not-allowed" : "pointer",
+            }}>
               {buyLoading ? "..." : "Buy — " + beat.price}
             </button>
           )}
-        </div>
+        </BeatCardShell>
       </div>
     );
   };
@@ -4420,6 +4424,83 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile, sa
 // priced=true  → Exclusive Beats (paid leases, BeatLeaseCard with preview + buy)
 // priced=false → MP3 Downloads   (free beats, direct download)
 // =============================================================================
+// Free MP3 beat card — members area download tab with preview
+function FreeMemberBeatCard({ beat, onViewProfile }) {
+  var [previewing,  setPreviewing]  = React.useState(false);
+  var [previewTime, setPreviewTime] = React.useState(0);
+  var audioRef = React.useRef(null);
+  var timerRef = React.useRef(null);
+  var previewId = React.useRef("member_" + beat.id);
+
+  function startPreview() {
+    if (previewing) { stopPreview(); return; }
+    startGlobalPreview(previewId.current);
+    setPreviewing(true); setPreviewTime(0);
+  }
+  function stopPreview() {
+    clearGlobalPreview(previewId.current);
+    setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
+  }
+  useGlobalPreviewStop(previewId.current, React.useCallback(function() {
+    setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
+  }, []));
+  function onAudioPlay() {
+    clearInterval(timerRef.current);
+    var start = Date.now();
+    timerRef.current = setInterval(function() {
+      var el = (Date.now() - start) / 1000;
+      setPreviewTime(Math.min(el, 30));
+      if (el >= 30) { clearInterval(timerRef.current); stopPreview(); }
+    }, 100);
+  }
+  function onTimeUpdate(e) {
+    var el = e.target, st = parseFloat(el.dataset.startTime || 0);
+    if (el.currentTime >= st + 30) { el.pause(); stopPreview(); }
+    if (el.currentTime < st) el.currentTime = st;
+  }
+  React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
+
+  return (
+    <BeatCardShell beat={beat} accentColor="#22C55E" onViewProfile={onViewProfile}>
+      {beat.url && (
+        <button onClick={startPreview} style={{
+          width: "100%", borderRadius: 12, padding: "11px",
+          background: previewing ? "rgba(99,91,255,0.15)" : "rgba(255,255,255,0.03)",
+          border: "1.5px solid " + (previewing ? "#635BFF" : "#2a2a2a"),
+          color: previewing ? "#635BFF" : "#666",
+          fontWeight: 700, fontSize: 14, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          marginBottom: 10,
+        }}>
+          {previewing
+            ? <><span style={{ fontSize:12 }}>■</span> Stop Preview</>
+            : <><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg> Preview Beat</>
+          }
+        </button>
+      )}
+      {previewing && beat.url && (
+        <>
+          <audio ref={audioRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
+            onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
+            onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
+          <PreviewBar previewTime={previewTime} onStop={stopPreview} />
+        </>
+      )}
+      <button onClick={function(){ downloadMp3(beat.url, beat.title, beat.id); }} style={{
+        width: "100%", borderRadius: 12, padding: "13px", border: "none",
+        background: "linear-gradient(135deg,#22C55E,#16A34A)",
+        color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+      }}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+        Save MP3 to Device
+      </button>
+    </BeatCardShell>
+  );
+}
+
 function MembersBeatsTab({ user, priced, onViewProfile }) {
   var [beats,   setBeats]   = React.useState([]);
   var [loading, setLoading] = React.useState(true);
@@ -4486,36 +4567,14 @@ function MembersBeatsTab({ user, priced, onViewProfile }) {
     );
   }
 
-  // MP3 Downloads — free beats, direct download button
+  // MP3 Downloads — free beats with preview + save-to-device
   return (
     <div>
       <div style={{ color: "#C026D3", fontWeight: 700, fontSize: 12, letterSpacing: 1, marginBottom: 14 }}>
         {beats.length} FREE DOWNLOAD{beats.length !== 1 ? "S" : ""} AVAILABLE
       </div>
       {beats.map(function(beat) {
-        return (
-          <div key={beat.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(34,197,94,0.2)" }}>
-            <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{beat.title}</div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
-              {beat.genre && (
-                <div style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>
-              )}
-              <div style={{ background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#22C55E", fontWeight: 700 }}>FREE</div>
-              <div style={{ color: "#555", fontSize: 11 }}>By <span onClick={function(e) { e.stopPropagation(); if (onViewProfile && beat.producer) onViewProfile(beat.producer); }} style={{ color: "#C026D3", fontWeight: 700, cursor: onViewProfile && beat.producer ? "pointer" : "default" }}>{beat.producer}</span> • {beat.downloads || 0} downloads</div>
-            </div>
-            <button onClick={function() {
-              apiFetch("/api/producer/beats/" + beat.id + "/download", { method: "POST" }).catch(function(){});
-              var a = document.createElement("a");
-              a.href = beat.url; a.download = (beat.title || "beat") + ".mp3"; a.target = "_blank";
-              document.body.appendChild(a); a.click(); document.body.removeChild(a);
-            }} style={{ width: "100%", borderRadius: 12, padding: "13px", border: "none",
-              background: "linear-gradient(135deg,#22C55E,#16A34A)",
-              color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-              ↓ Free Download MP3
-            </button>
-          </div>
-        );
+        return <FreeMemberBeatCard key={beat.id} beat={beat} onViewProfile={onViewProfile} />;
       })}
     </div>
   );
@@ -5259,12 +5318,7 @@ function ProfileBeatCard({ beat, currentUser }) {
   }
 
   async function handleDownload() {
-    try {
-      await apiFetch("/api/producer/beats/" + beat.id + "/download", { method: "POST" });
-      var a = document.createElement("a");
-      a.href = beat.url; a.download = beat.title + ".mp3"; a.target = "_blank";
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    } catch(e) { setBuyErr(e.message); }
+    await downloadMp3(beat.url, beat.title, beat.id);
   }
 
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
@@ -5276,77 +5330,65 @@ function ProfileBeatCard({ beat, currentUser }) {
   }, [beat.id]));
   if (deleted) return null;
 
-  return (
-    <div style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(245,158,11,0.2)" }}>
-      {/* Title + badges */}
-      <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 8 }}>{beat.title}</div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
-        {beat.genre && (
-          <div style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>
-        )}
-        <div style={{ background: isFree ? "rgba(34,197,94,0.12)" : "rgba(192,38,211,0.12)", border: "1px solid " + (isFree ? "rgba(34,197,94,0.25)" : "rgba(192,38,211,0.25)"), borderRadius: 20, padding: "2px 10px", fontSize: 11, color: isFree ? "#22C55E" : "#C026D3", fontWeight: 700 }}>
-          {isFree ? "FREE" : beat.price}
-        </div>
-        <div style={{ color: "#444", fontSize: 11 }}>{beat.downloads || 0} downloads</div>
-        {playCount > 0 && <div style={{ color: "#444", fontSize: 11 }}>▶ {fmtCount(playCount)} plays</div>}
-      </div>
+  const extraStats = playCount > 0
+    ? <span style={{ color:"#444", fontSize:11, display:"flex", alignItems:"center", gap:3 }}>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="#444"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg>
+        {fmtCount(playCount)}
+      </span>
+    : null;
 
-      {/* Preview button */}
+  return (
+    <BeatCardShell beat={beat} accentColor={isFree ? "#22C55E" : "#F59E0B"} extraStats={extraStats}>
+      {buyErr && <div style={{ color: "#F87171", fontSize: 12, marginBottom: 8 }}>{buyErr}</div>}
+
       {beat.url && (
         <button onClick={startPreview} style={{
-          width: "100%", borderRadius: 12, padding: "10px",
-          background: previewing ? "rgba(99,91,255,0.2)" : "transparent",
-          border: "1.5px solid " + (previewing ? "#635BFF" : "#333"),
-          color: previewing ? "#635BFF" : "#888",
+          width: "100%", borderRadius: 12, padding: "11px",
+          background: previewing ? "rgba(99,91,255,0.15)" : "rgba(255,255,255,0.03)",
+          border: "1.5px solid " + (previewing ? "#635BFF" : "#2a2a2a"),
+          color: previewing ? "#635BFF" : "#666",
           fontWeight: 700, fontSize: 14, cursor: "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 10,
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          marginBottom: 10,
         }}>
-          {previewing ? "■ Stop Preview" : "▶ Preview Beat"}
+          {previewing
+            ? <><span style={{ fontSize:12 }}>■</span> Stop Preview</>
+            : <><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg> Preview Beat</>
+          }
         </button>
       )}
 
-      {/* 30-second preview player */}
       {previewing && beat.url && (
-        <div style={{ marginBottom: 10 }}>
+        <>
           <audio ref={audioRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
-            onPlay={onAudioPlay} onPause={function() { clearInterval(timerRef.current); }}
+            onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
             onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
-          <div style={{ background: "#1a1a1a", borderRadius: 10, padding: "10px 14px",
-            border: "1px solid #2a2a2a", display: "flex", alignItems: "center", gap: 12 }}>
-            <button onClick={stopPreview} style={{ background: "none", border: "none", color: "#635BFF", cursor: "pointer", fontSize: 18, padding: 0, flexShrink: 0, lineHeight: 1 }}>■</button>
-            <div style={{ flex: 1, height: 4, background: "#333", borderRadius: 2, overflow: "hidden" }}>
-              <div style={{ height: "100%", borderRadius: 2, background: "linear-gradient(90deg,#635BFF,#C026D3)", width: (previewTime / 30 * 100) + "%", transition: "width 0.1s linear" }} />
-            </div>
-            <div style={{ color: "#888", fontSize: 12, fontWeight: 600, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{Math.floor(previewTime)}s / 30s</div>
-          </div>
-          <div style={{ color: "#555", fontSize: 11, textAlign: "center", marginTop: 6 }}>30s preview only</div>
-        </div>
+          <PreviewBar previewTime={previewTime} onStop={stopPreview} />
+        </>
       )}
 
-      {buyErr && <div style={{ color: "#F87171", fontSize: 12, marginBottom: 8 }}>{buyErr}</div>}
-
-      {/* Buy / Download button */}
       {isFree ? (
-        <button onClick={handleDownload} style={{
+        <button onClick={function(){ downloadMp3(beat.url, beat.title, beat.id); }} style={{
           width: "100%", borderRadius: 12, padding: "13px", border: "none",
           background: "linear-gradient(135deg,#22C55E,#16A34A)",
           color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
         }}>
-          ↓ Download Free MP3
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+          Save MP3 to Device
         </button>
       ) : (
         <button onClick={handleBuy} disabled={buyLoading} style={{
           width: "100%", borderRadius: 12, padding: "13px", border: "none",
-          background: "linear-gradient(135deg,#C026D3,#7C3AED)",
-          color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer",
-          opacity: buyLoading ? 0.6 : 1,
+          background: buyLoading ? "#1a1a1a" : "linear-gradient(135deg,#C026D3,#7C3AED)",
+          color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 14,
+          cursor: buyLoading ? "not-allowed" : "pointer",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
         }}>
           {buyLoading ? "Loading..." : "Buy Lease — " + beat.price}
         </button>
       )}
-    </div>
+    </BeatCardShell>
   );
 }
 
@@ -5994,6 +6036,7 @@ function fmtCount(n) {
 
 // ── Followers / Following list screen ────────────────────────────
 function FollowListScreen({ username, mode, onBack, onViewProfile }) {
+  // mode: "followers" | "following"
   const [users,   setUsers]   = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error,   setError]   = React.useState(null);
@@ -6006,50 +6049,41 @@ function FollowListScreen({ username, mode, onBack, onViewProfile }) {
   }, [username, mode]);
 
   return (
-    <div style={{
-      display:"flex", flexDirection:"column",
-      position:"absolute", inset:0,
-      background:"#0a0a0a", color:"white", fontFamily:"inherit",
-    }}>
-      {/* Header — clears the notch */}
-      <div style={{
-        display:"flex", alignItems:"center",
-        padding:"12px 16px 12px",
-        paddingTop:"calc(12px + env(safe-area-inset-top))",
-        borderBottom:"1px solid #1a1a1a",
-        background:"#0a0a0a", flexShrink:0,
-      }}>
-        <button onClick={onBack} style={{ background:"none", border:"none", color:"white", fontSize:22, cursor:"pointer", padding:"4px 12px 4px 0", lineHeight:1 }}>‹</button>
-        <span style={{ fontWeight:800, fontSize:17 }}>{mode === "followers" ? "Followers" : "Following"}</span>
+    <div style={{ background:"#0a0a0a", minHeight:"100%", color:"white", fontFamily:"inherit" }}>
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", padding:"16px 16px 12px", borderBottom:"1px solid #1a1a1a", position:"sticky", top:0, background:"#0a0a0a", zIndex:10 }}>
+        <button onClick={onBack} style={{ background:"none", border:"none", color:"white", fontSize:20, cursor:"pointer", padding:"4px 8px 4px 0", marginRight:8 }}>‹</button>
+        <span style={{ fontWeight:800, fontSize:17, textTransform:"capitalize" }}>{mode === "followers" ? "Followers" : "Following"}</span>
       </div>
 
-      {/* Scrollable list — bottom padding clears home indicator */}
-      <div style={{ flex:1, overflowY:"auto", paddingBottom:"calc(24px + env(safe-area-inset-bottom))" }}>
-        {loading && <div style={{ textAlign:"center", padding:40, color:"#555" }}>Loading...</div>}
-        {error   && <div style={{ textAlign:"center", padding:40, color:"#e44" }}>{error}</div>}
-        {!loading && !error && users.length === 0 && (
-          <div style={{ textAlign:"center", padding:40, color:"#555" }}>
-            {mode === "followers" ? "No followers yet" : "Not following anyone yet"}
+      {loading && <div style={{ textAlign:"center", padding:40, color:"#555" }}>Loading...</div>}
+      {error   && <div style={{ textAlign:"center", padding:40, color:"#e44" }}>{error}</div>}
+      {!loading && !error && users.length === 0 && (
+        <div style={{ textAlign:"center", padding:40, color:"#555" }}>
+          {mode === "followers" ? "No followers yet" : "Not following anyone yet"}
+        </div>
+      )}
+
+      {users.map(u => (
+        <div key={u.username} onClick={() => onViewProfile(u.username)}
+          style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #111", cursor:"pointer", gap:12 }}>
+          {/* Avatar */}
+          <div style={{ width:48, height:48, borderRadius:"50%", overflow:"hidden", flexShrink:0, background:"#222", display:"flex", alignItems:"center", justifyContent:"center" }}>
+            {u.avatarUrl
+              ? <img src={u.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+              : <span style={{ fontSize:20, color:"#555" }}>👤</span>
+            }
           </div>
-        )}
-        {users.map(u => (
-          <div key={u.username} onClick={() => onViewProfile(u.username)}
-            style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #111", cursor:"pointer", gap:12 }}>
-            <div style={{ width:48, height:48, borderRadius:"50%", overflow:"hidden", flexShrink:0, background:"#222", display:"flex", alignItems:"center", justifyContent:"center" }}>
-              {u.avatarUrl
-                ? <img src={u.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-                : <span style={{ fontSize:20, color:"#555" }}>👤</span>
-              }
-            </div>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontWeight:700, fontSize:14, color:"white", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{u.name || u.username}</div>
-              <div style={{ color:"#555", fontSize:12, marginTop:1 }}>@{u.username}</div>
-            </div>
-            {u.plan === "producer" && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 8px", color:"#C026D3", fontWeight:700, fontSize:10 }}>Pro</span>}
-            {u.plan === "artist"   && <span style={{ background:"rgba(245,158,11,0.15)",  border:"1px solid #F59E0B", borderRadius:20, padding:"2px 8px", color:"#F59E0B",  fontWeight:700, fontSize:10 }}>Artist</span>}
+          {/* Name + username */}
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontWeight:700, fontSize:14, color:"white", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{u.name || u.username}</div>
+            <div style={{ color:"#555", fontSize:12, marginTop:1 }}>@{u.username}</div>
           </div>
-        ))}
-      </div>
+          {/* Plan badge */}
+          {u.plan === "producer" && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 8px", color:"#C026D3", fontWeight:700, fontSize:10 }}>Pro</span>}
+          {u.plan === "artist"   && <span style={{ background:"rgba(245,158,11,0.15)",  border:"1px solid #F59E0B", borderRadius:20, padding:"2px 8px", color:"#F59E0B",  fontWeight:700, fontSize:10 }}>Artist</span>}
+        </div>
+      ))}
     </div>
   );
 }
@@ -6101,20 +6135,13 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
     </div>
   );
 
-  // Profile badges are shown based on plan only — a public profile stays
-  // visible and badged even if the subscription has since lapsed.
-  const isProd   = profile.plan === "producer";
+  const isProd = profile.plan === "producer";
   const isArtist = profile.plan === "artist" || isProd;
   const isOwnProfile = currentUser && username && currentUser.username && 
     currentUser.username.toLowerCase() === username.toLowerCase();
 
   const handleDownload = async (beat) => {
-    try {
-      await apiFetch("/api/producer/beats/" + beat.id + "/download", { method: "POST" });
-      const a = document.createElement("a");
-      a.href = beat.url; a.download = beat.title + ".mp3"; a.target = "_blank";
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    } catch (e) { console.error(e); }
+    await downloadMp3(beat.url, beat.title, beat.id);
   };
 
   return (
@@ -6122,7 +6149,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
       {/* ── Follow list overlay ── */}
       {followList && (
-        <div style={{ position:"fixed", inset:0, zIndex:5000, background:"#0a0a0a" }}>
+        <div style={{ position:"fixed", inset:0, zIndex:5000, background:"#0a0a0a", overflowY:"auto" }}>
           <FollowListScreen
             username={username}
             mode={followList}
@@ -6221,9 +6248,9 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {/* Plan tags */}
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-            {isProd && <span onClick={() => setBadgePopup({ type:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
-            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ type:"ceo", text:"Chief Executive Officer" })} />}
-            {isArtist && !isProd && <span onClick={() => setBadgePopup({ type:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
+            {isProd && <span onClick={() => setBadgePopup({ icon:"🎛️", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
+            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"👑", text:"Verified Chief Executive Officer" })} />}
+            {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"🎤", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
           </div>
         )}
 
@@ -7811,12 +7838,12 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         {user.username && <div style={{ color: "#555", fontSize: 12, marginTop: 2 }}>@{user.username}</div>}
         <div style={{ marginTop: 8 }}>
           {user.isPro && (
-            <span onClick={() => setOwnBadgePopup({ type:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 14px", color:"#C026D3", fontWeight:800, fontSize:12, marginRight:6, cursor:"pointer" }}>
+            <span onClick={() => setOwnBadgePopup({ icon:"🎛️", text:"This user is currently subscribed to Producer Pro" })} style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 14px", color:"#C026D3", fontWeight:800, fontSize:12, marginRight:6, cursor:"pointer" }}>
               <VerifiedBadge size={18} /> Producer Pro
             </span>
           )}
-          {user.isArtistPro && !user.isPro && <span onClick={() => setOwnBadgePopup({ type:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ display:"inline-block", background:"rgba(245,158,11,0.2)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 14px", color:"#F59E0B", fontWeight:800, fontSize:12, cursor:"pointer" }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
-          {user.username === "Trelli" && <CEOBadge onClick={() => setOwnBadgePopup({ type:"ceo", text:"Chief Executive Officer" })} />}
+          {user.isArtistPro && !user.isPro && <span onClick={() => setOwnBadgePopup({ icon:"🎤", text:"This user is currently subscribed to Artist Pro" })} style={{ display:"inline-block", background:"rgba(245,158,11,0.2)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 14px", color:"#F59E0B", fontWeight:800, fontSize:12, cursor:"pointer" }}><AppIcon id="vocalmic" size={20}/> Artist Pro</span>}
+          {user.username === "Trelli" && <CEOBadge onClick={() => setOwnBadgePopup({ icon:"👑", text:"Verified Chief Executive Officer" })} />}
         </div>
         <BadgeInfoPopup message={ownBadgePopup} onClose={() => setOwnBadgePopup(null)} />
       </div>
@@ -11379,12 +11406,6 @@ function CEOBadge({ onClick }) {
 
 function BadgeInfoPopup({ message, onClose }) {
   if (!message) return null;
-  const BadgeIcon = () => {
-    if (message.type === "producer") return <VerifiedBadge size={52} />;
-    if (message.type === "artist")   return <VerifiedBadge size={52} />;
-    if (message.type === "ceo")      return <GoldVerifiedBadge size={52} />;
-    return null;
-  };
   return (
     <>
       <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:99998, background:"rgba(0,0,0,0.6)" }}/>
@@ -11395,7 +11416,7 @@ function BadgeInfoPopup({ message, onClose }) {
         boxShadow:"0 16px 60px rgba(0,0,0,0.85)",
         display:"flex", flexDirection:"column", alignItems:"center", gap:14, textAlign:"center",
       }}>
-        <BadgeIcon />
+        <div style={{ fontSize:38 }}>{message.icon}</div>
         <div style={{ color:"white", fontSize:15, fontWeight:600, lineHeight:1.5 }}>{message.text}</div>
         <button onClick={onClose} style={{
           marginTop:4, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.15)",
@@ -13439,73 +13460,53 @@ function StudioScreen({ user, onExit }) {
     }
   };
 
-  // ── Ruler interaction ─────────────────────────────────────────
-  // Rules:
-  //   • loopEnabled=false      → ruler is fully inert (no interaction)
-  //   • Tap/drag LEFT edge     → drag loopIn  (22px grab zone in time units)
-  //   • Tap/drag RIGHT edge    → drag loopOut (22px grab zone in time units)
-  //   • Press inside blue bar  → drag entire region (span preserved)
-  //   • Tap on empty space     → do nothing at all
-  //
-  // Move handlers always read from rulerDragRef snapshot, never from stale
-  // React state closure — this is what prevented drag from working correctly.
+  // ── Ruler tap/drag → set loop in/out points ONLY ─────────────
+  // Tapping the ruler only creates/adjusts the loop region.
+  // It never seeks the playhead or interrupts playback.
+  // First tap on empty area: sets loop-in, second tap to the right: sets loop-out.
+  // Dragging: if tap lands within 0.3s of loopIn → drag loopIn,
+  //           if tap lands within 0.3s of loopOut → drag loopOut,
+  //           otherwise start a new loop region from that point.
+  // rulerDragRef declared at top of component (Rules of Hooks)
   const rulerTimeFromClientX = function (clientX) {
     const el = scrollRef.current;
     if (!el) return 0;
     const rect  = el.getBoundingClientRect();
+    // scrollRef is now the right-side lanes only (no sidebar) so no SIDEBAR_W offset needed
     const laneX = clientX - rect.left + el.scrollLeft;
     return Math.max(0, laneX / effectivePPS);
   };
 
+  // Ruler snaps to the nearest BEAT boundary (not just bars).
+  // This allows loop regions to start/end on any individual beat,
+  // making 1-bar, 2-bar, half-bar loops all equally easy to set.
   const snapToBar = function (t) {
     if (spb <= 0) return Math.max(0, t);
-    return Math.max(0, Math.round(t / spb) * spb);
+    // Snap to nearest beat
+    const snappedBeat = Math.max(0, Math.round(t / spb) * spb);
+    return snappedBeat;
   };
-
-  // Convert a fixed pixel grab zone to seconds at current zoom
-  const grabSecs = function (px) { return px / Math.max(1, effectivePPS); };
 
   const handleRulerMouseDown = function (e) {
     e.preventDefault();
-    if (!loopEnabled) return;                          // ruler inert when loop off
+    const raw = rulerTimeFromClientX(e.clientX);
+    const t   = snapToBar(raw);
+    // Grab threshold: half a beat (so handles feel magnetic near beat boundaries)
+    const grabThresh = Math.max(0.15, spb * 0.5);
+    let mode = "new";
+    if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
+    else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
+    rulerDragRef.current = { mode, startX: e.clientX, startT: t };
 
-    const raw  = rulerTimeFromClientX(e.clientX);
-    const grab = grabSecs(22);
-
-    let mode = null;
-    if      (Math.abs(raw - loopIn)  < grab)   mode = "in";
-    else if (Math.abs(raw - loopOut) < grab)    mode = "out";
-    else if (raw > loopIn && raw < loopOut)     mode = "move";
-    // tap outside region on empty space → do nothing
-    if (!mode) return;
-
-    // Snapshot current values into the drag ref so the move closure
-    // never reads stale React state.
-    rulerDragRef.current = {
-      mode,
-      startT:  snapToBar(raw),
-      snapIn:  loopIn,
-      snapOut: loopOut,
-    };
+    if (mode === "new") { setLoopIn(t); setLoopOut(snapToBar(t + spb)); } // don't auto-enable — user must toggle loop button
 
     const onMove = function (me) {
-      const d = rulerDragRef.current;
-      if (!d) return;
       const nt = snapToBar(rulerTimeFromClientX(me.clientX));
-      if (d.mode === "in") {
-        const v = Math.max(0, Math.min(nt, d.snapOut - spb));
-        setLoopIn(v);
-        d.snapIn = v;
-      } else if (d.mode === "out") {
-        const v = Math.max(nt, d.snapIn + spb);
-        setLoopOut(v);
-        d.snapOut = v;
-      } else {
-        // move — shift whole region, keep span fixed
-        const delta = nt - d.startT;
-        const ni    = Math.max(0, snapToBar(d.snapIn  + delta));
-        const no    = snapToBar(d.snapOut + delta);
-        if (no > ni) { setLoopIn(ni); setLoopOut(no); }
+      if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
+      else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spb)); }
+      else {
+        if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spb));
+        else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
       }
     };
     const onUp = function () {
@@ -13520,45 +13521,27 @@ function StudioScreen({ user, onExit }) {
   const handleRulerTouchStart = function (e) {
     e.preventDefault();
     e.stopPropagation();
-    if (!loopEnabled) return;
+    const raw = rulerTimeFromClientX(e.touches[0].clientX);
+    const t   = snapToBar(raw);
+    const grabThresh = Math.max(0.15, spb * 0.5);
+    let mode = "new";
+    if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
+    else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
+    rulerDragRef.current = { mode, startT: t };
 
-    const raw  = rulerTimeFromClientX(e.touches[0].clientX);
-    const grab = grabSecs(26);          // slightly larger on touch
-
-    let mode = null;
-    if      (Math.abs(raw - loopIn)  < grab)   mode = "in";
-    else if (Math.abs(raw - loopOut) < grab)    mode = "out";
-    else if (raw > loopIn && raw < loopOut)     mode = "move";
-    if (!mode) return;
-
-    rulerDragRef.current = {
-      mode,
-      startT:  snapToBar(raw),
-      snapIn:  loopIn,
-      snapOut: loopOut,
-    };
+    if (mode === "new") { setLoopIn(t); setLoopOut(snapToBar(t + spb)); } // don't auto-enable — user must toggle loop button
   };
 
   const handleRulerTouchMove = function (e) {
     e.preventDefault();
     e.stopPropagation();
-    const d = rulerDragRef.current;
-    if (!d) return;
-
+    if (!rulerDragRef.current) return;
     const nt = snapToBar(rulerTimeFromClientX(e.touches[0].clientX));
-    if (d.mode === "in") {
-      const v = Math.max(0, Math.min(nt, d.snapOut - spb));
-      setLoopIn(v);
-      d.snapIn = v;
-    } else if (d.mode === "out") {
-      const v = Math.max(nt, d.snapIn + spb);
-      setLoopOut(v);
-      d.snapOut = v;
-    } else {
-      const delta = nt - d.startT;
-      const ni    = Math.max(0, snapToBar(d.snapIn  + delta));
-      const no    = snapToBar(d.snapOut + delta);
-      if (no > ni) { setLoopIn(ni); setLoopOut(no); }
+    if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
+    else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spb)); }
+    else {
+      if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spb));
+      else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
     }
   };
 
