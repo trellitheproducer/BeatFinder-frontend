@@ -880,6 +880,18 @@ function useContentDeletedListener(callback) {
   }, [callback]);
 }
 
+// Fired when a beat is edited — all card lists re-fetch to show latest data
+function dispatchBeatUpdated(beatId, patch) {
+  window.dispatchEvent(new CustomEvent("bf:beatUpdated", { detail: { beatId: beatId, patch: patch } }));
+}
+function useBeatUpdatedListener(callback) {
+  React.useEffect(function() {
+    function handler(e) { callback(e.detail); }
+    window.addEventListener("bf:beatUpdated", handler);
+    return function() { window.removeEventListener("bf:beatUpdated", handler); };
+  }, [callback]);
+}
+
 // -- In-memory cache (10 minutes TTL) -----------------------------------------
 const cache = {};
 const CACHE_TTL = 10 * 60 * 1000;
@@ -3813,6 +3825,29 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
           )}
         </div>
 
+        {/* BPM + Key + Description row */}
+        {(beat.bpm > 0 || beat.key || beat.description) && (
+          <div style={{ marginBottom: 12 }}>
+            {(beat.bpm > 0 || beat.key) && (
+              <div style={{ display: "flex", gap: 6, marginBottom: beat.description ? 8 : 0 }}>
+                {beat.bpm > 0 && (
+                  <span style={{ background: "rgba(6,182,212,0.1)", border: "1px solid rgba(6,182,212,0.25)", borderRadius: 20, padding: "3px 10px", fontSize: 10, color: "#06B6D4", fontWeight: 700 }}>
+                    {beat.bpm} BPM
+                  </span>
+                )}
+                {beat.key && (
+                  <span style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: 20, padding: "3px 10px", fontSize: 10, color: "#22C55E", fontWeight: 700 }}>
+                    {beat.key}
+                  </span>
+                )}
+              </div>
+            )}
+            {beat.description && (
+              <div style={{ color: "#555", fontSize: 12, lineHeight: 1.5 }}>{beat.description}</div>
+            )}
+          </div>
+        )}
+
         {/* Waveform player */}
         {beat.url && (
           <div style={{ marginBottom: 14 }}>
@@ -3993,6 +4028,15 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
     }).catch(e => { setError(e.message); setLoading(false); });
   }, [user]);
 
+  // Update beat in-place when producer edits description/bpm/key/title
+  useBeatUpdatedListener(React.useCallback(function(detail) {
+    setBeats(function(prev) {
+      return prev.map(function(b) {
+        return b.id === detail.beatId ? Object.assign({}, b, detail.patch) : b;
+      });
+    });
+  }, []));
+
 
 
   const header = (
@@ -4098,6 +4142,15 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
       .then(d => { setFresh(d.beats || []); setFLoading(false); })
       .catch(() => setFLoading(false));
   }, []);
+
+  // Update producer beats in-place when a producer edits description/bpm/key/title
+  useBeatUpdatedListener(React.useCallback(function(detail) {
+    setRising(function(prev) {
+      return prev.map(function(b) {
+        return b.id === detail.beatId ? Object.assign({}, b, detail.patch) : b;
+      });
+    });
+  }, []));
 
   // Horizontal carousel card - compact version for side-scroll
   const CarouselCard = ({ beat }) => {
@@ -4922,6 +4975,15 @@ function MembersBeatsTab({ user, priced, onViewProfile }) {
     if (detail.kind === "beat") {
       setBeats(function(prev) { return prev.filter(function(b) { return b.id !== detail.id; }); });
     }
+  }, []));
+
+  // Update beat in-place when producer edits description/bpm/key/title
+  useBeatUpdatedListener(React.useCallback(function(detail) {
+    setBeats(function(prev) {
+      return prev.map(function(b) {
+        return b.id === detail.beatId ? Object.assign({}, b, detail.patch) : b;
+      });
+    });
   }, []));
 
   if (loading) return <BFLoader type="spinner" text="LOADING BEATS..." />;
@@ -5820,6 +5882,29 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
             </div>
           )}
         </div>
+
+        {/* BPM + Key + Description */}
+        {(beat.bpm > 0 || beat.key || beat.description) && (
+          <div style={{ marginBottom: 12 }}>
+            {(beat.bpm > 0 || beat.key) && (
+              <div style={{ display: "flex", gap: 6, marginBottom: beat.description ? 8 : 0 }}>
+                {beat.bpm > 0 && (
+                  <span style={{ background: "rgba(6,182,212,0.1)", border: "1px solid rgba(6,182,212,0.25)", borderRadius: 20, padding: "3px 10px", fontSize: 10, color: "#06B6D4", fontWeight: 700 }}>
+                    {beat.bpm} BPM
+                  </span>
+                )}
+                {beat.key && (
+                  <span style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: 20, padding: "3px 10px", fontSize: 10, color: "#22C55E", fontWeight: 700 }}>
+                    {beat.key}
+                  </span>
+                )}
+              </div>
+            )}
+            {beat.description && (
+              <div style={{ color: "#555", fontSize: 12, lineHeight: 1.5 }}>{beat.description}</div>
+            )}
+          </div>
+        )}
 
         {/* ── Preview player ── */}
         {beat.url && (
@@ -6737,6 +6822,18 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
       .catch(e => { setError(e.message); setLoading(false); });
   }, [username, currentUser?.id]);
 
+  // Update beat in-place when producer edits — no page refresh needed
+  useBeatUpdatedListener(React.useCallback(function(detail) {
+    setProfile(function(prev) {
+      if (!prev || !prev.beats) return prev;
+      return Object.assign({}, prev, {
+        beats: prev.beats.map(function(b) {
+          return b.id === detail.beatId ? Object.assign({}, b, detail.patch) : b;
+        }),
+      });
+    });
+  }, []));
+
   const toggleFollow = async () => {
     if (!currentUser) return;
     setFollowLoading(true);
@@ -7442,12 +7539,15 @@ function StripeConnectSection({ user }) {
 function MyUploadsSection({ user }) {
   const [beats,    setBeats]    = useState([]);
   const [loading,  setLoading]  = useState(true);
-  const [editId,   setEditId]   = useState(null);
-  const [editTitle,setEditTitle]= useState("");
-  const [editGenre,setEditGenre]= useState("");
-  const [editPrice,setEditPrice]= useState("");
-  const [saving,   setSaving]   = useState(false);
-  const [msg,      setMsg]      = useState("");
+  const [editId,    setEditId]    = useState(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editGenre, setEditGenre] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const [editDesc,  setEditDesc]  = useState("");
+  const [editBpm,   setEditBpm]   = useState("");
+  const [editKey,   setEditKey]   = useState("");
+  const [saving,    setSaving]    = useState(false);
+  const [msg,       setMsg]       = useState("");
 
   const load = () => {
     setLoading(true);
@@ -7460,9 +7560,12 @@ function MyUploadsSection({ user }) {
 
   const handleEdit = (beat) => {
     setEditId(beat.id);
-    setEditTitle(beat.title);
-    setEditGenre(beat.genre);
-    setEditPrice(beat.price);
+    setEditTitle(beat.title || "");
+    setEditGenre(beat.genre || "");
+    setEditPrice(beat.price || "");
+    setEditDesc(beat.description || "");
+    setEditBpm(beat.bpm ? String(beat.bpm) : "");
+    setEditKey(beat.key || "");
     setMsg("");
   };
 
@@ -7472,9 +7575,25 @@ function MyUploadsSection({ user }) {
     try {
       await apiFetch("/api/producer/beats/" + editId + "/update", {
         method: "POST",
-        body: JSON.stringify({ title: editTitle, genre: editGenre, price: editPrice }),
+        body: JSON.stringify({
+          title:       editTitle,
+          genre:       editGenre,
+          price:       editPrice,
+          description: editDesc,
+          bpm:         editBpm ? parseInt(editBpm) : 0,
+          key:         editKey,
+        }),
       });
       setMsg("Updated!");
+      // Broadcast to all beat card lists so they update live without refresh
+      dispatchBeatUpdated(editId, {
+        title:       editTitle,
+        genre:       editGenre,
+        price:       editPrice,
+        description: editDesc,
+        bpm:         editBpm ? parseInt(editBpm) : 0,
+        key:         editKey,
+      });
       setEditId(null);
       load();
     } catch (e) {
@@ -7531,8 +7650,46 @@ function MyUploadsSection({ user }) {
                 value={editPrice}
                 onChange={e => setEditPrice(e.target.value)}
                 placeholder="Price e.g. free or £50"
-                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 12 }}
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
               />
+              {/* BPM + Key row */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ color: "#666", fontSize: 11, fontWeight: 700, marginBottom: 4, letterSpacing: 0.5 }}>BPM</div>
+                  <input
+                    type="number"
+                    min={40} max={300}
+                    value={editBpm}
+                    onChange={e => setEditBpm(e.target.value)}
+                    placeholder="e.g. 140"
+                    style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box" }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ color: "#666", fontSize: 11, fontWeight: 700, marginBottom: 4, letterSpacing: 0.5 }}>KEY</div>
+                  <select
+                    value={editKey}
+                    onChange={e => setEditKey(e.target.value)}
+                    style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: editKey ? "white" : "#555", fontSize: 14, outline: "none", boxSizing: "border-box" }}
+                  >
+                    <option value="">Select key</option>
+                    {["C Major","C Minor","C# Major","C# Minor","D Major","D Minor","D# Major","D# Minor","E Major","E Minor","F Major","F Minor","F# Major","F# Minor","G Major","G Minor","G# Major","G# Minor","A Major","A Minor","A# Major","A# Minor","B Major","B Minor"].map(k => (
+                      <option key={k} value={k}>{k}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {/* Description */}
+              <div style={{ color: "#666", fontSize: 11, fontWeight: 700, marginBottom: 4, letterSpacing: 0.5 }}>DESCRIPTION</div>
+              <textarea
+                value={editDesc}
+                onChange={e => setEditDesc(e.target.value)}
+                placeholder="Tell listeners about this beat — mood, inspiration, usage rights..."
+                maxLength={500}
+                rows={3}
+                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 13, outline: "none", boxSizing: "border-box", resize: "none", fontFamily: "inherit", marginBottom: 4 }}
+              />
+              <div style={{ color: "#444", fontSize: 10, textAlign: "right", marginBottom: 12 }}>{editDesc.length}/500</div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={handleSave} disabled={saving} style={{ flex: 1, background: "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: "11px", fontSize: 14, cursor: "pointer" }}>
                   {saving ? "Saving..." : "Save Changes"}
@@ -7558,8 +7715,11 @@ function MyUploadsSection({ user }) {
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#F59E0B", fontWeight: 700 }}>{beat.genre}</div>
                 <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#C026D3", fontWeight: 700 }}>{beat.price}</div>
+                {beat.bpm > 0 && <div style={{ background: "rgba(6,182,212,0.1)", border: "1px solid rgba(6,182,212,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#06B6D4", fontWeight: 700 }}>{beat.bpm} BPM</div>}
+                {beat.key && <div style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#22C55E", fontWeight: 700 }}>{beat.key}</div>}
                 <div style={{ background: "rgba(255,255,255,0.05)", borderRadius: 20, padding: "2px 10px", fontSize: 11, color: "#555" }}>{beat.downloads} downloads</div>
               </div>
+              {beat.description && <div style={{ color: "#555", fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>{beat.description}</div>}
             </div>
           )}
         </div>
@@ -13696,6 +13856,22 @@ function StudioScreen({ user, onExit }) {
       live.bandpass.bpDry.gain.setTargetAtTime(1 - mixWet, now, T);
       live.bandpass.bpWet.gain.setTargetAtTime(mixWet,     now, T);
     }
+
+    // ── Autotune — live param updates during playback ──
+    if (live.autotune) {
+      const at   = fx.autotune || {};
+      const atOn = !!(at.on);
+      const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
+      try {
+        live.autotune.parameters.get("bypass").value   = atOn ? 0 : 1;
+        live.autotune.parameters.get("key").value      = KEY_OFFSETS[at.key || "C"] || 0;
+        live.autotune.parameters.get("speed").value    = at.speed ?? 50;
+        live.autotune.parameters.get("humanize").value = at.humanize ?? 10;
+        live.autotune.parameters.get("wet").value      = at.wet ?? 1;
+        live.autotune.parameters.get("vibrato").value  = at.vibrato ?? 0;
+        live.autotune.port.postMessage({ scale: at.scale || "major" });
+      } catch(e) {}
+    }
   };
   const toggleMute = function (id) {
     setTracks(function(prev){
@@ -13752,6 +13928,8 @@ function StudioScreen({ user, onExit }) {
     // Register pitch worklet if not done yet (async, required before AudioWorkletNode)
     // Register RNNoise worklet if not done yet
     await registerRNNoiseWorklet(actx);
+    // Register autotune worklet on the playback AudioContext so it's ready for buildChain
+    await registerAutotuneWorklet(actx);
     // Schedule audio 50ms ahead so all tracks start at exactly the same moment.
     // masterStartRef MUST equal `now` (the scheduled start), NOT actx.currentTime.
     // Recording timing: playheadAtRef + (startActxTime - masterStartRef).
@@ -14316,6 +14494,31 @@ function StudioScreen({ user, onExit }) {
         node = bpEntry;
 
         liveNodes.bandpass = { bp1, bp2, bpDry, bpWet, bpOut };
+      }
+
+      // ── Autotune — pitch correction on playback (same worklet as monitoring) ──
+      {
+        const at     = fx.autotune || {};
+        const atOn   = !!(at.on);
+        const atReady = autotuneWorkletReady.current;
+        if (atReady) {
+          try {
+            const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
+            const atNode = new AudioWorkletNode(actx, "autotune-processor", {
+              numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+            });
+            atNode.parameters.get("bypass").value   = atOn ? 0 : 1;
+            atNode.parameters.get("key").value      = KEY_OFFSETS[at.key || "C"] || 0;
+            atNode.parameters.get("speed").value    = at.speed ?? 50;
+            atNode.parameters.get("humanize").value = at.humanize ?? 10;
+            atNode.parameters.get("wet").value      = at.wet ?? 1;
+            atNode.parameters.get("vibrato").value  = at.vibrato ?? 0;
+            atNode.port.postMessage({ scale: at.scale || "major" });
+            atNode.connect(node);
+            node = atNode;
+            liveNodes.autotune = atNode;
+          } catch(e) { /* worklet not ready yet — skip */ }
+        }
       }
 
       // Store live nodes for this track
