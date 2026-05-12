@@ -3675,7 +3675,7 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
             {[
               { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>, title: "100% FREE", sub: "No tags, just vibes." },
               { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>, title: "INSTANT DOWNLOAD", sub: "High quality MP3." },
-              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>, title: "UNLIMITED USE", sub: "All your projects." },
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>, title: "UNLIMITED USE", sub: "Non-profit only." },
             ].map(function(item, i) {
               return (
                 <div key={i} style={{ flex: 1, textAlign: "center", padding: "0 4px", borderRight: i < 2 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
@@ -3692,6 +3692,21 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
           <button onClick={onBuy} disabled={buyLoading} style={{ width: "100%", borderRadius: 14, padding: "15px", background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)", border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"), color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 15, cursor: buyLoading ? "not-allowed" : "pointer", letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: buyLoading ? "none" : "0 0 18px rgba(245,158,11,0.25)" }}>
             {buyLoading ? "Loading..." : "Buy Lease — " + beat.price}
           </button>
+          <div style={{ display: "flex", marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
+            {[
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>, title: "MP3 LEASE", sub: "Instant delivery." },
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>, title: "UNLIMITED STREAMS", sub: "No expiry date." },
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>, title: "COMMERCIAL USE", sub: "Monetise your music." },
+            ].map(function(item, i) {
+              return (
+                <div key={i} style={{ flex: 1, textAlign: "center", padding: "0 4px", borderRight: i < 2 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
+                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>{item.icon}</div>
+                  <div style={{ color: "#555", fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>{item.title}</div>
+                  <div style={{ color: "#333", fontSize: 8, marginTop: 1 }}>{item.sub}</div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -5687,7 +5702,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
             {[
               { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>, title: "100% FREE", sub: "No tags, just vibes." },
               { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>, title: "INSTANT DOWNLOAD", sub: "High quality MP3." },
-              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>, title: "UNLIMITED USE", sub: "All your projects." },
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>, title: "UNLIMITED USE", sub: "Non-profit only." },
             ].map(function(item, i) {
               return (
                 <div key={i} style={{
@@ -5715,6 +5730,24 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
           }}>
             {buyLoading ? "Loading..." : "Buy Lease — " + beat.price}
           </button>
+          <div style={{ display: "flex", gap: 0, marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
+            {[
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>, title: "MP3 LEASE", sub: "Instant delivery." },
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>, title: "UNLIMITED STREAMS", sub: "No expiry date." },
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>, title: "COMMERCIAL USE", sub: "Monetise your music." },
+            ].map(function(item, i) {
+              return (
+                <div key={i} style={{
+                  flex: 1, textAlign: "center", padding: "0 4px",
+                  borderRight: i < 2 ? "1px solid rgba(255,255,255,0.05)" : "none",
+                }}>
+                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>{item.icon}</div>
+                  <div style={{ color: "#555", fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>{item.title}</div>
+                  <div style={{ color: "#333", fontSize: 8, marginTop: 1 }}>{item.sub}</div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
