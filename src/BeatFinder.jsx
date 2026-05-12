@@ -6116,24 +6116,256 @@ function ImageLightbox({ images, startIndex, onClose }) {
 }
 
 // =============================================================================
-// CONTENT TABS — shown on every public profile (Beats / Music / Videos)
+// ARTIST TRACK UPLOAD MODAL
+// =============================================================================
+function TrackUploadModal({ currentUser, onClose, onUploaded }) {
+  var [title,       setTitle]       = React.useState("");
+  var [description, setDescription] = React.useState("");
+  var [producerTag, setProducerTag] = React.useState("");
+  var [beatTitle,   setBeatTitle]   = React.useState("");
+  var [file,        setFile]        = React.useState(null);
+  var [uploading,   setUploading]   = React.useState(false);
+  var [error,       setError]       = React.useState("");
+
+  async function handleUpload() {
+    if (!file) { setError("Please select an audio file"); return; }
+    if (!title.trim()) { setError("Please add a title"); return; }
+    setUploading(true); setError("");
+    try {
+      var formData = new FormData();
+      formData.append("file", file);
+      formData.append("meta", JSON.stringify({
+        title:        title.trim(),
+        description:  description.trim(),
+        producer_tag: producerTag.replace("@","").trim(),
+        beat_title:   beatTitle.trim(),
+      }));
+      var token = localStorage.getItem("bf_token");
+      var res = await fetch(API_BASE + "/api/auth/tracks/upload", {
+        method: "POST",
+        headers: token ? { "Authorization": "Bearer " + token } : {},
+        body: formData,
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Upload failed");
+      onUploaded();
+    } catch(e) {
+      setError(e.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9999,
+      background: "rgba(0,0,0,0.85)", display: "flex",
+      alignItems: "flex-end", justifyContent: "center",
+    }} onClick={onClose}>
+      <div style={{
+        background: "#111", borderRadius: "20px 20px 0 0",
+        padding: 24, width: "100%", maxWidth: 430,
+        border: "1px solid #222", paddingBottom: "calc(24px + env(safe-area-inset-bottom))",
+      }} onClick={function(e){ e.stopPropagation(); }}>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>Upload Track</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#555", fontSize: 20, cursor: "pointer" }}>✕</button>
+        </div>
+
+        {error && <div style={{ color: "#F87171", fontSize: 13, marginBottom: 12, textAlign: "center" }}>{error}</div>}
+
+        {/* File picker */}
+        <div style={{ marginBottom: 12 }}>
+          <label style={{
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            background: "rgba(245,158,11,0.1)", border: "1.5px dashed #F59E0B",
+            borderRadius: 12, padding: "16px", cursor: "pointer", color: "#F59E0B", fontWeight: 700, fontSize: 14,
+          }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12l7-7 7 7"/></svg>
+            {file ? file.name : "Choose MP3 / WAV file"}
+            <input type="file" accept=".mp3,.wav,.m4a,.aac,.ogg" style={{ display: "none" }}
+              onChange={function(e){ setFile(e.target.files[0]); if (!title && e.target.files[0]) setTitle(e.target.files[0].name.replace(/\.[^.]+$/,"")); }} />
+          </label>
+        </div>
+
+        <input value={title} onChange={function(e){ setTitle(e.target.value); }} placeholder="Track title *"
+          style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "11px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
+
+        {/* Producer tag */}
+        <div style={{ position: "relative", marginBottom: 8 }}>
+          <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "#F59E0B", fontWeight: 800, fontSize: 14 }}>@</span>
+          <input value={producerTag} onChange={function(e){ setProducerTag(e.target.value.replace("@","")); }}
+            placeholder="Tag producer username (optional)"
+            style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "11px 14px 11px 28px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+        </div>
+
+        <input value={beatTitle} onChange={function(e){ setBeatTitle(e.target.value); }} placeholder="Beat title used (optional)"
+          style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "11px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }} />
+
+        <textarea value={description} onChange={function(e){ setDescription(e.target.value); }}
+          placeholder="Description — tell people about this track..."
+          maxLength={500} rows={3}
+          style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "11px 14px", color: "white", fontSize: 13, outline: "none", boxSizing: "border-box", resize: "none", fontFamily: "inherit", marginBottom: 4 }} />
+        <div style={{ color: "#444", fontSize: 10, textAlign: "right", marginBottom: 14 }}>{description.length}/500</div>
+
+        <button onClick={handleUpload} disabled={uploading || !file} style={{
+          width: "100%", background: uploading ? "#333" : "linear-gradient(135deg,#F59E0B,#D97706)",
+          border: "none", borderRadius: 12, color: "white", fontWeight: 800, fontSize: 16,
+          padding: "14px", cursor: uploading ? "not-allowed" : "pointer",
+        }}>
+          {uploading ? "Uploading..." : "Upload Track"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// ARTIST TRACK CARD — shows on artist profile Tracks tab
+// =============================================================================
+function ArtistTrackCard({ track, isOwner, onDeleted, onViewProfile }) {
+  var [playing,    setPlaying]    = React.useState(false);
+  var [currentTime,setCurrentTime]= React.useState(0);
+  var [duration,   setDuration]   = React.useState(0);
+  var audioRef = React.useRef(null);
+
+  function togglePlay() {
+    var a = audioRef.current;
+    if (!a) return;
+    if (playing) { a.pause(); setPlaying(false); }
+    else { a.play(); setPlaying(true); }
+  }
+
+  async function handleDelete() {
+    if (!window.confirm("Delete this track?")) return;
+    try {
+      await apiFetch("/api/auth/tracks/" + track.id, { method: "DELETE" });
+      onDeleted();
+    } catch(e) {}
+  }
+
+  var pct = duration > 0 ? (currentTime / duration) * 100 : 0;
+  var fmt = function(s) { return Math.floor(s/60) + ":" + String(Math.floor(s%60)).padStart(2,"0"); };
+
+  return (
+    <div style={{ background: "#111", borderRadius: 16, border: "1px solid rgba(245,158,11,0.2)", marginBottom: 14, overflow: "hidden" }}>
+      <div style={{ height: 2, background: "linear-gradient(90deg,#F59E0B,transparent)" }} />
+      <div style={{ padding: "14px 16px" }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
+          {/* Play button */}
+          <button onClick={togglePlay} style={{
+            width: 46, height: 46, borderRadius: "50%", flexShrink: 0,
+            background: playing ? "rgba(245,158,11,0.2)" : "rgba(255,255,255,0.06)",
+            border: "1.5px solid " + (playing ? "#F59E0B" : "#2a2a2a"),
+            color: playing ? "#F59E0B" : "#aaa",
+            display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+          }}>
+            {playing
+              ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+              : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg>
+            }
+          </button>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 2 }}>{track.title}</div>
+            {/* Producer tag */}
+            {track.producer_tag && (
+              <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
+                <span style={{ color: "#F59E0B", fontSize: 12, fontWeight: 700 }}>
+                  🎹 Beat by{" "}
+                  <span
+                    onClick={function(){ if (onViewProfile) onViewProfile(track.producer_tag); }}
+                    style={{ cursor: "pointer", textDecoration: "underline", textDecorationColor: "#F59E0B44" }}
+                  >
+                    @{track.producer_tag}
+                  </span>
+                </span>
+              </div>
+            )}
+            {track.beat_title && <div style={{ color: "#555", fontSize: 11 }}>"{track.beat_title}"</div>}
+          </div>
+
+          {isOwner && (
+            <button onClick={handleDelete} style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 8, color: "#F87171", fontSize: 11, padding: "4px 10px", cursor: "pointer", fontWeight: 600, flexShrink: 0 }}>
+              Delete
+            </button>
+          )}
+        </div>
+
+        {/* Audio player bar */}
+        {track.url && (
+          <div>
+            <audio ref={audioRef} src={track.url}
+              onTimeUpdate={function(){ setCurrentTime(audioRef.current?.currentTime||0); }}
+              onLoadedMetadata={function(){ setDuration(audioRef.current?.duration||0); }}
+              onEnded={function(){ setPlaying(false); setCurrentTime(0); }}
+            />
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ color: "#555", fontSize: 10, fontVariantNumeric: "tabular-nums", minWidth: 32 }}>{fmt(currentTime)}</span>
+              <div
+                style={{ flex: 1, height: 3, background: "#1e1e1e", borderRadius: 2, cursor: "pointer", position: "relative" }}
+                onClick={function(e){
+                  if (!audioRef.current || !duration) return;
+                  var rect = e.currentTarget.getBoundingClientRect();
+                  audioRef.current.currentTime = ((e.clientX - rect.left) / rect.width) * duration;
+                }}
+              >
+                <div style={{ width: pct + "%", height: "100%", background: "#F59E0B", borderRadius: 2, transition: "width 0.1s" }} />
+              </div>
+              <span style={{ color: "#555", fontSize: 10, fontVariantNumeric: "tabular-nums", minWidth: 32, textAlign: "right" }}>{fmt(duration)}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Description */}
+        {track.description && (
+          <div style={{ color: "#666", fontSize: 12, marginTop: 10, lineHeight: 1.5 }}>{track.description}</div>
+        )}
+
+        {/* Plays + date */}
+        <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+          <span style={{ color: "#333", fontSize: 11 }}>{new Date(track.uploaded_at).toLocaleDateString()}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// CONTENT TABS — shown on every public profile (Beats / Tracks / Music / Videos)
 // =============================================================================
 function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave, onViewProfile }) {
   var [tab, setTab]           = React.useState("posts");
   var [items, setItems]       = React.useState([]);
   var [loading, setLoading]   = React.useState(false);
   var [comments, setComments] = React.useState({});
-
   var [likes, setLikes]             = React.useState({});
-  var [openSheet, setOpenSheet]       = React.useState(null); // contentId
-
-
+  var [openSheet, setOpenSheet]       = React.useState(null);
   var [posts, setPosts]         = React.useState([]);
   var [openPostSheet, setOpenPostSheet] = React.useState(null);
   var [postLikes, setPostLikes] = React.useState({});
   var [postComments, setPostComments] = React.useState({});
-  var [lightbox, setLightbox] = React.useState(null); // { images: [], index: 0 }
-  var [openMenu, setOpenMenu] = React.useState(null);  // post/content id with menu open
+  var [lightbox, setLightbox] = React.useState(null);
+  var [openMenu, setOpenMenu] = React.useState(null);
+
+  // Artist tracks state
+  var [tracks, setTracks]           = React.useState([]);
+  var [tracksLoading, setTracksLoading] = React.useState(false);
+  var [showTrackUpload, setShowTrackUpload] = React.useState(false);
+  var isOwnerArtist = currentUser && currentUser.username === username && (currentUser.plan === "artist" || currentUser.plan === "producer");
+
+  function loadTracks() {
+    setTracksLoading(true);
+    apiFetch("/api/auth/tracks/profile/" + encodeURIComponent(username))
+      .then(function(d) { setTracks(d || []); setTracksLoading(false); })
+      .catch(function() { setTracksLoading(false); });
+  }
+
+  React.useEffect(function() {
+    if (tab === "tracks") loadTracks();
+  }, [tab, username]);
 
   function loadPosts() {
     setLoading(true); setPosts([]);
@@ -6330,12 +6562,22 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
     );
   }
 
-  var tabs = [
-    { id: "posts", label: "Posts" },
-    { id: "beats", label: "Beats" },
-    { id: "music", label: "Music" },
-    { id: "video", label: "Videos" },
-  ];
+  var isArtistProfile = profile && (profile.plan === "artist") && profile.plan !== "producer";
+  var isProducerProfile = profile && profile.plan === "producer";
+
+  var tabs = isArtistProfile
+    ? [
+        { id: "posts",  label: "Posts"  },
+        { id: "tracks", label: "Tracks" },
+        { id: "music",  label: "Music"  },
+        { id: "video",  label: "Videos" },
+      ]
+    : [
+        { id: "posts",  label: "Posts"  },
+        { id: "beats",  label: "Beats"  },
+        { id: "music",  label: "Music"  },
+        { id: "video",  label: "Videos" },
+      ];
 
   // Render comment thread for a content item
   function ContentCard({ item }) {
@@ -6467,7 +6709,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
         })}
       </div>
 
-      {/* Beats tab */}
+      {/* Beats tab — producers only */}
       {tab === "beats" && (
         <div style={{ padding: "0 16px" }}>
           {profile && profile.beats && profile.beats.length > 0 ? (
@@ -6479,6 +6721,55 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
               <AppIcon id="note" size={40} />
               <div style={{ fontSize: 15, marginTop: 12, color: "#444", fontWeight: 700 }}>No beats yet</div>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Tracks tab — artists only */}
+      {tab === "tracks" && (
+        <div style={{ padding: "0 16px" }}>
+          {/* Upload button — only shown to the profile owner */}
+          {isOwnerArtist && (
+            <button onClick={function(){ setShowTrackUpload(true); }} style={{
+              width: "100%", background: "linear-gradient(135deg,#F59E0B,#D97706)",
+              border: "none", borderRadius: 14, color: "white", fontWeight: 800,
+              fontSize: 15, padding: "14px", cursor: "pointer", marginBottom: 16,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12l7-7 7 7"/></svg>
+              Upload Track
+            </button>
+          )}
+
+          {/* Track upload modal */}
+          {showTrackUpload && (
+            <TrackUploadModal
+              currentUser={currentUser}
+              onClose={function(){ setShowTrackUpload(false); }}
+              onUploaded={function(){ setShowTrackUpload(false); loadTracks(); }}
+            />
+          )}
+
+          {tracksLoading ? (
+            <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>Loading tracks...</div>
+          ) : tracks.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+              <div style={{ fontSize: 15, marginTop: 12, color: "#444", fontWeight: 700 }}>No tracks yet</div>
+              {isOwnerArtist && <div style={{ color: "#444", fontSize: 13, marginTop: 6 }}>Upload your first track above</div>}
+            </div>
+          ) : (
+            tracks.map(function(track) {
+              return (
+                <ArtistTrackCard
+                  key={track.id}
+                  track={track}
+                  isOwner={isOwnerArtist}
+                  onDeleted={function(){ loadTracks(); }}
+                  onViewProfile={onViewProfile}
+                />
+              );
+            })
           )}
         </div>
       )}
@@ -7008,8 +7299,10 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
           {[
             { val: profile.followerCount || 0, label: "Followers", onClick: () => setFollowList("followers") },
             { val: profile.followingCount || 0, label: "Following", onClick: () => setFollowList("following") },
-            { val: profile.beats?.length || 0,  label: "Beats",     onClick: null },
-            { val: profile.playCount || 0,      label: "Plays",     onClick: null, icon: "play" },
+            isProd
+              ? { val: profile.beats?.length || 0, label: "Beats", onClick: null }
+              : { val: profile.trackCount || 0,    label: "Tracks", onClick: null },
+            { val: profile.playCount || 0, label: "Plays", onClick: null, icon: "play" },
           ].map((s, i) => (
             <div key={s.label}
               onClick={s.onClick || undefined}
@@ -10900,24 +11193,29 @@ class NoiseGateProcessor extends AudioWorkletProcessor {
 registerProcessor("noise-gate-processor", NoiseGateProcessor);
 `;
 
-const noiseGateWorkletReady = { current: false, promise: null };
-const rnnoiseWorkletReady = noiseGateWorkletReady;
+const _noiseGateRegistered = new WeakMap();
 
 async function registerRNNoiseWorklet(actx) {
-  if (noiseGateWorkletReady.current) return;
-  if (noiseGateWorkletReady.promise) { await noiseGateWorkletReady.promise; return; }
-  noiseGateWorkletReady.promise = (async () => {
+  if (!actx || actx.state === "closed") return false;
+  if (_noiseGateRegistered.get(actx) === true) return true;
+  if (_noiseGateRegistered.get(actx) instanceof Promise) {
+    return await _noiseGateRegistered.get(actx);
+  }
+  const p = (async () => {
     try {
       const blob = new Blob([NOISE_GATE_WORKLET_CODE], { type: "application/javascript" });
       const url  = URL.createObjectURL(blob);
       await actx.audioWorklet.addModule(url);
       URL.revokeObjectURL(url);
-      noiseGateWorkletReady.current = true;
+      _noiseGateRegistered.set(actx, true);
+      return true;
     } catch(e) {
-      // Worklet registration failed — compressor fallback used in buildChain
+      _noiseGateRegistered.set(actx, false);
+      return false;
     }
   })();
-  await noiseGateWorkletReady.promise;
+  _noiseGateRegistered.set(actx, p);
+  return await p;
 }
 
 function _TRottenMasterPlugin({ fx, upd }) {
@@ -13678,11 +13976,9 @@ function StudioScreen({ user, onExit }) {
       const wet = revOn ? (fx.reverb.wet || 0.25) : 0;
       live.reverb.wetG.gain.setTargetAtTime(wet,     now, T);
       live.reverb.dryG.gain.setTargetAtTime(1 - wet, now, T);
-      if (revOn && fx.reverb.preDelay !== undefined) {
+      if (revOn && live.reverb.preDelay && fx.reverb.preDelay !== undefined) {
         live.reverb.preDelay.delayTime.setTargetAtTime(fx.reverb.preDelay / 1000, now, T);
       }
-      // Note: room size changes the IR buffer — requires a brief rebuild only when roomSize changes
-      // For smooth real-time feel, we defer that to the next play() call. Wet/dry is instant.
     }
 
     // ── Ocean Reverb — live wet/dry and damping ──
@@ -13691,10 +13987,10 @@ function StudioScreen({ user, onExit }) {
       const wet = oceanOn ? (fx.ocean.wet || 0.35) : 0;
       live.ocean.wetG.gain.setTargetAtTime(wet,     now, T);
       live.ocean.dryG.gain.setTargetAtTime(1 - wet, now, T);
-      if (oceanOn && fx.ocean.preDelay !== undefined) {
+      if (oceanOn && live.ocean.preDelay && fx.ocean.preDelay !== undefined) {
         live.ocean.preDelay.delayTime.setTargetAtTime(fx.ocean.preDelay / 1000, now, T);
       }
-      if (oceanOn && fx.ocean.damp !== undefined && live.ocean.lpf) {
+      if (oceanOn && live.ocean.lpf && fx.ocean.damp !== undefined) {
         const freq = 800 + (1 - fx.ocean.damp) * 7200;
         live.ocean.lpf.frequency.setTargetAtTime(freq, now, T);
       }
@@ -13982,60 +14278,78 @@ function StudioScreen({ user, onExit }) {
       volGain.connect(trackAnalyser); // taps off AFTER volume/mute
       trackAnalysersRef.current[track.id] = trackAnalyser;
 
-      // ── Reverb — always built so wet/dry can be morphed live ──
-      // We always allocate the reverb graph; when off, wetG = 0 and dryG = 1
+      // ── Reverb — only allocate ConvolverNode when plugin is ON ──
+      // CRASH FIX: allocating IR buffers for every track even when off was
+      // the main cause of iOS memory crashes with 4+ tracks.
       {
-        const sr = actx.sampleRate;
-        const preDelaySec = (fx.reverb && fx.reverb.preDelay) ? fx.reverb.preDelay / 1000 : 0;
-        const preDelay = actx.createDelay(0.2);
-        preDelay.delayTime.value = preDelaySec;
-        const roomSize = (fx.reverb && fx.reverb.on) ? (fx.reverb.roomSize || 0.8) : 0.8;
-        const len = Math.round(sr * roomSize * 3);
-        const ir = actx.createBuffer(2, len, sr);
-        for (let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.5);}
-        const conv = actx.createConvolver(); conv.buffer = ir;
-        const wetVal = (fx.reverb && fx.reverb.on) ? (fx.reverb.wet || 0.25) : 0;
+        const reverbOn = !!(fx.reverb && fx.reverb.on);
+        const wetVal   = reverbOn ? (fx.reverb.wet || 0.25) : 0;
         const dryG = actx.createGain(); dryG.gain.value = 1 - wetVal;
         const wetG = actx.createGain(); wetG.gain.value = wetVal;
         const mix  = actx.createGain();
         dryG.connect(mix); wetG.connect(mix); mix.connect(node);
-        preDelay.connect(conv); conv.connect(wetG);
-        const split = actx.createGain(); split.gain.value = 1;
-        split.connect(dryG); split.connect(preDelay);
-        node = split;
-        liveNodes.reverb = { dryG, wetG, preDelay, conv };
+
+        if (reverbOn) {
+          const sr = actx.sampleRate;
+          const preDelaySec = (fx.reverb.preDelay || 0) / 1000;
+          const preDelay = actx.createDelay(0.2);
+          preDelay.delayTime.value = preDelaySec;
+          const roomSize = fx.reverb.roomSize || 0.8;
+          // Shared IR buffer per roomSize to avoid re-allocating per track
+          const len = Math.round(sr * Math.min(roomSize, 1.5) * 2); // capped at 2s IR
+          const ir = actx.createBuffer(2, len, sr);
+          for (let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.5);}
+          const conv = actx.createConvolver(); conv.buffer = ir;
+          const split = actx.createGain(); split.gain.value = 1;
+          split.connect(dryG); split.connect(preDelay);
+          preDelay.connect(conv); conv.connect(wetG);
+          node = split;
+          liveNodes.reverb = { dryG, wetG, preDelay, conv };
+        } else {
+          // Bypass: dry path only, no convolver allocated
+          const split = actx.createGain(); split.gain.value = 1;
+          split.connect(dryG);
+          node = split;
+          liveNodes.reverb = { dryG, wetG };
+        }
       }
 
-      // ── Ocean Reverb — deeper/longer with damping lowpass on wet signal ──
+      // ── Ocean Reverb — only allocate when ON ──
       {
-        const sr = actx.sampleRate;
         const oceanOn = !!(fx.ocean && fx.ocean.on);
-        const preDelaySec = oceanOn ? (fx.ocean.preDelay || 20) / 1000 : 0.02;
-        const roomSize = oceanOn ? Math.min(2, fx.ocean.roomSize || 1.0) : 1.0;
-        const len = Math.round(sr * roomSize * 4); // longer tail than standard reverb
-        const ir = actx.createBuffer(2, len, sr);
-        for (let ch=0;ch<2;ch++){
-          const d = ir.getChannelData(ch);
-          for (let i=0;i<len;i++) d[i] = (Math.random()*2-1)*Math.pow(1-i/len, 1.8); // gentler decay
-        }
-        const conv = actx.createConvolver(); conv.buffer = ir;
-        // Damping: lowpass on wet signal for dark oceanic character
-        const damp = oceanOn ? (fx.ocean.damp || 0.6) : 0.6;
-        const lpf = actx.createBiquadFilter();
-        lpf.type = "lowpass";
-        lpf.frequency.value = 800 + (1 - damp) * 7200; // damp=1 → 800Hz, damp=0 → 8000Hz
-        lpf.Q.value = 0.5;
-        const preDelay = actx.createDelay(0.3); preDelay.delayTime.value = preDelaySec;
-        const wetVal = oceanOn ? (fx.ocean.wet || 0.35) : 0;
+        const wetVal  = oceanOn ? (fx.ocean.wet || 0.35) : 0;
         const dryG = actx.createGain(); dryG.gain.value = 1 - wetVal;
         const wetG = actx.createGain(); wetG.gain.value = wetVal;
         const mix  = actx.createGain();
         dryG.connect(mix); wetG.connect(mix); mix.connect(node);
-        preDelay.connect(conv); conv.connect(lpf); lpf.connect(wetG);
-        const split = actx.createGain(); split.gain.value = 1;
-        split.connect(dryG); split.connect(preDelay);
-        node = split;
-        liveNodes.ocean = { dryG, wetG, preDelay, lpf };
+
+        if (oceanOn) {
+          const sr = actx.sampleRate;
+          const preDelaySec = (fx.ocean.preDelay || 20) / 1000;
+          const roomSize = Math.min(1.5, fx.ocean.roomSize || 1.0); // hard cap at 1.5s IR
+          const len = Math.round(sr * roomSize * 2.5);
+          const ir = actx.createBuffer(2, len, sr);
+          for (let ch=0;ch<2;ch++){
+            const d = ir.getChannelData(ch);
+            for (let i=0;i<len;i++) d[i] = (Math.random()*2-1)*Math.pow(1-i/len, 1.8);
+          }
+          const conv = actx.createConvolver(); conv.buffer = ir;
+          const damp = fx.ocean.damp || 0.6;
+          const lpf = actx.createBiquadFilter();
+          lpf.type = "lowpass";
+          lpf.frequency.value = 800 + (1 - damp) * 7200;
+          lpf.Q.value = 0.5;
+          const preDelay = actx.createDelay(0.3); preDelay.delayTime.value = preDelaySec;
+          const split = actx.createGain(); split.gain.value = 1;
+          split.connect(dryG); split.connect(preDelay);
+          preDelay.connect(conv); conv.connect(lpf); lpf.connect(wetG);
+          node = split;
+          liveNodes.ocean = { dryG, wetG, preDelay, lpf, conv };
+        } else {
+        split.connect(dryG);
+          node = split;
+          liveNodes.ocean = { dryG, wetG };
+        }
       }
 
       // ── 5-band parametric EQ — always built; bypass = unity gain when off ──
