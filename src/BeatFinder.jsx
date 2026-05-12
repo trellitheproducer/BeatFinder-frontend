@@ -1583,6 +1583,33 @@ function RhymeFinder({ onClose, onInsert }) {
     );
   };
 
+  // Prevent touch events from bubbling to page scroll on iOS
+  var resultsRef = React.useRef(null);
+  React.useEffect(function() {
+    var el = resultsRef.current;
+    if (!el) return;
+    function onTouchMove(e) {
+      // Allow scroll only if the element itself is scrollable and not at the boundary
+      var atTop    = el.scrollTop === 0;
+      var atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight;
+      var goingUp  = e.touches[0] && e._touchStartY > e.touches[0].clientY;
+      var goingDown= e.touches[0] && e._touchStartY < e.touches[0].clientY;
+      if ((atTop && goingDown) || (atBottom && goingUp)) {
+        e.preventDefault();
+      }
+      e.stopPropagation();
+    }
+    function onTouchStart(e) {
+      e._touchStartY = e.touches[0] ? e.touches[0].clientY : 0;
+    }
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove",  onTouchMove,  { passive: false });
+    return function() {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove",  onTouchMove);
+    };
+  }, []);
+
   return (
     <div style={{
       position: "fixed", left: 0, right: 0, bottom: 0,
@@ -1590,12 +1617,12 @@ function RhymeFinder({ onClose, onInsert }) {
       borderTop: "2px solid rgba(6,182,212,0.4)",
       zIndex: 1000,
       display: "flex", flexDirection: "column",
-      maxHeight: "60vh",
+      height: "55vh",
       paddingBottom: "env(safe-area-inset-bottom)",
       boxShadow: "0 -8px 32px rgba(0,0,0,0.8)",
     }}>
-      {/* Header + search — fixed, never scrolls */}
-      <div style={{ padding: "12px 16px 10px", flexShrink: 0, background: "#0a0f1a" }}>
+      {/* Header + search — always visible, never scrolls */}
+      <div style={{ padding: "12px 16px 10px", flexShrink: 0, background: "#0a0f1a", zIndex: 1 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ color: "#06B6D4", fontWeight: 800, fontSize: 13 }}><AppIcon id="target" size={20}/> Rhyme Finder</div>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer", padding: "4px 8px" }}>✕</button>
@@ -1624,16 +1651,25 @@ function RhymeFinder({ onClose, onInsert }) {
         </div>
       </div>
 
-      {/* Results — independently scrollable, never affects page */}
+      {/* Thin divider */}
+      <div style={{ height: 1, background: "rgba(6,182,212,0.15)", flexShrink: 0 }} />
+
+      {/* Results — independently scrollable */}
       {results && (
-        <div style={{
-          overflowY: "scroll",
-          WebkitOverflowScrolling: "touch",
-          overscrollBehavior: "contain",
-          padding: "0 16px 16px",
-          flex: 1,
-          minHeight: 0,
-        }}>
+        <div
+          ref={resultsRef}
+          style={{
+            overflowY: "scroll",
+            WebkitOverflowScrolling: "touch",
+            overscrollBehavior: "contain",
+            padding: "12px 16px 24px",
+            flex: 1,
+            minHeight: 0,
+            // Custom subtle scrollbar
+            scrollbarWidth: "thin",
+            scrollbarColor: "rgba(6,182,212,0.3) transparent",
+          }}
+        >
           {results.perfect.length === 0 && results.near.length === 0 ? (
             <div style={{ color: "#444", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
               No rhymes found for "{searched}"
@@ -1651,7 +1687,7 @@ function RhymeFinder({ onClose, onInsert }) {
       )}
 
       {!results && !loading && (
-        <div style={{ color: "#333", fontSize: 12, textAlign: "center", padding: "12px 0", flexShrink: 0 }}>
+        <div style={{ color: "#333", fontSize: 12, textAlign: "center", padding: "16px 0", flexShrink: 0 }}>
           Tap a rhyme to insert it into your lyrics
         </div>
       )}
