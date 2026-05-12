@@ -3960,13 +3960,13 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
     var start = Date.now() - (previewTime * 1000);
     timerRef.current = setInterval(function() {
       var el = (Date.now() - start) / 1000;
-      setPreviewTime(Math.min(el, 30));
+      setPreviewTime(Math.min(el, 45));
       if (el >= 45) { clearInterval(timerRef.current); stopPreview(); }
     }, 100);
   }
   function onTimeUpdate(e) {
     var el = e.target, st = parseFloat(el.dataset.startTime || 0);
-    if (el.currentTime >= st + 30) { el.pause(); stopPreview(); }
+    if (el.currentTime >= st + 45) { el.pause(); stopPreview(); }
     if (el.currentTime < st) el.currentTime = st;
   }
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
@@ -4000,16 +4000,11 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
       user={user}
       onViewProfile={onViewProfile}
       audioEl={previewing && beat.url ? (
-        <audio ref={audioRef} src={beat.url + "#t=" + (beat.preview_start || 0)} autoPlay data-start-time={String(beat.preview_start || 0)}
+        <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
           onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
+          onLoadedMetadata={function(){ if (audioRef.current && (beat.preview_start || 0) > 0) audioRef.current.currentTime = beat.preview_start || 0; }}
           onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
       ) : null}
-    />
-  );
-}
-
-// =============================================================================
-// PRODUCER BEATS SCREEN
 // =============================================================================
 function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
   const [beats,   setBeats]   = useState([]);
@@ -4243,13 +4238,13 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
       var start = Date.now();
       tRef.current = setInterval(function() {
         var el = (Date.now() - start) / 1000;
-        setPTime(Math.min(el, 30));
+        setPTime(Math.min(el, 45));
         if (el >= 45) { clearInterval(tRef.current); stopPrev(); }
       }, 100);
     }
     function onTimeUpdate(e) {
       var el = e.target, st = parseFloat(el.dataset.startTime || 0);
-      if (el.currentTime >= st + 30) { el.pause(); stopPrev(); }
+      if (el.currentTime >= st + 45) { el.pause(); stopPrev(); }
       if (el.currentTime < st) el.currentTime = st;
     }
     async function handleBuy() {
@@ -4283,8 +4278,9 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
           user={user}
           onViewProfile={onViewProfile}
           audioEl={prev && beat.url ? (
-            <audio ref={aRef} src={beat.url + "#t=" + (beat.preview_start || 0)} autoPlay data-start-time={String(beat.preview_start || 0)}
+            <audio ref={aRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
               onPlay={onPlay} onPause={function(){ clearInterval(tRef.current); }}
+              onLoadedMetadata={function(){ if (aRef.current && (beat.preview_start || 0) > 0) aRef.current.currentTime = beat.preview_start || 0; }}
               onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
           ) : null}
         />
@@ -4921,13 +4917,13 @@ function FreeMemberBeatCard({ beat, onViewProfile }) {
     var start = Date.now();
     timerRef.current = setInterval(function() {
       var el = (Date.now() - start) / 1000;
-      setPreviewTime(Math.min(el, 30));
+      setPreviewTime(Math.min(el, 45));
       if (el >= 45) { clearInterval(timerRef.current); stopPreview(); }
     }, 100);
   }
   function onTimeUpdate(e) {
     var el = e.target, st = parseFloat(el.dataset.startTime || 0);
-    if (el.currentTime >= st + 30) { el.pause(); stopPreview(); }
+    if (el.currentTime >= st + 45) { el.pause(); stopPreview(); }
     if (el.currentTime < st) el.currentTime = st;
   }
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
@@ -4941,8 +4937,9 @@ function FreeMemberBeatCard({ beat, onViewProfile }) {
       onDownload={function(){ downloadMp3(beat.url, beat.title, beat.id); }}
       onViewProfile={onViewProfile}
       audioEl={previewing && beat.url ? (
-        <audio ref={audioRef} src={beat.url + "#t=" + (beat.preview_start || 0)} autoPlay data-start-time={String(beat.preview_start || 0)}
+        <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
           onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
+          onLoadedMetadata={function(){ if (audioRef.current && (beat.preview_start || 0) > 0) audioRef.current.currentTime = beat.preview_start || 0; }}
           onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
       ) : null}
     />
@@ -5948,8 +5945,9 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
               </span>
             </div>
             {previewing && beat.url && (
-              <audio ref={audioRef} src={beat.url + "#t=" + (beat.preview_start || 0)} autoPlay data-start-time={String(beat.preview_start || 0)}
+              <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
                 onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
+                onLoadedMetadata={function(){ if (audioRef.current && (beat.preview_start || 0) > 0) audioRef.current.currentTime = beat.preview_start || 0; }}
                 onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
             )}
           </div>
@@ -6709,21 +6707,52 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
         })}
       </div>
 
-      {/* Beats tab — producers only */}
-      {tab === "beats" && (
-        <div style={{ padding: "0 16px" }}>
-          {profile && profile.beats && profile.beats.length > 0 ? (
-            profile.beats.map(function(beat) {
-              return <ProfileBeatCard key={beat.id} beat={beat} currentUser={currentUser} onViewProfile={onViewProfile} />;
-            })
-          ) : (
-            <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
-              <AppIcon id="note" size={40} />
-              <div style={{ fontSize: 15, marginTop: 12, color: "#444", fontWeight: 700 }}>No beats yet</div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Beats tab — producers only, split into Free and Licensed */}
+      {tab === "beats" && (function() {
+        var beats = (profile && profile.beats) || [];
+        var isFreePrice = function(p) { return !p || p === "free" || p === "£0" || p === "0" || p === "£0.00" || p === "0.00"; };
+        var freeBeats     = beats.filter(function(b) { return isFreePrice(b.price); });
+        var licensedBeats = beats.filter(function(b) { return !isFreePrice(b.price); });
+
+        if (beats.length === 0) return (
+          <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
+            <AppIcon id="note" size={40} />
+            <div style={{ fontSize: 15, marginTop: 12, color: "#444", fontWeight: 700 }}>No beats yet</div>
+          </div>
+        );
+
+        return (
+          <div style={{ padding: "0 16px" }}>
+            {/* Free Beats section */}
+            {freeBeats.length > 0 && (
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(192,38,211,0.2)" }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#C026D3", boxShadow: "0 0 6px #C026D3" }} />
+                  <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>FREE BEATS</div>
+                  <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "1px 8px", fontSize: 10, color: "#C026D3", fontWeight: 700 }}>{freeBeats.length}</div>
+                </div>
+                {freeBeats.map(function(beat) {
+                  return <ProfileBeatCard key={beat.id} beat={beat} currentUser={currentUser} onViewProfile={onViewProfile} />;
+                })}
+              </div>
+            )}
+
+            {/* Licensed Beats section */}
+            {licensedBeats.length > 0 && (
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(245,158,11,0.2)" }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#F59E0B", boxShadow: "0 0 6px #F59E0B" }} />
+                  <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>LICENSED BEATS</div>
+                  <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "1px 8px", fontSize: 10, color: "#F59E0B", fontWeight: 700 }}>{licensedBeats.length}</div>
+                </div>
+                {licensedBeats.map(function(beat) {
+                  return <ProfileBeatCard key={beat.id} beat={beat} currentUser={currentUser} onViewProfile={onViewProfile} />;
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Tracks tab — artists only */}
       {tab === "tracks" && (
@@ -9423,8 +9452,8 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 setUploadBpm(""); setUploadKey(""); setUploadDesc(""); setUploadPreviewStart(0);
                 setUploadFile(null);
                 if (uploadFileRef.current) uploadFileRef.current.value = "";
-                // Return to dashboard after 1.5s
-                setTimeout(function(){ setActiveSection(null); setUploadMsg(""); }, 1500);
+                // Clear success message after 3s, stay on form
+                setTimeout(function(){ setUploadMsg(""); }, 3000);
               } catch (e) { setUploadMsg("Error: " + e.message); }
               setUploadLoading(false);
             }} style={{ width: "100%", background: uploadLoading ? "#333" : "#C026D3", border: "none", borderRadius: 12, color: "white", fontWeight: 800, fontSize: 15, padding: "14px", cursor: uploadLoading ? "not-allowed" : "pointer" }}>
