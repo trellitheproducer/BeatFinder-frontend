@@ -1910,55 +1910,10 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
           <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>{beat.channel}</div>
         </div>
       </div>
-      {/* Wrap iframe in a relative container with a transparent overlay.
-          The suggested videos and "Watch on YouTube" bar appear at the BOTTOM.
-          Overlay covers bottom 50px to block those clicks while play button in middle works. */}
-      <div style={{ position: "relative", width: "100%", height: 220, flexShrink: 0, background: "#000" }}
-        ref={function(el){
-          if (!el) return;
-          // Thumbnail-first: show thumbnail, load iframe only on tap
-          if (el._atInit) return;
-          el._atInit = true;
-          el._playing = false;
-
-          // Create thumbnail overlay
-          const overlay = document.createElement("div");
-          overlay.style.cssText = "position:absolute;inset:0;z-index:20;cursor:pointer;background:#000;";
-
-          const thumb = document.createElement("img");
-          thumb.src = "https://img.youtube.com/vi/" + beat.videoId + "/hqdefault.jpg";
-          thumb.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.85;";
-
-          const playBtn = document.createElement("div");
-          playBtn.style.cssText = "position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:60px;height:60px;border-radius:50%;background:rgba(255,0,0,0.85);display:flex;align-items:center;justify-content:center;box-shadow:0 0 20px rgba(0,0,0,0.6);";
-          playBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>';
-
-          overlay.appendChild(thumb);
-          overlay.appendChild(playBtn);
-
-          // Bottom blocker — always present over iframe to block suggested videos
-          const bottomBlock = document.createElement("div");
-          bottomBlock.style.cssText = "position:absolute;bottom:0;left:0;right:0;height:55px;z-index:15;background:transparent;";
-
-          overlay.addEventListener("click", function() {
-            if (el._playing) return;
-            el._playing = true;
-            const iframe = el.querySelector("iframe");
-            if (iframe) iframe.src = embedUrl(beat.videoId);
-            overlay.style.display = "none";
-            el.appendChild(bottomBlock);
-          });
-          overlay.addEventListener("touchend", function(e) {
-            e.preventDefault();
-            overlay.click();
-          });
-
-          el.appendChild(overlay);
-        }}
-      >
+      <div style={{ position: "relative", width: "100%", height: 220, flexShrink: 0, background: "#000" }}>
         <iframe
           key={beat.videoId}
-          src="about:blank"
+          src={embedUrl(beat.videoId)}
           width="100%" height="220"
           style={{ display: "block", border: "none", background: "#000", position: "absolute", top: 0, left: 0 }}
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -18187,6 +18142,35 @@ function SplashScreen({ onDone }) {
 }
 
 export default function BeatFinder() {
+  // ── Blank screen recovery ─────────────────────────────────────────────────
+  // When a user taps a YouTube link and the YouTube app opens, iOS suspends
+  // the PWA. On return, if the page has gone blank (body has no visible content),
+  // reload to restore the app. This is the only reliable fix for the blank screen.
+  React.useEffect(function() {
+    var _leftAt = 0;
+    function onHide() {
+      if (document.visibilityState === "hidden") _leftAt = Date.now();
+    }
+    function onShow() {
+      if (document.visibilityState !== "visible") return;
+      // If we were away for more than 1 second (i.e. left the app, not just a quick blur)
+      // and the root app element has no height, the page is blank — reload.
+      var away = Date.now() - _leftAt;
+      if (away > 1000) {
+        var root = document.getElementById("root") || document.body;
+        if (root && root.clientHeight < 50) {
+          window.location.reload();
+        }
+      }
+    }
+    document.addEventListener("visibilitychange", onHide);
+    document.addEventListener("visibilitychange", onShow);
+    return function() {
+      document.removeEventListener("visibilitychange", onHide);
+      document.removeEventListener("visibilitychange", onShow);
+    };
+  }, []);
+
   const [splashDone, setSplashDone] = useState(function() {
     // On iOS, backgrounding the app causes a full page reload.
     // If sessionStorage shows a session was already started, skip the splash.
