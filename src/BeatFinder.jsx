@@ -1585,14 +1585,20 @@ function RhymeFinder({ onClose, onInsert }) {
 
   return (
     <div style={{
-      background: "#0a0f1a", borderTop: "1px solid rgba(6,182,212,0.3)",
-      paddingBottom: "calc(0px + env(safe-area-inset-bottom))",
-      maxHeight: "60vh", minHeight: 200, display: "flex", flexDirection: "column",
+      position: "fixed", left: 0, right: 0, bottom: 0,
+      background: "#0a0f1a",
+      borderTop: "2px solid rgba(6,182,212,0.4)",
+      zIndex: 1000,
+      display: "flex", flexDirection: "column",
+      maxHeight: "60vh",
+      paddingBottom: "env(safe-area-inset-bottom)",
+      boxShadow: "0 -8px 32px rgba(0,0,0,0.8)",
     }}>
-      <div style={{ padding: "12px 16px 10px", flexShrink: 0 }}>
+      {/* Header + search — fixed, never scrolls */}
+      <div style={{ padding: "12px 16px 10px", flexShrink: 0, background: "#0a0f1a" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ color: "#06B6D4", fontWeight: 800, fontSize: 13 }}><AppIcon id="target" size={20}/> Rhyme Finder</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer" }}>✕</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer", padding: "4px 8px" }}>✕</button>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -1618,8 +1624,16 @@ function RhymeFinder({ onClose, onInsert }) {
         </div>
       </div>
 
+      {/* Results — independently scrollable, never affects page */}
       {results && (
-        <div style={{ overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "0 16px 16px", flex: 1, minHeight: 0 }}>
+        <div style={{
+          overflowY: "scroll",
+          WebkitOverflowScrolling: "touch",
+          overscrollBehavior: "contain",
+          padding: "0 16px 16px",
+          flex: 1,
+          minHeight: 0,
+        }}>
           {results.perfect.length === 0 && results.near.length === 0 ? (
             <div style={{ color: "#444", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
               No rhymes found for "{searched}"
@@ -1637,7 +1651,7 @@ function RhymeFinder({ onClose, onInsert }) {
       )}
 
       {!results && !loading && (
-        <div style={{ color: "#333", fontSize: 12, textAlign: "center", padding: "12px 0" }}>
+        <div style={{ color: "#333", fontSize: 12, textAlign: "center", padding: "12px 0", flexShrink: 0 }}>
           Tap a rhyme to insert it into your lyrics
         </div>
       )}
@@ -3649,7 +3663,7 @@ function BeatCardShell({ beat, accentColor, children, onViewProfile, extraStats 
 // Matches the ProfileBeatCard design: logo thumbnail, waveform player,
 // purple=free, gold=paid, footer info pills on free beats.
 // =============================================================================
-function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audioEl, onBuy, onDownload, buyLoading, buyErr, user }) {
+function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audioEl, onBuy, onDownload, buyLoading, buyErr, user, onViewProfile }) {
   var isFree    = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
   var accentClr = isFree ? "#C026D3" : "#F59E0B";
   var totalSecs = Math.floor(previewTime || 0);
@@ -3712,7 +3726,11 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ color: "#555", fontSize: 9, fontWeight: 700, letterSpacing: 1 }}>PRODUCER</div>
             <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <span style={{ color: "white", fontWeight: 700, fontSize: 13 }}>{beat.producer || "Unknown"}</span>
+              <span
+                onClick={function(e) { e.stopPropagation(); if (onViewProfile && (beat.producer_username || beat.producer)) onViewProfile(beat.producer_username || beat.producer); }}
+                style={{ color: "white", fontWeight: 700, fontSize: 13, cursor: onViewProfile && (beat.producer_username || beat.producer) ? "pointer" : "default" }}>
+                {beat.producer || "Unknown"}
+              </span>
               <VerifiedBadge size={13} />
             </div>
           </div>
@@ -3871,6 +3889,7 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
       buyLoading={loading}
       buyErr={err}
       user={user}
+      onViewProfile={onViewProfile}
       audioEl={previewing && beat.url ? (
         <audio ref={audioRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
           onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
@@ -4135,6 +4154,7 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
           buyLoading={buyLoading}
           buyErr={buyErr}
           user={user}
+          onViewProfile={onViewProfile}
           audioEl={prev && beat.url ? (
             <audio ref={aRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
               onPlay={onPlay} onPause={function(){ clearInterval(tRef.current); }}
@@ -4792,6 +4812,7 @@ function FreeMemberBeatCard({ beat, onViewProfile }) {
       previewTime={previewTime}
       onTogglePreview={startPreview}
       onDownload={function(){ downloadMp3(beat.url, beat.title, beat.id); }}
+      onViewProfile={onViewProfile}
       audioEl={previewing && beat.url ? (
         <audio ref={audioRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
           onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
