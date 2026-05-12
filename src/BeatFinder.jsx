@@ -18142,32 +18142,39 @@ function SplashScreen({ onDone }) {
 }
 
 export default function BeatFinder() {
-  // ── Blank screen recovery ─────────────────────────────────────────────────
-  // When a user taps a YouTube link and the YouTube app opens, iOS suspends
-  // the PWA. On return, if the page has gone blank (body has no visible content),
-  // reload to restore the app. This is the only reliable fix for the blank screen.
+  // ── In-app browser dismissal recovery ────────────────────────────────────
+  // When a YouTube link opens Safari's in-app browser (the grey "Done" bar),
+  // iOS fires the `pageshow` event when the user taps Done and returns.
+  // If the page was restored from bfcache it may be blank — we force a reload.
   React.useEffect(function() {
-    var _leftAt = 0;
-    function onHide() {
-      if (document.visibilityState === "hidden") _leftAt = Date.now();
-    }
-    function onShow() {
-      if (document.visibilityState !== "visible") return;
-      // If we were away for more than 1 second (i.e. left the app, not just a quick blur)
-      // and the root app element has no height, the page is blank — reload.
-      var away = Date.now() - _leftAt;
-      if (away > 1000) {
-        var root = document.getElementById("root") || document.body;
-        if (root && root.clientHeight < 50) {
-          window.location.reload();
-        }
+    function onPageShow(e) {
+      // e.persisted = true means page was restored from back-forward cache (blank)
+      if (e.persisted) {
+        window.location.reload();
       }
     }
-    document.addEventListener("visibilitychange", onHide);
-    document.addEventListener("visibilitychange", onShow);
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        // Give the browser 300ms to finish restoring, then check if blank
+        setTimeout(function() {
+          var root = document.getElementById("root") || document.body;
+          if (root && root.children.length === 0) {
+            window.location.reload();
+          }
+          // Also check if body background is white (blank state indicator)
+          var bg = window.getComputedStyle(document.body).backgroundColor;
+          if (bg === "rgb(255, 255, 255)" || bg === "rgba(0, 0, 0, 0)") {
+            var appEl = document.querySelector("[data-bf-app]");
+            if (!appEl) window.location.reload();
+          }
+        }, 300);
+      }
+    }
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return function() {
-      document.removeEventListener("visibilitychange", onHide);
-      document.removeEventListener("visibilitychange", onShow);
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 
@@ -18471,7 +18478,7 @@ export default function BeatFinder() {
   }
 
   return (
-    <div key="app-root" id="bf-portrait-lock" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
+    <div key="app-root" data-bf-app="1" id="bf-portrait-lock" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
       {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
