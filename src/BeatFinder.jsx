@@ -9383,6 +9383,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"reverb",       label:"Convolution Reverb",  sub:"Room simulation",               icon:"wave", color:"#C026D3" },
     { key:"ocean",        label:"Ocean Reverb",        sub:"Deep · Lush · Atmospheric",     icon:"wave", color:"#0891b2" },
     { key:"noiseremover", label:"Noise Remover",       sub:"RNNoise · AI denoising",        icon:"mic", color:"#10B981" },
+    { key:"autotune",     label:"Autotune",            sub:"T-Pain · Melodic · Key/Scale",  icon:"knobs", color:"#C026D3" },
     { key:"doubler",      label:"Vocal Doubler",        sub:"Stereo width · Haas effect",     icon:"speaker", color:"#F59E0B" },
     { key:"hdelay",       label:"H-Delay",              sub:"Tape · BPM sync · Analog",       icon:"◷", color:"#E85D04" },
     { key:"trotten",      label:"T-Rotten Master",      sub:"Mastering · Analog warmth",       icon:"knobs", color:"#C8762A" },
@@ -9419,6 +9420,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"reverb",       label:"Reverb",              sub:"Room sim",        icon:"ph-reverb",      color:"#0891b2", cat:"REVERB",   tag:"EFFECT" },
     { key:"ocean",        label:"Ocean Reverb",        sub:"Lush · Deep",     icon:"ph-reverb",      color:"#0369a1", cat:"REVERB",   tag:"EFFECT" },
     { key:"noiseremover", label:"Noise Gate AI",       sub:"RNNoise",         icon:"ph-gate",        color:"#059669", cat:"DYNAMICS", tag:"UTILITY" },
+    { key:"autotune",     label:"Autotune",            sub:"T-Pain · Melodic",icon:"ph-master",      color:"#be185d", cat:"PITCH",    tag:"EFFECT" },
     { key:"doubler",      label:"Doubler",             sub:"Haas / Width",    icon:"ph-doubler",     color:"#d97706", cat:"UTILITY",  tag:"MIXER"  },
     { key:"hdelay",       label:"T-Delay",             sub:"Tape · BPM sync", icon:"ph-delay",       color:"#ea580c", cat:"UTILITY",  tag:"EFFECT" },
     { key:"trotten",      label:"T-Rotten Master 19",  sub:"Analog warmth",   icon:"ph-master",      color:"#854d0e", cat:"DYNAMICS", tag:"MASTER" },
@@ -9669,6 +9671,9 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
 
           {/* GRM Bandpass plugin */}
           {key === "bandpass" && <BandpassPlugin fx={fx} upd={upd} Knob={Knob} />}
+
+          {/* Autotune plugin */}
+          {key === "autotune" && <AutotunePlugin fx={fx} upd={upd} Knob={Knob} />}
 
         </div>
       );
@@ -10330,6 +10335,382 @@ function _BandpassPlugin({ fx, upd, Knob }) {
           <div style={{ textAlign:"center" }}>
             <div style={{ color:"#0e5a6a", fontSize:8, fontWeight:700, letterSpacing:1 }}>HI CUT</div>
             <div style={{ color: on ? "#38bdf8" : "#2a4a50", fontSize:11, fontWeight:800, marginTop:2 }}>{fmtHz(hiHz)} Hz</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// AUTOTUNE WORKLET — McLeod Pitch Detection + Granular Pitch Shifter
+// Runs entirely in AudioWorklet thread. No WASM, no SharedArrayBuffer.
+// Compatible with iOS Safari 14.5+.
+// =============================================================================
+const AUTOTUNE_WORKLET_CODE = `
+// ── Note frequency table ──────────────────────────────────────────
+const NOTE_FREQS = [];
+for (let m = 0; m < 128; m++) NOTE_FREQS.push(440 * Math.pow(2, (m - 69) / 12));
+
+// Scale intervals (semitones from root)
+const SCALES = {
+  major:       [0,2,4,5,7,9,11],
+  minor:       [0,2,3,5,7,8,10],
+  chromatic:   [0,1,2,3,4,5,6,7,8,9,10,11],
+  pentatonic:  [0,2,4,7,9],
+  blues:       [0,3,5,6,7,10],
+};
+
+const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
+
+function freqToMidi(f) {
+  if (f <= 0) return -1;
+  return 69 + 12 * Math.log2(f / 440);
+}
+function midiToFreq(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+function snapToScale(midi, keyOffset, scaleIntervals, humanize) {
+  if (midi < 0) return midi;
+  const octave = Math.floor((midi - keyOffset) / 12);
+  const semitone = ((midi - keyOffset) % 12 + 12) % 12;
+  let closest = scaleIntervals[0], minDist = 12;
+  for (let i = 0; i < scaleIntervals.length; i++) {
+    const d = Math.abs(scaleIntervals[i] - semitone);
+    const dw = Math.min(d, 12 - d);
+    if (dw < minDist) { minDist = dw; closest = scaleIntervals[i]; }
+  }
+  const snapped = keyOffset + octave * 12 + closest;
+  // Humanize: add small random offset in cents so it's not robotic
+  const humanCents = (humanize / 100) * (Math.random() * 20 - 10);
+  return snapped + humanCents / 100;
+}
+
+// ── McLeod Pitch Method (MPM) ────────────────────────────────────
+// More accurate than YIN for vocal frequencies on mobile hardware
+function detectPitchMPM(buf, sampleRate) {
+  const N = buf.length;
+  const halfN = Math.floor(N / 2);
+
+  // Normalised square difference function
+  const nsdf = new Float32Array(halfN);
+  let acf0 = 0;
+  for (let i = 0; i < N; i++) acf0 += buf[i] * buf[i];
+  if (acf0 < 1e-8) return -1;
+
+  for (let tau = 0; tau < halfN; tau++) {
+    let acf = 0, norm = 0;
+    for (let i = 0; i < N - tau; i++) {
+      acf  += buf[i] * buf[i + tau];
+      norm += buf[i] * buf[i] + buf[i + tau] * buf[i + tau];
+    }
+    nsdf[tau] = norm > 0 ? 2 * acf / norm : 0;
+  }
+
+  // Find highest peak after first negative region
+  let maxVal = -1, maxTau = -1, inNeg = false;
+  for (let tau = 1; tau < halfN - 1; tau++) {
+    if (nsdf[tau] < 0) { inNeg = true; }
+    if (inNeg && nsdf[tau] > 0.5 && nsdf[tau] > maxVal) {
+      // Parabolic interpolation for sub-sample accuracy
+      const prev = nsdf[tau - 1], curr = nsdf[tau], next = nsdf[tau + 1];
+      const interp = tau + (next - prev) / (2 * (2 * curr - prev - next));
+      maxVal = curr; maxTau = interp;
+    }
+  }
+  if (maxTau < 0 || maxVal < 0.4) return -1;
+  return sampleRate / maxTau;
+}
+
+// ── Granular pitch shifter ────────────────────────────────────────
+// Overlap-add with 4 grains. Works on iOS Safari.
+class GranularShifter {
+  constructor(bufSize) {
+    this.bufSize  = bufSize;
+    this.inBuf    = new Float32Array(bufSize * 2);
+    this.outBuf   = new Float32Array(bufSize * 2);
+    this.inPtr    = 0;
+    this.outPtr   = 0;
+    this.grainSize = Math.round(bufSize / 2);
+    this.hopSize   = Math.round(this.grainSize / 4);
+    this.ratio     = 1.0;
+    this.phase     = 0;
+  }
+
+  setRatio(r) { this.ratio = Math.max(0.5, Math.min(2.0, r)); }
+
+  // Hanning window
+  _window(i, len) {
+    return 0.5 * (1 - Math.cos(2 * Math.PI * i / (len - 1)));
+  }
+
+  process(input) {
+    const gs = this.grainSize;
+    const hs = this.hopSize;
+    const out = new Float32Array(input.length);
+
+    for (let i = 0; i < input.length; i++) {
+      this.inBuf[this.inPtr % (this.bufSize * 2)] = input[i];
+      this.inPtr++;
+
+      // Read from input at pitch-shifted read pointer
+      const readPos = Math.round(this.inPtr - gs + this.phase * hs);
+      let sample = 0;
+      for (let g = 0; g < 4; g++) {
+        const gPos = readPos + g * hs;
+        for (let j = 0; j < hs; j++) {
+          const idx = (gPos + Math.round(j * this.ratio)) % (this.bufSize * 2);
+          if (idx >= 0 && idx < this.bufSize * 2) {
+            const win = this._window(j, hs);
+            sample += this.inBuf[idx] * win / 4;
+          }
+        }
+      }
+      this.phase = (this.phase + 1) % 4;
+      out[i] = sample;
+    }
+    return out;
+  }
+}
+
+class AutotuneProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [
+      { name:"bypass",    defaultValue:0,    minValue:0,   maxValue:1,   automationRate:"k-rate" },
+      { name:"keyOffset", defaultValue:0,    minValue:0,   maxValue:11,  automationRate:"k-rate" },
+      { name:"speed",     defaultValue:50,   minValue:1,   maxValue:100, automationRate:"k-rate" },
+      { name:"humanize",  defaultValue:10,   minValue:0,   maxValue:100, automationRate:"k-rate" },
+      { name:"wet",       defaultValue:1.0,  minValue:0,   maxValue:1,   automationRate:"k-rate" },
+      { name:"vibrato",   defaultValue:0,    minValue:0,   maxValue:1,   automationRate:"k-rate" },
+      { name:"formant",   defaultValue:1,    minValue:0,   maxValue:1,   automationRate:"k-rate" },
+    ];
+  }
+
+  constructor(options) {
+    super();
+    this._scale    = SCALES.major;
+    this._detBuf   = new Float32Array(2048);
+    this._detPtr   = 0;
+    this._detPitch = -1;
+    this._targetMidi = -1;
+    this._currentMidi = -1;
+    this._shifter  = new GranularShifter(4096);
+    this._vibratoPhase = 0;
+    this._smoothedRatio = 1.0;
+
+    this.port.onmessage = (e) => {
+      if (e.data.scale && SCALES[e.data.scale]) {
+        this._scale = SCALES[e.data.scale];
+      }
+    };
+  }
+
+  process(inputs, outputs, params) {
+    const inp = inputs[0]?.[0];
+    const out = outputs[0]?.[0];
+    if (!inp || !out) return true;
+
+    const bypass   = params.bypass[0] > 0.5;
+    if (bypass) { out.set(inp); return true; }
+
+    const keyOffset = Math.round(params.keyOffset[0]);
+    const speed     = params.speed[0] / 100;       // 0..1
+    const humanize  = params.humanize[0];
+    const wet       = params.wet[0];
+    const vibrato   = params.vibrato[0];
+    const formant   = params.formant[0] > 0.5;
+
+    // Fill detection buffer
+    for (let i = 0; i < inp.length; i++) {
+      this._detBuf[this._detPtr % 2048] = inp[i];
+      this._detPtr++;
+    }
+
+    // Detect pitch every 512 samples
+    if (this._detPtr % 512 === 0) {
+      const slice = this._detBuf.slice(0, 2048);
+      const freq = detectPitchMPM(slice, sampleRate);
+      if (freq > 60 && freq < 1200) {
+        this._detPitch = freq;
+        const detMidi = freqToMidi(freq);
+        this._targetMidi = snapToScale(detMidi, keyOffset, this._scale, humanize);
+      }
+    }
+
+    let shifted;
+    if (this._targetMidi < 0 || this._detPitch < 0) {
+      shifted = inp.slice();
+    } else {
+      // Smooth pitch transition — speed controls how fast we reach target
+      if (this._currentMidi < 0) this._currentMidi = this._targetMidi;
+      const smoothing = 1 - speed; // speed=1 → no smooth (hard tune), speed=0 → max smooth
+      this._currentMidi += (this._targetMidi - this._currentMidi) * (1 - smoothing * 0.95);
+
+      let ratio = midiToFreq(this._currentMidi) / this._detPitch;
+
+      // Vibrato
+      if (vibrato > 0) {
+        this._vibratoPhase += (2 * Math.PI * 5.5) / sampleRate * inp.length;
+        ratio *= 1 + vibrato * 0.015 * Math.sin(this._vibratoPhase);
+      }
+
+      // Smooth the ratio to prevent clicks
+      this._smoothedRatio += (ratio - this._smoothedRatio) * 0.3;
+      this._shifter.setRatio(this._smoothedRatio);
+      shifted = this._shifter.process(inp);
+
+      // Formant compensation — scale amplitude to preserve tonal character
+      if (formant) {
+        const inRms  = Math.sqrt(inp.reduce((a, v) => a + v * v, 0) / inp.length) + 1e-9;
+        const outRms = Math.sqrt(shifted.reduce((a, v) => a + v * v, 0) / shifted.length) + 1e-9;
+        const comp   = Math.min(2, inRms / outRms);
+        for (let i = 0; i < shifted.length; i++) shifted[i] *= comp;
+      }
+    }
+
+    // Wet/dry mix
+    for (let i = 0; i < out.length; i++) {
+      out[i] = wet * (shifted[i] || 0) + (1 - wet) * inp[i];
+      // Hard clip to prevent feedback blowups
+      if (out[i] >  1) out[i] =  1;
+      if (out[i] < -1) out[i] = -1;
+    }
+    return true;
+  }
+}
+registerProcessor("autotune-processor", AutotuneProcessor);
+`;
+
+const autotuneWorkletReady = { current: false, promise: null };
+
+async function registerAutotuneWorklet(actx) {
+  if (autotuneWorkletReady.current) return true;
+  if (autotuneWorkletReady.promise) { await autotuneWorkletReady.promise; return autotuneWorkletReady.current; }
+  autotuneWorkletReady.promise = (async () => {
+    try {
+      const blob = new Blob([AUTOTUNE_WORKLET_CODE], { type: "application/javascript" });
+      const url  = URL.createObjectURL(blob);
+      await actx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      autotuneWorkletReady.current = true;
+    } catch(e) {
+      console.warn("AutotuneWorklet registration failed:", e);
+      autotuneWorkletReady.current = false;
+    }
+  })();
+  await autotuneWorkletReady.promise;
+  return autotuneWorkletReady.current;
+}
+
+// =============================================================================
+// AUTOTUNE PLUGIN UI — matches compressor/reverb style
+// =============================================================================
+function AutotunePlugin({ fx, upd, Knob }) {
+  const at  = fx.autotune || {};
+  const on  = !!at.on;
+  const KEYS   = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  const SCALES = ["major","minor","chromatic","pentatonic","blues"];
+  const SCALE_LABELS = { major:"Major", minor:"Minor", chromatic:"Chromatic", pentatonic:"Pentatonic", blues:"Blues" };
+
+  return (
+    <div style={{ background:"linear-gradient(180deg,#0d1117 0%,#0a0d12 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (on ? "#C026D3" : "#2a2a2a"), boxShadow: on ? "0 0 24px rgba(192,38,211,0.2), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 14px", borderBottom:"1px solid rgba(255,255,255,0.06)", background:"rgba(192,38,211,0.04)" }}>
+        <div style={{ display:"flex", gap:3 }}>
+          {[0,1,2,3].map(i => <div key={i} style={{ width:3, height:4+i*3, borderRadius:1, background: on ? "#C026D3" : "#1e1e1e", boxShadow: on ? "0 0 4px #C026D388" : "none", transition:"all 0.15s" }} />)}
+        </div>
+        <div style={{ width:8, height:8, borderRadius:"50%", background: on ? "#C026D3" : "#1a1a1a", boxShadow: on ? "0 0 6px #C026D3, 0 0 12px rgba(192,38,211,0.5)" : "none", transition:"all 0.2s" }} />
+        <button onClick={function(){ upd("autotune",{on:!on}); }} style={{ background: on ? "linear-gradient(180deg,#be185d,#9d174d)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (on ? "#C026D3" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1 }}>{on ? "ON" : "OFF"}</button>
+        <div style={{ flex:1 }} />
+        <div style={{ color: on ? "#C026D3" : "#555", fontSize:10, fontWeight:800, letterSpacing:1 }}>AUTOTUNE</div>
+        {/* Mode badge */}
+        <div style={{ background:"rgba(192,38,211,0.15)", border:"1px solid rgba(192,38,211,0.3)", borderRadius:4, padding:"2px 7px", fontSize:8, fontWeight:800, color:"#C026D3", letterSpacing:0.5 }}>
+          {(at.speed || 50) >= 80 ? "HARD" : (at.speed || 50) >= 40 ? "MELODIC" : "SMOOTH"}
+        </div>
+      </div>
+
+      <div style={{ padding:"14px", opacity: on ? 1 : 0.4, transition:"opacity 0.2s" }}>
+
+        {/* Key + Scale selectors */}
+        <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+          <div style={{ flex:1 }}>
+            <div style={{ color:"#666", fontSize:8, fontWeight:800, letterSpacing:1, marginBottom:5 }}>KEY</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+              {KEYS.map(function(k) {
+                const active = (at.key || "C") === k;
+                return (
+                  <button key={k} onClick={function(){ upd("autotune",{key:k}); }} style={{
+                    padding:"4px 6px", borderRadius:5, fontSize:9, fontWeight:800, cursor:"pointer",
+                    background: active ? "#C026D3" : "rgba(255,255,255,0.04)",
+                    border: "1px solid " + (active ? "#C026D3" : "#2a2a2a"),
+                    color: active ? "white" : "#555",
+                    minWidth:28, textAlign:"center",
+                  }}>{k}</button>
+                );
+              })}
+            </div>
+          </div>
+          <div style={{ flex:1 }}>
+            <div style={{ color:"#666", fontSize:8, fontWeight:800, letterSpacing:1, marginBottom:5 }}>SCALE</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
+              {SCALES.map(function(s) {
+                const active = (at.scale || "major") === s;
+                return (
+                  <button key={s} onClick={function(){ upd("autotune",{scale:s}); }} style={{
+                    padding:"4px 8px", borderRadius:5, fontSize:9, fontWeight:800, cursor:"pointer", textAlign:"left",
+                    background: active ? "rgba(192,38,211,0.2)" : "rgba(255,255,255,0.03)",
+                    border: "1px solid " + (active ? "#C026D3" : "#222"),
+                    color: active ? "#C026D3" : "#444",
+                  }}>{SCALE_LABELS[s]}</button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Retune speed presets */}
+        <div style={{ marginBottom:14 }}>
+          <div style={{ color:"#666", fontSize:8, fontWeight:800, letterSpacing:1, marginBottom:6 }}>RETUNE SPEED</div>
+          <div style={{ display:"flex", gap:5, marginBottom:8 }}>
+            {[{label:"T-PAIN",speed:100},{label:"GUNNA",speed:60},{label:"DRAKE",speed:30},{label:"SMOOTH",speed:10}].map(function(p){
+              const active = Math.abs((at.speed||50) - p.speed) < 10;
+              return (
+                <button key={p.label} onClick={function(){ upd("autotune",{speed:p.speed}); }} style={{
+                  flex:1, padding:"5px 2px", borderRadius:6, fontSize:7, fontWeight:800, cursor:"pointer",
+                  background: active ? "linear-gradient(135deg,#C026D3,#7C3AED)" : "rgba(255,255,255,0.04)",
+                  border:"1px solid " + (active ? "#C026D3" : "#222"),
+                  color: active ? "white" : "#444",
+                  letterSpacing:0.3,
+                }}>{p.label}</button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Knobs row */}
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", justifyContent:"space-around" }}>
+          <Knob label="SPEED"    value={at.speed??50}    min={1}   max={100} step={1}   unit="%" color="#C026D3" onChange={function(v){ upd("autotune",{speed:v}); }} />
+          <Knob label="WET"      value={at.wet??1}        min={0}   max={1}   step={0.01} unit="%" color="#C026D3" onChange={function(v){ upd("autotune",{wet:v}); }} />
+          <Knob label="HUMANIZE" value={at.humanize??10}  min={0}   max={100} step={1}   unit="%" color="#8B5CF6" onChange={function(v){ upd("autotune",{humanize:v}); }} />
+          <Knob label="VIBRATO"  value={at.vibrato??0}    min={0}   max={1}   step={0.01} unit="%" color="#8B5CF6" onChange={function(v){ upd("autotune",{vibrato:v}); }} />
+        </div>
+
+        {/* Formant toggle */}
+        <div style={{ marginTop:12, display:"flex", alignItems:"center", gap:8 }}>
+          <button onClick={function(){ upd("autotune",{formant:!(at.formant??true)}); }} style={{
+            padding:"5px 12px", borderRadius:6, fontSize:9, fontWeight:800, cursor:"pointer",
+            background: (at.formant??true) ? "rgba(192,38,211,0.2)" : "rgba(255,255,255,0.04)",
+            border:"1px solid " + ((at.formant??true) ? "#C026D3" : "#222"),
+            color: (at.formant??true) ? "#C026D3" : "#444",
+          }}>FORMANT PRESERVE {(at.formant??true) ? "ON" : "OFF"}</button>
+          <div style={{ color:"#333", fontSize:8 }}>Preserves vocal character during pitch shift</div>
+        </div>
+
+        {/* Pitch display */}
+        <div style={{ marginTop:10, background:"rgba(0,0,0,0.4)", borderRadius:8, padding:"8px 12px", border:"1px solid #111", display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ width:6, height:6, borderRadius:"50%", background: on ? "#22C55E" : "#1a1a1a", boxShadow: on ? "0 0 6px #22C55E" : "none", flexShrink:0 }} />
+          <div style={{ color:"#333", fontSize:9 }}>
+            {on ? `Key: ${at.key||"C"} ${at.scale||"major"} · ${(at.speed||50)>=80?"Hard Tune":(at.speed||50)>=40?"Melodic":"Smooth"} mode active` : "Enable autotune to begin vocal correction"}
           </div>
         </div>
       </div>
@@ -12163,8 +12544,25 @@ function StudioScreen({ user, onExit }) {
   const [headphonesIn, setHeadphonesIn] = useState(false);
   const [monitorWarn,  setMonitorWarn]  = useState("");
   const [showAutoPitch,setShowAutoPitch] = useState(false);
-  const [autoPitch,    setAutoPitch]     = useState({ on:false, key:"C", scale:"major", speed:0.5 });
+  const [autoPitch,    setAutoPitch]     = useState({ on:false, key:"C", scale:"major", speed:50, humanize:10, wet:1, vibrato:0, formant:true });
   const [lowLatency,   setLowLatency]    = useState(true);
+
+  // Live-sync autoPitch params to running AutotuneWorklet node without restarting monitoring
+  React.useEffect(function() {
+    const node = window.__bfAutotuneNode;
+    if (!node) return;
+    const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
+    try {
+      node.parameters.get("bypass").value    = autoPitch.on ? 0 : 1;
+      node.parameters.get("keyOffset").value = KEY_OFFSETS[autoPitch.key || "C"] || 0;
+      node.parameters.get("speed").value     = autoPitch.speed ?? 50;
+      node.parameters.get("humanize").value  = autoPitch.humanize ?? 10;
+      node.parameters.get("wet").value       = autoPitch.wet ?? 1;
+      node.parameters.get("vibrato").value   = autoPitch.vibrato ?? 0;
+      node.parameters.get("formant").value   = (autoPitch.formant ?? true) ? 1 : 0;
+      node.port.postMessage({ scale: autoPitch.scale || "major" });
+    } catch(e) {}
+  }, [autoPitch]);
   // "builtin" = iPhone built-in mic, "headset" = wired headset mic
   // Always start on iPhone mic regardless of what's connected at load time
   const [micSource,    setMicSource]     = useState("builtin");
@@ -12802,8 +13200,45 @@ function StudioScreen({ user, onExit }) {
       // Mono → stereo centre: prevents iOS routing mono only to left channel
       const splitter = mCtx.createChannelSplitter(1);
       const merger   = mCtx.createChannelMerger(2);
+
+      // ── Autotune insert ───────────────────────────────────────────
+      // Register worklet and insert AutotuneProcessor between micBoost and splitter.
+      // If registration fails (older iOS), falls back to direct connection.
+      let autotuneNode = null;
+      const at = autoPitch || {};
+      try {
+        const atReady = await registerAutotuneWorklet(mCtx);
+        if (atReady) {
+          autotuneNode = new AudioWorkletNode(mCtx, "autotune-processor", {
+            numberOfInputs:  1,
+            numberOfOutputs: 1,
+            outputChannelCount: [1],
+          });
+          const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
+          const keyOffset = KEY_OFFSETS[at.key || "C"] || 0;
+          autotuneNode.parameters.get("bypass").value    = at.on ? 0 : 1;
+          autotuneNode.parameters.get("keyOffset").value = keyOffset;
+          autotuneNode.parameters.get("speed").value     = at.speed ?? 50;
+          autotuneNode.parameters.get("humanize").value  = at.humanize ?? 10;
+          autotuneNode.parameters.get("wet").value       = at.wet ?? 1;
+          autotuneNode.parameters.get("vibrato").value   = at.vibrato ?? 0;
+          autotuneNode.parameters.get("formant").value   = (at.formant ?? true) ? 1 : 0;
+          // Send scale to worklet via message
+          autotuneNode.port.postMessage({ scale: at.scale || "major" });
+          window.__bfAutotuneNode = autotuneNode;
+        }
+      } catch(e) {
+        autotuneNode = null;
+      }
+
+      // Build chain: src → micBoost → [autotune?] → splitter → merger → gain → destination
       src.connect(micBoost);
-      micBoost.connect(splitter);
+      if (autotuneNode) {
+        micBoost.connect(autotuneNode);
+        autotuneNode.connect(splitter);
+      } else {
+        micBoost.connect(splitter);
+      }
       splitter.connect(merger, 0, 0);
       splitter.connect(merger, 0, 1);
       merger.connect(gain);
@@ -17310,6 +17745,11 @@ userPickedMicRef.current = true;
           }
           updateTrack(t.id, { effects: newEffects });
           applyFxLive(t.id, newEffects);
+          // Sync autotune fx changes to autoPitch monitoring state so the
+          // live worklet node parameters update without restarting monitoring
+          if (section === "autotune" && newEffects.autotune) {
+            setAutoPitch(function(prev) { return Object.assign({}, prev, newEffects.autotune); });
+          }
         };
         return (
           <FxPanel
