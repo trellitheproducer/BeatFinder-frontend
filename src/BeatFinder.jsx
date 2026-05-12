@@ -848,12 +848,29 @@ function SpotifyEmbed({ embedUrl, height, style, itemId }) {
     setActive(true);
   }
 
+  var [broken, setBroken] = React.useState(false);
+  var iframeRef = React.useRef(null);
+
+  // Detect broken embed via load timeout — if Spotify errors, page is tiny/blank
+  React.useEffect(function() {
+    if (!active || broken) return;
+    var timer = setTimeout(function() {
+      try {
+        var iframe = iframeRef.current;
+        if (!iframe) return;
+        // If iframe loaded but content height is very small, it's likely an error page
+        // We can't read cross-origin content, so just leave it — user sees Spotify error
+      } catch(e) {}
+    }, 3000);
+    return function() { clearTimeout(timer); };
+  }, [active]);
+
   return (
     <div style={Object.assign({}, style, {
       position: "relative", height: h, overflow: "hidden", borderRadius: br,
     })}>
-      {/* Iframe — key changes when deactivated so React unmounts it, stopping playback */}
       <iframe
+        ref={iframeRef}
         key={active ? "active" : "inactive"}
         src={finalEmbedUrl + (finalEmbedUrl && finalEmbedUrl.includes("?") ? "&" : "?") + "utm_source=generator&theme=0"}
         width="100%"
@@ -863,7 +880,6 @@ function SpotifyEmbed({ embedUrl, height, style, itemId }) {
         loading={active ? "eager" : "lazy"}
         style={{ display: "block", border: "none" }}
       />
-      {/* Semi-transparent overlay — removed when user taps */}
       {!active && (
         <div onClick={activate} style={{
           position: "absolute", inset: 0,
