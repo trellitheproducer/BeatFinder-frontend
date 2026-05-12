@@ -9395,6 +9395,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 <span>0s (start)</span><span>90s</span><span>180s</span>
               </div>
             </div>
+            <input ref={uploadFileRef} type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac,.aiff,.opus" onChange={e => setUploadFile(e.target.files[0])}
               style={{ width: "100%", marginBottom: 12, color: "#aaa", fontSize: 14 }} />
             <button disabled={uploadLoading} onClick={async () => {
               if (!ytLink.trim() || !uploadFile) { setUploadMsg("Please fill all fields and select an MP3"); return; }
