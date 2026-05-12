@@ -1587,7 +1587,7 @@ function RhymeFinder({ onClose, onInsert }) {
     <div style={{
       background: "#0a0f1a", borderTop: "1px solid rgba(6,182,212,0.3)",
       paddingBottom: "calc(0px + env(safe-area-inset-bottom))",
-      maxHeight: 320, display: "flex", flexDirection: "column",
+      maxHeight: "60vh", minHeight: 200, display: "flex", flexDirection: "column",
     }}>
       <div style={{ padding: "12px 16px 10px", flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -1619,7 +1619,7 @@ function RhymeFinder({ onClose, onInsert }) {
       </div>
 
       {results && (
-        <div style={{ overflowY: "auto", padding: "0 16px 16px", flex: 1 }}>
+        <div style={{ overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "0 16px 16px", flex: 1, minHeight: 0 }}>
           {results.perfect.length === 0 && results.near.length === 0 ? (
             <div style={{ color: "#444", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
               No rhymes found for "{searched}"
