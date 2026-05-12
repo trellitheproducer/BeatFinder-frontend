@@ -1911,8 +1911,8 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
         </div>
       </div>
       {/* Wrap iframe in a relative container with a transparent overlay.
-          The overlay blocks clicks on YouTube's suggested videos (top ~80% of player)
-          while the bottom controls area remains interactive via pointer-events. */}
+          The suggested videos and "Watch on YouTube" bar appear at the BOTTOM.
+          Overlay covers bottom 50px to block those clicks while play button in middle works. */}
       <div style={{ position: "relative", width: "100%", height: 220, flexShrink: 0, background: "#000" }}>
         <iframe
           key={beat.videoId}
@@ -1922,11 +1922,10 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           title={beat.title}
         />
-        {/* Transparent overlay covering the top portion where suggested videos appear.
-            Blocks navigation away from BeatFinder. Bottom 44px left clear for YouTube controls. */}
+        {/* Block the bottom bar where "Watch on YouTube" and suggested video links appear */}
         <div style={{
-          position: "absolute", top: 0, left: 0, right: 0,
-          bottom: 44,
+          position: "absolute", bottom: 0, left: 0, right: 0,
+          height: 50,
           zIndex: 10,
           background: "transparent",
         }} />
