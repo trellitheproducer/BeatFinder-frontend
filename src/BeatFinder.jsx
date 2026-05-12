@@ -691,6 +691,92 @@ function LogicTrackHeader({
 const API_BASE = "https://beatfinder-backend.onrender.com";
 
 // =============================================================================
+// GLOBAL PLAY COUNT STORE
+// Single source of truth for beat play counts across ALL cards everywhere.
+// When any card records a play, all other cards showing the same beat update.
+// Uses an event-based pub/sub so no prop drilling is needed.
+// =============================================================================
+var _playCountStore = {};        // { [beatId]: number }
+var _playedThisSession = {};     // { [beatId]: timestamp } — client-side cooldown
+var _playTimers = {};            // { [beatId]: timeoutId } — 3s minimum play timer
+
+function getStoredPlayCount(beatId) {
+  return _playCountStore[beatId] || 0;
+}
+
+function setStoredPlayCount(beatId, count) {
+  _playCountStore[beatId] = count;
+  window.dispatchEvent(new CustomEvent("bf:playCountUpdate", { detail: { beatId, count } }));
+}
+
+function usePlayCount(beatId, initialCount) {
+  var [count, setCount] = React.useState(
+    _playCountStore[beatId] !== undefined ? _playCountStore[beatId] : (initialCount || 0)
+  );
+  React.useEffect(function() {
+    // Seed the store with the initial value from the API if not already set
+    if (_playCountStore[beatId] === undefined && initialCount !== undefined) {
+      _playCountStore[beatId] = initialCount || 0;
+    }
+    function handler(e) {
+      if (e.detail.beatId === beatId) setCount(e.detail.count);
+    }
+    window.addEventListener("bf:playCountUpdate", handler);
+    return function() { window.removeEventListener("bf:playCountUpdate", handler); };
+  }, [beatId, initialCount]);
+  return count;
+}
+
+// Called when audio actually starts playing. Enforces:
+// 1. 3-second minimum before counting (prevents accidental taps)
+// 2. 30-minute client-side cooldown (backup to server cooldown)
+// 3. Optimistic UI update, then reconcile with server response
+function recordPlay(beatId) {
+  if (!beatId) return;
+
+  // Client-side cooldown check — 30 min
+  var lastPlayed = _playedThisSession[beatId];
+  if (lastPlayed && (Date.now() - lastPlayed) < 30 * 60 * 1000) return;
+
+  // Cancel any existing timer for this beat (e.g. user stopped before 3s)
+  if (_playTimers[beatId]) {
+    clearTimeout(_playTimers[beatId]);
+    delete _playTimers[beatId];
+  }
+
+  // Start 3-second timer — only record if user actually listens
+  _playTimers[beatId] = setTimeout(function() {
+    delete _playTimers[beatId];
+    _playedThisSession[beatId] = Date.now();
+
+    // Optimistic update
+    var current = _playCountStore[beatId] || 0;
+    setStoredPlayCount(beatId, current + 1);
+
+    // Server-side record with anti-spam
+    apiFetch("/api/auth/beat-play/" + beatId, { method: "POST" })
+      .then(function(res) {
+        if (res && res.playCount !== undefined) {
+          // Reconcile with server's authoritative count
+          setStoredPlayCount(beatId, res.playCount);
+        }
+      })
+      .catch(function() {
+        // Server failed — roll back optimistic update
+        setStoredPlayCount(beatId, Math.max(0, (_playCountStore[beatId] || 1) - 1));
+      });
+  }, 3000);
+}
+
+// Cancel the 3s timer if the user stops before minimum play time
+function cancelPlayTimer(beatId) {
+  if (_playTimers[beatId]) {
+    clearTimeout(_playTimers[beatId]);
+    delete _playTimers[beatId];
+  }
+}
+
+// =============================================================================
 // GLOBAL PREVIEW COORDINATOR
 // Ensures only one beat/track preview plays at a time across all components.
 // Any component that starts a preview calls startGlobalPreview(id).
@@ -3569,6 +3655,8 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
   var totalSecs = Math.floor(previewTime || 0);
   var progMins  = String(Math.floor(totalSecs / 60)).padStart(2, "0");
   var progSecs  = String(totalSecs % 60).padStart(2, "0");
+  // Global play count — syncs across all cards showing the same beat
+  var playCount = usePlayCount(beat.id, beat.playCount);
 
   return (
     <div className="bf-card" style={{
@@ -3603,10 +3691,10 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
               ) : (
                 <span style={{ background: "rgba(245,158,11,0.12)", border: "1.5px solid #F59E0B", borderRadius: 20, padding: "3px 10px", color: "#F59E0B", fontSize: 10, fontWeight: 800 }}>{beat.price}</span>
               )}
-              {beat.playCount > 0 && (
+              {playCount > 0 && (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "rgba(255,255,255,0.05)", border: "1px solid #2a2a2a", borderRadius: 20, padding: "3px 9px", color: "#666", fontSize: 10, fontWeight: 700 }}>
                   <svg width="9" height="9" viewBox="0 0 24 24" fill="#666"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg>
-                  {fmtCount(beat.playCount)}
+                  {fmtCount(playCount)}
                 </span>
               )}
             </div>
@@ -3727,16 +3815,19 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
     if (previewing) { stopPreview(); return; }
     startGlobalPreview(previewId.current);
     setPreviewing(true); setPreviewTime(0);
+    recordPlay(beat.id);
   }
   function stopPreview() {
     clearGlobalPreview(previewId.current);
     setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+    cancelPlayTimer(beat.id);
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
   }
   useGlobalPreviewStop(previewId.current, React.useCallback(function() {
     setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+    cancelPlayTimer(beat.id);
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
-  }, []));
+  }, [beat.id]));
   function onAudioPlay() {
     clearInterval(timerRef.current);
     var start = Date.now() - (previewTime * 1000);
@@ -3988,16 +4079,19 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
       if (prev) { stopPrev(); return; }
       startGlobalPreview(prevId.current);
       setPrev(true); setPTime(0);
+      recordPlay(beat.id);
     }
     function stopPrev() {
       clearGlobalPreview(prevId.current);
       setPrev(false); setPTime(0); clearInterval(tRef.current);
+      cancelPlayTimer(beat.id);
       if (aRef.current) { aRef.current.pause(); aRef.current.currentTime = 0; }
     }
     useGlobalPreviewStop(prevId.current, React.useCallback(function() {
       setPrev(false); setPTime(0); clearInterval(tRef.current);
+      cancelPlayTimer(beat.id);
       if (aRef.current) { aRef.current.pause(); aRef.current.currentTime = 0; }
-    }, []));
+    }, [beat.id]));
     function onPlay() {
       clearInterval(tRef.current);
       var start = Date.now();
@@ -4662,16 +4756,19 @@ function FreeMemberBeatCard({ beat, onViewProfile }) {
     if (previewing) { stopPreview(); return; }
     startGlobalPreview(previewId.current);
     setPreviewing(true); setPreviewTime(0);
+    recordPlay(beat.id);
   }
   function stopPreview() {
     clearGlobalPreview(previewId.current);
     setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+    cancelPlayTimer(beat.id);
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
   }
   useGlobalPreviewStop(previewId.current, React.useCallback(function() {
     setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+    cancelPlayTimer(beat.id);
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
-  }, []));
+  }, [beat.id]));
   function onAudioPlay() {
     clearInterval(timerRef.current);
     var start = Date.now();
@@ -5445,10 +5542,10 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   var [previewTime, setPreviewTime] = React.useState(0);
   var [buyLoading,  setBuyLoading]  = React.useState(false);
   var [buyErr,      setBuyErr]      = React.useState("");
-  var [playCount,   setPlayCount]   = React.useState(beat.playCount || 0);
+  // Use global play count store — syncs across all cards showing this beat
+  var playCount = usePlayCount(beat.id, beat.playCount);
   var audioRef  = React.useRef(null);
   var timerRef  = React.useRef(null);
-  var playedRef = React.useRef(false);
   var isFree    = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
   var accentClr = isFree ? "#C026D3" : "#F59E0B";
   var previewId = React.useRef("profile_" + beat.id);
@@ -5457,21 +5554,21 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
     if (previewing) { stopPreview(); return; }
     startGlobalPreview(previewId.current);
     setPreviewing(true); setPreviewTime(0);
-    if (!playedRef.current) {
-      playedRef.current = true;
-      setPlayCount(function(c) { return c + 1; });
-      apiFetch("/api/auth/beat-play/" + beat.id, { method: "POST" }).catch(function(){});
-    }
+    // recordPlay handles 3s minimum + 30min cooldown + server sync
+    recordPlay(beat.id);
   }
   function stopPreview() {
     clearGlobalPreview(previewId.current);
     setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+    // Cancel play timer if user stopped before 3 seconds
+    cancelPlayTimer(beat.id);
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
   }
   useGlobalPreviewStop(previewId.current, React.useCallback(function() {
     setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+    cancelPlayTimer(beat.id);
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
-  }, []));
+  }, [beat.id]));
   function onAudioPlay() {
     clearInterval(timerRef.current);
     var start = Date.now() - (previewTime * 1000);
