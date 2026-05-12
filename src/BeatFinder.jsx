@@ -6054,9 +6054,10 @@ function fmtCount(n) {
 // ── Followers / Following list screen ────────────────────────────
 function FollowListScreen({ username, mode, onBack, onViewProfile }) {
   // mode: "followers" | "following"
-  const [users,   setUsers]   = React.useState([]);
-  const [loading, setLoading] = React.useState(true);
-  const [error,   setError]   = React.useState(null);
+  const [users,        setUsers]        = React.useState([]);
+  const [loading,      setLoading]      = React.useState(true);
+  const [error,        setError]        = React.useState(null);
+  const [viewingUser,  setViewingUser]  = React.useState(null);
 
   React.useEffect(() => {
     setLoading(true);
@@ -6065,12 +6066,35 @@ function FollowListScreen({ username, mode, onBack, onViewProfile }) {
       .catch(e => { setError(e.message); setLoading(false); });
   }, [username, mode]);
 
+  // If a user was tapped, show their public profile in a new overlay layer
+  if (viewingUser) {
+    return (
+      <div style={{ position:"fixed", inset:0, zIndex:6000, background:"#0a0a0a", overflowY:"auto", WebkitOverflowScrolling:"touch" }}
+        onTouchMove={function(e){ e.stopPropagation(); }}>
+        <PublicProfileScreen
+          username={viewingUser}
+          onBack={() => setViewingUser(null)}
+          onPlay={function(){}}
+          savedIds={new Set()}
+          onSave={function(){}}
+          currentUser={null}
+          hideBack={false}
+        />
+      </div>
+    );
+  }
+
   return (
     <div style={{ background:"#0a0a0a", minHeight:"100%", color:"white", fontFamily:"inherit" }}>
-      {/* Header */}
-      <div style={{ display:"flex", alignItems:"center", padding:"16px 16px 12px", borderBottom:"1px solid #1a1a1a", position:"sticky", top:0, background:"#0a0a0a", zIndex:10 }}>
-        <button onClick={onBack} style={{ background:"none", border:"none", color:"white", fontSize:20, cursor:"pointer", padding:"4px 8px 4px 0", marginRight:8 }}>‹</button>
-        <span style={{ fontWeight:800, fontSize:17, textTransform:"capitalize" }}>{mode === "followers" ? "Followers" : "Following"}</span>
+      {/* Header — padded below iPhone status bar */}
+      <div style={{
+        display:"flex", alignItems:"center",
+        paddingTop:"calc(env(safe-area-inset-top) + 12px)",
+        padding:"calc(env(safe-area-inset-top) + 12px) 16px 12px",
+        borderBottom:"1px solid #1a1a1a", position:"sticky", top:0, background:"#0a0a0a", zIndex:10,
+      }}>
+        <button onClick={onBack} style={{ background:"none", border:"none", color:"white", fontSize:24, cursor:"pointer", padding:"4px 12px 4px 0", marginRight:4, lineHeight:1 }}>‹</button>
+        <span style={{ fontWeight:800, fontSize:17 }}>{mode === "followers" ? "Followers" : "Following"}</span>
       </div>
 
       {loading && <div style={{ textAlign:"center", padding:40, color:"#555" }}>Loading...</div>}
@@ -6082,13 +6106,15 @@ function FollowListScreen({ username, mode, onBack, onViewProfile }) {
       )}
 
       {users.map(u => (
-        <div key={u.username} onClick={() => onViewProfile(u.username)}
+        <div key={u.username} onClick={() => setViewingUser(u.username)}
           style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #111", cursor:"pointer", gap:12 }}>
           {/* Avatar */}
-          <div style={{ width:48, height:48, borderRadius:"50%", overflow:"hidden", flexShrink:0, background:"#222", display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ width:48, height:48, borderRadius:"50%", overflow:"hidden", flexShrink:0,
+            background:"linear-gradient(135deg,#6B21A8,#C026D3)",
+            display:"flex", alignItems:"center", justifyContent:"center" }}>
             {u.avatarUrl
               ? <img src={u.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-              : <span style={{ fontSize:20, color:"#555" }}>👤</span>
+              : <span style={{ color:"white", fontWeight:800, fontSize:18 }}>{(u.username || "?")[0].toUpperCase()}</span>
             }
           </div>
           {/* Name + username */}
@@ -6097,8 +6123,9 @@ function FollowListScreen({ username, mode, onBack, onViewProfile }) {
             <div style={{ color:"#555", fontSize:12, marginTop:1 }}>@{u.username}</div>
           </div>
           {/* Plan badge */}
-          {u.plan === "producer" && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 8px", color:"#C026D3", fontWeight:700, fontSize:10 }}>Pro</span>}
-          {u.plan === "artist"   && <span style={{ background:"rgba(245,158,11,0.15)",  border:"1px solid #F59E0B", borderRadius:20, padding:"2px 8px", color:"#F59E0B",  fontWeight:700, fontSize:10 }}>Artist</span>}
+          {u.plan === "producer" && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"3px 10px", color:"#C026D3", fontWeight:700, fontSize:10 }}>Pro</span>}
+          {u.plan === "artist"   && <span style={{ background:"rgba(245,158,11,0.15)",  border:"1px solid #F59E0B", borderRadius:20, padding:"3px 10px", color:"#F59E0B",  fontWeight:700, fontSize:10 }}>Artist</span>}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
       ))}
     </div>
