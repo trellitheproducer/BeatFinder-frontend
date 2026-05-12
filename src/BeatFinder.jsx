@@ -2006,8 +2006,8 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
 // Stripe price IDs — replace YEARLY_ placeholders with your real annual price IDs
 // from your Stripe dashboard once created.
 var PLAN_PRICES = {
-  artist:   { monthly: "price_1TQDoFFHyNSCxas89UpDKiro",  yearly: "price_artist_yearly_REPLACE" },
-  producer: { monthly: "price_1TQDpBFHyNSCxas8cktbqw1n", yearly: "price_producer_yearly_REPLACE" },
+  artist:   { monthly: "price_1TQDoFFHyNSCxas89UpDKiro",  yearly: "price_1TW9CXFHyNSCxas8TM826ULo" },
+  producer: { monthly: "price_1TQDpBFHyNSCxas8cktbqw1n", yearly: "price_1TW9BnFHyNSCxas8vHDrVwB6" },
 };
 
 function PlanPicker({ onSelectPlan, compact }) {
