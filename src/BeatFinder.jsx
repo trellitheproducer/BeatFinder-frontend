@@ -4005,6 +4005,10 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
           onLoadedMetadata={function(){ if (audioRef.current && (beat.preview_start || 0) > 0) audioRef.current.currentTime = beat.preview_start || 0; }}
           onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
       ) : null}
+    />
+  );
+}
+
 // =============================================================================
 function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
   const [beats,   setBeats]   = useState([]);
