@@ -3639,7 +3639,7 @@ function DownloadButton({ url, title, beatId, style, children }) {
   );
 }
 
-// ── Shared 30s PreviewBar ─────────────────────────────────────────
+// ── Shared 45s PreviewBar ─────────────────────────────────────────
 function PreviewBar({ previewTime, onStop }) {
   return (
     <div style={{
@@ -3658,12 +3658,12 @@ function PreviewBar({ previewTime, onStop }) {
         <div style={{
           height: "100%", borderRadius: 2,
           background: "linear-gradient(90deg,#635BFF,#C026D3)",
-          width: (previewTime / 30 * 100) + "%",
+          width: (previewTime / 45 * 100) + "%",
           transition: "width 0.1s linear",
         }} />
       </div>
       <span style={{ color: "#555", fontSize: 11, fontWeight: 700, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
-        {Math.floor(previewTime)}s / 30s
+        {Math.floor(previewTime)}s / 45s
       </span>
     </div>
   );
@@ -3861,7 +3861,7 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
               <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 1.5, height: 28, overflow: "hidden" }}>
                 {Array.from({ length: 40 }, function(_, i) {
                   var h = 20 + Math.sin(i * 0.8) * 12 + Math.sin(i * 1.7) * 6;
-                  var filled = previewing && (i / 40) < (previewTime / 30);
+                  var filled = previewing && (i / 40) < (previewTime / 45);
                   return <div key={i} style={{ flex: 1, borderRadius: 2, height: Math.max(4, h) + "%", background: filled ? accentClr : "rgba(255,255,255,0.1)" }} />;
                 })}
               </div>
@@ -3961,7 +3961,7 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
     timerRef.current = setInterval(function() {
       var el = (Date.now() - start) / 1000;
       setPreviewTime(Math.min(el, 30));
-      if (el >= 30) { clearInterval(timerRef.current); stopPreview(); }
+      if (el >= 45) { clearInterval(timerRef.current); stopPreview(); }
     }, 100);
   }
   function onTimeUpdate(e) {
@@ -4000,7 +4000,7 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
       user={user}
       onViewProfile={onViewProfile}
       audioEl={previewing && beat.url ? (
-        <audio ref={audioRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
+        <audio ref={audioRef} src={beat.url + "#t=" + (beat.preview_start || 0)} autoPlay data-start-time={String(beat.preview_start || 0)}
           onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
           onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
       ) : null}
@@ -4244,7 +4244,7 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
       tRef.current = setInterval(function() {
         var el = (Date.now() - start) / 1000;
         setPTime(Math.min(el, 30));
-        if (el >= 30) { clearInterval(tRef.current); stopPrev(); }
+        if (el >= 45) { clearInterval(tRef.current); stopPrev(); }
       }, 100);
     }
     function onTimeUpdate(e) {
@@ -4283,7 +4283,7 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
           user={user}
           onViewProfile={onViewProfile}
           audioEl={prev && beat.url ? (
-            <audio ref={aRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
+            <audio ref={aRef} src={beat.url + "#t=" + (beat.preview_start || 0)} autoPlay data-start-time={String(beat.preview_start || 0)}
               onPlay={onPlay} onPause={function(){ clearInterval(tRef.current); }}
               onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
           ) : null}
@@ -4922,7 +4922,7 @@ function FreeMemberBeatCard({ beat, onViewProfile }) {
     timerRef.current = setInterval(function() {
       var el = (Date.now() - start) / 1000;
       setPreviewTime(Math.min(el, 30));
-      if (el >= 30) { clearInterval(timerRef.current); stopPreview(); }
+      if (el >= 45) { clearInterval(timerRef.current); stopPreview(); }
     }, 100);
   }
   function onTimeUpdate(e) {
@@ -4941,7 +4941,7 @@ function FreeMemberBeatCard({ beat, onViewProfile }) {
       onDownload={function(){ downloadMp3(beat.url, beat.title, beat.id); }}
       onViewProfile={onViewProfile}
       audioEl={previewing && beat.url ? (
-        <audio ref={audioRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
+        <audio ref={audioRef} src={beat.url + "#t=" + (beat.preview_start || 0)} autoPlay data-start-time={String(beat.preview_start || 0)}
           onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
           onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
       ) : null}
@@ -5692,7 +5692,7 @@ function PostSheet({ user, onClose, onPosted }) {
 
 // =============================================================================
 // PROFILE BEAT CARD — preview + buy from public profiles
-// Reuses the same 30-second enforced preview as BeatLeaseCard
+// Reuses the same 45-second enforced preview as BeatLeaseCard
 // =============================================================================
 function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   var [previewing,  setPreviewing]  = React.useState(false);
@@ -5731,8 +5731,8 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
     var start = Date.now() - (previewTime * 1000);
     timerRef.current = setInterval(function() {
       var elapsed = (Date.now() - start) / 1000;
-      setPreviewTime(Math.min(elapsed, 30));
-      if (elapsed >= 30) { clearInterval(timerRef.current); stopPreview(); }
+      setPreviewTime(Math.min(elapsed, 45));
+      if (elapsed >= 45) { clearInterval(timerRef.current); stopPreview(); }
     }, 100);
   }
   function onTimeUpdate(e) {
@@ -5932,7 +5932,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
               <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 1.5, height: 28, overflow: "hidden" }}>
                 {Array.from({ length: 40 }, function(_, i) {
                   var h = 20 + Math.sin(i * 0.8) * 12 + Math.sin(i * 1.7) * 6;
-                  var filled = previewing && (i / 40) < (previewTime / 30);
+                  var filled = previewing && (i / 40) < (previewTime / 45);
                   return (
                     <div key={i} style={{
                       flex: 1, borderRadius: 2,
@@ -5948,7 +5948,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
               </span>
             </div>
             {previewing && beat.url && (
-              <audio ref={audioRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
+              <audio ref={audioRef} src={beat.url + "#t=" + (beat.preview_start || 0)} autoPlay data-start-time={String(beat.preview_start || 0)}
                 onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
                 onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
             )}
@@ -7841,6 +7841,7 @@ function MyUploadsSection({ user }) {
   const [editDesc,  setEditDesc]  = useState("");
   const [editBpm,   setEditBpm]   = useState("");
   const [editKey,   setEditKey]   = useState("");
+  const [editPreviewStart, setEditPreviewStart] = useState(0);
   const [saving,    setSaving]    = useState(false);
   const [msg,       setMsg]       = useState("");
 
@@ -7861,6 +7862,7 @@ function MyUploadsSection({ user }) {
     setEditDesc(beat.description || "");
     setEditBpm(beat.bpm ? String(beat.bpm) : "");
     setEditKey(beat.key || "");
+    setEditPreviewStart(beat.preview_start || 0);
     setMsg("");
   };
 
@@ -7871,23 +7873,25 @@ function MyUploadsSection({ user }) {
       await apiFetch("/api/producer/beats/" + editId + "/update", {
         method: "POST",
         body: JSON.stringify({
-          title:       editTitle,
-          genre:       editGenre,
-          price:       editPrice,
-          description: editDesc,
-          bpm:         editBpm ? parseInt(editBpm) : 0,
-          key:         editKey,
+          title:         editTitle,
+          genre:         editGenre,
+          price:         editPrice,
+          description:   editDesc,
+          bpm:           editBpm ? parseInt(editBpm) : 0,
+          key:           editKey,
+          preview_start: editPreviewStart,
         }),
       });
       setMsg("Updated!");
       // Broadcast to all beat card lists so they update live without refresh
       dispatchBeatUpdated(editId, {
-        title:       editTitle,
-        genre:       editGenre,
-        price:       editPrice,
-        description: editDesc,
-        bpm:         editBpm ? parseInt(editBpm) : 0,
-        key:         editKey,
+        title:         editTitle,
+        genre:         editGenre,
+        price:         editPrice,
+        description:   editDesc,
+        bpm:           editBpm ? parseInt(editBpm) : 0,
+        key:           editKey,
+        preview_start: editPreviewStart,
       });
       setEditId(null);
       load();
@@ -7985,7 +7989,23 @@ function MyUploadsSection({ user }) {
                 style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 13, outline: "none", boxSizing: "border-box", resize: "none", fontFamily: "inherit", marginBottom: 4 }}
               />
               <div style={{ color: "#444", fontSize: 10, textAlign: "right", marginBottom: 12 }}>{editDesc.length}/500</div>
-              <div style={{ display: "flex", gap: 8 }}>
+
+              {/* Preview Start */}
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ color: "#666", fontSize: 11, fontWeight: 700, marginBottom: 4, letterSpacing: 0.5 }}>
+                  PREVIEW START — <span style={{ color: "#C026D3" }}>{editPreviewStart}s</span>
+                  <span style={{ color: "#444", fontWeight: 400, marginLeft: 6 }}>45s preview plays from this point</span>
+                </div>
+                <input
+                  type="range" min={0} max={180} step={5}
+                  value={editPreviewStart}
+                  onChange={e => setEditPreviewStart(parseInt(e.target.value))}
+                  style={{ width: "100%", accentColor: "#C026D3" }}
+                />
+                <div style={{ display: "flex", justifyContent: "space-between", color: "#333", fontSize: 10 }}>
+                  <span>0s (start)</span><span>90s</span><span>180s</span>
+                </div>
+              </div>
                 <button onClick={handleSave} disabled={saving} style={{ flex: 1, background: "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: "11px", fontSize: 14, cursor: "pointer" }}>
                   {saving ? "Saving..." : "Save Changes"}
                 </button>
@@ -8562,6 +8582,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   const [uploadBpm,        setUploadBpm]        = useState("");
   const [uploadKey,        setUploadKey]        = useState("");
   const [uploadDesc,       setUploadDesc]       = useState("");
+  const [uploadPreviewStart, setUploadPreviewStart] = useState(0);
   const [uploadFile,       setUploadFile]       = useState(null);
   const uploadFileRef = React.useRef(null);
   const [uploadLoading,    setUploadLoading]    = useState(false);
@@ -9357,7 +9378,22 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             />
             <div style={{ color: "#444", fontSize: 10, textAlign: "right", marginBottom: 12 }}>{uploadDesc.length}/500</div>
 
-            <input ref={uploadFileRef} type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac,.aiff,.opus" onChange={e => setUploadFile(e.target.files[0])}
+            {/* Preview Start */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ color: "#666", fontSize: 11, fontWeight: 700, marginBottom: 4, letterSpacing: 0.5 }}>
+                PREVIEW START — <span style={{ color: "#C026D3" }}>{uploadPreviewStart}s</span>
+                <span style={{ color: "#444", fontWeight: 400, marginLeft: 6 }}>45s preview plays from this point</span>
+              </div>
+              <input
+                type="range" min={0} max={180} step={5}
+                value={uploadPreviewStart}
+                onChange={e => setUploadPreviewStart(parseInt(e.target.value))}
+                style={{ width: "100%", accentColor: "#C026D3" }}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", color: "#333", fontSize: 10 }}>
+                <span>0s (start)</span><span>90s</span><span>180s</span>
+              </div>
+            </div>
               style={{ width: "100%", marginBottom: 12, color: "#aaa", fontSize: 14 }} />
             <button disabled={uploadLoading} onClick={async () => {
               if (!ytLink.trim() || !uploadFile) { setUploadMsg("Please fill all fields and select an MP3"); return; }
@@ -9366,23 +9402,27 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 const fd = new FormData();
                 var priceVal = (uploadPrice || "").trim();
                 if (priceVal === "0" || priceVal === "£0" || priceVal === "0.00" || priceVal === "£0.00" || priceVal === "") priceVal = "free";
-                fd.append("title",       ytLink.trim());
-                fd.append("genre",       uploadGenre || "");
-                fd.append("price",       priceVal);
-                fd.append("bpm",         uploadBpm ? String(parseInt(uploadBpm)) : "0");
-                fd.append("key",         uploadKey || "");
-                fd.append("description", uploadDesc || "");
-                fd.append("file",        uploadFile);
+                fd.append("title",         ytLink.trim());
+                fd.append("genre",         uploadGenre || "");
+                fd.append("price",         priceVal);
+                fd.append("bpm",           uploadBpm ? String(parseInt(uploadBpm)) : "0");
+                fd.append("key",           uploadKey || "");
+                fd.append("description",   uploadDesc || "");
+                fd.append("preview_start", String(uploadPreviewStart || 0));
+                fd.append("file",          uploadFile);
                 const token = typeof getToken === "function" ? getToken() : (localStorage.getItem("bf_token") || "");
                 const res = await fetch(API_BASE + "/api/producer/upload", { method: "POST", headers: { "Authorization": "Bearer " + token }, body: fd });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || "Upload failed");
                 setUploads(prev => [data.beat, ...prev]);
                 setUploadMsg("Beat uploaded!");
+                // Clear all fields
                 setYtLink(""); setUploadGenre(""); setUploadPrice("");
-                setUploadBpm(""); setUploadKey(""); setUploadDesc("");
+                setUploadBpm(""); setUploadKey(""); setUploadDesc(""); setUploadPreviewStart(0);
                 setUploadFile(null);
                 if (uploadFileRef.current) uploadFileRef.current.value = "";
+                // Return to dashboard after 1.5s
+                setTimeout(function(){ setActiveSection(null); setUploadMsg(""); }, 1500);
               } catch (e) { setUploadMsg("Error: " + e.message); }
               setUploadLoading(false);
             }} style={{ width: "100%", background: uploadLoading ? "#333" : "#C026D3", border: "none", borderRadius: 12, color: "white", fontWeight: 800, fontSize: 15, padding: "14px", cursor: uploadLoading ? "not-allowed" : "pointer" }}>
