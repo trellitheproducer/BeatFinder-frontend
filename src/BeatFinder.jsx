@@ -815,6 +815,25 @@ function SpotifyEmbed({ embedUrl, height, style, itemId }) {
   var h  = height || 152;
   var br = (style && style.borderRadius) ? style.borderRadius : 0;
 
+  // Normalise Spotify URL to the correct embed format
+  // Handles: open.spotify.com/track/ID → open.spotify.com/embed/track/ID
+  // Also handles old embed.spotify.com format
+  function normaliseEmbedUrl(url) {
+    if (!url) return url;
+    // Already correct embed format
+    if (url.includes("open.spotify.com/embed/")) return url;
+    // Old embed domain
+    if (url.includes("embed.spotify.com/")) {
+      return url.replace("embed.spotify.com/", "open.spotify.com/embed/");
+    }
+    // open.spotify.com/track/ID or /album/ID or /playlist/ID
+    var m = url.match(/open\.spotify\.com\/(track|album|playlist|episode|show)\/([A-Za-z0-9]+)/);
+    if (m) return "https://open.spotify.com/embed/" + m[1] + "/" + m[2];
+    return url;
+  }
+
+  var finalEmbedUrl = normaliseEmbedUrl(embedUrl);
+
   // Listen for another preview activating — deactivate self (unmounts iframe)
   React.useEffect(function() {
     function handler(e) {
@@ -836,7 +855,7 @@ function SpotifyEmbed({ embedUrl, height, style, itemId }) {
       {/* Iframe — key changes when deactivated so React unmounts it, stopping playback */}
       <iframe
         key={active ? "active" : "inactive"}
-        src={embedUrl + "?utm_source=generator&theme=0"}
+        src={finalEmbedUrl + (finalEmbedUrl && finalEmbedUrl.includes("?") ? "&" : "?") + "utm_source=generator&theme=0"}
         width="100%"
         height={h}
         frameBorder="0"
@@ -1621,78 +1640,119 @@ function RhymeFinder({ onClose, onInsert }) {
 
     if (isMultiWord) {
       // ── Phonetic multi-word engine ─────────────────────────────────────────
-      // Fetch candidates for EACH word from both rhyme + near-rhyme + sounds-like
-      var lastWord = words[words.length - 1];
+      // Strategy: fetch real candidates for each word separately,
+      // validate they are common real words, then pair them phonetically.
+      var lastWord  = words[words.length - 1];
       var firstWord = words[0];
 
+      // Common word validator — uses Datamuse frequency tag
+      // Words with freq tag f:X where X >= 4 are common enough
+      // We'll use a simple known-bad-pattern filter as first pass
+      function looksReal(w) {
+        if (!w || w.length < 2) return false;
+        // Reject if contains uncommon consonant clusters unlikely in English
+        if (/[^aeiou]{4,}/.test(w)) return false;
+        // Reject if ends in rare patterns
+        if (/[^aeiou](ff|rr|bb|dd|gg|pp|tt|kk|ll|mm|nn|ss|zz)$/.test(w) && w.length <= 4) return false;
+        // Reject single-syllable words that are clearly not English
+        if (w.length <= 5 && !/[aeiou]/.test(w)) return false;
+        return true;
+      }
+
+      // Fetch candidates with frequency scores — use &md=f to get frequency data
       var fetches = [
-        // Rhymes for last word (most important)
-        fetch("https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(lastWord) + "&max=100").then(function(r){ return r.json(); }),
+        // Rhymes for last word with frequency metadata
+        fetch("https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(lastWord) + "&md=f&max=150").then(function(r){ return r.json(); }),
         // Near rhymes for last word
-        fetch("https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(lastWord) + "&max=100").then(function(r){ return r.json(); }),
-        // Sounds like last word
-        fetch("https://api.datamuse.com/words?sl=" + encodeURIComponent(lastWord) + "&max=80").then(function(r){ return r.json(); }),
-        // Rhymes for first word
-        fetch("https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(firstWord) + "&max=80").then(function(r){ return r.json(); }),
+        fetch("https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(lastWord) + "&md=f&max=100").then(function(r){ return r.json(); }),
+        // Rhymes for first word with frequency metadata
+        fetch("https://api.datamuse.com/words?rel_rhy=" + encodeURIComponent(firstWord) + "&md=f&max=150").then(function(r){ return r.json(); }),
         // Near rhymes for first word
-        fetch("https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(firstWord) + "&max=80").then(function(r){ return r.json(); }),
+        fetch("https://api.datamuse.com/words?rel_nry=" + encodeURIComponent(firstWord) + "&md=f&max=100").then(function(r){ return r.json(); }),
       ];
 
       Promise.all(fetches).then(function(data) {
-        var lastRhy  = (data[0] || []).map(function(r){ return r.word; }).filter(isUsable);
-        var lastNry  = (data[1] || []).map(function(r){ return r.word; }).filter(isUsable);
-        var lastSl   = (data[2] || []).map(function(r){ return r.word; }).filter(isUsable);
-        var firstRhy = (data[3] || []).map(function(r){ return r.word; }).filter(isUsable);
-        var firstNry = (data[4] || []).map(function(r){ return r.word; }).filter(isUsable);
 
-        // Build candidate PAIRS: [first-rhyme] + [last-rhyme]
+        // Extract word + frequency from Datamuse response
+        // Datamuse returns tags like ["f:12.34"] for frequency
+        function extractFreq(entry) {
+          var freq = 0;
+          if (entry.tags) {
+            entry.tags.forEach(function(t) {
+              if (t.startsWith("f:")) freq = parseFloat(t.slice(2)) || 0;
+            });
+          }
+          return freq;
+        }
+
+        // Filter to only real, common words
+        // Datamuse frequency: >1 = fairly common, >3 = common, >10 = very common
+        function filterCommon(entries, minFreq) {
+          return (entries || []).filter(function(e) {
+            if (!looksReal(e.word)) return false;
+            if (e.word.indexOf(" ") !== -1) return false; // no multi-word entries
+            var freq = extractFreq(e);
+            // If no freq data, use Datamuse score as proxy — score > 2000 = common
+            if (freq === 0) return (e.score || 0) > 2000;
+            return freq >= minFreq;
+          }).map(function(e){ return e.word; });
+        }
+
+        var lastRhy  = filterCommon(data[0], 1.5);
+        var lastNry  = filterCommon(data[1], 2);
+        var firstRhy = filterCommon(data[2], 1.5);
+        var firstNry = filterCommon(data[3], 2);
+
+        // Deduplicate and cap lists
+        function dedupe(arr) {
+          var seen = new Set();
+          return arr.filter(function(w) {
+            if (seen.has(w)) return false;
+            seen.add(w);
+            return true;
+          });
+        }
+
+        var fCands = dedupe(firstRhy.concat(firstNry)).slice(0, 25);
+        var lCands = dedupe(lastRhy.concat(lastNry)).slice(0, 25);
+
+        // Build pairs — but ONLY real word + real word combinations
         var pairs = [];
         var seenPairs = new Set();
 
-        function addPair(a, b) {
-          var key = a + " " + b;
-          if (!seenPairs.has(key) && a !== b) {
-            seenPairs.add(key);
-            pairs.push(key);
-          }
-        }
-
-        // Cross-pair first and last rhyme candidates
-        var fCands = firstRhy.concat(firstNry).slice(0, 40);
-        var lCands = lastRhy.concat(lastNry).concat(lastSl).slice(0, 40);
-
         fCands.forEach(function(f) {
           lCands.forEach(function(l) {
-            addPair(f, l);
+            if (f === l) return;
+            var key = f + " " + l;
+            if (!seenPairs.has(key)) {
+              seenPairs.add(key);
+              pairs.push(key);
+            }
           });
         });
 
-        // Also add single-word candidates from last word (for 1-word phrases like "highway")
-        lCands.forEach(function(l) { if (l.indexOf(" ") === -1) seenPairs.add(l) || pairs.push(l); });
-
-        // Score every candidate
+        // Score every candidate pair phonetically
         var scored = pairs.map(function(p) {
           return { word: p, score: phoneticScore(words, p) };
         }).filter(function(r) { return r.score > 15; });
 
-        // Sort by score descending
         scored.sort(function(a, b) { return b.score - a.score; });
 
-        // Split into perfect multis (high score) and near multis
         var perfectMultis = scored.filter(function(r){ return r.score >= 50; }).slice(0, 20);
         var nearMultis    = scored.filter(function(r){ return r.score >= 20 && r.score < 50; }).slice(0, 20);
 
-        // Also keep the old-style last-word-only rhymes as "slant rhymes"
+        // Slant rhymes = just the top real single-word rhymes of the last word
         var slant = lastRhy.slice(0, 15).map(function(w){ return { word: w }; });
 
         setResults({
-          perfect:      perfectMultis,
-          near:         nearMultis,
+          perfect:       perfectMultis,
+          near:          nearMultis,
           multiSyllable: slant,
-          isMultiWord:  true,
-          phonetic:     true,
+          isMultiWord:   true,
+          phonetic:      true,
         });
         setLoading(false);
+
       }).catch(function() {
         setResults({ perfect: [], near: [], multiSyllable: [], isMultiWord: true });
         setLoading(false);
@@ -1726,14 +1786,25 @@ function RhymeFinder({ onClose, onInsert }) {
   };
 
   var RhymeChip = function(props) {
+    var touchMoved = React.useRef(false);
     return (
       <button
-        onClick={function() { onInsert(props.word); }}
+        onTouchStart={function(){ touchMoved.current = false; }}
+        onTouchMove={function(){ touchMoved.current = true; }}
+        onTouchEnd={function(e){
+          if (touchMoved.current) { e.preventDefault(); return; }
+        }}
+        onClick={function(e) {
+          if (touchMoved.current) { e.preventDefault(); return; }
+          onInsert(props.word);
+        }}
         style={{
           background: "rgba(255,255,255,0.05)", border: "1px solid #2a2a2a",
           borderRadius: 20, padding: "5px 12px", color: "white",
           fontSize: 13, fontWeight: 500, cursor: "pointer", flexShrink: 0,
           fontFamily: "'DM Sans',sans-serif",
+          WebkitTapHighlightColor: "transparent",
+          userSelect: "none",
         }}>
         {props.word}
       </button>
@@ -1771,7 +1842,7 @@ function RhymeFinder({ onClose, onInsert }) {
       <div style={{ padding: "12px 16px 10px", flexShrink: 0, background: "#0a0f1a", zIndex: 1 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <div style={{ color: "#06B6D4", fontWeight: 800, fontSize: 13 }}><AppIcon id="target" size={20}/> Rhyme Finder</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer", padding: "4px 8px" }}>✕</button>
+          <button onClick={function(e){ e.stopPropagation(); onClose(); }} onTouchEnd={function(e){ e.stopPropagation(); }} style={{ background: "none", border: "none", color: "#555", fontSize: 18, cursor: "pointer", padding: "4px 8px" }}>✕</button>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -1911,9 +1982,10 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
         id:        isEditing ? initialLyric.id : ("lyric_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8)),
         title:     title.trim() || (beat ? beat.title : "Untitled"),
         text:      text.trim(),
-        beatTitle: beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
-        beatId:    beat ? beat.videoId : (initialLyric ? initialLyric.beatId : ""),
-        beat:      beat || (initialLyric ? initialLyric.beat : null),
+        beatTitle:   beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
+        beatId:      beat ? beat.videoId : (initialLyric ? initialLyric.beatId : ""),
+        beatChannel: beat ? (beat.channel || beat.channelTitle || "") : (initialLyric ? (initialLyric.beatChannel || "") : ""),
+        beat:        beat || (initialLyric ? initialLyric.beat : null),
         savedAt:   isEditing ? initialLyric.savedAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -1932,9 +2004,10 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
         id:        isEditing ? initialLyric.id : ("lyric_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8)),
         title:     title.trim() || (beat ? beat.title : "Untitled"),
         text:      text.trim(),
-        beatTitle: beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
-        beatId:    beat ? beat.videoId : (initialLyric ? initialLyric.beatId : ""),
-        beat:      beat || (initialLyric ? initialLyric.beat : null),
+        beatTitle:   beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
+        beatId:      beat ? beat.videoId : (initialLyric ? initialLyric.beatId : ""),
+        beatChannel: beat ? (beat.channel || beat.channelTitle || "") : (initialLyric ? (initialLyric.beatChannel || "") : ""),
+        beat:        beat || (initialLyric ? initialLyric.beat : null),
         savedAt:   isEditing ? initialLyric.savedAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -1949,10 +2022,11 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
       id:        isEditing ? initialLyric.id : ("lyric_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8)),
       title:     title.trim() || (beat ? beat.title : "Untitled"),
       text:      text.trim(),
-      beatTitle: beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
-      beatId:    beat ? beat.videoId : (initialLyric ? initialLyric.beatId : ""),
-      beat:      beat || (initialLyric ? initialLyric.beat : null),
-      savedAt:   isEditing ? initialLyric.savedAt : new Date().toISOString(),
+      beatTitle:   beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
+      beatId:      beat ? beat.videoId : (initialLyric ? initialLyric.beatId : ""),
+      beatChannel: beat ? (beat.channel || beat.channelTitle || "") : (initialLyric ? (initialLyric.beatChannel || "") : ""),
+      beat:        beat || (initialLyric ? initialLyric.beat : null),
+      savedAt:     isEditing ? initialLyric.savedAt : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     onSaveLyric(lyric, isEditing ? lyricIndex : null);
@@ -2052,7 +2126,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
           {text.length} chars • {text.split(" ").filter(function(w){return w.length > 0;}).length} words
         </div>
         {user ? (
-          <button onClick={() => setAiOpen(aiOpen === "rhymes" ? null : "rhymes")} style={{
+          <button onClick={function(e){ e.stopPropagation(); setAiOpen(aiOpen === "rhymes" ? null : "rhymes"); }} style={{
             background: aiOpen === "rhymes" ? "rgba(6,182,212,0.2)" : "rgba(6,182,212,0.15)",
             border: "1px solid " + (aiOpen === "rhymes" ? "#06B6D4" : "rgba(6,182,212,0.4)"),
             borderRadius: 20, color: "#06B6D4", fontWeight: 800,
@@ -19283,7 +19357,17 @@ export default function BeatFinder() {
   }, []);
 
   const handleEditLyric = useCallback((lyric, index) => {
-    setLyricsBeat(lyric.beat || null);
+    // Reconstruct beat object from stored fields if full object not available
+    var beatObj = lyric.beat || null;
+    if (!beatObj && lyric.beatId) {
+      beatObj = {
+        videoId:      lyric.beatId,
+        title:        lyric.beatTitle || "Beat",
+        channel:      lyric.beatChannel || "",
+        channelTitle: lyric.beatChannel || "",
+      };
+    }
+    setLyricsBeat(beatObj);
     setEditingLyric(lyric);
     setEditingIndex(index);
     setLyricsOpen(true);
