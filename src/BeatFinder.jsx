@@ -3563,33 +3563,27 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
 // BEAT LEASE CARD
 // =============================================================================
 // ── Download helper ───────────────────────────────────────────────
-// In PWA standalone mode window.open(_blank) opens an external Safari tab.
-// The correct approach is fetching via the proxy and triggering a blob download,
-// which shows the native iOS share/save sheet without leaving the app.
-async function downloadMp3(url, title, beatId) {
+// On iOS Safari, the ONLY way to get the native "Do you want to download?"
+// popup is window.open(_blank) pointing to a URL that returns
+// Content-Disposition: attachment. Blob fetch + a.click() opens an
+// external page instead. This is an iOS Safari limitation.
+function downloadMp3(url, title, beatId) {
   var proxyUrl = beatId
     ? API_BASE + "/api/producer/beats/" + beatId + "/file"
     : url;
-  var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
-  try {
-    var res  = await fetch(proxyUrl);
-    if (!res.ok) throw new Error("fetch failed");
-    var blob = await res.blob();
-    var burl = URL.createObjectURL(blob);
-    var a    = document.createElement("a");
-    a.href     = burl;
-    a.download = filename;
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function() {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(burl);
-    }, 5000);
-  } catch(e) {
-    // Fallback: open proxy URL directly
-    window.location.href = proxyUrl;
-  }
+  window.open(proxyUrl, "_blank");
+}
+
+// ── Download Button — no loading state needed (opens instantly) ───
+function DownloadButton({ url, title, beatId, style, children }) {
+  return (
+    <button
+      onClick={function() { downloadMp3(url, title, beatId); }}
+      style={style}
+    >
+      {children}
+    </button>
+  );
 }
 
 // ── Shared 30s PreviewBar ─────────────────────────────────────────
@@ -3809,10 +3803,13 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
       {/* CTA */}
       {isFree ? (
         <div style={{ padding: "0 16px 16px" }}>
-          <button onClick={onDownload} style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #C026D3", color: "#C026D3", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: "0 0 18px rgba(192,38,211,0.2), inset 0 0 18px rgba(192,38,211,0.04)" }}>
+          <DownloadButton
+            url={beat.url} title={beat.title} beatId={beat.id}
+            style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #C026D3", color: "#C026D3", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: "0 0 18px rgba(192,38,211,0.2), inset 0 0 18px rgba(192,38,211,0.04)" }}
+          >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
             Save MP3 to Device
-          </button>
+          </DownloadButton>
           <div style={{ display: "flex", marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
             {[
               { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>, title: "100% FREE", sub: "No tags, just vibes." },
@@ -5838,18 +5835,13 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
       {/* ── CTA button ── */}
       {isFree ? (
         <div style={{ padding: "0 16px 16px" }}>
-          <button onClick={function(){ downloadMp3(beat.url, beat.title, beat.id); }} style={{
-            width: "100%", borderRadius: 14, padding: "15px",
-            background: "transparent",
-            border: "2px solid #C026D3",
-            color: "#C026D3", fontWeight: 800, fontSize: 15,
-            cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-            boxShadow: "0 0 18px rgba(192,38,211,0.2), inset 0 0 18px rgba(192,38,211,0.04)",
-          }}>
+          <DownloadButton
+            url={beat.url} title={beat.title} beatId={beat.id}
+            style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #C026D3", color: "#C026D3", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: "0 0 18px rgba(192,38,211,0.2), inset 0 0 18px rgba(192,38,211,0.04)" }}
+          >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
             Save MP3 to Device
-          </button>
+          </DownloadButton>
 
           {/* ── Footer info pills ── */}
           <div style={{ display: "flex", gap: 0, marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
