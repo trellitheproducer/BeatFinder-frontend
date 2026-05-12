@@ -4001,8 +4001,7 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
       onViewProfile={onViewProfile}
       audioEl={previewing && beat.url ? (
         <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-          onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
-          onLoadedMetadata={function(){ if (audioRef.current && (beat.preview_start || 0) > 0) audioRef.current.currentTime = beat.preview_start || 0; }}
+          onPlay={function(){ onAudioPlay(); if (audioRef.current && (beat.preview_start || 0) > 0 && audioRef.current.currentTime < (beat.preview_start || 0)) audioRef.current.currentTime = beat.preview_start || 0; }} onPause={function(){ clearInterval(timerRef.current); }}
           onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
       ) : null}
     />
@@ -4283,8 +4282,7 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
           onViewProfile={onViewProfile}
           audioEl={prev && beat.url ? (
             <audio ref={aRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-              onPlay={onPlay} onPause={function(){ clearInterval(tRef.current); }}
-              onLoadedMetadata={function(){ if (aRef.current && (beat.preview_start || 0) > 0) aRef.current.currentTime = beat.preview_start || 0; }}
+              onPlay={function(){ onPlay(); if (aRef.current && (beat.preview_start || 0) > 0 && aRef.current.currentTime < (beat.preview_start || 0)) aRef.current.currentTime = beat.preview_start || 0; }} onPause={function(){ clearInterval(tRef.current); }}
               onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
           ) : null}
         />
@@ -4942,8 +4940,7 @@ function FreeMemberBeatCard({ beat, onViewProfile }) {
       onViewProfile={onViewProfile}
       audioEl={previewing && beat.url ? (
         <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-          onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
-          onLoadedMetadata={function(){ if (audioRef.current && (beat.preview_start || 0) > 0) audioRef.current.currentTime = beat.preview_start || 0; }}
+          onPlay={function(){ onAudioPlay(); if (audioRef.current && (beat.preview_start || 0) > 0 && audioRef.current.currentTime < (beat.preview_start || 0)) audioRef.current.currentTime = beat.preview_start || 0; }} onPause={function(){ clearInterval(timerRef.current); }}
           onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
       ) : null}
     />
@@ -5738,7 +5735,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   }
   function onTimeUpdate(e) {
     var el = e.target, startT = parseFloat(el.dataset.startTime || 0);
-    if (el.currentTime >= startT + 30) { el.pause(); stopPreview(); }
+    if (el.currentTime >= startT + 45) { el.pause(); stopPreview(); }
     if (el.currentTime < startT) el.currentTime = startT;
   }
   async function handleBuy() {
@@ -5950,8 +5947,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
             </div>
             {previewing && beat.url && (
               <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-                onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
-                onLoadedMetadata={function(){ if (audioRef.current && (beat.preview_start || 0) > 0) audioRef.current.currentTime = beat.preview_start || 0; }}
+                onPlay={function(){ onAudioPlay(); if (audioRef.current && (beat.preview_start || 0) > 0 && audioRef.current.currentTime < (beat.preview_start || 0)) audioRef.current.currentTime = beat.preview_start || 0; }} onPause={function(){ clearInterval(timerRef.current); }}
                 onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
             )}
           </div>
