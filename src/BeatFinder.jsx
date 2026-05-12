@@ -3539,6 +3539,143 @@ function BeatCardShell({ beat, accentColor, children, onViewProfile, extraStats 
   );
 }
 
+// =============================================================================
+// NEW BEAT CARD SHELL — shared design used by all producer beat cards
+// Matches the ProfileBeatCard design: logo thumbnail, waveform player,
+// purple=free, gold=paid, footer info pills on free beats.
+// =============================================================================
+function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audioEl, onBuy, onDownload, buyLoading, buyErr, user }) {
+  var isFree    = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
+  var accentClr = isFree ? "#C026D3" : "#F59E0B";
+  var totalSecs = Math.floor(previewTime || 0);
+  var progMins  = String(Math.floor(totalSecs / 60)).padStart(2, "0");
+  var progSecs  = String(totalSecs % 60).padStart(2, "0");
+
+  return (
+    <div className="bf-card" style={{
+      background: "linear-gradient(160deg,#151515 0%,#0f0f0f 100%)",
+      borderRadius: 20, marginBottom: 16, overflow: "hidden",
+      border: "1px solid " + accentClr + "44",
+      boxShadow: "0 4px 32px rgba(0,0,0,0.6), 0 0 0 0.5px " + accentClr + "22",
+    }}>
+      <div style={{ height: 3, background: "linear-gradient(90deg," + accentClr + "cc,transparent)" }} />
+
+      <div style={{ padding: "16px 16px 0" }}>
+        {/* Header row */}
+        <div style={{ display: "flex", gap: 14, marginBottom: 14 }}>
+          {/* Thumbnail — BeatFinder logo */}
+          <div style={{ width: 80, height: 80, borderRadius: 12, flexShrink: 0, overflow: "hidden", background: "#0a0a0a", border: "1px solid " + accentClr + "33" }}>
+            <img src="https://i.ibb.co/v4wcZVJW/IMG-9119.jpg" alt="BeatFinder" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+          </div>
+
+          {/* Info */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {beat.genre && (
+              <div style={{ color: accentClr, fontSize: 9, fontWeight: 800, letterSpacing: 1.5, marginBottom: 4, textTransform: "uppercase" }}>{beat.genre}</div>
+            )}
+            <div style={{ color: "white", fontWeight: 800, fontSize: 15, lineHeight: 1.3, marginBottom: 6, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{beat.title}</div>
+            <div style={{ color: "#666", fontSize: 11, marginBottom: 8 }}>Instrumental</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              {isFree ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(192,38,211,0.12)", border: "1.5px solid #C026D3", borderRadius: 20, padding: "3px 10px", color: "#C026D3", fontSize: 10, fontWeight: 800 }}>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/></svg>
+                  FREE DOWNLOAD
+                </span>
+              ) : (
+                <span style={{ background: "rgba(245,158,11,0.12)", border: "1.5px solid #F59E0B", borderRadius: 20, padding: "3px 10px", color: "#F59E0B", fontSize: 10, fontWeight: 800 }}>{beat.price}</span>
+              )}
+              {beat.playCount > 0 && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "rgba(255,255,255,0.05)", border: "1px solid #2a2a2a", borderRadius: 20, padding: "3px 9px", color: "#666", fontSize: 10, fontWeight: 700 }}>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="#666"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg>
+                  {fmtCount(beat.playCount)}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Producer row */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.05)", borderBottom: "1px solid rgba(255,255,255,0.05)", marginBottom: 14 }}>
+          <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, background: "linear-gradient(135deg," + accentClr + "55,#0a0a0a)", border: "1.5px solid " + accentClr + "55", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ color: accentClr, fontWeight: 800, fontSize: 13 }}>{(beat.producer || "?")[0].toUpperCase()}</span>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: "#555", fontSize: 9, fontWeight: 700, letterSpacing: 1 }}>PRODUCER</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ color: "white", fontWeight: 700, fontSize: 13 }}>{beat.producer || "Unknown"}</span>
+              <VerifiedBadge size={13} />
+            </div>
+          </div>
+          {beat.downloads > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4, color: "#555", fontSize: 11, flexShrink: 0 }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+              {beat.downloads}
+            </div>
+          )}
+        </div>
+
+        {/* Waveform player */}
+        {beat.url && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, background: "rgba(255,255,255,0.03)", borderRadius: 12, padding: "10px 14px", border: "1px solid #1e1e1e" }}>
+              <button onClick={onTogglePreview} style={{ width: 36, height: 36, borderRadius: "50%", flexShrink: 0, background: previewing ? "rgba(99,91,255,0.2)" : "rgba(255,255,255,0.06)", border: "1.5px solid " + (previewing ? "#635BFF" : "#2a2a2a"), color: previewing ? "#635BFF" : "#aaa", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                {previewing
+                  ? <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                  : <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg>
+                }
+              </button>
+              <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 1.5, height: 28, overflow: "hidden" }}>
+                {Array.from({ length: 40 }, function(_, i) {
+                  var h = 20 + Math.sin(i * 0.8) * 12 + Math.sin(i * 1.7) * 6;
+                  var filled = previewing && (i / 40) < (previewTime / 30);
+                  return <div key={i} style={{ flex: 1, borderRadius: 2, height: Math.max(4, h) + "%", background: filled ? accentClr : "rgba(255,255,255,0.1)" }} />;
+                })}
+              </div>
+              <span style={{ color: "#555", fontSize: 10, fontWeight: 700, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
+                {previewing ? progMins + ":" + progSecs + " / 0:30" : "0:30"}
+              </span>
+            </div>
+            {audioEl}
+          </div>
+        )}
+
+        {buyErr && <div style={{ color: "#F87171", fontSize: 12, marginBottom: 10 }}>{buyErr}</div>}
+      </div>
+
+      {/* CTA */}
+      {isFree ? (
+        <div style={{ padding: "0 16px 16px" }}>
+          <button onClick={onDownload} style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #C026D3", color: "#C026D3", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: "0 0 18px rgba(192,38,211,0.2), inset 0 0 18px rgba(192,38,211,0.04)" }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+            Save MP3 to Device
+          </button>
+          <div style={{ display: "flex", marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
+            {[
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>, title: "100% FREE", sub: "No tags, just vibes." },
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>, title: "INSTANT DOWNLOAD", sub: "High quality MP3." },
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>, title: "UNLIMITED USE", sub: "All your projects." },
+            ].map(function(item, i) {
+              return (
+                <div key={i} style={{ flex: 1, textAlign: "center", padding: "0 4px", borderRight: i < 2 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
+                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>{item.icon}</div>
+                  <div style={{ color: "#555", fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>{item.title}</div>
+                  <div style={{ color: "#333", fontSize: 8, marginTop: 1 }}>{item.sub}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div style={{ padding: "0 16px 16px" }}>
+          <button onClick={onBuy} disabled={buyLoading} style={{ width: "100%", borderRadius: 14, padding: "15px", background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)", border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"), color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 15, cursor: buyLoading ? "not-allowed" : "pointer", letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: buyLoading ? "none" : "0 0 18px rgba(245,158,11,0.25)" }}>
+            {buyLoading ? "Loading..." : "Buy Lease — " + beat.price}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BeatLeaseCard({ beat, user, onViewProfile }) {
   const [loading,     setLoading]     = useState(false);
   const [err,         setErr]         = useState("");
@@ -3546,7 +3683,7 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
   const [previewTime, setPreviewTime] = useState(0);
   const audioRef = React.useRef(null);
   const timerRef = React.useRef(null);
-  const isFree   = beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
+  const isFree   = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
   var previewId  = React.useRef("lease_" + beat.id);
 
   function startPreview() {
@@ -3579,7 +3716,7 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
   }
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
 
-  const handleBuyLease = async () => {
+  async function handleBuy() {
     if (!user) { setErr("Please log in to purchase a lease"); return; }
     setLoading(true); setErr("");
     try {
@@ -3593,59 +3730,25 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
       document.addEventListener("visibilitychange", resetOnReturn);
       window.location.href = result.checkout_url;
     } catch (e) { setErr(e.message); setLoading(false); }
-  };
+  }
 
   return (
-    <BeatCardShell beat={beat} accentColor={isFree ? "#22C55E" : "#C026D3"} onViewProfile={onViewProfile}>
-      {err && <div style={{ color: "#F87171", fontSize: 12, marginBottom: 10 }}>{err}</div>}
-
-      {/* Preview toggle */}
-      <button onClick={startPreview} style={{
-        width: "100%", borderRadius: 12, padding: "11px",
-        background: previewing ? "rgba(99,91,255,0.15)" : "rgba(255,255,255,0.03)",
-        border: "1.5px solid " + (previewing ? "#635BFF" : "#2a2a2a"),
-        color: previewing ? "#635BFF" : "#666",
-        fontWeight: 700, fontSize: 14, cursor: "pointer",
-        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-        marginBottom: 10,
-      }}>
-        {previewing
-          ? <><span style={{ fontSize:12 }}>■</span> Stop Preview</>
-          : <><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg> Preview Beat</>
-        }
-      </button>
-
-      {previewing && beat.url && (
-        <>
-          <audio ref={audioRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
-            onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
-            onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
-          <PreviewBar previewTime={previewTime} onStop={stopPreview} />
-        </>
-      )}
-
-      {isFree ? (
-        <button onClick={function(){ downloadMp3(beat.url, beat.title, beat.id); }} style={{
-          width: "100%", borderRadius: 12, padding: "14px", border: "none",
-          background: "linear-gradient(135deg,#22C55E,#16A34A)",
-          color: "white", fontWeight: 800, fontSize: 15, cursor: "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-        }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
-          Save MP3 to Device
-        </button>
-      ) : (
-        <button onClick={handleBuyLease} disabled={loading} style={{
-          width: "100%", borderRadius: 12, padding: "14px", border: "none",
-          background: loading ? "#1a1a1a" : "linear-gradient(135deg,#C026D3,#7C3AED)",
-          color: loading ? "#555" : "white", fontWeight: 800, fontSize: 15,
-          cursor: loading ? "not-allowed" : "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-        }}>
-          {loading ? "Loading..." : "Buy Lease — " + beat.price}
-        </button>
-      )}
-    </BeatCardShell>
+    <NewBeatCardShell
+      beat={beat}
+      previewing={previewing}
+      previewTime={previewTime}
+      onTogglePreview={startPreview}
+      onDownload={function(){ downloadMp3(beat.url, beat.title, beat.id); }}
+      onBuy={handleBuy}
+      buyLoading={loading}
+      buyErr={err}
+      user={user}
+      audioEl={previewing && beat.url ? (
+        <audio ref={audioRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
+          onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
+          onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
+      ) : null}
+    />
   );
 }
 
@@ -3890,54 +3993,25 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
     React.useEffect(function() { return function() { clearInterval(tRef.current); }; }, []);
 
     return (
-      <div style={{ flexShrink: 0, width: 230 }}>
-        <BeatCardShell beat={beat} accentColor={isFree ? "#22C55E" : "#C026D3"} onViewProfile={onViewProfile}>
-          {buyErr && <div style={{ color:"#F87171", fontSize:10, marginBottom:6 }}>{buyErr}</div>}
-          {beat.url && (
-            <button onClick={startPrev} style={{
-              width: "100%", borderRadius: 10, padding: "8px",
-              background: prev ? "rgba(99,91,255,0.15)" : "rgba(255,255,255,0.03)",
-              border: "1px solid " + (prev ? "#635BFF" : "#2a2a2a"),
-              color: prev ? "#635BFF" : "#666",
-              fontSize: 12, fontWeight: 700, cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              marginBottom: 8,
-            }}>
-              {prev
-                ? <><span style={{ fontSize:10 }}>■</span> Stop</>
-                : <><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg> Preview</>
-              }
-            </button>
-          )}
-          {prev && beat.url && (
-            <>
-              <audio ref={aRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
-                onPlay={onPlay} onPause={function(){ clearInterval(tRef.current); }}
-                onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
-              <PreviewBar previewTime={pTime} onStop={stopPrev} />
-            </>
-          )}
-          {isFree ? (
-            <button onClick={function(){ downloadMp3(beat.url, beat.title, beat.id); }} style={{
-              width: "100%", borderRadius: 10, padding: "8px", border: "none",
-              background: "linear-gradient(135deg,#22C55E,#16A34A)",
-              color: "white", fontWeight: 800, fontSize: 12, cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
-              Save to Device
-            </button>
-          ) : (
-            <button onClick={handleBuy} disabled={buyLoading} style={{
-              width: "100%", borderRadius: 10, padding: "8px", border: "none",
-              background: buyLoading ? "#1a1a1a" : "linear-gradient(135deg,#C026D3,#7C3AED)",
-              color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 12,
-              cursor: buyLoading ? "not-allowed" : "pointer",
-            }}>
-              {buyLoading ? "..." : "Buy — " + beat.price}
-            </button>
-          )}
-        </BeatCardShell>
+      <div style={{ flexShrink: 0, width: 280 }}>
+        <NewBeatCardShell
+          beat={beat}
+          previewing={prev}
+          previewTime={pTime}
+          onTogglePreview={startPrev}
+          onDownload={function(){ downloadMp3(beat.url, beat.title, beat.id); }}
+          onBuy={handleBuy}
+          buyLoading={buyLoading}
+          buyErr={buyErr}
+          user={user}
+          audioEl={prev && beat.url ? (
+            <audio ref={aRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
+              onPlay={onPlay} onPause={function(){ clearInterval(tRef.current); }}
+              onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
+          ) : null}
+        />
+      </div>
+    );
       </div>
     );
   };
@@ -4580,44 +4654,20 @@ function FreeMemberBeatCard({ beat, onViewProfile }) {
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
 
   return (
-    <BeatCardShell beat={beat} accentColor="#22C55E" onViewProfile={onViewProfile}>
-      {beat.url && (
-        <button onClick={startPreview} style={{
-          width: "100%", borderRadius: 12, padding: "11px",
-          background: previewing ? "rgba(99,91,255,0.15)" : "rgba(255,255,255,0.03)",
-          border: "1.5px solid " + (previewing ? "#635BFF" : "#2a2a2a"),
-          color: previewing ? "#635BFF" : "#666",
-          fontWeight: 700, fontSize: 14, cursor: "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-          marginBottom: 10,
-        }}>
-          {previewing
-            ? <><span style={{ fontSize:12 }}>■</span> Stop Preview</>
-            : <><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg> Preview Beat</>
-          }
-        </button>
-      )}
-      {previewing && beat.url && (
-        <>
-          <audio ref={audioRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
-            onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
-            onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
-          <PreviewBar previewTime={previewTime} onStop={stopPreview} />
-        </>
-      )}
-      <button onClick={function(){ downloadMp3(beat.url, beat.title, beat.id); }} style={{
-        width: "100%", borderRadius: 12, padding: "13px", border: "none",
-        background: "linear-gradient(135deg,#22C55E,#16A34A)",
-        color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer",
-        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-      }}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
-        Save MP3 to Device
-      </button>
-    </BeatCardShell>
+    <NewBeatCardShell
+      beat={beat}
+      previewing={previewing}
+      previewTime={previewTime}
+      onTogglePreview={startPreview}
+      onDownload={function(){ downloadMp3(beat.url, beat.title, beat.id); }}
+      audioEl={previewing && beat.url ? (
+        <audio ref={audioRef} src={beat.url + "#t=45"} autoPlay data-start-time="45"
+          onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
+          onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
+      ) : null}
+    />
   );
 }
-
 function MembersBeatsTab({ user, priced, onViewProfile }) {
   var [beats,   setBeats]   = React.useState([]);
   var [loading, setLoading] = React.useState(true);
