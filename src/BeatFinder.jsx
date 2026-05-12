@@ -2001,6 +2001,126 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
 
 
 // =============================================================================
+// PLAN PICKER — shared monthly/annual toggle used everywhere plans are shown
+// =============================================================================
+// Stripe price IDs — replace YEARLY_ placeholders with your real annual price IDs
+// from your Stripe dashboard once created.
+var PLAN_PRICES = {
+  artist:   { monthly: "price_1TQDoFFHyNSCxas89UpDKiro",  yearly: "price_artist_yearly_REPLACE" },
+  producer: { monthly: "price_1TQDpBFHyNSCxas8cktbqw1n", yearly: "price_producer_yearly_REPLACE" },
+};
+
+function PlanPicker({ onSelectPlan, compact }) {
+  var [billing, setBilling] = React.useState("monthly"); // "monthly" | "yearly"
+
+  var plans = [
+    {
+      id: "artist",
+      label: "Artist Pro",
+      color: "#F59E0B",
+      monthlyPrice: 4.99,
+      yearlyPrice:  49.99,
+      monthlyStr: "£4.99/mo",
+      yearlyStr:  "£49.99/yr",
+      saving:     "Save £9.89",
+      perks: ["Rhyme Finder AI tool", "Studio recording mode", "Your own profile", "Write lyrics to beats", "Save unlimited beats", "Exclusive member beats", "Download MP3s", "Purchase leases"],
+    },
+    {
+      id: "producer",
+      label: "Producer Pro",
+      color: "#C026D3",
+      monthlyPrice: 8.99,
+      yearlyPrice:  89.99,
+      monthlyStr: "£8.99/mo",
+      yearlyStr:  "£89.99/yr",
+      saving:     "Save £17.89",
+      perks: ["Everything in Artist Pro", "Upload & sell beats", "Sell MP3 leases", "Download stats", "Verified badge", "Featured in rotation"],
+    },
+  ];
+
+  return (
+    <div>
+      {/* Billing toggle */}
+      <div style={{ display: "flex", background: "#111", border: "1px solid #222", borderRadius: 30, padding: 3, marginBottom: 14, position: "relative" }}>
+        {["monthly", "yearly"].map(function(b) {
+          var isActive = billing === b;
+          return (
+            <button key={b} onClick={function() { setBilling(b); }}
+              style={{
+                flex: 1, padding: "8px 0", borderRadius: 26, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13,
+                background: isActive ? (b === "yearly" ? "linear-gradient(135deg,#C026D3,#7C3AED)" : "#1a1a1a") : "transparent",
+                color: isActive ? "white" : "#555",
+                transition: "all 0.18s",
+                position: "relative",
+              }}>
+              {b === "monthly" ? "Monthly" : "Annual"}
+              {b === "yearly" && (
+                <span style={{
+                  position: "absolute", top: -8, right: 6,
+                  background: "linear-gradient(135deg,#22C55E,#16A34A)",
+                  color: "white", fontSize: 8, fontWeight: 800, borderRadius: 20,
+                  padding: "2px 6px", letterSpacing: 0.5,
+                }}>SAVE UP TO 17%</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Plan cards */}
+      <div style={{ display: "flex", gap: 10 }}>
+        {plans.map(function(p) {
+          var priceStr  = billing === "yearly" ? p.yearlyStr  : p.monthlyStr;
+          var priceId   = PLAN_PRICES[p.id][billing];
+          return (
+            <div key={p.id} style={{
+              flex: 1, background: "#111", border: "1.5px solid " + p.color,
+              borderRadius: 14, padding: compact ? "12px 10px" : "14px 12px", textAlign: "left",
+              position: "relative", overflow: "hidden",
+            }}>
+              {billing === "yearly" && (
+                <div style={{
+                  position: "absolute", top: 0, right: 0,
+                  background: "linear-gradient(135deg,#22C55E,#16A34A)",
+                  color: "white", fontSize: 9, fontWeight: 800,
+                  padding: "3px 8px", borderBottomLeftRadius: 8,
+                }}>{p.saving}</div>
+              )}
+              <div style={{ color: "white", fontWeight: 800, fontSize: compact ? 12 : 13, marginBottom: 2 }}>{p.label}</div>
+              <div style={{ color: p.color, fontWeight: 800, fontSize: compact ? 14 : 16, marginBottom: billing === "yearly" ? 2 : 10 }}>{priceStr}</div>
+              {billing === "yearly" && (
+                <div style={{ color: "#555", fontSize: 10, marginBottom: 10 }}>≈ £{(p.yearlyPrice / 12).toFixed(2)}/mo</div>
+              )}
+              {!compact && p.perks.map(function(perk) {
+                return (
+                  <div key={perk} style={{ color: "#bbb", fontSize: 11, marginBottom: 6, lineHeight: 1.3, display: "flex", alignItems: "flex-start", gap: 5 }}>
+                    <span style={{ color: p.color, flexShrink: 0, fontWeight: 900 }}>+</span>
+                    <span>{perk}</span>
+                  </div>
+                );
+              })}
+              {onSelectPlan && (
+                <button onClick={function() { onSelectPlan(p.id, priceId, billing); }}
+                  style={{
+                    width: "100%", marginTop: compact ? 8 : 12,
+                    background: "linear-gradient(135deg," + p.color + ",#7C3AED)",
+                    border: "none", borderRadius: 10, color: "white",
+                    fontWeight: 800, fontSize: compact ? 12 : 13,
+                    padding: compact ? "8px" : "11px",
+                    cursor: "pointer",
+                  }}>
+                  Subscribe
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
 // BEAT FEED
 // =============================================================================
 function BeatFeed({ artistName, featured, exclusive, savedIds, onSave, onPlay, showPagination, filterTitle, instrumentalOnly, max, extraQueries, blockedChannels }) {
@@ -4644,24 +4764,15 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave, onSignUp
             </div>
           </div>
 
-          {/* Paid plan cards */}
-          <div style={{ display: "flex", gap: 10 }}>
-            {[
-              { label: "Artist Pro", price: "£4.99/mo", color: "#F59E0B", perks: ["Rhyme Finder AI tool", "Studio recording mode", "Your own profile", "Write lyrics to beats", "Save unlimited beats", "Exclusive member beats", "Download MP3s", "Purchase leases"] },
-              { label: "Producer Pro", price: "£8.99/mo", color: "#C026D3", perks: ["Everything in Artist Pro", "Upload & sell beats", "Sell MP3 leases", "Download stats", "Verified badge", "Featured in rotation"] },
-            ].map(p => (
-              <div key={p.label} style={{ flex: 1, background: "#111", border: "1.5px solid " + p.color, borderRadius: 14, padding: "14px 12px", textAlign: "left" }}>
-                <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>{p.label}</div>
-                <div style={{ color: p.color, fontWeight: 800, fontSize: 16, marginBottom: 12 }}>{p.price}</div>
-                {p.perks.map(perk => (
-                  <div key={perk} style={{ color: "#bbb", fontSize: 11, marginBottom: 6, lineHeight: 1.3, display: "flex", alignItems: "flex-start", gap: 5 }}>
-                    <span style={{ color: p.color, flexShrink: 0, fontWeight: 900 }}>+</span>
-                    <span>{perk}</span>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
+          <PlanPicker onSelectPlan={function(planId, priceId, billing) {
+            if (user) {
+              apiFetch("/api/stripe/create-checkout", { method: "POST", body: JSON.stringify({ price_id: priceId }) })
+                .then(function(r) { window.location.href = r.checkout_url; })
+                .catch(function(e) { alert("Error: " + e.message); });
+            } else {
+              onSignUp && onSignUp();
+            }
+          }} />
         </div>
 
         
@@ -6052,21 +6163,54 @@ function fmtCount(n) {
 }
 
 // ── Followers / Following list screen ────────────────────────────
-function FollowListScreen({ username, mode, onBack, onViewProfile }) {
+function FollowListScreen({ username, mode, onBack, onViewProfile, currentUser }) {
   // mode: "followers" | "following"
-  const [users,        setUsers]        = React.useState([]);
-  const [loading,      setLoading]      = React.useState(true);
-  const [error,        setError]        = React.useState(null);
-  const [viewingUser,  setViewingUser]  = React.useState(null);
+  const [users,       setUsers]       = React.useState([]);
+  const [loading,     setLoading]     = React.useState(true);
+  const [error,       setError]       = React.useState(null);
+  const [viewingUser, setViewingUser] = React.useState(null);
+  // Map of username → following bool for the logged-in user
+  const [followMap,   setFollowMap]   = React.useState({});
+  const [followLoading, setFollowLoading] = React.useState({});
 
   React.useEffect(() => {
     setLoading(true);
     apiFetch("/api/auth/" + mode + "/" + encodeURIComponent(username))
-      .then(d  => { setUsers(d); setLoading(false); })
+      .then(d => {
+        setUsers(d || []);
+        setLoading(false);
+        // Pre-load follow state for each user if logged in
+        if (currentUser && (d || []).length > 0) {
+          apiFetch("/api/auth/following/" + encodeURIComponent(currentUser.username))
+            .then(following => {
+              const map = {};
+              (following || []).forEach(f => { map[f.username] = true; });
+              setFollowMap(map);
+            })
+            .catch(() => {});
+        }
+      })
       .catch(e => { setError(e.message); setLoading(false); });
   }, [username, mode]);
 
-  // If a user was tapped, show their public profile in a new overlay layer
+  function toggleFollow(e, targetUsername) {
+    e.stopPropagation();
+    if (!currentUser) return;
+    const isFollowing = !!followMap[targetUsername];
+    setFollowLoading(prev => ({ ...prev, [targetUsername]: true }));
+    apiFetch("/api/auth/follow/" + encodeURIComponent(targetUsername), {
+      method: isFollowing ? "DELETE" : "POST",
+    })
+      .then(() => {
+        setFollowMap(prev => ({ ...prev, [targetUsername]: !isFollowing }));
+        setFollowLoading(prev => ({ ...prev, [targetUsername]: false }));
+      })
+      .catch(() => {
+        setFollowLoading(prev => ({ ...prev, [targetUsername]: false }));
+      });
+  }
+
+  // If a user was tapped, show their full public profile
   if (viewingUser) {
     return (
       <div style={{ position:"fixed", inset:0, zIndex:6000, background:"#0a0a0a", overflowY:"auto", WebkitOverflowScrolling:"touch" }}
@@ -6077,7 +6221,7 @@ function FollowListScreen({ username, mode, onBack, onViewProfile }) {
           onPlay={function(){}}
           savedIds={new Set()}
           onSave={function(){}}
-          currentUser={null}
+          currentUser={currentUser}
           hideBack={false}
         />
       </div>
@@ -6089,7 +6233,6 @@ function FollowListScreen({ username, mode, onBack, onViewProfile }) {
       {/* Header — padded below iPhone status bar */}
       <div style={{
         display:"flex", alignItems:"center",
-        paddingTop:"calc(env(safe-area-inset-top) + 12px)",
         padding:"calc(env(safe-area-inset-top) + 12px) 16px 12px",
         borderBottom:"1px solid #1a1a1a", position:"sticky", top:0, background:"#0a0a0a", zIndex:10,
       }}>
@@ -6105,29 +6248,51 @@ function FollowListScreen({ username, mode, onBack, onViewProfile }) {
         </div>
       )}
 
-      {users.map(u => (
-        <div key={u.username} onClick={() => setViewingUser(u.username)}
-          style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #111", cursor:"pointer", gap:12 }}>
-          {/* Avatar */}
-          <div style={{ width:48, height:48, borderRadius:"50%", overflow:"hidden", flexShrink:0,
-            background:"linear-gradient(135deg,#6B21A8,#C026D3)",
-            display:"flex", alignItems:"center", justifyContent:"center" }}>
-            {u.avatarUrl
-              ? <img src={u.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-              : <span style={{ color:"white", fontWeight:800, fontSize:18 }}>{(u.username || "?")[0].toUpperCase()}</span>
-            }
+      {users.map(u => {
+        const isOwnAccount = currentUser && currentUser.username === u.username;
+        const isFollowing  = !!followMap[u.username];
+        const isLoading    = !!followLoading[u.username];
+        return (
+          <div key={u.username} onClick={() => setViewingUser(u.username)}
+            style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #111", cursor:"pointer", gap:12 }}>
+            {/* Avatar */}
+            <div style={{ width:48, height:48, borderRadius:"50%", overflow:"hidden", flexShrink:0,
+              background:"linear-gradient(135deg,#6B21A8,#C026D3)",
+              display:"flex", alignItems:"center", justifyContent:"center" }}>
+              {u.avatarUrl
+                ? <img src={u.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                : <span style={{ color:"white", fontWeight:800, fontSize:18 }}>{(u.username || "?")[0].toUpperCase()}</span>
+              }
+            </div>
+            {/* Name + username */}
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontWeight:700, fontSize:14, color:"white", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{u.name || u.username}</div>
+              <div style={{ color:"#555", fontSize:12, marginTop:1 }}>@{u.username}</div>
+            </div>
+            {/* Plan badge */}
+            {u.plan === "producer" && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"3px 10px", color:"#C026D3", fontWeight:700, fontSize:10, flexShrink:0 }}>Pro</span>}
+            {u.plan === "artist"   && <span style={{ background:"rgba(245,158,11,0.15)",  border:"1px solid #F59E0B", borderRadius:20, padding:"3px 10px", color:"#F59E0B",  fontWeight:700, fontSize:10, flexShrink:0 }}>Artist</span>}
+            {/* Follow / Unfollow button — hidden for own account */}
+            {currentUser && !isOwnAccount && (
+              <button
+                onClick={(e) => toggleFollow(e, u.username)}
+                disabled={isLoading}
+                style={{
+                  flexShrink:0, padding:"6px 14px", borderRadius:20, fontWeight:700, fontSize:12,
+                  cursor: isLoading ? "not-allowed" : "pointer", border:"1.5px solid",
+                  background: isFollowing ? "transparent" : "#C026D3",
+                  borderColor: isFollowing ? "#444" : "#C026D3",
+                  color: isFollowing ? "#777" : "white",
+                  opacity: isLoading ? 0.5 : 1,
+                  transition:"all 0.15s",
+                }}>
+                {isLoading ? "..." : isFollowing ? "Following" : "Follow"}
+              </button>
+            )}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="2.5" strokeLinecap="round" style={{flexShrink:0}}><polyline points="9 18 15 12 9 6"/></svg>
           </div>
-          {/* Name + username */}
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontWeight:700, fontSize:14, color:"white", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{u.name || u.username}</div>
-            <div style={{ color:"#555", fontSize:12, marginTop:1 }}>@{u.username}</div>
-          </div>
-          {/* Plan badge */}
-          {u.plan === "producer" && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"3px 10px", color:"#C026D3", fontWeight:700, fontSize:10 }}>Pro</span>}
-          {u.plan === "artist"   && <span style={{ background:"rgba(245,158,11,0.15)",  border:"1px solid #F59E0B", borderRadius:20, padding:"3px 10px", color:"#F59E0B",  fontWeight:700, fontSize:10 }}>Artist</span>}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -6197,6 +6362,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
           <FollowListScreen
             username={username}
             mode={followList}
+            currentUser={currentUser}
             onBack={() => setFollowList(null)}
             onViewProfile={(u) => { setFollowList(null); /* parent handles navigation */ onBack && typeof onBack === "function" && onBack(u); }}
           />
@@ -6293,7 +6459,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
             {isProd && <span onClick={() => setBadgePopup({ icon:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
-            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Verified Chief Executive Officer" })} />}
+            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Chief Executive Officer" })} />}
             {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
           </div>
         )}
@@ -6979,12 +7145,8 @@ function RootAuthScreen({ onLogin, startMode }) {
   const [rememberMe,  setRememberMe]  = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authErr,     setAuthErr]     = useState("");
-  const [selectedPlan, setSelectedPlan] = useState("artist"); // "artist" | "producer"
-
-  const SIGNUP_PLANS = [
-    { id: "artist",   label: "Artist Pro",   price: "£4.99/mo", priceId: "price_1TQDoFFHyNSCxas89UpDKiro", color: "#F59E0B" },
-    { id: "producer", label: "Producer Pro", price: "£8.99/mo", priceId: "price_1TQDpBFHyNSCxas8cktbqw1n", color: "#C026D3" },
-  ];
+  const [selectedPlan,    setSelectedPlan]    = useState("artist");
+  const [selectedPriceId, setSelectedPriceId] = useState(PLAN_PRICES.artist.monthly);
 
   useEffect(() => {
     try {
@@ -7036,19 +7198,10 @@ function RootAuthScreen({ onLogin, startMode }) {
       {mode === "signup" && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ color: "#888", fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>CHOOSE YOUR PLAN</div>
-          <div style={{ display: "flex", gap: 10 }}>
-            {SIGNUP_PLANS.map(p => (
-              <button key={p.id} onClick={() => setSelectedPlan(p.id)} style={{
-                flex: 1, padding: "12px 8px", borderRadius: 12, cursor: "pointer",
-                border: "2px solid " + (selectedPlan === p.id ? p.color : "#222"),
-                background: selectedPlan === p.id ? p.color + "18" : "#111",
-                textAlign: "left", transition: "all 0.15s",
-              }}>
-                <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>{p.label}</div>
-                <div style={{ color: p.color, fontWeight: 700, fontSize: 13 }}>{p.price}</div>
-              </button>
-            ))}
-          </div>
+          <PlanPicker compact onSelectPlan={function(planId, priceId) {
+            setSelectedPlan(planId);
+            setSelectedPriceId(priceId);
+          }} />
           <div style={{ color: "#444", fontSize: 11, marginTop: 8, textAlign: "center" }}>
             You'll be taken to Stripe to complete payment after creating your account.
           </div>
@@ -7072,11 +7225,10 @@ function RootAuthScreen({ onLogin, startMode }) {
             // After signup, redirect to Stripe checkout for selected plan
             if (mode === "signup") {
               onLogin(u);
-              const plan = SIGNUP_PLANS.find(p => p.id === selectedPlan);
               try {
                 const r = await apiFetch("/api/stripe/create-checkout", {
                   method: "POST",
-                  body: JSON.stringify({ price_id: plan.priceId }),
+                  body: JSON.stringify({ price_id: selectedPriceId }),
                 });
                 window.location.href = r.checkout_url;
               } catch(e) {
@@ -7582,7 +7734,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
     if (!user) return;
     apiFetch("/api/auth/me")
       .then(fresh => {
-        setUser(u => ({ ...u, ...fresh, isPro: fresh.plan === "producer", isArtistPro: fresh.plan === "artist" || fresh.plan === "producer" }));
+        setUser(u => ({ ...u, ...fresh, isPro: fresh.subscriptionActive && fresh.plan === "producer", isArtistPro: fresh.subscriptionActive && (fresh.plan === "artist" || fresh.plan === "producer") }));
         setBio(fresh.bio || "");
         setEditName(fresh.name || "");
         setLocation(fresh.location || "");
@@ -8369,28 +8521,12 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         <div>
           <SectionBack onBack={() => setActiveSection(null)} label="Back to Dashboard" />
           <div style={{ color: "white", fontWeight: 800, fontSize: 20, marginBottom: 16 }}>Choose Your Plan</div>
-          {PLANS.map(plan => (
-            <div key={plan.id} style={{ background: "#111", borderRadius: 16, padding: 20, marginBottom: 14, border: "1.5px solid #333" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-                <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>{plan.label}</div>
-                <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 18 }}>£{plan.price}/mo</div>
-              </div>
-              {plan.perks.map(perk => (
-                <div key={perk} style={{ color: "#aaa", fontSize: 14, marginBottom: 6, display: "flex", gap: 8 }}>
-                  <span style={{ color: "#C026D3" }}>+</span>{perk}
-                </div>
-              ))}
-              <button onClick={async () => {
-                try {
-                  const priceId = plan.id === "artist" ? "price_1TQDoFFHyNSCxas89UpDKiro" : "price_1TQDpBFHyNSCxas8cktbqw1n";
-                  const r = await apiFetch("/api/stripe/create-checkout", { method: "POST", body: JSON.stringify({ price_id: priceId }) });
-                  window.location.href = r.checkout_url;
-                } catch (e) { alert("Error: " + e.message); }
-              }} style={{ width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 12, color: "white", fontWeight: 800, fontSize: 15, padding: "14px", cursor: "pointer", marginTop: 12 }}>
-                Subscribe - £{plan.price}/mo
-              </button>
-            </div>
-          ))}
+          <PlanPicker onSelectPlan={async function(planId, priceId) {
+            try {
+              const r = await apiFetch("/api/stripe/create-checkout", { method: "POST", body: JSON.stringify({ price_id: priceId }) });
+              window.location.href = r.checkout_url;
+            } catch (e) { alert("Error: " + e.message); }
+          }} />
         </div>
       )}
     </div>
@@ -17309,10 +17445,11 @@ export default function BeatFinder() {
     if (!token) return;
     AuthAPI.me()
       .then(u => {
+        const active = u.subscriptionActive || false;
         setUser({
           ...u,
-          isPro:       u.plan === "producer",
-          isArtistPro: u.plan === "artist" || u.plan === "producer",
+          isPro:       active && u.plan === "producer",
+          isArtistPro: active && (u.plan === "artist" || u.plan === "producer"),
         });
         // Auto-skip welcome — user already has a valid session
         try { localStorage.setItem("bf_welcomed", "1"); } catch(e) {}
@@ -17438,6 +17575,12 @@ export default function BeatFinder() {
       setShowAuthPrompt(true);
       return;
     }
+    // Expired subscribers cannot access Studio or Exclusive
+    if (user && !user.subscriptionActive && (id === "studio" || id === "exclusive")) {
+      setPromptReason("expired");
+      setShowAuthPrompt(true);
+      return;
+    }
     setPlaying(null);
     setTab(id);
     if (id === "studio") setStudioVisited(true);
@@ -17496,7 +17639,7 @@ export default function BeatFinder() {
       });
   }, [user?.id]);
 
-  const isArtistPro = user?.isPro || user?.isArtistPro || user?.plan === "artist" || user?.plan === "producer";
+  const isArtistPro = !!(user?.subscriptionActive && (user?.isPro || user?.isArtistPro || user?.plan === "artist" || user?.plan === "producer"));
 
 
   // Public profile URL — /u/:username — accessible without login
@@ -17572,24 +17715,30 @@ export default function BeatFinder() {
           padding: 24, fontFamily: "'DM Sans',sans-serif",
         }} onClick={() => setShowAuthPrompt(false)}>
           <div style={{
-            background: "#111", border: "1.5px solid #C026D3",
+            background: "#111", border: "1.5px solid " + (promptReason === "expired" ? "#F59E0B" : "#C026D3"),
             borderRadius: 20, padding: 28, width: "100%", maxWidth: 340,
             textAlign: "center",
           }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 40, marginBottom: 12, color: "#C026D3" }}><AppIcon id={promptReason === "studio" ? "studio" : promptReason === "producer" ? "money" : "profile"} size={36} /></div>
+            <div style={{ fontSize: 40, marginBottom: 12, color: promptReason === "expired" ? "#F59E0B" : "#C026D3" }}>
+              {promptReason === "expired"
+                ? <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                : <AppIcon id={promptReason === "studio" ? "studio" : promptReason === "producer" ? "money" : "profile"} size={36} />}
+            </div>
             <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 8 }}>
-              {promptReason === "studio" || promptReason === "producer" ? "Pro Plan Required" : "Sign In Required"}
+              {promptReason === "expired" ? "Subscription Expired" : promptReason === "studio" || promptReason === "producer" ? "Pro Plan Required" : "Sign In Required"}
             </div>
             <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 24 }}>
-              {promptReason === "studio"
+              {promptReason === "expired"
+                ? "Your subscription has ended. Renew your plan to regain access to Studio, exclusive beats and all Pro features."
+                : promptReason === "studio"
                 ? "Purchase a Pro plan to unlock Studio mode and start recording."
                 : promptReason === "producer"
                 ? "Purchase Producer Pro to upload beats, sell leases and get paid instantly."
                 : "Sign in to access your profile, save beats and more."}
             </div>
-            <button onClick={() => { setShowAuthPrompt(false); if (promptReason === "studio" || promptReason === "producer") { goTab("exclusive"); } else { setShowAuthWall(true); setWelcomeDone(false); } }}
-              style={{ width: "100%", background: "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, fontSize: 16, padding: "14px", cursor: "pointer", marginBottom: 12 }}>
-              {promptReason === "studio" || promptReason === "producer" ? "View Pro Plans" : "Sign In / Create Account"}
+            <button onClick={() => { setShowAuthPrompt(false); if (promptReason === "expired" || promptReason === "studio" || promptReason === "producer") { goTab("exclusive"); } else { setShowAuthWall(true); setWelcomeDone(false); } }}
+              style={{ width: "100%", background: promptReason === "expired" ? "linear-gradient(135deg,#F59E0B,#EF4444)" : "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, fontSize: 16, padding: "14px", cursor: "pointer", marginBottom: 12 }}>
+              {promptReason === "expired" ? "Renew Subscription" : promptReason === "studio" || promptReason === "producer" ? "View Pro Plans" : "Sign In / Create Account"}
             </button>
             <button onClick={() => setShowAuthPrompt(false)}
               style={{ background: "none", border: "none", color: "#555", fontSize: 14, cursor: "pointer" }}>
@@ -17701,7 +17850,7 @@ export default function BeatFinder() {
         }}>
         {NAV.filter(function(n){ return !(n.id === 'profile' && !user); }).map(n => {
           const isPro    = user?.isPro || user?.isArtistPro;
-          const locked   = (n.id === "exclusive" && (!user || !isPro)) || (n.id === "studio" && !user);
+          const locked   = (n.id === "exclusive" && (!user || !isPro)) || (n.id === "studio" && (!user || (user && !user.subscriptionActive && user.username !== "Trelli")));
           const isActive = tab === n.id;
           const activeColor = n.id === "exclusive" ? "#F59E0B" : n.id === "studio" ? "#22C55E" : "#C026D3";
           const isStudio = n.id === "studio";
