@@ -8006,6 +8006,7 @@ function MyUploadsSection({ user }) {
                   <span>0s (start)</span><span>90s</span><span>180s</span>
                 </div>
               </div>
+              <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={handleSave} disabled={saving} style={{ flex: 1, background: "#C026D3", border: "none", borderRadius: 10, color: "white", fontWeight: 800, padding: "11px", fontSize: 14, cursor: "pointer" }}>
                   {saving ? "Saving..." : "Save Changes"}
                 </button>
