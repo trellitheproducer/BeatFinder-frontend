@@ -10694,25 +10694,31 @@ class AutotuneProcessor extends AudioWorkletProcessor {
 registerProcessor("autotune-processor", AutotuneProcessor);
 `;
 
-const autotuneWorkletReady = { current: false, promise: null };
+// Track registration per AudioContext — each context needs its own addModule call
+const _autotuneRegistered = new WeakMap();
 
 async function registerAutotuneWorklet(actx) {
-  if (autotuneWorkletReady.current) return true;
-  if (autotuneWorkletReady.promise) { await autotuneWorkletReady.promise; return autotuneWorkletReady.current; }
-  autotuneWorkletReady.promise = (async () => {
+  if (!actx || actx.state === "closed") return false;
+  if (_autotuneRegistered.get(actx) === true) return true;
+  if (_autotuneRegistered.get(actx) instanceof Promise) {
+    return await _autotuneRegistered.get(actx);
+  }
+  const p = (async () => {
     try {
       const blob = new Blob([AUTOTUNE_WORKLET_CODE], { type: "application/javascript" });
       const url  = URL.createObjectURL(blob);
       await actx.audioWorklet.addModule(url);
       URL.revokeObjectURL(url);
-      autotuneWorkletReady.current = true;
+      _autotuneRegistered.set(actx, true);
+      return true;
     } catch(e) {
       console.warn("AutotuneWorklet registration failed:", e);
-      autotuneWorkletReady.current = false;
+      _autotuneRegistered.set(actx, false);
+      return false;
     }
   })();
-  await autotuneWorkletReady.promise;
-  return autotuneWorkletReady.current;
+  _autotuneRegistered.set(actx, p);
+  return await p;
 }
 
 // =============================================================================
@@ -14498,16 +14504,16 @@ function StudioScreen({ user, onExit }) {
 
       // ── Autotune — pitch correction on playback (same worklet as monitoring) ──
       {
-        const at     = fx.autotune || {};
-        const atOn   = !!(at.on);
-        const atReady = autotuneWorkletReady.current;
-        if (atReady) {
+        const at   = fx.autotune || {};
+        const atOn = !!(at.on);
+        // Only insert if autotune is ON — skip entirely when off to save CPU
+        if (atOn) {
           try {
             const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
             const atNode = new AudioWorkletNode(actx, "autotune-processor", {
               numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
             });
-            atNode.parameters.get("bypass").value   = atOn ? 0 : 1;
+            atNode.parameters.get("bypass").value   = 0; // always active when inserted
             atNode.parameters.get("key").value      = KEY_OFFSETS[at.key || "C"] || 0;
             atNode.parameters.get("speed").value    = at.speed ?? 50;
             atNode.parameters.get("humanize").value = at.humanize ?? 10;
@@ -14517,7 +14523,9 @@ function StudioScreen({ user, onExit }) {
             atNode.connect(node);
             node = atNode;
             liveNodes.autotune = atNode;
-          } catch(e) { /* worklet not ready yet — skip */ }
+          } catch(e) {
+            console.warn("Autotune node creation failed — worklet not ready yet:", e);
+          }
         }
       }
 
