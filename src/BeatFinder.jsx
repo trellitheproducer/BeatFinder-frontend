@@ -5,7 +5,9 @@ import ReactDOM from "react-dom";
 // PREMIUM LOADER COMPONENT
 // =============================================================================
 const LOADER_STYLE = `
-  html, body { background: #0a0a0a; }
+  html, body { background: #0a0a0a; margin: 0; padding: 0; }
+  html { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  body { min-height: 100vh; overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
   @media screen and (orientation: landscape) {
     html, body { overflow: hidden; }
     #bf-portrait-lock {
@@ -22318,7 +22320,7 @@ export default function BeatFinder() {
   // Public profile URL — /u/:username — accessible without login
   if (urlUsername) {
     return (
-      <div data-bf-app="1" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
+      <div key="app-root" data-bf-app="1" id="bf-portrait-lock" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
         <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
         <DownloadToast />
         <PopupBlockedModal />
