@@ -8375,10 +8375,34 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
   var [verifiedLease,  setVerifiedLease]  = React.useState(null); // { id, ... } once confirmed
   var [contractDownloaded, setContractDownloaded] = React.useState(false);
   var sheetPanelRef = React.useRef(null);
+  var backdropRef   = React.useRef(null);
   React.useEffect(function() {
     if (sheetPanelRef.current) {
       try { sheetPanelRef.current.scrollTop = 0; } catch(e) {}
     }
+    // Block touchmove on the backdrop ONLY — leave the panel alone so its
+    // overflowY:auto can scroll normally. This is what stops the underlying
+    // page from scrolling behind the sheet on Trending/Members tabs without
+    // breaking the sheet's own scroll on iOS Safari.
+    var backdropEl = backdropRef.current;
+    var panelEl    = sheetPanelRef.current;
+    function onTouchMove(e) {
+      // If the touch is on the panel (or any descendant), let it scroll.
+      if (panelEl && (e.target === panelEl || panelEl.contains(e.target))) {
+        return;
+      }
+      // Otherwise (touch on backdrop / outside panel) → prevent page scroll.
+      try { e.preventDefault(); } catch(_) {}
+    }
+    if (backdropEl) {
+      // Must be non-passive so preventDefault works.
+      try { backdropEl.addEventListener("touchmove", onTouchMove, { passive: false }); } catch(_) {}
+    }
+    return function() {
+      if (backdropEl) {
+        try { backdropEl.removeEventListener("touchmove", onTouchMove); } catch(_) {}
+      }
+    };
   }, []);
 
   // For LICENSED beats, check if the user owns a lease for this beat. Reads
@@ -8514,15 +8538,7 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
     }
   }
 
-  // ── Render via React portal to document.body ─────────────────────────────
-  // CRITICAL: On Trending and Members tabs, the card lives inside a
-  // horizontally-scrolling carousel (overflow-x:auto + -webkit-overflow-
-  // scrolling:touch). iOS Safari has a long-standing bug where position:fixed
-  // children of such a container get TRAPPED inside it — they render but
-  // can't scroll themselves, ignore touch events, or behave erratically.
-  // The fix is to mount the modal at the root of document.body, escaping
-  // all parent overflow contexts so it behaves identically on every tab.
-  var sheetJsx = (
+  return (
     <>
       {showContract && (
         <ContractViewer
@@ -8544,7 +8560,7 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
         />
       )}
 
-      <div onClick={onClose} style={{
+      <div ref={backdropRef} onClick={onClose} style={{
         position: "fixed", inset: 0, zIndex: 99998,
         background: "rgba(0,0,0,0.75)",
         display: "flex", alignItems: "flex-end", justifyContent: "center",
@@ -8915,11 +8931,6 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
       </div>
     </>
   );
-
-  if (typeof document === "undefined" || !document.body || !ReactDOM.createPortal) {
-    return sheetJsx;
-  }
-  return ReactDOM.createPortal(sheetJsx, document.body);
 }
 
 // ── Compact beat card for two-column profile layout ───────────────────────────
