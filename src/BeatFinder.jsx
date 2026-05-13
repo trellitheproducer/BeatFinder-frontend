@@ -4695,10 +4695,6 @@ function usePopupWarn() {
 }
 
 function detectPopupBlock() {
-  // Skip the test if the user has dismissed the warning this session
-  try {
-    if (sessionStorage.getItem("bf_popup_dismissed") === "1") return false;
-  } catch (e) {}
   try {
     var probe = window.open("about:blank", "_blank", "width=1,height=1,left=-9999,top=-9999");
     var blocked = !probe || probe.closed || typeof probe.closed === "undefined";
@@ -4710,6 +4706,9 @@ function detectPopupBlock() {
       __setPopupWarn(true);
       return true;
     }
+    // Popups are now allowed — clear the warning if it was previously shown
+    try { sessionStorage.removeItem("bf_popup_warn"); } catch (e) {}
+    __setPopupWarn(false);
     return false;
   } catch (e) {
     return false;
@@ -4717,85 +4716,65 @@ function detectPopupBlock() {
 }
 
 // ── Inline pop-up warning banner ──────────────────────────────────
-// Renders inside the contract sheet/modal. Compact, friendly, dismissible.
-// Doesn't block the contract — just lets the user know they'll need to
-// allow pop-ups before the MP3 download will work.
+// Renders inside the contract sheet/modal. Compact, friendly, NOT dismissible.
+// Stays visible until popups are actually allowed — since the user can't
+// download anything without them, hiding the warning would just confuse
+// them later when downloads silently fail.
 function PopupWarningBanner() {
-  var [warn, setWarn] = usePopupWarn();
-  var [expanded, setExpanded] = React.useState(false);
+  var [warn] = usePopupWarn();
   if (!warn) return null;
-
-  function dismiss(e) {
-    e.stopPropagation();
-    try { sessionStorage.setItem("bf_popup_dismissed", "1"); } catch (e2) {}
-    setWarn(false);
-    __setPopupWarn(false);
-  }
 
   return (
     <div
-      onClick={function() { setExpanded(function(x) { return !x; }); }}
       style={{
         background: "linear-gradient(135deg, rgba(245,158,11,0.18), rgba(217,119,6,0.08))",
         border: "1px solid rgba(245,158,11,0.5)",
         borderRadius: 12,
-        padding: "10px 12px",
+        padding: "12px 14px",
         marginBottom: 12,
-        cursor: "pointer",
         animation: "bf-warn-in 0.4s ease-out, bf-warn-pulse 2s ease-out 0.4s 2",
         boxShadow: "0 0 0 0 rgba(245,158,11,0.5)",
       }}
     >
       <style>{"@keyframes bf-warn-in{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}@keyframes bf-warn-pulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0)}50%{box-shadow:0 0 0 8px rgba(245,158,11,0.18)}}"}</style>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" style={{ flexShrink: 0 }}>
+
+      {/* Heading row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" style={{ flexShrink: 0 }}>
           <circle cx="12" cy="12" r="10"/>
           <line x1="12" y1="8" x2="12" y2="13"/>
           <circle cx="12" cy="16.5" r="0.5" fill="#F59E0B"/>
         </svg>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, letterSpacing: 0.2 }}>
-            Allow pop-ups for downloads
+          <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 13, letterSpacing: 0.2 }}>
+            Pop-ups are blocked
           </div>
           <div style={{ color: "#aaa", fontSize: 11, marginTop: 2 }}>
-            {expanded ? "Tap for full steps" : "Tap to see how"}
+            You'll need to turn this off to download beats &amp; contracts
           </div>
         </div>
-        <button
-          onClick={dismiss}
-          style={{
-            width: 24, height: 24, borderRadius: "50%",
-            background: "rgba(255,255,255,0.06)",
-            border: "1px solid #333", color: "#888",
-            cursor: "pointer", fontSize: 12, lineHeight: 1,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            flexShrink: 0,
-          }}
-        >✕</button>
       </div>
 
-      {expanded && (
-        <div style={{
-          marginTop: 10,
-          padding: "10px 12px",
-          background: "rgba(0,0,0,0.35)",
-          borderRadius: 10,
-          color: "#ccc", fontSize: 11.5, lineHeight: 1.6,
-        }}>
-          <div style={{ color: "#F59E0B", fontWeight: 700, fontSize: 10, letterSpacing: 1, marginBottom: 6 }}>
-            HOW TO FIX
-          </div>
-          <ol style={{ margin: 0, paddingLeft: 16 }}>
-            <li>Open iPhone <b style={{ color: "white" }}>Settings</b></li>
-            <li>Scroll down → tap <b style={{ color: "white" }}>Apps → Safari</b></li>
-            <li>Turn <b style={{ color: "white" }}>Block Pop-ups</b> off</li>
-            <li>Return to BeatFinder — downloads will work</li>
-          </ol>
-          <div style={{ marginTop: 8, color: "#666", fontSize: 10 }}>
-            Pop-ups are only used to open download prompts safely.
-          </div>
+      {/* Step-by-step instructions — always visible */}
+      <div style={{
+        padding: "10px 12px",
+        background: "rgba(0,0,0,0.35)",
+        borderRadius: 10,
+        color: "#ccc", fontSize: 11.5, lineHeight: 1.7,
+      }}>
+        <div style={{ color: "#F59E0B", fontWeight: 700, fontSize: 10, letterSpacing: 1, marginBottom: 6 }}>
+          HOW TO FIX (TAKES 10 SECONDS)
         </div>
-      )}
+        <ol style={{ margin: 0, paddingLeft: 16 }}>
+          <li>Open the iPhone <b style={{ color: "white" }}>Settings</b> app</li>
+          <li>Scroll down → tap <b style={{ color: "white" }}>Apps → Safari</b></li>
+          <li>Turn <b style={{ color: "white" }}>Block Pop-ups</b> off</li>
+          <li>Return to BeatFinder — downloads will work</li>
+        </ol>
+        <div style={{ marginTop: 8, color: "#666", fontSize: 10, fontStyle: "italic" }}>
+          BeatFinder only uses pop-ups to open download &amp; share prompts.
+        </div>
+      </div>
     </div>
   );
 }
