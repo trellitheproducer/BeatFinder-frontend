@@ -3929,6 +3929,7 @@ function generateFreeLeaseContract(beat, user) {
 }
 
 function generateLeaseContractHtml(lease) {
+  var date = lease.purchased_at
     ? new Date(lease.purchased_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
     : new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
   var leaseId = lease.id || ("BF-" + Date.now());
