@@ -5435,6 +5435,16 @@ function FreeBeatCTA({ beat, user }) {
   function markSigned() {
     try { window.localStorage.setItem(signedKey, "1"); } catch (e) {}
     setStep("done");
+    // Also record on the server so the agreed-licence state persists across
+    // PWA, Safari, and other devices for this logged-in user. Fire-and-forget
+    // — if the request fails, localStorage still works as a fallback.
+    if (user && beat && beat.id) {
+      try {
+        apiFetch("/api/producer/beats/" + beat.id + "/agree-licence", {
+          method: "POST",
+        }).catch(function() {});
+      } catch (e) {}
+    }
   }
 
   if (step === "contract") {
@@ -8371,15 +8381,18 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
     }
   }, []);
 
-  // For LICENSED beats, check the server to see if the user already owns this lease.
-  // This is the ONLY way "step = done" is reached for paid beats.
+  // For LICENSED beats, check if the user owns a lease for this beat. Reads
+  // from the global cache (window.__bf_leases__) first — that's populated by
+  // the main App on login/Stripe-success and means we don't need a per-sheet
+  // network call. Only falls back to fetching /my-leases if the cache hasn't
+  // loaded yet (e.g. user opens a sheet seconds after launching the app and
+  // before the boot fetch completes).
   React.useEffect(function() {
     if (isFree) return;
     if (!user) { setVerifyingLease(false); return; }
     var cancelled = false;
-    setVerifyingLease(true);
-    apiFetch("/api/producer/my-leases").then(function(leases) {
-      if (cancelled) return;
+
+    function checkAgainstCache(leases) {
       var match = (leases || []).find(function(l) {
         return l.beat_id === beat.id || l.id === beat.id;
       });
@@ -8388,10 +8401,36 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
         setStep("done");
       }
       setVerifyingLease(false);
-    }).catch(function() {
-      if (!cancelled) setVerifyingLease(false);
-    });
-    return function() { cancelled = true; };
+    }
+
+    // Fast path: cache already loaded — use it instantly, no network call.
+    if (typeof window !== "undefined" && Array.isArray(window.__bf_leases__)) {
+      setVerifyingLease(true);
+      checkAgainstCache(window.__bf_leases__);
+    } else {
+      // Slow path: cache hasn't loaded yet, fetch ourselves.
+      setVerifyingLease(true);
+      apiFetch("/api/producer/my-leases").then(function(leases) {
+        if (cancelled) return;
+        checkAgainstCache(leases);
+      }).catch(function() {
+        if (!cancelled) setVerifyingLease(false);
+      });
+    }
+
+    // Re-check when the global cache updates (e.g. user just bought another
+    // beat in a different sheet, or returned from Stripe success).
+    function onLeasesUpdated() {
+      if (cancelled) return;
+      if (typeof window !== "undefined" && Array.isArray(window.__bf_leases__)) {
+        checkAgainstCache(window.__bf_leases__);
+      }
+    }
+    window.addEventListener("bf-leases-updated", onLeasesUpdated);
+    return function() {
+      cancelled = true;
+      window.removeEventListener("bf-leases-updated", onLeasesUpdated);
+    };
   }, [isFree, beat.id, user]);
 
   // FREE-only: re-check localStorage on visibility change (iOS resume)
@@ -8416,6 +8455,16 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
   function markSigned() {
     try { window.localStorage.setItem(signedKey, "1"); } catch (e) {}
     setStep("done");
+    // Also record on the server so the agreed-licence state persists across
+    // PWA, Safari, and other devices for this logged-in user. Fire-and-forget
+    // — only fires for free beats; licensed beats use server-confirmed lease.
+    if (isFree && user && beat && beat.id) {
+      try {
+        apiFetch("/api/producer/beats/" + beat.id + "/agree-licence", {
+          method: "POST",
+        }).catch(function() {});
+      } catch (e) {}
+    }
   }
 
   var downloadUrl = beat.id
@@ -8465,14 +8514,7 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
     }
   }
 
-  // Portaled to document.body so the sheet renders identically regardless of
-  // which card invokes it. Without the portal, the sheet would be a child of
-  // the card's deeply-nested scrolling container — that's why opening from
-  // Members/Trending tabs looked different from opening on the public profile
-  // (each tab has different parent overflow/transform contexts that bled
-  // through). Portal hoists the modal to document.body so it sits at the
-  // top of the DOM in every case.
-  var sheetJsx = (
+  return (
     <>
       {showContract && (
         <ContractViewer
@@ -8865,11 +8907,6 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
       </div>
     </>
   );
-
-  if (typeof document === "undefined" || !document.body || !ReactDOM.createPortal) {
-    return sheetJsx;
-  }
-  return ReactDOM.createPortal(sheetJsx, document.body);
 }
 
 // ── Compact beat card for two-column profile layout ───────────────────────────
@@ -23061,6 +23098,36 @@ export default function BeatFinder() {
   const [searchQuery, setSearchQuery] = useState("");
   const [artist,  setArtist]  = useState(null); // kept for compatibility
   const [user,    setUser]    = useState(null);
+  // Global lease cache — fetched once at login and refreshed on returning
+  // from Stripe success. Every CompactBeatActionSheet reads from this instead
+  // of issuing its own /my-leases request, which (a) makes sheet opens
+  // instant for already-purchased beats, (b) cuts redundant network calls,
+  // and (c) keeps state consistent across PWA / Safari / multiple devices
+  // since the server is the single source of truth.
+  const [userLeases, setUserLeases] = useState(null); // null = not yet loaded, [] = loaded but empty
+  // Refresh function — called on login, app boot, and after Stripe success
+  const refreshUserLeases = React.useCallback(function() {
+    return apiFetch("/api/producer/my-leases")
+      .then(function(leases) {
+        setUserLeases(Array.isArray(leases) ? leases : []);
+        return leases;
+      })
+      .catch(function() {
+        setUserLeases([]);
+        return [];
+      });
+  }, []);
+  // Expose to all CompactBeatActionSheet instances via a window-level event
+  // — they listen for "bf-leases-updated" and re-check their own beat against
+  // the new list. This avoids prop-drilling through 4 different card types.
+  React.useEffect(function() {
+    if (userLeases !== null) {
+      try {
+        window.__bf_leases__ = userLeases;
+        window.dispatchEvent(new CustomEvent("bf-leases-updated"));
+      } catch(e) {}
+    }
+  }, [userLeases]);
   const [playing, setPlaying] = useState(function() {
     // Restore the beat being viewed if the page was reloaded mid-view
     // (e.g. after iOS bfcache recovery from a YouTube suggested-video tap)
@@ -23158,11 +23225,12 @@ export default function BeatFinder() {
     } catch(e) {
       setTab("exclusive");
     }
-    // Fetch the beat from my-leases to get the download URL
-    apiFetch("/api/producer/my-leases").then(function(leases) {
-      var match = leases.find(function(l) { return l.beat_id === leaseBeatId || l.id === leaseBeatId; });
+    // Refresh the global lease cache so every card now sees the new lease.
+    // Then locate the just-purchased beat to display the success modal.
+    refreshUserLeases().then(function(leases) {
+      var match = (leases || []).find(function(l) { return l.beat_id === leaseBeatId || l.id === leaseBeatId; });
       if (match) setLeaseBeat(match);
-    }).catch(function() {});
+    });
   }, [user]);
   // /u/username or /profile/username — open a public profile directly from a shared link
   const urlUsername = (function() {
@@ -23206,6 +23274,24 @@ export default function BeatFinder() {
         // Auto-skip welcome — user already has a valid session
         try { localStorage.setItem("bf_welcomed", "1"); } catch(e) {}
         setWelcomeDone(true);
+        // Hydrate free-licence agreements from server into localStorage.
+        // The agreed-licence state was previously localStorage-only, which is
+        // sandboxed per-browser-context on iOS (Safari tab vs home-screen PWA
+        // have separate localStorages). Pulling the server list and writing
+        // each agreed beat back into localStorage means the "Licence Agreed
+        // ✓" state appears consistently no matter which context the user
+        // opens beatfinder.co.uk from.
+        apiFetch("/api/producer/my-free-licences")
+          .then(function(res) {
+            var ids = (res && res.beat_ids) || [];
+            ids.forEach(function(id) {
+              try { localStorage.setItem("bf_signed_free_" + id, "1"); } catch(e) {}
+            });
+          })
+          .catch(function() { /* non-fatal */ });
+        // Also hydrate the paid-lease cache so beat sheets that need to check
+        // ownership can do so instantly without their own API call.
+        refreshUserLeases();
       })
       .catch(() => clearToken());
   }, []);
@@ -23512,6 +23598,21 @@ export default function BeatFinder() {
               isPro:       active && u.plan === "producer",
               isArtistPro: active && (u.plan === "artist" || u.plan === "producer"),
             });
+            // Hydrate free-licence agreements from server into localStorage
+            // so this newly-logged-in session sees the same "Licence Agreed ✓"
+            // state across PWA/Safari/devices.
+            apiFetch("/api/producer/my-free-licences")
+              .then(function(res) {
+                var ids = (res && res.beat_ids) || [];
+                ids.forEach(function(id) {
+                  try { localStorage.setItem("bf_signed_free_" + id, "1"); } catch(e) {}
+                });
+              })
+              .catch(function() { /* non-fatal */ });
+            // Also hydrate the paid-lease cache so every sheet renders the
+            // correct "Save MP3 to Device" state instantly for already-owned
+            // beats — no per-sheet network round-trip required.
+            refreshUserLeases();
             doWelcome();
           }} />
         </div>
