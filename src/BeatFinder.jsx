@@ -4195,40 +4195,79 @@ async function fetchContractPdf(endpoint, options) {
   return await res.blob();
 }
 
-function triggerBlobDownload(blob, filename) {
-  // iOS Safari / standalone PWA doesn't reliably honour <a download> for blobs:
-  // it sometimes opens the file in a viewer and navigates away. With a real
-  // application/pdf blob the native share sheet appears, which is the goal —
-  // but we still open in a new tab so React state behind it stays intact.
+async function triggerBlobDownload(blob, filename) {
+  // PDF download on iOS is tricky because:
+  //   - <a download> is ignored on iOS Safari (navigates the tab to the blob,
+  //     stranding the user on a PDF viewer page)
+  //   - window.open(blobUrl) needs a user gesture; we lost it during the
+  //     async fetch
+  //   - The cleanest path is the Web Share API with a File, which works even
+  //     when popups are blocked because it goes through the OS share sheet
+  filename = filename || "BeatFinder_Contract.pdf";
   var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
               (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  var url = URL.createObjectURL(blob);
-  try {
-    if (isIOS) {
-      var win = window.open(url, "_blank");
-      if (!win) {
-        var a0 = document.createElement("a");
-        a0.href = url;
-        a0.target = "_blank";
-        a0.rel = "noopener noreferrer";
-        a0.style.display = "none";
-        document.body.appendChild(a0);
-        a0.click();
-        setTimeout(function() { document.body.removeChild(a0); }, 1000);
+
+  // STRATEGY 1 (iOS): Web Share with a File. iOS shows the native share sheet
+  // with "Save to Files" as a primary action. CRUCIALLY this does not require
+  // Block Pop-ups to be disabled — share sheet is treated as a system UI,
+  // not a popup. So even users with Block Pop-ups on can save the contract.
+  if (isIOS && navigator.canShare && typeof File === "function") {
+    try {
+      var file = new File([blob], filename, { type: "application/pdf" });
+      if (navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: filename });
+          return;
+        } catch (e) {
+          // AbortError = user dismissed the share sheet without picking
+          // an action. Treat as cancel and stop here (do NOT fall through
+          // to a path that would navigate the current tab).
+          if (e && (e.name === "AbortError" ||
+                    String(e.message || "").toLowerCase().indexOf("abort") !== -1 ||
+                    String(e.message || "").toLowerCase().indexOf("cancel") !== -1)) {
+            return;
+          }
+          // Real error — fall through to the final fallback below
+        }
       }
-      setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
-      return;
-    }
+    } catch (e) { /* File construction failed, fall through */ }
+  }
+
+  // STRATEGY 2 (Android / desktop / non-iOS browsers): standard <a download>
+  if (!isIOS) {
+    var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
-    a.href = url;
-    a.download = filename || "BeatFinder_Contract.pdf";
+    a.href     = url;
+    a.download = filename;
     a.style.display = "none";
     document.body.appendChild(a);
     a.click();
-    setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
-  } catch(e) {
-    window.open(url, "_blank");
+    setTimeout(function() {
+      try { document.body.removeChild(a); } catch (e) {}
+      URL.revokeObjectURL(url);
+    }, 1000);
+    return;
   }
+
+  // STRATEGY 3 (iOS fallback when Web Share unavailable): open in new tab.
+  // Requires popups to be allowed. Surfaces our friendly popup-blocked modal
+  // if blocked, with a "Try Again" affordance.
+  var url2 = URL.createObjectURL(blob);
+  var win  = window.open(url2, "_blank");
+  if (!win || win.closed || typeof win.closed === "undefined") {
+    try {
+      __setPopupBlockedModal({
+        blobUrl: url2,
+        filename: filename,
+        title: "Licence Contract",
+      });
+    } catch (e) {
+      alert("Pop-ups are blocked. Turn off Block Pop-ups in iPhone Settings → Apps → Safari to save your contract.");
+      URL.revokeObjectURL(url2);
+    }
+    return;
+  }
+  setTimeout(function() { URL.revokeObjectURL(url2); }, 60000);
 }
 
 async function downloadFreeContractPdf(beat, user) {
@@ -4242,7 +4281,7 @@ async function downloadFreeContractPdf(beat, user) {
         producer:   beat.producer || beat.producer_username || "Producer",
       }),
     });
-    triggerBlobDownload(blob, "BeatFinder_FreeLicence_" + safeTitle + ".pdf");
+    await triggerBlobDownload(blob, "BeatFinder_FreeLicence_" + safeTitle + ".pdf");
   } catch (e) {
     alert(e.message || "Could not download contract — please try again.");
   }
@@ -4256,7 +4295,7 @@ async function downloadLeaseContractPdf(lease) {
     }
     var safeTitle = (lease.beat_title || "Beat").replace(/[^\w]/g, "_");
     var blob = await fetchContractPdf("/api/contracts/lease/" + lease.id, { method: "GET" });
-    triggerBlobDownload(blob, "BeatFinder_Lease_" + safeTitle + ".pdf");
+    await triggerBlobDownload(blob, "BeatFinder_Lease_" + safeTitle + ".pdf");
   } catch (e) {
     alert(e.message || "Could not download contract — please try again.");
   }
@@ -4872,15 +4911,8 @@ var __popupGlobalProbeInstalled = false;
 function installGlobalPopupProbe() {
   if (__popupGlobalProbeInstalled) return;
   if (typeof document === "undefined") return;
-  // If we already tested this session, don't run again
-  try {
-    if (sessionStorage.getItem("bf_popup_tested") === "1") {
-      __popupGlobalProbeInstalled = true;
-      return;
-    }
-  } catch (e) {}
   __popupGlobalProbeInstalled = true;
-  function onFirstTap(e) {
+  function onRelevantTap(e) {
     // Only run for taps on relevant beat/download/contract buttons.
     // Filter by walking up the DOM looking for a marker class or button text.
     var target = e.target;
@@ -4895,7 +4927,9 @@ function installGlobalPopupProbe() {
       if (txt.indexOf("FREE DOWNLOAD") !== -1 ||
           txt.indexOf("BUY LEASE") !== -1 ||
           txt.indexOf("SAVE MP3 TO DEVICE") !== -1 ||
+          txt.indexOf("SAVE PDF") !== -1 ||
           txt.indexOf("VIEW LICENCE CONTRACT") !== -1 ||
+          txt.indexOf("VIEW LEASE CONTRACT") !== -1 ||
           txt.indexOf("GET FREE BEAT") !== -1) {
         relevant = true;
         break;
@@ -4904,20 +4938,17 @@ function installGlobalPopupProbe() {
       depth++;
     }
     if (!relevant) return;
-    document.removeEventListener("pointerdown", onFirstTap, true);
-    document.removeEventListener("touchstart", onFirstTap, true);
-    document.removeEventListener("click", onFirstTap, true);
     // Run SYNCHRONOUSLY inside the user gesture — iOS only treats
     // window.open as user-initiated for the synchronous portion of the
-    // event handler. A setTimeout or microtask would lose the activation.
+    // event handler. Re-runs on EVERY relevant tap (not one-shot) so that
+    // when the user fixes their Safari setting, the banner clears the
+    // next time they tap a button.
     try {
       detectPopupBlock();
-      try { sessionStorage.setItem("bf_popup_tested", "1"); } catch (e2) {}
     } catch (e2) {}
   }
-  document.addEventListener("pointerdown", onFirstTap, true);
-  document.addEventListener("touchstart", onFirstTap, true);
-  document.addEventListener("click",       onFirstTap, true);
+  // capture phase so we run before any handlers
+  document.addEventListener("pointerdown", onRelevantTap, true);
 }
 
 // ── Inline pop-up warning banner ──────────────────────────────────
