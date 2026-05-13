@@ -4126,15 +4126,9 @@ function generateLeaseContract(lease) {
 function downloadMp3(url, title, beatId) {
   // For free beats use the Cloudinary URL directly with fl_attachment for forced download
   // Only use the backend proxy for paid/authenticated downloads
-  var downloadUrl;
-  if (url && url.includes("cloudinary.com")) {
-    // Insert fl_attachment into Cloudinary URL to force download
-    downloadUrl = url.replace("/upload/", "/upload/fl_attachment/");
-  } else if (beatId) {
-    downloadUrl = API_BASE + "/api/producer/beats/" + beatId + "/file";
-  } else {
-    downloadUrl = url;
-  }
+  var downloadUrl = beatId
+    ? API_BASE + "/api/producer/beats/" + beatId + "/file"
+    : url;
   var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
   var a = document.createElement("a");
   a.href     = downloadUrl;
@@ -4149,9 +4143,9 @@ function downloadMp3(url, title, beatId) {
 
 // ── Download Button ───────────────────────────────────────────────
 function DownloadButton({ url, title, beatId, beat, user, style, children }) {
-  var downloadUrl = url && url.includes("cloudinary.com")
-    ? url.replace("/upload/", "/upload/fl_attachment/")
-    : (beatId ? API_BASE + "/api/producer/beats/" + beatId + "/file" : url);
+  var downloadUrl = beatId
+    ? API_BASE + "/api/producer/beats/" + beatId + "/file"
+    : url;
   var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
   return (
     <a
@@ -4276,8 +4270,8 @@ function BeatCardShell({ beat, accentColor, children, onViewProfile, extraStats 
 // ── Free Beat CTA — contract must be accepted before MP3 unlocks ──────────────
 function FreeBeatCTA({ beat, user }) {
   var [step, setStep] = React.useState("idle"); // idle | contract | done
-  var downloadUrl = beat.url && beat.url.includes("cloudinary.com")
-    ? beat.url.replace("/upload/", "/upload/fl_attachment/")
+  var downloadUrl = beat.id
+    ? API_BASE + "/api/producer/beats/" + beat.id + "/file"
     : beat.url;
   var filename = (beat.title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
   var date      = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
@@ -4726,8 +4720,8 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
         <div style={{ marginBottom: 20 }}>
           <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Your Purchased Leases</div>
           {leases.map(lease => {
-            var dlUrl = lease.beat_url && lease.beat_url.includes("cloudinary.com")
-              ? lease.beat_url.replace("/upload/", "/upload/fl_attachment/")
+            var dlUrl = lease.beat_id
+              ? API_BASE + "/api/producer/beats/" + lease.beat_id + "/file"
               : lease.beat_url;
             var contractUri = "data:text/html;charset=utf-8," + encodeURIComponent(generateLeaseContractHtml(lease));
             return (
@@ -5540,7 +5534,7 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile, sa
 // priced=false → MP3 Downloads   (free beats, direct download)
 // =============================================================================
 // Free MP3 beat card — members area download tab with preview
-function FreeMemberBeatCard({ beat, onViewProfile }) {
+function FreeMemberBeatCard({ beat, onViewProfile, user }) {
   var [previewing,  setPreviewing]  = React.useState(false);
   var [previewTime, setPreviewTime] = React.useState(0);
   var audioRef  = React.useRef(null);
@@ -5592,6 +5586,7 @@ function FreeMemberBeatCard({ beat, onViewProfile }) {
       onTogglePreview={startPreview}
       onDownload={function(){ downloadMp3(beat.url, beat.title, beat.id); }}
       onViewProfile={onViewProfile}
+      user={user}
       audioEl={previewing && beat.url ? (
         <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
           onPlay={function(){ onAudioPlay(); if (audioRef.current && (beat.preview_start||0) > 0 && !seekedRef.current) { audioRef.current.currentTime = beat.preview_start; seekedRef.current = true; } }}
@@ -5683,7 +5678,7 @@ function MembersBeatsTab({ user, priced, onViewProfile }) {
         {beats.length} FREE DOWNLOAD{beats.length !== 1 ? "S" : ""} AVAILABLE
       </div>
       {beats.map(function(beat) {
-        return <FreeMemberBeatCard key={beat.id} beat={beat} onViewProfile={onViewProfile} />;
+        return <FreeMemberBeatCard key={beat.id} beat={beat} onViewProfile={onViewProfile} user={user} />;
       })}
     </div>
   );
@@ -20287,8 +20282,8 @@ export default function BeatFinder() {
             {leaseBeat && (function() {
               var contractHtml = generateLeaseContractHtml(leaseBeat);
               var contractUri  = "data:text/html;charset=utf-8," + encodeURIComponent(contractHtml);
-              var dlUrl = leaseBeat.beat_url && leaseBeat.beat_url.includes("cloudinary.com")
-                ? leaseBeat.beat_url.replace("/upload/", "/upload/fl_attachment/")
+              var dlUrl = leaseBeat.beat_id
+                ? API_BASE + "/api/producer/beats/" + leaseBeat.beat_id + "/file"
                 : leaseBeat.beat_url;
               return (
                 <>
