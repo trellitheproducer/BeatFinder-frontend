@@ -6739,6 +6739,70 @@ function CompactBeatCard({ beat }) {
   );
 }
 
+function BeatsTabContent({ profile, currentUser, onViewProfile }) {
+  var beats = (profile && profile.beats) || [];
+  function isFreePrice(p) { return !p || p === "free" || p === "£0" || p === "0" || p === "£0.00" || p === "0.00"; }
+  var freeBeats     = beats.filter(function(b) { return isFreePrice(b.price); });
+  var licensedBeats = beats.filter(function(b) { return !isFreePrice(b.price); });
+  var hasBoth = freeBeats.length > 0 && licensedBeats.length > 0;
+
+  if (beats.length === 0) return (
+    <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
+      <AppIcon id="note" size={40} />
+      <div style={{ fontSize: 15, marginTop: 12, color: "#444", fontWeight: 700 }}>No beats yet</div>
+    </div>
+  );
+
+  if (!hasBoth) return (
+    <div style={{ padding: "0 16px" }}>
+      {freeBeats.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(192,38,211,0.2)" }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#C026D3" }} />
+            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13 }}>FREE BEATS</div>
+            <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "1px 8px", fontSize: 10, color: "#C026D3", fontWeight: 700 }}>{freeBeats.length}</div>
+          </div>
+          {freeBeats.map(function(b) { return <ProfileBeatCard key={b.id} beat={b} currentUser={currentUser} onViewProfile={onViewProfile} />; })}
+        </div>
+      )}
+      {licensedBeats.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(245,158,11,0.2)" }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#F59E0B" }} />
+            <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 13 }}>LICENSED BEATS</div>
+            <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "1px 8px", fontSize: 10, color: "#F59E0B", fontWeight: 700 }}>{licensedBeats.length}</div>
+          </div>
+          {licensedBeats.map(function(b) { return <ProfileBeatCard key={b.id} beat={b} currentUser={currentUser} onViewProfile={onViewProfile} />; })}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "0 12px" }}>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(192,38,211,0.2)" }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#C026D3", flexShrink: 0 }} />
+            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 11 }}>FREE</div>
+            <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "1px 6px", fontSize: 9, color: "#C026D3", fontWeight: 700 }}>{freeBeats.length}</div>
+          </div>
+          {freeBeats.map(function(b) { return <CompactBeatCard key={b.id} beat={b} />; })}
+        </div>
+        <div style={{ width: 1, background: "rgba(255,255,255,0.05)", flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(245,158,11,0.2)" }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#F59E0B", flexShrink: 0 }} />
+            <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 11 }}>LICENSED</div>
+            <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "1px 6px", fontSize: 9, color: "#F59E0B", fontWeight: 700 }}>{licensedBeats.length}</div>
+          </div>
+          {licensedBeats.map(function(b) { return <CompactBeatCard key={b.id} beat={b} />; })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave, onViewProfile }) {
   var [tab, setTab]           = React.useState("posts");
   var [items, setItems]       = React.useState([]);
@@ -7113,80 +7177,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
       </div>
 
       {/* Beats tab — producers only, split into Free and Licensed */}
-      {tab === "beats" && (function() {
-        var beats = (profile && profile.beats) || [];
-        var isFreePrice = function(p) { return !p || p === "free" || p === "£0" || p === "0" || p === "£0.00" || p === "0.00"; };
-        var freeBeats     = beats.filter(function(b) { return isFreePrice(b.price); });
-        var licensedBeats = beats.filter(function(b) { return !isFreePrice(b.price); });
-
-        if (beats.length === 0) return (
-          <div style={{ textAlign: "center", padding: "40px 24px", color: "#555" }}>
-            <AppIcon id="note" size={40} />
-            <div style={{ fontSize: 15, marginTop: 12, color: "#444", fontWeight: 700 }}>No beats yet</div>
-          </div>
-        );
-
-        var onlyFree     = freeBeats.length > 0 && licensedBeats.length === 0;
-        var onlyLicensed = licensedBeats.length === 0 || freeBeats.length === 0;
-
-        // If only one type, show full-width ProfileBeatCards
-        if (onlyFree || onlyLicensed) {
-          return (
-            <div style={{ padding: "0 16px" }}>
-              {freeBeats.length > 0 && (
-                <div style={{ marginBottom: 24 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(192,38,211,0.2)" }}>
-                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#C026D3", boxShadow: "0 0 6px #C026D3" }} />
-                    <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>FREE BEATS</div>
-                    <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "1px 8px", fontSize: 10, color: "#C026D3", fontWeight: 700 }}>{freeBeats.length}</div>
-                  </div>
-                  {freeBeats.map(function(beat) { return <ProfileBeatCard key={beat.id} beat={beat} currentUser={currentUser} onViewProfile={onViewProfile} />; })}
-                </div>
-              )}
-              {licensedBeats.length > 0 && (
-                <div style={{ marginBottom: 24 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(245,158,11,0.2)" }}>
-                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#F59E0B", boxShadow: "0 0 6px #F59E0B" }} />
-                    <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>LICENSED BEATS</div>
-                    <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "1px 8px", fontSize: 10, color: "#F59E0B", fontWeight: 700 }}>{licensedBeats.length}</div>
-                  </div>
-                  {licensedBeats.map(function(beat) { return <ProfileBeatCard key={beat.id} beat={beat} currentUser={currentUser} onViewProfile={onViewProfile} />; })}
-                </div>
-              )}
-            </div>
-          );
-        }
-
-        // Both types exist — show side by side with compact cards
-        return (
-          <div style={{ padding: "0 12px" }}>
-            <div style={{ display: "flex", gap: 10 }}>
-              {/* Free Beats column */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(192,38,211,0.2)" }}>
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#C026D3", flexShrink: 0 }} />
-                  <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 11, letterSpacing: 0.3 }}>FREE</div>
-                  <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "1px 6px", fontSize: 9, color: "#C026D3", fontWeight: 700 }}>{freeBeats.length}</div>
-                </div>
-                {freeBeats.map(function(beat) { return <CompactBeatCard key={beat.id} beat={beat} />; })}
-              </div>
-
-              {/* Divider */}
-              <div style={{ width: 1, background: "rgba(255,255,255,0.05)", flexShrink: 0, marginTop: 4 }} />
-
-              {/* Licensed Beats column */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(245,158,11,0.2)" }}>
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#F59E0B", flexShrink: 0 }} />
-                  <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 11, letterSpacing: 0.3 }}>LICENSED</div>
-                  <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "1px 6px", fontSize: 9, color: "#F59E0B", fontWeight: 700 }}>{licensedBeats.length}</div>
-                </div>
-                {licensedBeats.map(function(beat) { return <CompactBeatCard key={beat.id} beat={beat} />; })}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {tab === "beats" && <BeatsTabContent profile={profile} currentUser={currentUser} onViewProfile={onViewProfile} />}
 
       {/* Tracks tab — artists only */}
       {tab === "tracks" && (
