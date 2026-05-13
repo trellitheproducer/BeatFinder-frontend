@@ -16258,13 +16258,23 @@ function StudioScreen({ user, onExit }) {
   // Persistent mic stream — requested once on mount, reused for both monitoring and recording
   const micStreamRef        = useRef(null);
 
+  // Tracks whether the NoiseGateProcessor AudioWorklet has been registered on
+  // the current playback AudioContext. Set true by doPlay() after the worklet
+  // registers successfully. buildChain reads this to decide whether to use the
+  // worklet path (proper RMS-based noise gate) or fall back to a DynamicsCompressor.
+  const noiseGateWorkletReady = useRef(false);
+
   // Re-route iOS audio output back to speaker after mic use.
   // iOS switches to earpiece when getUserMedia is called; this forces it back.
   const restoreIOSSpeaker = async function() {
     // iOS routes AudioContext to the earpiece when a mic stream is open.
     // Even after mic tracks stop, the existing AudioContext stays earpiece-routed.
-    // The ONLY reliable fix is to close the AudioContext entirely and create a new one.
-    // iOS then re-evaluates the route from scratch — with no active mic, it picks the speaker.
+    // This is WebKit bug 295889 (open as of late 2025). Workaround chain:
+    //   1. Close the existing AudioContext entirely so iOS releases its audio session
+    //   2. Pause + restart the silent <audio> element — this nudges iOS to re-evaluate
+    //      the audio session category and pick the speaker (not earpiece) for output
+    //   3. Wait briefly so iOS registers the session change before we build the new context
+    //   4. Create a fresh AudioContext; iOS now routes it to the loudspeaker
     try {
       const old = actxRef.current;
       if (old && old.state !== "closed") {
@@ -16275,9 +16285,28 @@ function StudioScreen({ user, onExit }) {
       masterGainRef.current = null;
       fxNodesRef.current = {};
       scheduledRef.current = [];
-      // Small pause so iOS registers the session change before we create the new context
-      await new Promise(function(res) { setTimeout(res, 80); });
-      // Create fresh AudioContext — iOS will route this to the speaker
+      // Worklets are scoped to their AudioContext — when we recreate, they're gone
+      noiseGateWorkletReady.current = false;
+
+      // Bounce the silent audio element. Pausing fully releases iOS's audio session
+      // claim, and restarting it forces iOS to choose a fresh output route. With
+      // no mic stream alive, that route is the speaker.
+      try {
+        const sa = silentAudioRef.current;
+        if (sa) {
+          sa.pause();
+          // Tiny pause helps iOS register the session release
+          await new Promise(function(res){ setTimeout(res, 30); });
+          // Reset to the start in case it's been seeked away
+          try { sa.currentTime = 0; } catch(e) {}
+          await sa.play().catch(function(){});
+        }
+      } catch(e) {}
+
+      // Slightly longer pause so iOS finishes the session re-evaluation
+      await new Promise(function(res) { setTimeout(res, 120); });
+
+      // Create fresh AudioContext — iOS now picks speaker for output
       actxRef.current = new (window.AudioContext || window.webkitAudioContext)({
         latencyHint: "interactive",
       });
@@ -16760,7 +16789,10 @@ function StudioScreen({ user, onExit }) {
       autoGainControl:  { exact: false },   // Never allow AGC — causes level jumps mid-take
       channelCount:     { ideal: 1 },       // Request mono from hardware (ideal = won't fail on stereo-only devices)
       sampleRate:       { ideal: 48000, min: 44100 }, // 48kHz for best quality; 44100 fallback
-      latency:          { ideal: 0 },       // Request minimum hardware latency
+      sampleSize:       { ideal: 16 },      // 16-bit samples — standard high-quality PCM depth
+      // Note: NO `latency` constraint. iOS interprets `latency: 0` as "use the
+      // low-power audio path" which routes through a quality-reduced codec.
+      // Omitting it lets iOS pick the best-quality path for the requested sampleRate.
     }, extraConstraints || {});
 
     const wantBuiltIn = wantSource === "builtin" || wantSource === "default";
@@ -17456,7 +17488,8 @@ function StudioScreen({ user, onExit }) {
     const master = getOrCreateMaster();
     // Register pitch worklet if not done yet (async, required before AudioWorkletNode)
     // Register RNNoise worklet if not done yet
-    await registerRNNoiseWorklet(actx);
+    const gateOk = await registerRNNoiseWorklet(actx);
+    noiseGateWorkletReady.current = !!gateOk;
     // Register autotune worklet on the playback AudioContext so it's ready for buildChain
     await registerAutotuneWorklet(actx);
     // Schedule audio 50ms ahead so all tracks start at exactly the same moment.
@@ -18052,30 +18085,31 @@ function StudioScreen({ user, onExit }) {
         liveNodes.bandpass = { bp1, bp2, bpDry, bpWet, bpOut };
       }
 
-      // ── Autotune — pitch correction on playback (same worklet as monitoring) ──
+      // ── Autotune — pitch correction on playback ───────────────────────────
+      // Always inserted (with bypass=1 when off) so the ON/OFF toggle works LIVE
+      // during playback. If we skip the node when off, the user has to stop +
+      // restart playback to activate autotune — bad UX.
       {
         const at   = fx.autotune || {};
         const atOn = !!(at.on);
-        // Only insert if autotune is ON — skip entirely when off to save CPU
-        if (atOn) {
-          try {
-            const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
-            const atNode = new AudioWorkletNode(actx, "autotune-processor", {
-              numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
-            });
-            atNode.parameters.get("bypass").value   = 0; // always active when inserted
-            atNode.parameters.get("key").value      = KEY_OFFSETS[at.key || "C"] || 0;
-            atNode.parameters.get("speed").value    = at.speed ?? 50;
-            atNode.parameters.get("humanize").value = at.humanize ?? 10;
-            atNode.parameters.get("wet").value      = at.wet ?? 1;
-            atNode.parameters.get("vibrato").value  = at.vibrato ?? 0;
-            atNode.port.postMessage({ scale: at.scale || "major" });
-            atNode.connect(node);
-            node = atNode;
-            liveNodes.autotune = atNode;
-          } catch(e) {
-            console.warn("Autotune node creation failed — worklet not ready yet:", e);
-          }
+        try {
+          const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
+          const atNode = new AudioWorkletNode(actx, "autotune-processor", {
+            numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+          });
+          atNode.parameters.get("bypass").value   = atOn ? 0 : 1;
+          atNode.parameters.get("key").value      = KEY_OFFSETS[at.key || "C"] || 0;
+          atNode.parameters.get("speed").value    = at.speed ?? 50;
+          atNode.parameters.get("humanize").value = at.humanize ?? 10;
+          atNode.parameters.get("wet").value      = at.wet ?? 1;
+          atNode.parameters.get("vibrato").value  = at.vibrato ?? 0;
+          atNode.port.postMessage({ scale: at.scale || "major" });
+          atNode.connect(node);
+          node = atNode;
+          liveNodes.autotune = atNode;
+        } catch(e) {
+          // Worklet not ready yet — autotune simply unavailable for this play session
+          console.warn("[Studio] Autotune node creation failed:", e);
         }
       }
 
@@ -18796,10 +18830,12 @@ function StudioScreen({ user, onExit }) {
       ];
       const mime = CODEC_PREFS.find(function(m){ return MediaRecorder.isTypeSupported(m); }) || "";
 
-      // 256kbps for best possible recording quality (Opus handles this very efficiently)
+      // 320kbps Opus — top-tier quality for vocals. Opus stops gaining audible quality
+      // beyond 256kbps for mono, but 320kbps gives extra headroom for any transcoding
+      // the user does later (mix, master, export to lossy formats).
       const mr = new MediaRecorder(recStream, {
         mimeType:          mime || undefined,
-        audioBitsPerSecond: 256000,
+        audioBitsPerSecond: 320000,
       });
 
       mr.ondataavailable = function (ev) {
