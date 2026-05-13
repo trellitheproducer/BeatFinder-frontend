@@ -3879,35 +3879,415 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
 // Safari sees Content-Disposition: attachment and shows the native
 // "Do you want to download?" popup WITHOUT opening a new page.
 // The CORS headers on the backend allow this cross-origin.
+function generateFreeLeaseContract(beat, user) {
+  var date     = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  var leaseId  = "BF-FREE-" + Date.now();
+  var artist   = (user && (user.name || user.username)) || "Artist";
+  var email    = (user && user.email) || "";
+  var producer = beat.producer || beat.producer_username || "Producer";
+  var beatTitle = beat.title || "Beat";
+
+  var html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>BeatFinder Free Licence — ${beatTitle}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Georgia, serif; background: #fff; color: #111; padding: 60px 80px; max-width: 860px; margin: 0 auto; font-size: 14px; line-height: 1.8; }
+  .header { text-align: center; border-bottom: 3px solid #111; padding-bottom: 24px; margin-bottom: 32px; }
+  .logo { font-size: 28px; font-weight: 900; letter-spacing: 3px; color: #111; font-family: Arial, sans-serif; }
+  .logo span { color: #C026D3; }
+  .subtitle { font-size: 11px; letter-spacing: 2px; color: #555; margin-top: 4px; text-transform: uppercase; }
+  h1 { font-size: 20px; margin: 24px 0 8px; text-align: center; letter-spacing: 1px; }
+  .lease-id { text-align: center; font-size: 11px; color: #888; margin-bottom: 32px; letter-spacing: 1px; }
+  .parties { background: #f8f8f8; border: 1px solid #ddd; border-radius: 8px; padding: 20px 24px; margin-bottom: 28px; }
+  .party-row { display: flex; gap: 32px; margin-bottom: 12px; }
+  .party-row:last-child { margin-bottom: 0; }
+  .party-label { font-weight: bold; min-width: 140px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #555; }
+  .party-value { color: #111; }
+  .free-badge { display: inline-block; background: #C026D3; color: white; font-size: 11px; font-weight: 800; padding: 3px 12px; border-radius: 20px; letter-spacing: 1px; }
+  h2 { font-size: 13px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; margin: 24px 0 10px; border-bottom: 1px solid #ddd; padding-bottom: 6px; color: #333; }
+  .clause { margin-bottom: 16px; }
+  .clause-num { font-weight: bold; color: #111; }
+  .signature-block { margin-top: 48px; display: flex; gap: 48px; }
+  .sig-box { flex: 1; border-top: 1px solid #111; padding-top: 12px; }
+  .sig-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #555; }
+  .sig-name { font-size: 13px; margin-top: 4px; font-weight: bold; }
+  .footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #ddd; font-size: 10px; color: #999; text-align: center; line-height: 1.6; }
+  @media print { body { padding: 40px; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="logo">BEAT<span>FINDER</span></div>
+  <div class="subtitle">beatfinder.co.uk — Music Licensing Platform</div>
+</div>
+
+<h1>FREE NON-EXCLUSIVE BEAT LICENCE</h1>
+<div class="lease-id">Licence Reference: ${leaseId} &nbsp;|&nbsp; Date: ${date}</div>
+
+<div class="parties">
+  <div class="party-row"><span class="party-label">Beat Title</span><span class="party-value">"${beatTitle}"</span></div>
+  <div class="party-row"><span class="party-label">Producer</span><span class="party-value">${producer}</span></div>
+  <div class="party-row"><span class="party-label">Licensee (Artist)</span><span class="party-value">${artist}${email ? " (" + email + ")" : ""}</span></div>
+  <div class="party-row"><span class="party-label">Licence Type</span><span class="party-value"><span class="free-badge">FREE</span> &nbsp;Non-Exclusive Licence</span></div>
+  <div class="party-row"><span class="party-label">Licence Fee</span><span class="party-value">£0.00 (Free)</span></div>
+  <div class="party-row"><span class="party-label">Platform</span><span class="party-value">BeatFinder (beatfinder.co.uk)</span></div>
+</div>
+
+<h2>1. Grant of Licence</h2>
+<div class="clause">
+<span class="clause-num">1.1</span> The Producer hereby grants the Licensee a free, non-exclusive, non-transferable licence to use the above-named musical composition (the "Beat") for non-commercial purposes, subject to the terms and conditions of this Agreement.
+</div>
+<div class="clause">
+<span class="clause-num">1.2</span> This licence is facilitated through BeatFinder (beatfinder.co.uk), acting as an intermediary platform.
+</div>
+
+<h2>2. Permitted Uses</h2>
+<div class="clause">
+<span class="clause-num">2.1</span> The Licensee may use the Beat for the following purposes:<br/>
+&nbsp;&nbsp;&nbsp;(a) Recording a single song using the Beat as an instrumental;<br/>
+&nbsp;&nbsp;&nbsp;(b) Distributing the finished recording on free streaming platforms (SoundCloud, YouTube non-monetised, etc.);<br/>
+&nbsp;&nbsp;&nbsp;(c) Promoting the finished recording on social media;<br/>
+&nbsp;&nbsp;&nbsp;(d) Performing the finished recording at non-ticketed events.
+</div>
+<div class="clause">
+<span class="clause-num">2.2</span> The Licensee <strong>must</strong> credit the Producer in all uses using the format: <em>(Prod. by ${producer})</em>
+</div>
+
+<h2>3. Restrictions</h2>
+<div class="clause">
+<span class="clause-num">3.1</span> This free licence is strictly for <strong>non-commercial use only</strong>. The Licensee may not monetise any recording made with the Beat.
+</div>
+<div class="clause">
+<span class="clause-num">3.2</span> The Licensee may <strong>not</strong>:<br/>
+&nbsp;&nbsp;&nbsp;(a) Sell, sub-licence, transfer, or assign this licence or the Beat;<br/>
+&nbsp;&nbsp;&nbsp;(b) Monetise recordings on YouTube, Spotify, Apple Music, or any other platform;<br/>
+&nbsp;&nbsp;&nbsp;(c) Claim ownership or copyright of the Beat;<br/>
+&nbsp;&nbsp;&nbsp;(d) Register the Beat with any copyright collection society;<br/>
+&nbsp;&nbsp;&nbsp;(e) Use the Beat in any synchronisation, film, TV, advert, or commercial project;<br/>
+&nbsp;&nbsp;&nbsp;(f) Sell physical copies of recordings using the Beat.
+</div>
+<div class="clause">
+<span class="clause-num">3.3</span> If the Licensee's recording exceeds 10,000 streams or begins generating any revenue, the Licensee must immediately purchase a paid lease through BeatFinder to continue lawful use.
+</div>
+
+<h2>4. Ownership & Copyright</h2>
+<div class="clause">
+<span class="clause-num">4.1</span> The Producer retains full copyright ownership of the Beat. This licence does not transfer any ownership rights to the Licensee.
+</div>
+<div class="clause">
+<span class="clause-num">4.2</span> The Licensee owns the copyright in their original vocals and lyrics recorded over the Beat.
+</div>
+
+<h2>5. BeatFinder Platform Terms</h2>
+<div class="clause">
+<span class="clause-num">5.1</span> BeatFinder acts as a marketplace only and is not responsible for disputes between parties arising from the use of this licence.
+</div>
+<div class="clause">
+<span class="clause-num">5.2</span> BeatFinder reserves the right to remove content from its platform that violates its Terms of Service. Such removal does not invalidate existing licences already granted.
+</div>
+<div class="clause">
+<span class="clause-num">5.3</span> By downloading this Beat through BeatFinder, the Licensee agrees to BeatFinder's Terms of Service at beatfinder.co.uk.
+</div>
+
+<h2>6. Representations & Warranties</h2>
+<div class="clause">
+<span class="clause-num">6.1</span> The Producer warrants they are the sole copyright owner of the Beat and have the full right to grant this licence.
+</div>
+<div class="clause">
+<span class="clause-num">6.2</span> The Licensee warrants they will use the Beat in compliance with all applicable laws and will not use it for any unlawful purpose.
+</div>
+
+<h2>7. Termination</h2>
+<div class="clause">
+<span class="clause-num">7.1</span> This licence terminates immediately if the Licensee breaches any term, particularly the non-commercial restriction.
+</div>
+<div class="clause">
+<span class="clause-num">7.2</span> Upon termination, the Licensee must cease all use and remove any published recordings using the Beat.
+</div>
+
+<h2>8. Governing Law</h2>
+<div class="clause">
+<span class="clause-num">8.1</span> This Agreement is governed by the laws of England and Wales.
+</div>
+
+<div class="signature-block">
+  <div class="sig-box">
+    <div class="sig-label">Producer / Rights Holder</div>
+    <div class="sig-name">${producer}</div>
+    <div style="margin-top:8px;font-size:11px;color:#888;">Via BeatFinder Platform</div>
+  </div>
+  <div class="sig-box">
+    <div class="sig-label">Licensee (Artist)</div>
+    <div class="sig-name">${artist}</div>
+    <div style="margin-top:8px;font-size:11px;color:#888;">${email}</div>
+  </div>
+  <div class="sig-box">
+    <div class="sig-label">Platform Administrator</div>
+    <div class="sig-name">BeatFinder</div>
+    <div style="margin-top:8px;font-size:11px;color:#888;">beatfinder.co.uk</div>
+  </div>
+</div>
+
+<div class="footer">
+  This free licence was generated automatically by BeatFinder (beatfinder.co.uk) upon download.<br/>
+  Licence Reference: ${leaseId} &nbsp;|&nbsp; Date: ${date}<br/>
+  This is a FREE NON-COMMERCIAL licence only. Commercial use requires a paid lease.<br/>
+  © ${new Date().getFullYear()} BeatFinder. All rights reserved.
+</div>
+</body>
+</html>`;
+
+  var blob = new Blob([html], { type: "text/html" });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement("a");
+  a.href     = url;
+  a.download = "BeatFinder_FreeLicence_" + beatTitle.replace(/[^\w]/g, "_") + ".html";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+}
+
+function generateLeaseContract(lease) {
+  var date = lease.purchased_at
+    ? new Date(lease.purchased_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+    : new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  var leaseId = lease.id || ("BF-" + Date.now());
+  var artist   = lease.buyer_name || lease.buyer_username || "Artist";
+  var producer = lease.producer || "Producer";
+  var beatTitle = lease.beat_title || "Beat";
+  var price    = lease.price || "";
+
+  var html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>BeatFinder Lease Agreement — ${beatTitle}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Georgia, serif; background: #fff; color: #111; padding: 60px 80px; max-width: 860px; margin: 0 auto; font-size: 14px; line-height: 1.8; }
+  .header { text-align: center; border-bottom: 3px solid #111; padding-bottom: 24px; margin-bottom: 32px; }
+  .logo { font-size: 28px; font-weight: 900; letter-spacing: 3px; color: #111; font-family: Arial, sans-serif; }
+  .logo span { color: #C026D3; }
+  .subtitle { font-size: 11px; letter-spacing: 2px; color: #555; margin-top: 4px; text-transform: uppercase; }
+  h1 { font-size: 20px; margin: 24px 0 8px; text-align: center; letter-spacing: 1px; }
+  .lease-id { text-align: center; font-size: 11px; color: #888; margin-bottom: 32px; letter-spacing: 1px; }
+  .parties { background: #f8f8f8; border: 1px solid #ddd; border-radius: 8px; padding: 20px 24px; margin-bottom: 28px; }
+  .party-row { display: flex; gap: 32px; margin-bottom: 12px; }
+  .party-row:last-child { margin-bottom: 0; }
+  .party-label { font-weight: bold; min-width: 120px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #555; }
+  .party-value { color: #111; }
+  h2 { font-size: 13px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; margin: 24px 0 10px; border-bottom: 1px solid #ddd; padding-bottom: 6px; color: #333; }
+  p { margin-bottom: 12px; }
+  .clause { margin-bottom: 16px; }
+  .clause-num { font-weight: bold; color: #111; }
+  .signature-block { margin-top: 48px; display: flex; gap: 48px; }
+  .sig-box { flex: 1; border-top: 1px solid #111; padding-top: 12px; }
+  .sig-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #555; }
+  .sig-name { font-size: 13px; margin-top: 4px; font-weight: bold; }
+  .footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #ddd; font-size: 10px; color: #999; text-align: center; line-height: 1.6; }
+  @media print { body { padding: 40px; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="logo">BEAT<span>FINDER</span></div>
+  <div class="subtitle">beatfinder.co.uk — Music Licensing Platform</div>
+</div>
+
+<h1>NON-EXCLUSIVE BEAT LEASE AGREEMENT</h1>
+<div class="lease-id">Lease Reference: ${leaseId} &nbsp;|&nbsp; Date: ${date}</div>
+
+<div class="parties">
+  <div class="party-row"><span class="party-label">Beat Title</span><span class="party-value">"${beatTitle}"</span></div>
+  <div class="party-row"><span class="party-label">Producer</span><span class="party-value">${producer}</span></div>
+  <div class="party-row"><span class="party-label">Licensee (Artist)</span><span class="party-value">${artist}${lease.buyer_email ? " (" + lease.buyer_email + ")" : ""}</span></div>
+  <div class="party-row"><span class="party-label">Licence Type</span><span class="party-value">Non-Exclusive MP3 Lease</span></div>
+  <div class="party-row"><span class="party-label">Licence Fee</span><span class="party-value">${price}</span></div>
+  <div class="party-row"><span class="party-label">Platform</span><span class="party-value">BeatFinder (beatfinder.co.uk)</span></div>
+</div>
+
+<h2>1. Grant of Licence</h2>
+<div class="clause">
+<span class="clause-num">1.1</span> The Producer hereby grants the Licensee a non-exclusive, non-transferable licence to use the above-named musical composition (the "Beat") for the purposes outlined in this Agreement, subject to the terms and conditions herein.
+</div>
+<div class="clause">
+<span class="clause-num">1.2</span> This licence is facilitated through BeatFinder (beatfinder.co.uk), acting as an intermediary platform. BeatFinder is not a party to the creative ownership of the Beat but administers the transaction and licensing process.
+</div>
+
+<h2>2. Permitted Uses</h2>
+<div class="clause">
+<span class="clause-num">2.1</span> The Licensee may use the Beat for the following purposes:<br/>
+&nbsp;&nbsp;&nbsp;(a) Recording a single song or project using the Beat as an instrumental;<br/>
+&nbsp;&nbsp;&nbsp;(b) Distributing the finished recording on streaming platforms (Spotify, Apple Music, YouTube, etc.);<br/>
+&nbsp;&nbsp;&nbsp;(c) Performing the finished recording live;<br/>
+&nbsp;&nbsp;&nbsp;(d) Promoting the finished recording on social media.
+</div>
+<div class="clause">
+<span class="clause-num">2.2</span> The Licensee must credit the Producer in all releases using the format: <em>(Prod. by ${producer})</em>
+</div>
+
+<h2>3. Restrictions</h2>
+<div class="clause">
+<span class="clause-num">3.1</span> This is a <strong>Non-Exclusive</strong> licence. The Producer retains the right to licence the same Beat to other artists simultaneously.
+</div>
+<div class="clause">
+<span class="clause-num">3.2</span> The Licensee may <strong>not</strong>:<br/>
+&nbsp;&nbsp;&nbsp;(a) Sell, sub-licence, transfer, or assign this licence or the Beat to any third party;<br/>
+&nbsp;&nbsp;&nbsp;(b) Claim ownership or copyright of the Beat or its underlying composition;<br/>
+&nbsp;&nbsp;&nbsp;(c) Register the Beat with any copyright collection society (PRS, BMI, ASCAP, etc.) as a standalone composition;<br/>
+&nbsp;&nbsp;&nbsp;(d) Use the Beat in audio-visual synchronisation (TV, film, adverts) without a separate sync licence;<br/>
+&nbsp;&nbsp;&nbsp;(e) Use the Beat for sampling purposes in another Beat or instrumental.
+</div>
+<div class="clause">
+<span class="clause-num">3.3</span> Commercial use (monetised releases exceeding 100,000 streams or generating revenue exceeding £5,000) requires an upgrade to an Exclusive or Commercial licence. The Licensee agrees to contact the Producer via BeatFinder to renegotiate terms if these thresholds are reached.
+</div>
+
+<h2>4. Ownership & Copyright</h2>
+<div class="clause">
+<span class="clause-num">4.1</span> The Producer retains full copyright ownership of the Beat. This Agreement does not transfer any ownership rights to the Licensee.
+</div>
+<div class="clause">
+<span class="clause-num">4.2</span> The Licensee owns the copyright in the vocals, lyrics, and any original creative contribution added to the finished recording, but not in the underlying Beat.
+</div>
+<div class="clause">
+<span class="clause-num">4.3</span> The finished recording shall be considered a joint work for royalty purposes. The Producer is entitled to 50% of the composition royalties (writer's share) for any performance or mechanical royalties generated by the finished recording.
+</div>
+
+<h2>5. BeatFinder Platform Terms</h2>
+<div class="clause">
+<span class="clause-num">5.1</span> BeatFinder (beatfinder.co.uk) acts solely as a marketplace facilitating the transaction between the Producer and the Licensee. BeatFinder is not responsible for disputes between parties arising from the use of this licence.
+</div>
+<div class="clause">
+<span class="clause-num">5.2</span> BeatFinder retains a platform fee from each transaction in accordance with its standard fee schedule. This fee is non-refundable.
+</div>
+<div class="clause">
+<span class="clause-num">5.3</span> BeatFinder reserves the right to remove content from its platform that violates its Terms of Service. Such removal does not invalidate existing licences already granted.
+</div>
+<div class="clause">
+<span class="clause-num">5.4</span> By completing this purchase through BeatFinder, both parties agree to BeatFinder's Terms of Service available at beatfinder.co.uk.
+</div>
+
+<h2>6. Representations & Warranties</h2>
+<div class="clause">
+<span class="clause-num">6.1</span> The Producer warrants that they are the sole creator and copyright owner of the Beat and have the full right to grant this licence.
+</div>
+<div class="clause">
+<span class="clause-num">6.2</span> The Licensee warrants that they will use the Beat in compliance with all applicable laws and will not use it for any unlawful, defamatory, or harmful purpose.
+</div>
+
+<h2>7. Limitation of Liability</h2>
+<div class="clause">
+<span class="clause-num">7.1</span> To the fullest extent permitted by law, BeatFinder shall not be liable for any indirect, incidental, or consequential damages arising from the use of this licence or the Beat.
+</div>
+<div class="clause">
+<span class="clause-num">7.2</span> BeatFinder's total liability in any matter related to this Agreement shall not exceed the licence fee paid.
+</div>
+
+<h2>8. Termination</h2>
+<div class="clause">
+<span class="clause-num">8.1</span> This licence terminates immediately and automatically if the Licensee breaches any term of this Agreement.
+</div>
+<div class="clause">
+<span class="clause-num">8.2</span> Upon termination, the Licensee must cease all use of the Beat and remove any published recordings using the Beat.
+</div>
+
+<h2>9. Governing Law</h2>
+<div class="clause">
+<span class="clause-num">9.1</span> This Agreement shall be governed by and construed in accordance with the laws of England and Wales. Any disputes shall be subject to the exclusive jurisdiction of the courts of England and Wales.
+</div>
+
+<div class="signature-block">
+  <div class="sig-box">
+    <div class="sig-label">Producer / Rights Holder</div>
+    <div class="sig-name">${producer}</div>
+    <div style="margin-top:8px;font-size:11px;color:#888;">Via BeatFinder Platform</div>
+  </div>
+  <div class="sig-box">
+    <div class="sig-label">Licensee (Artist)</div>
+    <div class="sig-name">${artist}</div>
+    <div style="margin-top:8px;font-size:11px;color:#888;">${lease.buyer_email || ""}</div>
+  </div>
+  <div class="sig-box">
+    <div class="sig-label">Platform Administrator</div>
+    <div class="sig-name">BeatFinder</div>
+    <div style="margin-top:8px;font-size:11px;color:#888;">beatfinder.co.uk</div>
+  </div>
+</div>
+
+<div class="footer">
+  This licence agreement was generated automatically by BeatFinder (beatfinder.co.uk) upon successful payment.<br/>
+  Lease Reference: ${leaseId} &nbsp;|&nbsp; Transaction Date: ${date}<br/>
+  BeatFinder is a music licensing platform. This document constitutes a binding legal agreement between the parties named above.<br/>
+  © ${new Date().getFullYear()} BeatFinder. All rights reserved.
+</div>
+</body>
+</html>`;
+
+  var blob = new Blob([html], { type: "text/html" });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement("a");
+  a.href     = url;
+  a.download = "BeatFinder_Lease_" + beatTitle.replace(/[^\w]/g, "_") + "_" + leaseId + ".html";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+}
+
 function downloadMp3(url, title, beatId) {
   var proxyUrl = beatId
     ? API_BASE + "/api/producer/beats/" + beatId + "/file"
     : url;
-  var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
 
-  // Hidden anchor click — the industry standard forced download trigger.
-  // Must happen synchronously inside the user gesture (onClick) to work on iOS.
-  var a = document.createElement("a");
-  a.href     = proxyUrl;
-  a.download = filename;          // hint filename to Safari
-  a.rel      = "noopener";
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(function() {
-    document.body.removeChild(a);
-  }, 1000);
+  // Use window.open with _blank — prevents iOS from navigating the current tab
+  var w = window.open(proxyUrl, "_blank");
+  if (!w) {
+    // Fallback if popup blocked — hidden anchor
+    var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
+    var a = document.createElement("a");
+    a.href = proxyUrl;
+    a.download = filename;
+    a.rel = "noopener";
+    a.target = "_blank";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() { document.body.removeChild(a); }, 1000);
+  }
 }
 
 // ── Download Button ───────────────────────────────────────────────
-function DownloadButton({ url, title, beatId, style, children }) {
+function DownloadButton({ url, title, beatId, beat, user, style, children }) {
+  var [showContract, setShowContract] = React.useState(false);
   return (
-    <button
-      onClick={function() { downloadMp3(url, title, beatId); }}
-      style={style}
-    >
-      {children}
-    </button>
+    <>
+      <button
+        onClick={function() {
+          downloadMp3(url, title, beatId);
+          if (beat) setShowContract(true);
+        }}
+        style={style}
+      >
+        {children}
+      </button>
+      {showContract && beat && (
+        <div style={{ marginTop: 8 }}>
+          <button
+            onClick={function() { generateFreeLeaseContract(beat, user); setShowContract(false); }}
+            style={{ width: "100%", background: "transparent", border: "1px solid rgba(192,38,211,0.4)", borderRadius: 10, padding: "8px", color: "#C026D3", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Download Free Licence Contract
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -4152,7 +4532,7 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
       {isFree ? (
         <div style={{ padding: "0 16px 16px" }}>
           <DownloadButton
-            url={beat.url} title={beat.title} beatId={beat.id}
+            url={beat.url} title={beat.title} beatId={beat.id} beat={beat} user={user}
             style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #C026D3", color: "#C026D3", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: "0 0 18px rgba(192,38,211,0.2), inset 0 0 18px rgba(192,38,211,0.04)" }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
@@ -4369,9 +4749,15 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
               <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>By {lease.producer} • {lease.price} • {new Date(lease.purchased_at).toLocaleDateString()}</div>
               <button
                 onClick={() => { downloadMp3(lease.beat_url, lease.beat_title, null); }}
-                style={{ width: "100%", borderRadius: 12, padding: "13px", background: "linear-gradient(135deg,#22C55E,#16A34A)", border: "none", color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+                style={{ width: "100%", borderRadius: 12, padding: "13px", background: "linear-gradient(135deg,#22C55E,#16A34A)", border: "none", color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, marginBottom: 8 }}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
                 Save Lease MP3 to Device
+              </button>
+              <button
+                onClick={() => { generateLeaseContract(lease); }}
+                style={{ width: "100%", borderRadius: 12, padding: "11px", background: "transparent", border: "1px solid #2a2a2a", color: "#888", fontWeight: 700, fontSize: 13, cursor: "pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Download Lease Contract
               </button>
             </div>
           ))}
@@ -6264,7 +6650,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
         <div style={{ padding: "0 16px 16px" }}>
           {currentUser ? (
             <DownloadButton
-              url={beat.url} title={beat.title} beatId={beat.id}
+              url={beat.url} title={beat.title} beatId={beat.id} beat={beat} user={currentUser}
               style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #C026D3", color: "#C026D3", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: "0 0 18px rgba(192,38,211,0.2), inset 0 0 18px rgba(192,38,211,0.04)" }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
@@ -6770,7 +7156,7 @@ function CompactBeatCard({ beat, currentUser }) {
         {/* Action button */}
         {isFree ? (
           currentUser ? (
-            <DownloadButton url={beat.url} title={beat.title} beatId={beat.id}
+            <DownloadButton url={beat.url} title={beat.title} beatId={beat.id} beat={beat} user={currentUser}
               style={{ background: "transparent", border: "1.5px solid #C026D3", borderRadius: 20, padding: "5px 10px", color: "#C026D3", fontSize: 9, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
               <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/></svg>
               FREE
@@ -19480,6 +19866,22 @@ export default function BeatFinder() {
 
   // Handle URL routing — reset_token and /u/:username public profiles
   const resetToken = new URLSearchParams(window.location.search).get("reset_token");
+  const leaseSuccess = new URLSearchParams(window.location.search).get("lease") === "success";
+  const leaseBeatId  = new URLSearchParams(window.location.search).get("beat_id");
+  const [leaseModal, setLeaseModal] = React.useState(leaseSuccess);
+  const [leaseBeat,  setLeaseBeat]  = React.useState(null);
+
+  // When returning from Stripe, fetch the purchased beat details
+  React.useEffect(function() {
+    if (!leaseSuccess || !leaseBeatId || !user) return;
+    // Clear the URL params without reload
+    window.history.replaceState({}, "", "/");
+    // Fetch the beat from my-leases to get the download URL
+    apiFetch("/api/producer/my-leases").then(function(leases) {
+      var match = leases.find(function(l) { return l.beat_id === leaseBeatId || l.id === leaseBeatId; });
+      if (match) setLeaseBeat(match);
+    }).catch(function() {});
+  }, [user]);
   // /u/username or /profile/username — open a public profile directly from a shared link
   const urlUsername = (function() {
     const m = window.location.pathname.match(/^\/(?:u|profile)\/([^/]+)/);
@@ -19902,6 +20304,47 @@ export default function BeatFinder() {
       )}
 
       {lyricsOpen && <LyricsNotepad beat={lyricsBeat} onClose={() => { setLyricsOpen(false); setEditingLyric(null); setEditingIndex(null); }} onSaveLyric={handleSaveLyric} initialLyric={editingLyric} lyricIndex={editingIndex} user={user} />}
+
+      {/* ── Lease purchase success modal ── */}
+      {leaseModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 99999, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div style={{ background: "#111", borderRadius: 20, padding: 28, width: "100%", maxWidth: 380, border: "1.5px solid rgba(245,158,11,0.4)", textAlign: "center" }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>🎉</div>
+            <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 20, marginBottom: 8 }}>Purchase Complete!</div>
+            <div style={{ color: "#aaa", fontSize: 14, marginBottom: 24 }}>
+              {leaseBeat ? "Your lease for \"" + leaseBeat.beat_title + "\" is ready to download." : "Your beat lease is ready. Find it in your purchased beats."}
+            </div>
+            {leaseBeat && leaseBeat.beat_url && (
+              <button onClick={function() { downloadMp3(leaseBeat.beat_url, leaseBeat.beat_title, null); setLeaseModal(false); }} style={{
+                width: "100%", background: "linear-gradient(135deg,#F59E0B,#D97706)",
+                border: "none", borderRadius: 14, color: "white", fontWeight: 800,
+                fontSize: 16, padding: "14px", cursor: "pointer", marginBottom: 12,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+                Download MP3
+              </button>
+            )}
+            <button onClick={function() { setLeaseModal(false); goTab("profile"); }} style={{
+              width: "100%", background: "transparent", border: "1px solid #333",
+              borderRadius: 14, color: "#888", fontWeight: 700, fontSize: 14,
+              padding: "12px", cursor: "pointer", marginBottom: 10,
+            }}>
+              View My Purchases
+            </button>
+            {leaseBeat && (
+              <button onClick={function() { generateLeaseContract(leaseBeat); }} style={{
+                width: "100%", background: "transparent", border: "1px solid #333",
+                borderRadius: 14, color: "#555", fontWeight: 600, fontSize: 13,
+                padding: "12px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Download Lease Contract
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {playing && (
         <Player
           beat={playing}
