@@ -21195,6 +21195,9 @@ export default function BeatFinder() {
   React.useEffect(function() {
     var wasBFCached = false;
     var reloadInProgress = false;
+    var lastRafTime = Date.now();
+    var rafHandle = null;
+    var pollHandle = null;
 
     function safeReload() {
       if (reloadInProgress) return;
@@ -21229,6 +21232,33 @@ export default function BeatFinder() {
       if (isAppBlank()) safeReload();
     }
 
+    // RAF-gap detection: when iOS opens an in-app web viewer / system browser
+    // (Safari View Controller, the YouTube share-sheet preview, etc.) over the
+    // top of BeatFinder, requestAnimationFrame pauses. As soon as the user
+    // dismisses the overlay ("Done" button) and returns, RAF resumes — so a
+    // big gap in RAF timestamps is the most reliable signal of a return.
+    // visibilitychange and focus aren't always fired by iOS's in-app viewer.
+    function tickRaf() {
+      var now = Date.now();
+      var gap = now - lastRafTime;
+      if (gap > 800) {
+        // We were paused (likely backgrounded or covered by in-app viewer).
+        // Check several times in case the DOM hasn't re-rendered yet.
+        setTimeout(checkAndRecover, 50);
+        setTimeout(checkAndRecover, 250);
+        setTimeout(checkAndRecover, 700);
+        setTimeout(checkAndRecover, 1500);
+      }
+      lastRafTime = now;
+      rafHandle = window.requestAnimationFrame(tickRaf);
+    }
+    rafHandle = window.requestAnimationFrame(tickRaf);
+
+    // Backup: poll every 2s to catch any case where RAF detection misses
+    pollHandle = window.setInterval(function() {
+      if (document.visibilityState === "visible") checkAndRecover();
+    }, 2000);
+
     function onPageShow(e) {
       // e.persisted = true means page was restored from back-forward cache.
       // On iOS this often means the React tree is alive but the DOM may
@@ -21258,6 +21288,9 @@ export default function BeatFinder() {
         setTimeout(checkAndRecover, 500);
         setTimeout(checkAndRecover, 1000);
         setTimeout(checkAndRecover, 1500);
+      } else {
+        // Page is being hidden — mark RAF time so we can detect a long gap on return
+        lastRafTime = Date.now();
       }
     }
 
@@ -21277,6 +21310,8 @@ export default function BeatFinder() {
       window.removeEventListener("pagehide",      onPageHide);
       window.removeEventListener("focus",         onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (rafHandle) window.cancelAnimationFrame(rafHandle);
+      if (pollHandle) window.clearInterval(pollHandle);
     };
   }, []);
 
