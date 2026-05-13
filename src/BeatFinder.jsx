@@ -53,17 +53,18 @@ const LOADER_STYLE = `
   .nr-slider::-moz-range-thumb { background:#10B981 !important; }
   .bf-spinner {
     width: 44px; height: 44px; border-radius: 50%;
-    border: 3px solid rgba(192,38,211,0.15);
-    border-top-color: #C026D3;
+    border: 3px solid rgba(99,102,241,0.12);
+    border-top-color: #A855F7;
+    border-right-color: #6366F1;
     animation: bf-spin 0.8s linear infinite;
-    filter: drop-shadow(0 0 8px rgba(192,38,211,0.5));
+    filter: drop-shadow(0 0 10px rgba(168,85,247,0.5)) drop-shadow(0 0 6px rgba(99,102,241,0.4));
   }
   .bf-bars { display:flex; align-items:flex-end; gap:4px; height:28px; }
   .bf-bar {
     width: 5px; border-radius: 3px;
-    background: linear-gradient(180deg,#C026D3,#7C3AED);
+    background: linear-gradient(180deg,#A855F7 0%,#7C3AED 50%,#3B82F6 100%);
     animation: bf-pulse 1s ease-in-out infinite;
-    filter: drop-shadow(0 0 4px rgba(192,38,211,0.6));
+    filter: drop-shadow(0 0 4px rgba(168,85,247,0.7)) drop-shadow(0 0 2px rgba(59,130,246,0.5));
   }
   .bf-bar:nth-child(1) { height:14px; animation-delay:0s; }
   .bf-bar:nth-child(2) { height:22px; animation-delay:0.15s; }
@@ -71,6 +72,45 @@ const LOADER_STYLE = `
   .bf-bar:nth-child(4) { height:22px; animation-delay:0.45s; }
   .bf-bar:nth-child(5) { height:14px; animation-delay:0.6s; }
   .bf-loader { animation: bf-fade 0.2s ease; }
+
+  /* Neon progress bar — used for uploads/downloads */
+  @keyframes bf-progress-shimmer {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+  }
+  @keyframes bf-progress-indet {
+    0%   { left: -40%; width: 40%; }
+    50%  { left: 30%;  width: 50%; }
+    100% { left: 100%; width: 40%; }
+  }
+  .bf-progress-track {
+    position: relative;
+    width: 100%;
+    height: 6px;
+    background: #0a0a0a;
+    border: 1px solid #1a1a1a;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.6);
+  }
+  .bf-progress-fill {
+    position: absolute;
+    top: 0; bottom: 0;
+    background: linear-gradient(90deg, #A855F7 0%, #7C3AED 35%, #6366F1 65%, #3B82F6 100%);
+    background-size: 200% 100%;
+    animation: bf-progress-shimmer 2s linear infinite;
+    border-radius: 6px;
+    box-shadow: 0 0 12px rgba(168,85,247,0.6), 0 0 6px rgba(59,130,246,0.5);
+    transition: width 0.25s ease;
+  }
+  .bf-progress-indet {
+    position: absolute;
+    top: 0; bottom: 0;
+    background: linear-gradient(90deg, transparent 0%, #A855F7 30%, #6366F1 70%, transparent 100%);
+    box-shadow: 0 0 12px rgba(168,85,247,0.6);
+    animation: bf-progress-indet 1.4s cubic-bezier(0.4,0,0.2,1) infinite;
+    border-radius: 6px;
+  }
 
 `;
 
@@ -98,6 +138,52 @@ function BFLoader({ text, type }) {
           letterSpacing: 2, opacity: 0.8,
         }}>
           {text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Sleek neon progress bar — black track with purple→blue gradient fill.
+// Pass `progress` as 0-1 for determinate, omit/null for indeterminate animation.
+function BFProgressBar({ progress, label, sublabel }) {
+  var pct = (typeof progress === "number" && progress >= 0 && progress <= 1)
+    ? Math.round(progress * 100) : null;
+  return (
+    <div style={{ width: "100%" }}>
+      <style>{LOADER_STYLE}</style>
+      {(label || pct !== null) && (
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          marginBottom: 6,
+        }}>
+          {label && (
+            <span style={{ color: "#aaa", fontSize: 11, fontWeight: 700, letterSpacing: 0.4 }}>
+              {label}
+            </span>
+          )}
+          {pct !== null && (
+            <span style={{
+              color: "#A855F7", fontSize: 11, fontWeight: 800, letterSpacing: 0.4,
+              textShadow: "0 0 8px rgba(168,85,247,0.5)",
+            }}>
+              {pct}%
+            </span>
+          )}
+        </div>
+      )}
+      <div className="bf-progress-track">
+        {pct !== null ? (
+          <div className="bf-progress-fill" style={{ width: pct + "%" }} />
+        ) : (
+          <div className="bf-progress-indet" />
+        )}
+      </div>
+      {sublabel && (
+        <div style={{
+          color: "#555", fontSize: 10, marginTop: 6, letterSpacing: 0.3,
+        }}>
+          {sublabel}
         </div>
       )}
     </div>
@@ -4435,47 +4521,107 @@ function DownloadToast() {
   var state = useDownloadToast();
   if (!state) return null;
   var status = state.status; // "downloading" | "success" | "error"
-  var bg, icon, text;
+
+  // Sleek black card with neon accent based on state
+  var borderColor, glowColor, icon, text;
   if (status === "downloading") {
-    bg = "linear-gradient(135deg,#C026D3,#9333EA)";
+    borderColor = "#A855F7";
+    glowColor   = "rgba(168,85,247,0.55)";
     icon = (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"
-        style={{ animation: "bf-spin 1s linear infinite" }}>
-        <path d="M21 12a9 9 0 1 1-6.219-8.56" strokeLinecap="round"/>
-      </svg>
+      <div style={{
+        width: 32, height: 32, borderRadius: "50%",
+        background: "linear-gradient(135deg, #A855F7 0%, #6366F1 100%)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        boxShadow: "0 0 12px rgba(168,85,247,0.6), 0 0 6px rgba(99,102,241,0.5)",
+        flexShrink: 0,
+      }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"
+          style={{ animation: "bf-spin 1s linear infinite" }}>
+          <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+        </svg>
+      </div>
     );
-    text = "Downloading " + (state.title || "beat") + "...";
+    text = "Downloading " + (state.title || "beat");
   } else if (status === "success") {
-    bg = "linear-gradient(135deg,#22C55E,#16A34A)";
-    icon = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>;
-    text = "Downloaded ✓";
+    borderColor = "#3B82F6";
+    glowColor   = "rgba(59,130,246,0.55)";
+    icon = (
+      <div style={{
+        width: 32, height: 32, borderRadius: "50%",
+        background: "linear-gradient(135deg, #6366F1 0%, #3B82F6 100%)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        boxShadow: "0 0 12px rgba(59,130,246,0.6), 0 0 6px rgba(99,102,241,0.5)",
+        flexShrink: 0,
+      }}>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </div>
+    );
+    text = "Downloaded";
   } else {
-    bg = "linear-gradient(135deg,#EF4444,#B91C1C)";
-    icon = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>;
+    borderColor = "#EF4444";
+    glowColor   = "rgba(239,68,68,0.45)";
+    icon = (
+      <div style={{
+        width: 32, height: 32, borderRadius: "50%",
+        background: "linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        boxShadow: "0 0 12px rgba(239,68,68,0.5)",
+        flexShrink: 0,
+      }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      </div>
+    );
     text = state.message || "Download failed";
   }
+
   var toast = (
     <>
-      <style>{"@keyframes bf-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes bf-toast-in{from{transform:translateY(-20px);opacity:0}to{transform:translateY(0);opacity:1}}"}</style>
+      <style>{LOADER_STYLE + "@keyframes bf-toast-in{from{transform:translate(-50%,-20px);opacity:0}to{transform:translate(-50%,0);opacity:1}}@keyframes bf-glow-pulse{0%,100%{box-shadow:0 8px 32px rgba(0,0,0,0.6),0 0 0 1px " + borderColor + "44,0 0 20px " + glowColor + "}50%{box-shadow:0 8px 32px rgba(0,0,0,0.6),0 0 0 1px " + borderColor + "66,0 0 32px " + glowColor + "}}"}</style>
       <div style={{
         position: "fixed",
         top: "max(env(safe-area-inset-top), 12px)",
         left: "50%",
         transform: "translateX(-50%)",
         zIndex: 2147483646,
-        background: bg,
+        background: "linear-gradient(135deg, #0a0a0a 0%, #0f0f12 100%)",
         color: "white",
-        padding: "12px 18px",
-        borderRadius: 28,
-        boxShadow: "0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08)",
-        display: "flex", alignItems: "center", gap: 10,
-        fontWeight: 700, fontSize: 13, letterSpacing: 0.2,
-        minWidth: 220, maxWidth: "calc(100vw - 32px)",
-        animation: "bf-toast-in 0.25s ease-out",
+        padding: status === "downloading" ? "12px 16px 14px" : "12px 18px",
+        borderRadius: 20,
+        border: "1px solid " + borderColor + "55",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px " + borderColor + "44, 0 0 20px " + glowColor,
+        animation: "bf-toast-in 0.28s cubic-bezier(0.22,1,0.36,1)" + (status === "downloading" ? ", bf-glow-pulse 2s ease-in-out infinite" : ""),
+        minWidth: 260, maxWidth: "calc(100vw - 32px)",
         pointerEvents: "none",
       }}>
-        {icon}
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {icon}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontWeight: 700, fontSize: 13, letterSpacing: 0.2,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {text}
+            </div>
+            {status === "downloading" && (
+              <div style={{ color: "#666", fontSize: 10.5, marginTop: 2 }}>
+                Please wait
+              </div>
+            )}
+          </div>
+        </div>
+        {status === "downloading" && (
+          <div style={{ marginTop: 10 }}>
+            <div className="bf-progress-track">
+              <div className="bf-progress-indet" />
+            </div>
+          </div>
+        )}
       </div>
     </>
   );
@@ -4713,6 +4859,65 @@ function detectPopupBlock() {
   } catch (e) {
     return false;
   }
+}
+
+// Global one-time detection on the FIRST user interaction anywhere on the page.
+// iOS requires window.open inside a user gesture, so we attach a one-shot
+// pointerdown listener to document. The instant a user taps anywhere — even
+// before they get to a CTA — we run the probe and surface the banner.
+// This catches users whose contract state is already "done" from localStorage
+// (returning users who signed an agreement in a previous session), because
+// they bypass the CTA tap handler entirely.
+var __popupGlobalProbeInstalled = false;
+function installGlobalPopupProbe() {
+  if (__popupGlobalProbeInstalled) return;
+  if (typeof document === "undefined") return;
+  // If we already tested this session, don't run again
+  try {
+    if (sessionStorage.getItem("bf_popup_tested") === "1") {
+      __popupGlobalProbeInstalled = true;
+      return;
+    }
+  } catch (e) {}
+  __popupGlobalProbeInstalled = true;
+  function onFirstTap(e) {
+    // Only run for taps on relevant beat/download/contract buttons.
+    // Filter by walking up the DOM looking for a marker class or button text.
+    var target = e.target;
+    var depth = 0;
+    var relevant = false;
+    while (target && depth < 8) {
+      if (target.dataset && target.dataset.bfDownloadCta === "1") {
+        relevant = true;
+        break;
+      }
+      var txt = (target.innerText || target.textContent || "").toUpperCase();
+      if (txt.indexOf("FREE DOWNLOAD") !== -1 ||
+          txt.indexOf("BUY LEASE") !== -1 ||
+          txt.indexOf("SAVE MP3 TO DEVICE") !== -1 ||
+          txt.indexOf("VIEW LICENCE CONTRACT") !== -1 ||
+          txt.indexOf("GET FREE BEAT") !== -1) {
+        relevant = true;
+        break;
+      }
+      target = target.parentElement;
+      depth++;
+    }
+    if (!relevant) return;
+    document.removeEventListener("pointerdown", onFirstTap, true);
+    document.removeEventListener("touchstart", onFirstTap, true);
+    document.removeEventListener("click", onFirstTap, true);
+    // Run SYNCHRONOUSLY inside the user gesture — iOS only treats
+    // window.open as user-initiated for the synchronous portion of the
+    // event handler. A setTimeout or microtask would lose the activation.
+    try {
+      detectPopupBlock();
+      try { sessionStorage.setItem("bf_popup_tested", "1"); } catch (e2) {}
+    } catch (e2) {}
+  }
+  document.addEventListener("pointerdown", onFirstTap, true);
+  document.addEventListener("touchstart", onFirstTap, true);
+  document.addEventListener("click",       onFirstTap, true);
 }
 
 // ── Inline pop-up warning banner ──────────────────────────────────
@@ -5201,7 +5406,7 @@ function FreeBeatCTA({ beat, user }) {
             <div style={{ color: "#555", fontSize: 11 }}>Download your contract & MP3 below</div>
           </div>
         </div>
-        <button onClick={function() { setShowContract(true); }} style={{
+        <button data-bf-download-cta="1" onClick={function() { setShowContract(true); }} style={{
           width: "100%", borderRadius: 14, padding: "12px",
           background: "transparent", border: "1px solid #333",
           color: "#888", fontWeight: 700, fontSize: 12, cursor: "pointer",
@@ -5211,7 +5416,7 @@ function FreeBeatCTA({ beat, user }) {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           View Licence Contract
         </button>
-        <button onClick={function() { downloadBeatMp3(beat); }} style={{
+        <button data-bf-download-cta="1" onClick={function() { downloadBeatMp3(beat); }} style={{
           width: "100%", borderRadius: 14, padding: "15px", border: "none",
           background: "linear-gradient(135deg,#C026D3,#9333EA)",
           color: "white", fontWeight: 800, fontSize: 14,
@@ -7173,14 +7378,45 @@ function PostSheet({ user, onClose, onPosted }) {
                 onChange={function(e) { submitVideo(e.target.files && e.target.files[0]); e.target.value = ""; }} />
               <button onClick={function() { videoFileRef.current && videoFileRef.current.click(); }}
                 disabled={loading}
-                style={{ width: "100%", background: "#3B82F6", border: "none", borderRadius: 12,
-                  color: "white", fontWeight: 800, fontSize: 15, padding: 14, cursor: "pointer",
-                  opacity: loading ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-                </svg>
-                {loading ? "Uploading..." : "Choose Video"}
+                style={{
+                  width: "100%",
+                  background: loading
+                    ? "linear-gradient(135deg, #0a0a0a 0%, #0f0f12 100%)"
+                    : "linear-gradient(135deg, #A855F7 0%, #6366F1 60%, #3B82F6 100%)",
+                  border: loading ? "1px solid rgba(168,85,247,0.4)" : "none",
+                  borderRadius: 12,
+                  color: "white", fontWeight: 800, fontSize: 15,
+                  padding: loading ? 12 : 14,
+                  cursor: loading ? "not-allowed" : "pointer",
+                  boxShadow: loading
+                    ? "0 0 20px rgba(168,85,247,0.35)"
+                    : "0 4px 18px rgba(168,85,247,0.4)",
+                  display: "flex", alignItems: loading ? "stretch" : "center",
+                  flexDirection: loading ? "column" : "row",
+                  justifyContent: "center", gap: 10,
+                  transition: "all 0.2s ease",
+                }}>
+                {loading ? (
+                  <div style={{ width: "100%" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 8 }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                        stroke="#A855F7" strokeWidth="2.5" strokeLinecap="round"
+                        style={{ animation: "bf-spin 1s linear infinite", filter: "drop-shadow(0 0 4px rgba(168,85,247,0.6))" }}>
+                        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                      </svg>
+                      <span style={{ color: "#A855F7", fontSize: 12, fontWeight: 800, letterSpacing: 1 }}>UPLOADING VIDEO</span>
+                    </div>
+                    <BFProgressBar />
+                  </div>
+                ) : (
+                  <>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    Choose Video
+                  </>
+                )}
               </button>
               {msg && <div style={{ color: "#EF4444", fontSize: 13, marginTop: 8 }}>{msg}</div>}
             </div>
@@ -7723,11 +7959,35 @@ function TrackUploadModal({ currentUser, onClose, onUploaded }) {
         <div style={{ color: "#444", fontSize: 10, textAlign: "right", marginBottom: 14 }}>{description.length}/500</div>
 
         <button onClick={handleUpload} disabled={uploading || !file} style={{
-          width: "100%", background: uploading ? "#333" : "linear-gradient(135deg,#F59E0B,#D97706)",
-          border: "none", borderRadius: 12, color: "white", fontWeight: 800, fontSize: 16,
-          padding: "14px", cursor: uploading ? "not-allowed" : "pointer",
+          width: "100%",
+          background: uploading
+            ? "linear-gradient(135deg, #0a0a0a 0%, #0f0f12 100%)"
+            : "linear-gradient(135deg, #A855F7 0%, #6366F1 60%, #3B82F6 100%)",
+          border: uploading ? "1px solid rgba(168,85,247,0.4)" : "none",
+          borderRadius: 12, color: "white", fontWeight: 800, fontSize: 16,
+          padding: uploading ? "12px" : "14px",
+          cursor: uploading ? "not-allowed" : "pointer",
+          boxShadow: uploading
+            ? "0 0 20px rgba(168,85,247,0.35), inset 0 0 0 1px rgba(168,85,247,0.15)"
+            : "0 4px 18px rgba(168,85,247,0.4)",
+          transition: "all 0.2s ease",
         }}>
-          {uploading ? "Uploading..." : "Upload Track"}
+          {uploading ? (
+            <div>
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                gap: 8, marginBottom: 8,
+              }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="#A855F7" strokeWidth="2.5" strokeLinecap="round"
+                  style={{ animation: "bf-spin 1s linear infinite", filter: "drop-shadow(0 0 4px rgba(168,85,247,0.6))" }}>
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                </svg>
+                <span style={{ color: "#A855F7", fontSize: 12, fontWeight: 800, letterSpacing: 1 }}>UPLOADING TRACK</span>
+              </div>
+              <BFProgressBar />
+            </div>
+          ) : "Upload Track"}
         </button>
       </div>
     </div>
@@ -10548,16 +10808,44 @@ function PostVideoSection({ user, onBack }) {
 
         <button onClick={function() { if (fileRef.current) fileRef.current.click(); }}
           disabled={loading}
-          style={{ width: "100%", background: "linear-gradient(135deg,#3B82F6,#6366F1)",
-            border: "none", borderRadius: 12, color: "white", fontWeight: 800,
-            fontSize: 15, padding: "14px", cursor: "pointer", opacity: loading ? 0.7 : 1,
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="17 8 12 3 7 8"/>
-            <line x1="12" y1="3" x2="12" y2="15"/>
-          </svg>
-          {loading ? "Uploading..." : "Choose Video from Phone"}
+          style={{
+            width: "100%",
+            background: loading
+              ? "linear-gradient(135deg, #0a0a0a 0%, #0f0f12 100%)"
+              : "linear-gradient(135deg, #A855F7 0%, #6366F1 60%, #3B82F6 100%)",
+            border: loading ? "1px solid rgba(168,85,247,0.4)" : "none",
+            borderRadius: 12, color: "white", fontWeight: 800,
+            fontSize: 15, padding: loading ? "12px" : "14px",
+            cursor: loading ? "not-allowed" : "pointer",
+            boxShadow: loading
+              ? "0 0 20px rgba(168,85,247,0.35)"
+              : "0 4px 18px rgba(168,85,247,0.4)",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+            flexDirection: loading ? "column" : "row",
+            transition: "all 0.2s ease",
+          }}>
+          {loading ? (
+            <div style={{ width: "100%" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 8 }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="#A855F7" strokeWidth="2.5" strokeLinecap="round"
+                  style={{ animation: "bf-spin 1s linear infinite", filter: "drop-shadow(0 0 4px rgba(168,85,247,0.6))" }}>
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                </svg>
+                <span style={{ color: "#A855F7", fontSize: 12, fontWeight: 800, letterSpacing: 1 }}>UPLOADING VIDEO</span>
+              </div>
+              <BFProgressBar />
+            </div>
+          ) : (
+            <>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              Choose Video from Phone
+            </>
+          )}
         </button>
 
         {msg && <div style={{ color: msg.startsWith("Error") ? "#EF4444" : "#22C55E", fontSize: 13, marginTop: 10, textAlign: "center" }}>{msg}</div>}
@@ -11047,7 +11335,15 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                   padding: "6px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
                   backdropFilter: "blur(4px)" }}>
                 {headerUploading ? (
-                  <div style={{ width: 12, height: 12, border: "2px solid #555", borderTopColor: "white", borderRadius: "50%" }} />
+                  <div style={{
+                    width: 12, height: 12,
+                    border: "2px solid rgba(168,85,247,0.2)",
+                    borderTopColor: "#A855F7",
+                    borderRightColor: "#3B82F6",
+                    borderRadius: "50%",
+                    animation: "bf-spin 0.8s linear infinite",
+                    filter: "drop-shadow(0 0 4px rgba(168,85,247,0.6))",
+                  }} />
                 ) : (
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -11113,15 +11409,25 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               )}
               {/* Edit badge */}
               <div style={{ position: "absolute", bottom: 2, right: 2, width: 28, height: 28,
-                borderRadius: "50%", background: "#C026D3", border: "2px solid #0a0a0a",
+                borderRadius: "50%",
+                background: "linear-gradient(135deg, #A855F7 0%, #6366F1 100%)",
+                border: "2px solid #0a0a0a",
+                boxShadow: "0 0 10px rgba(168,85,247,0.6)",
                 display: "flex", alignItems: "center", justifyContent: "center" }}>
                 {avatarUploading
-                  ? <div style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "white", borderRadius: "50%" }} />
+                  ? <div style={{
+                      width: 12, height: 12,
+                      border: "2px solid rgba(255,255,255,0.25)",
+                      borderTopColor: "white",
+                      borderRightColor: "rgba(255,255,255,0.7)",
+                      borderRadius: "50%",
+                      animation: "bf-spin 0.8s linear infinite",
+                    }} />
                   : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>}
               </div>
             </button>
-            <div style={{ color: "#555", fontSize: 12, marginTop: 8 }}>
-              {avatarUploading ? "Uploading..." : "Tap to change photo"}
+            <div style={{ color: avatarUploading ? "#A855F7" : "#555", fontSize: 12, marginTop: 8, fontWeight: avatarUploading ? 700 : 500, letterSpacing: avatarUploading ? 0.5 : 0 }}>
+              {avatarUploading ? "Uploading photo..." : "Tap to change photo"}
             </div>
 
             {/* Plan badge */}
@@ -11450,8 +11756,40 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 setTimeout(function(){ setUploadMsg(""); }, 3000);
               } catch (e) { setUploadMsg("Error: " + e.message); }
               setUploadLoading(false);
-            }} style={{ width: "100%", background: uploadLoading ? "#333" : "#C026D3", border: "none", borderRadius: 12, color: "white", fontWeight: 800, fontSize: 15, padding: "14px", cursor: uploadLoading ? "not-allowed" : "pointer" }}>
-              {uploadLoading ? "Uploading..." : "Upload Beat"}
+            }} disabled={uploadLoading} style={{
+              width: "100%",
+              background: uploadLoading
+                ? "linear-gradient(135deg, #0a0a0a 0%, #0f0f12 100%)"
+                : "linear-gradient(135deg, #A855F7 0%, #6366F1 60%, #3B82F6 100%)",
+              border: uploadLoading ? "1px solid rgba(168,85,247,0.4)" : "none",
+              borderRadius: 12,
+              color: "white",
+              fontWeight: 800,
+              fontSize: 15,
+              padding: uploadLoading ? "12px" : "14px",
+              cursor: uploadLoading ? "not-allowed" : "pointer",
+              boxShadow: uploadLoading
+                ? "0 0 20px rgba(168,85,247,0.35), inset 0 0 0 1px rgba(168,85,247,0.15)"
+                : "0 4px 18px rgba(168,85,247,0.4), 0 0 0 1px rgba(255,255,255,0.05)",
+              letterSpacing: 0.5,
+              transition: "all 0.2s ease",
+            }}>
+              {uploadLoading ? (
+                <div>
+                  <div style={{
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    gap: 8, marginBottom: 8,
+                  }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                      stroke="#A855F7" strokeWidth="2.5" strokeLinecap="round"
+                      style={{ animation: "bf-spin 1s linear infinite", filter: "drop-shadow(0 0 4px rgba(168,85,247,0.6))" }}>
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                    </svg>
+                    <span style={{ color: "#A855F7", fontSize: 12, fontWeight: 800, letterSpacing: 1 }}>UPLOADING BEAT</span>
+                  </div>
+                  <BFProgressBar />
+                </div>
+              ) : "Upload Beat"}
             </button>
             {uploadMsg && <div style={{ marginTop: 10, color: uploadMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, textAlign: "center" }}>{uploadMsg}</div>}
           </div>
@@ -20866,6 +21204,15 @@ function SplashScreen({ onDone }) {
 }
 
 export default function BeatFinder() {
+  // ── Install the global pop-up block detector once ────────────────────────
+  // Runs on the very first user tap anywhere on the page (after this effect
+  // mounts). This guarantees the warning banner appears for users who
+  // resume into a "Licence Agreed" state from localStorage and would
+  // otherwise never trigger the per-button detection.
+  React.useEffect(function() {
+    installGlobalPopupProbe();
+  }, []);
+
   // ── In-app browser dismissal recovery ────────────────────────────────────
   // When a YouTube link opens Safari's in-app browser (the grey "Done" bar),
   // iOS fires the `pageshow` event when the user taps Done and returns.
