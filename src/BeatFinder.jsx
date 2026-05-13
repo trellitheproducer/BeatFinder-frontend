@@ -6638,12 +6638,13 @@ function ArtistTrackCard({ track, isOwner, onDeleted, onViewProfile }) {
 // CONTENT TABS — shown on every public profile (Beats / Tracks / Music / Videos)
 // =============================================================================
 // ── Compact beat card for two-column profile layout ───────────────────────────
-function CompactBeatCard({ beat }) {
+function CompactBeatCard({ beat, currentUser }) {
   var isFreePrice = function(p) { return !p || p === "free" || p === "£0" || p === "0" || p === "£0.00" || p === "0.00"; };
   var isFree  = isFreePrice(beat.price);
   var accent  = isFree ? "#C026D3" : "#F59E0B";
   var [previewing, setPreviewing] = React.useState(false);
   var [previewTime, setPreviewTime] = React.useState(0);
+  var [buyLoading, setBuyLoading] = React.useState(false);
   var audioRef  = React.useRef(null);
   var timerRef  = React.useRef(null);
   var seekedRef = React.useRef(false);
@@ -6744,13 +6745,32 @@ function CompactBeatCard({ beat }) {
             : <svg width="8" height="8" viewBox="0 0 24 24" fill={accent}><polygon points="5,3 19,12 5,21"/></svg>
           }
         </button>
-        <div style={{ flex: 1 }}>
-          {isFree
-            ? <div style={{ color: "#C026D3", fontSize: 9, fontWeight: 800 }}>FREE</div>
-            : <div style={{ color: "#F59E0B", fontSize: 10, fontWeight: 800 }}>{beat.price}</div>
-          }
+        <div style={{ flex: 1, minWidth: 0 }}>
           {previewing && <div style={{ color: "#555", fontSize: 8 }}>{Math.floor(previewTime)}s / 45s</div>}
         </div>
+        {/* Action button */}
+        {isFree ? (
+          <DownloadButton url={beat.url} title={beat.title} beatId={beat.id}
+            style={{ background: "transparent", border: "1.5px solid #C026D3", borderRadius: 20, padding: "5px 10px", color: "#C026D3", fontSize: 9, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/></svg>
+            FREE
+          </DownloadButton>
+        ) : (
+          <button onClick={async function() {
+            if (!currentUser) return;
+            setBuyLoading(true);
+            try {
+              var r = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
+              window.location.href = r.checkout_url;
+            } catch(e) { setBuyLoading(false); }
+          }} disabled={buyLoading} style={{
+            background: "transparent", border: "1.5px solid #F59E0B", borderRadius: 20,
+            padding: "5px 10px", color: "#F59E0B", fontSize: 9, fontWeight: 800,
+            cursor: buyLoading ? "not-allowed" : "pointer", flexShrink: 0,
+          }}>
+            {buyLoading ? "..." : "BUY " + beat.price}
+          </button>
+        )}
       </div>
       {previewing && beat.url && (
         <audio ref={audioRef} src={beat.url + ((beat.preview_start||0) > 0 ? "#t=" + (beat.preview_start||0) : "")} autoPlay data-start-time={String(beat.preview_start || 0)}
@@ -6822,7 +6842,7 @@ function BeatsTabContent({ profile, currentUser, onViewProfile }) {
             <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 11 }}>FREE</div>
             <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "1px 6px", fontSize: 9, color: "#C026D3", fontWeight: 700 }}>{freeBeats.length}</div>
           </div>
-          {freeBeats.map(function(b) { return <CompactBeatCard key={b.id} beat={b} />; })}
+          {freeBeats.map(function(b) { return <CompactBeatCard key={b.id} beat={b} currentUser={currentUser} />; })}
         </div>
         <div style={{ width: 1, background: "rgba(255,255,255,0.05)", flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -6831,7 +6851,7 @@ function BeatsTabContent({ profile, currentUser, onViewProfile }) {
             <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 11 }}>LICENSED</div>
             <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "1px 6px", fontSize: 9, color: "#F59E0B", fontWeight: 700 }}>{licensedBeats.length}</div>
           </div>
-          {licensedBeats.map(function(b) { return <CompactBeatCard key={b.id} beat={b} />; })}
+          {licensedBeats.map(function(b) { return <CompactBeatCard key={b.id} beat={b} currentUser={currentUser} />; })}
         </div>
       </div>
     </div>
