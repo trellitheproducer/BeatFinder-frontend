@@ -19437,9 +19437,9 @@ export default function BeatFinder() {
 
   // Handle URL routing — reset_token and /u/:username public profiles
   const resetToken = new URLSearchParams(window.location.search).get("reset_token");
-  // /u/username — open a public profile directly from a shared link
+  // /u/username or /profile/username — open a public profile directly from a shared link
   const urlUsername = (function() {
-    const m = window.location.pathname.match(/^\/u\/([^/]+)/);
+    const m = window.location.pathname.match(/^\/(?:u|profile)\/([^/]+)/);
     return m ? decodeURIComponent(m[1]) : null;
   })();
 
