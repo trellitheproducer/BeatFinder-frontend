@@ -5,6 +5,7 @@ import ReactDOM from "react-dom";
 // PREMIUM LOADER COMPONENT
 // =============================================================================
 const LOADER_STYLE = `
+  html, body { background: #0a0a0a; }
   @media screen and (orientation: landscape) {
     html, body { overflow: hidden; }
     #bf-portrait-lock {
@@ -21864,9 +21865,6 @@ export default function BeatFinder() {
         if (!appEl) return true;
         var root = document.getElementById("root") || appEl;
         if (root && root.children.length === 0) return true;
-        // Detect a white/transparent body background which signals dead React tree
-        var bg = window.getComputedStyle(document.body).backgroundColor;
-        if (bg === "rgb(255, 255, 255)" || bg === "rgba(0, 0, 0, 0)") return true;
         // Check if the app element has zero rendered area
         var rect = appEl.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return true;
@@ -22320,7 +22318,7 @@ export default function BeatFinder() {
   // Public profile URL — /u/:username — accessible without login
   if (urlUsername) {
     return (
-      <div data-bf-app="1" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", height: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+      <div data-bf-app="1" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
         <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
         <DownloadToast />
         <PopupBlockedModal />
