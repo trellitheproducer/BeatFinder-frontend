@@ -5978,7 +5978,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   var [previewTime, setPreviewTime] = React.useState(0);
   var [buyLoading,  setBuyLoading]  = React.useState(false);
   var [buyErr,      setBuyErr]      = React.useState("");
-  // Use global play count store — syncs across all cards showing this beat
+  var [deleted,     setDeleted]     = React.useState(false);
   var playCount = usePlayCount(beat.id, beat.playCount);
   var audioRef  = React.useRef(null);
   var timerRef  = React.useRef(null);
