@@ -2337,6 +2337,32 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
             userSelect: "none",
           }}
         />
+        {/* Touch blocker — "More videos" overlay strip that appears when paused.
+            Covers the horizontal band where YouTube shows suggested thumbnails
+            and side-arrow nav buttons, while leaving the very center clear so
+            the play/pause tap still works. */}
+        <div style={{
+          position: "absolute", top: "30%", left: 0,
+          width: "30%", height: "40%",
+          zIndex: 20,
+        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
+        <div style={{
+          position: "absolute", top: "30%", right: 0,
+          width: "30%", height: "40%",
+          zIndex: 20,
+        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
+        {/* Touch blocker — bottom-right corner: YouTube logo / "Watch on YouTube" link */}
+        <div style={{
+          position: "absolute", bottom: 0, right: 0,
+          width: "30%", height: 40,
+          zIndex: 20,
+        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
+        {/* Touch blocker — bottom-left corner: share/save buttons that appear on hover */}
+        <div style={{
+          position: "absolute", bottom: 0, left: 0,
+          width: "15%", height: 40,
+          zIndex: 20,
+        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
       </div>
       <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
         <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4, lineHeight: 1.4 }}>
