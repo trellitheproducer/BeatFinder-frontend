@@ -10288,6 +10288,8 @@ function MyUploadsSection({ user }) {
   const [editTitle, setEditTitle] = useState("");
   const [editGenre, setEditGenre] = useState("");
   const [editPrice, setEditPrice] = useState("");
+  const [editPremiumPrice, setEditPremiumPrice] = useState("");
+  const [editPremiumSold,  setEditPremiumSold]  = useState(false);
   const [editDesc,  setEditDesc]  = useState("");
   const [editBpm,   setEditBpm]   = useState("");
   const [editKey,   setEditKey]   = useState("");
@@ -10309,6 +10311,8 @@ function MyUploadsSection({ user }) {
     setEditTitle(beat.title || "");
     setEditGenre(beat.genre || "");
     setEditPrice(beat.price || "");
+    setEditPremiumPrice(beat.premium_lease_price ? String(beat.premium_lease_price) : "");
+    setEditPremiumSold(!!beat.premium_sold);
     setEditDesc(beat.description || "");
     setEditBpm(beat.bpm ? String(beat.bpm) : "");
     setEditKey(beat.key || "");
@@ -10320,28 +10324,54 @@ function MyUploadsSection({ user }) {
     setSaving(true);
     setMsg("");
     try {
-      await apiFetch("/api/producer/beats/" + editId + "/update", {
-        method: "POST",
-        body: JSON.stringify({
-          title:         editTitle,
-          genre:         editGenre,
-          price:         editPrice,
-          description:   editDesc,
-          bpm:           editBpm ? parseInt(editBpm) : 0,
-          key:           editKey,
-          preview_start: editPreviewStart,
-        }),
-      });
-      setMsg("Updated!");
-      // Broadcast to all beat card lists so they update live without refresh
-      dispatchBeatUpdated(editId, {
+      // Normalise price: if user chose FREE, clear premium too
+      var priceVal = (editPrice || "").trim();
+      if (priceVal === "0" || priceVal === "£0" || priceVal === "") priceVal = "free";
+      var isPaid = (priceVal !== "free");
+
+      // Build the request body. We always send basic_lease_price.
+      // Premium is included only when the producer set a value AND
+      // it hasn't already been sold (server rejects price change if sold).
+      var body = {
         title:         editTitle,
         genre:         editGenre,
-        price:         editPrice,
+        price:         priceVal,
         description:   editDesc,
         bpm:           editBpm ? parseInt(editBpm) : 0,
         key:           editKey,
         preview_start: editPreviewStart,
+        basic_lease_price: isPaid ? 50 : 0,
+      };
+
+      // Only send premium price changes when allowed. If sold, the server
+      // returns 409 — so we just skip the field entirely to avoid errors.
+      if (isPaid && !editPremiumSold) {
+        var premiumNum = parseInt(editPremiumPrice, 10);
+        if (editPremiumPrice && (isNaN(premiumNum) || premiumNum < 100 || premiumNum > 500)) {
+          setMsg("Error: Premium lease price must be between £100 and £500 (or leave blank for Basic only)");
+          setSaving(false);
+          return;
+        }
+        // Send 0 to clear, otherwise the chosen value
+        body.premium_lease_price = editPremiumPrice ? premiumNum : 0;
+      }
+
+      await apiFetch("/api/producer/beats/" + editId + "/update", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      setMsg("Updated!");
+      // Broadcast to all beat card lists so they update live without refresh
+      dispatchBeatUpdated(editId, {
+        title:               editTitle,
+        genre:               editGenre,
+        price:               priceVal,
+        description:         editDesc,
+        bpm:                 editBpm ? parseInt(editBpm) : 0,
+        key:                 editKey,
+        preview_start:       editPreviewStart,
+        basic_lease_price:   isPaid ? 50 : 0,
+        premium_lease_price: (isPaid && !editPremiumSold && editPremiumPrice) ? parseInt(editPremiumPrice, 10) : 0,
       });
       setEditId(null);
       load();
@@ -10395,12 +10425,103 @@ function MyUploadsSection({ user }) {
                 placeholder="Genre"
                 style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
               />
-              <input
-                value={editPrice}
-                onChange={e => setEditPrice(e.target.value)}
-                placeholder="Price e.g. free or £50"
-                style={{ width: "100%", background: "#1a1a1a", border: "1px solid #333", borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
-              />
+
+              {/* PRICING — FREE/PAID toggle, mirrors upload form */}
+              <div style={{ color: "#666", fontSize: 11, fontWeight: 700, marginBottom: 6, letterSpacing: 0.5 }}>PRICING</div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <button type="button"
+                  disabled={editPremiumSold}
+                  onClick={function() {
+                    if (editPremiumSold) return;
+                    setEditPrice("free");
+                    setEditPremiumPrice("");
+                  }}
+                  style={{
+                    flex: 1, padding: "10px", borderRadius: 10,
+                    border: (editPrice === "free" ? "2px solid #C026D3" : "1px solid #333"),
+                    background: (editPrice === "free" ? "rgba(192,38,211,0.15)" : "transparent"),
+                    color: (editPrice === "free" ? "#C026D3" : "#888"),
+                    fontWeight: 800, fontSize: 12,
+                    cursor: editPremiumSold ? "not-allowed" : "pointer",
+                    opacity: editPremiumSold ? 0.5 : 1,
+                  }}>
+                  FREE Beat
+                </button>
+                <button type="button" onClick={function() {
+                  if (editPrice === "free" || !editPrice) setEditPrice("£50");
+                }}
+                  style={{
+                    flex: 1, padding: "10px", borderRadius: 10,
+                    border: (editPrice && editPrice !== "free" ? "2px solid #F59E0B" : "1px solid #333"),
+                    background: (editPrice && editPrice !== "free" ? "rgba(245,158,11,0.15)" : "transparent"),
+                    color: (editPrice && editPrice !== "free" ? "#F59E0B" : "#888"),
+                    fontWeight: 800, fontSize: 12, cursor: "pointer",
+                  }}>
+                  PAID Lease
+                </button>
+              </div>
+
+              {editPrice && editPrice !== "free" && (
+                <div style={{ background: "#0a0a0a", border: "1px solid #1f1f1f", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                  <div style={{ color: "#aaa", fontSize: 11, fontWeight: 700, marginBottom: 8, letterSpacing: 0.5 }}>
+                    LEASE TIERS — buyers pick one
+                  </div>
+                  {/* Basic — fixed £50 */}
+                  <div style={{ background: "#0d0d0d", border: "1px solid #222", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12 }}>Basic Lease</div>
+                      <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 14 }}>£50</div>
+                    </div>
+                    <div style={{ color: "#666", fontSize: 10, marginTop: 4, lineHeight: 1.4 }}>
+                      Non-exclusive · 75% royalties · 100k stream cap · Fixed at £50
+                    </div>
+                  </div>
+                  {/* Premium — producer-set £100-£500 */}
+                  <div style={{ background: "#0d0d0d", border: "1px solid #222", borderRadius: 8, padding: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <div style={{ color: "#A855F7", fontWeight: 800, fontSize: 12 }}>
+                        Premium Lease (Exclusive){editPremiumSold ? " — SOLD" : ""}
+                      </div>
+                    </div>
+                    {editPremiumSold ? (
+                      <div style={{ color: "#888", fontSize: 11, lineHeight: 1.5 }}>
+                        <strong style={{ color: "#A855F7" }}>£{editPremiumPrice}</strong> — Locked. The premium exclusive has already been sold; price cannot be changed.
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ color: "#A855F7", fontSize: 14, fontWeight: 800 }}>£</span>
+                          <input
+                            type="number"
+                            min={100} max={500}
+                            value={editPremiumPrice}
+                            onChange={function(e) { setEditPremiumPrice(e.target.value); }}
+                            placeholder="100 – 500"
+                            style={{
+                              flex: 1, background: "#000", border: "1px solid #333",
+                              borderRadius: 6, padding: "6px 10px", color: "white",
+                              fontSize: 13, outline: "none",
+                            }}
+                          />
+                          {editPremiumPrice && (
+                            <button type="button" onClick={function() { setEditPremiumPrice(""); }}
+                              style={{
+                                background: "transparent", border: "1px solid #333",
+                                borderRadius: 6, padding: "5px 9px", color: "#888",
+                                fontSize: 10, fontWeight: 700, cursor: "pointer",
+                              }}>
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                        <div style={{ color: "#666", fontSize: 10, marginTop: 6, lineHeight: 1.4 }}>
+                          EXCLUSIVE · 50% royalties · Unlimited streams · Beat retired on sale · Leave blank to offer Basic only
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
               {/* BPM + Key row */}
               <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                 <div style={{ flex: 1 }}>
