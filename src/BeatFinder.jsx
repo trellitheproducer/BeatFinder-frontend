@@ -21970,7 +21970,12 @@ export default function BeatFinder() {
   // Uses sessionStorage so it resets every time the tab is opened
   const [welcomeDone, setWelcomeDone] = useState(function() {
     // If user is already logged in, skip the welcome gate
-    try { return !!localStorage.getItem("bf_token"); } catch(e) { return false; }
+    try { if (localStorage.getItem("bf_token")) return true; } catch(e) {}
+    // If the page was opened on a public profile URL, skip the welcome gate
+    // so the visitor sees the profile straight away (and the profile is
+    // rendered inside the main app tree so scrolling works in Safari).
+    if (urlUsername) return true;
+    return false;
   });
   // showAuthWall: true when user tapped "Sign In" — shows auth form full-screen, no app
   const [showAuthWall,   setShowAuthWall]   = useState(false);
@@ -22264,7 +22269,13 @@ export default function BeatFinder() {
   const [lyricsBeat,    setLyricsBeat]    = useState(null);
   const [editingLyric,  setEditingLyric]  = useState(null);
   const [editingIndex,  setEditingIndex]  = useState(null);
-  const [publicProfile, setPublicProfile] = useState(null);
+  // If the page was opened via /u/:username or /profile/:username, boot
+  // straight into that public profile rendered inside the main app tree
+  // (same code path as in-app navigation). This avoids the broken early-
+  // return that didn't allow scrolling in Safari (non-PWA).
+  const [publicProfile, setPublicProfile] = useState(function() {
+    return urlUsername || null;
+  });
   const [searchProfile, setSearchProfile] = useState(null);
   const [showMessages,       setShowMessages]       = useState(false);
   const [showPost,           setShowPost]           = useState(false);
@@ -22314,24 +22325,15 @@ export default function BeatFinder() {
   const isArtistPro = !!(user?.subscriptionActive && (user?.isPro || user?.isArtistPro || user?.plan === "artist" || user?.plan === "producer"));
 
 
-  // Public profile URL — /u/:username — accessible without login
-  if (urlUsername) {
-    return (
-      <div data-bf-app="1" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
-        <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
-        <DownloadToast />
-        <PopupBlockedModal />
-        <PublicProfileScreen
-          username={urlUsername}
-          onBack={() => { window.history.replaceState({}, "", "/"); window.location.reload(); }}
-          onPlay={() => {}}
-          savedIds={new Set()}
-          onSave={() => {}}
-          currentUser={user}
-        />
-      </div>
-    );
-  }
+  // Public profile URL — handled by setting publicProfile state from urlUsername
+  // (see useState initializer above). We render the profile INSIDE the main app
+  // tree which provides the proper Safari scroll context. We also clean the URL
+  // so a refresh boots directly to the public profile via state, not URL routing.
+  React.useEffect(function() {
+    if (urlUsername) {
+      try { window.history.replaceState({}, "", "/"); } catch(e) {}
+    }
+  }, []);
 
   if (resetToken) {
     return (
