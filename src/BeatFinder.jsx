@@ -3903,9 +3903,8 @@ function ContractViewer({ html, onClose, filename }) {
   function handleSave() {
     var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     if (isIOS) {
-      // On iOS, blob: URL clicks navigate the PWA away and reset to home.
-      // Use a data URI opened in a new tab so the user gets Share > Save to Files
-      // without the app losing its state.
+      // On iOS blob: URL clicks navigate the PWA away and reset to home.
+      // Use a data URI in a new tab so user gets Share > Save to Files without losing app state.
       try { window.open("data:text/html;charset=utf-8," + encodeURIComponent(html), "_blank"); } catch(e) {}
       return;
     }
@@ -3921,97 +3920,69 @@ function ContractViewer({ html, onClose, filename }) {
       setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
     } catch(e) {
       var blob2 = new Blob([html], { type: "text/html" });
-      var url2  = URL.createObjectURL(blob2);
-      window.open(url2, "_blank");
+      window.open(URL.createObjectURL(blob2), "_blank");
     }
   }
 
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 999999,
-      background: "#fff", display: "flex", flexDirection: "column",
-    }}>
-      {/* Header bar */}
+    <div style={{ position: "fixed", inset: 0, zIndex: 999999, background: "#fff", display: "flex", flexDirection: "column" }}>
+      {/* Header */}
       <div style={{
         background: "#0a0a0a",
-        padding: "env(safe-area-inset-top, 14px) 16px 14px",
         paddingTop: "max(env(safe-area-inset-top), 14px)",
+        padding: "14px 16px",
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        flexShrink: 0, gap: 12,
-        borderBottom: "1px solid #1a1a1a",
+        flexShrink: 0, gap: 12, borderBottom: "1px solid #1a1a1a",
       }}>
-        {/* X close button */}
-        <button
-          onClick={onClose}
-          style={{
-            background: "rgba(255,255,255,0.08)", border: "1px solid #333",
-            borderRadius: "50%", color: "#fff", cursor: "pointer",
-            width: 36, height: 36, display: "flex", alignItems: "center",
-            justifyContent: "center", flexShrink: 0, fontSize: 18, lineHeight: 1,
-          }}
-        >
-          ✕
-        </button>
-
+        <button onClick={onClose} style={{
+          background: "rgba(255,255,255,0.08)", border: "1px solid #333",
+          borderRadius: "50%", color: "#fff", cursor: "pointer",
+          width: 36, height: 36, display: "flex", alignItems: "center",
+          justifyContent: "center", flexShrink: 0, fontSize: 18, lineHeight: 1,
+        }}>✕</button>
         <div style={{ color: "white", fontWeight: 800, fontSize: 15, letterSpacing: 0.5, flex: 1, textAlign: "center" }}>
           Licence Contract
         </div>
-
-        {/* Save to Device button */}
-        <button
-          onClick={handleSave}
-          style={{
-            background: "linear-gradient(135deg,#C026D3,#9333EA)",
-            border: "none", borderRadius: 10, color: "white", cursor: "pointer",
-            padding: "8px 14px", fontWeight: 800, fontSize: 12,
-            display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
-            letterSpacing: 0.3,
-          }}
-        >
+        <button onClick={handleSave} style={{
+          background: "linear-gradient(135deg,#C026D3,#9333EA)",
+          border: "none", borderRadius: 10, color: "white", cursor: "pointer",
+          padding: "8px 14px", fontWeight: 800, fontSize: 12,
+          display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
+        }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
             <path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/>
           </svg>
           Save
         </button>
       </div>
-
-      {/* Scrollable contract content */}
+      {/* Contract content */}
       <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}
         dangerouslySetInnerHTML={{ __html: html }}
       />
-
-      {/* Bottom action bar */}
+      {/* Bottom bar */}
       <div style={{
         background: "#0a0a0a", borderTop: "1px solid #1a1a1a",
         padding: "12px 16px",
         paddingBottom: "max(env(safe-area-inset-bottom), 16px)",
         display: "flex", gap: 10, flexShrink: 0,
       }}>
-        <button
-          onClick={handleSave}
-          style={{
-            flex: 1, borderRadius: 14, padding: "13px",
-            background: "linear-gradient(135deg,#C026D3,#9333EA)",
-            border: "none", color: "white", fontWeight: 800, fontSize: 14,
-            cursor: "pointer", display: "flex", alignItems: "center",
-            justifyContent: "center", gap: 8,
-          }}
-        >
+        <button onClick={handleSave} style={{
+          flex: 1, borderRadius: 14, padding: "13px",
+          background: "linear-gradient(135deg,#C026D3,#9333EA)",
+          border: "none", color: "white", fontWeight: 800, fontSize: 14,
+          cursor: "pointer", display: "flex", alignItems: "center",
+          justifyContent: "center", gap: 8,
+        }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
             <path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/>
           </svg>
           Save Contract to Device
         </button>
-        <button
-          onClick={onClose}
-          style={{
-            borderRadius: 14, padding: "13px 18px",
-            background: "transparent", border: "1px solid #333",
-            color: "#888", fontWeight: 700, fontSize: 13, cursor: "pointer",
-          }}
-        >
-          Close
-        </button>
+        <button onClick={onClose} style={{
+          borderRadius: 14, padding: "13px 18px",
+          background: "transparent", border: "1px solid #333",
+          color: "#888", fontWeight: 700, fontSize: 13, cursor: "pointer",
+        }}>Close</button>
       </div>
     </div>
   );
@@ -4053,12 +4024,10 @@ function generateFreeLeaseContractHtml(beat, user) {
 }
 
 function generateFreeLeaseContract(beat, user) {
-  // iOS Safari navigates away from the page when clicking a blob: URL,
-  // which resets the app back to home. We detect iOS and skip the auto-download --
-  // the ContractViewer Save button handles saving on iOS instead.
+  // iOS Safari navigates the PWA away when clicking blob: URLs, resetting the app.
+  // Skip auto-download on iOS — ContractViewer Save button handles it instead.
   var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   if (isIOS) return;
-
   var html = generateFreeLeaseContractHtml(beat, user);
   var beatTitle = beat.title || "Beat";
   var blob = new Blob([html], { type: "text/html" });
@@ -4253,11 +4222,10 @@ function generateLeaseContractHtml(lease) {
 }
 
 function generateLeaseContract(lease) {
-  // iOS Safari navigates away when clicking blob: URLs -- skip on iOS,
-  // ContractViewer Save button handles it instead.
+  // iOS Safari navigates the PWA away when clicking blob: URLs.
+  // Skip on iOS — ContractViewer Save button handles it instead.
   var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   if (isIOS) return;
-
   var html = generateLeaseContractHtml(lease);
   var beatTitle = lease.beat_title || "Beat";
   var leaseId = lease.id || ("BF-" + Date.now());
@@ -4273,18 +4241,14 @@ function generateLeaseContract(lease) {
 }
 
 function downloadMp3(url, title, beatId) {
-  // Always use the backend proxy when we have a beatId.
-  // The proxy sets Content-Disposition: attachment + CORS headers so iOS Safari
-  // shows the native download prompt instead of opening a blank media-player page.
+  // Always use the backend proxy when beatId is available.
+  // The proxy sets Content-Disposition: attachment so iOS Safari shows the
+  // native download prompt instead of opening a blank media-player page.
   var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
-  var downloadUrl;
-  if (beatId) {
-    downloadUrl = API_BASE + "/api/producer/beats/" + beatId + "/file";
-  } else if (url) {
-    downloadUrl = url.replace("/upload/", "/upload/fl_attachment/");
-  } else {
-    return;
-  }
+  var downloadUrl = beatId
+    ? API_BASE + "/api/producer/beats/" + beatId + "/file"
+    : (url ? url.replace("/upload/", "/upload/fl_attachment/") : null);
+  if (!downloadUrl) return;
   var a = document.createElement("a");
   a.href     = downloadUrl;
   a.download = filename;
@@ -4427,8 +4391,6 @@ function BeatCardShell({ beat, accentColor, children, onViewProfile, extraStats 
 function FreeBeatCTA({ beat, user }) {
   var [step, setStep] = React.useState("idle");
   var [showContract, setShowContract] = React.useState(false);
-  // Always use the backend proxy for downloads — it sets Content-Disposition: attachment
-  // so iOS Safari shows the native download dialog instead of a blank media page.
   var downloadUrl = beat.id
     ? API_BASE + "/api/producer/beats/" + beat.id + "/file"
     : (beat.url ? beat.url.replace("/upload/", "/upload/fl_attachment/") : "#");
