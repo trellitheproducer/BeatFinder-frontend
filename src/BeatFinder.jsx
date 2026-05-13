@@ -4138,7 +4138,7 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
                 })}
               </div>
               <span style={{ color: "#555", fontSize: 10, fontWeight: 700, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
-                {previewing ? progMins + ":" + progSecs + " / 0:30" : "0:30"}
+                {previewing ? progMins + ":" + progSecs + " / 0:45" : "0:45"}
               </span>
             </div>
             {audioEl}
@@ -6236,7 +6236,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
                 })}
               </div>
               <span style={{ color: "#555", fontSize: 10, fontWeight: 700, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
-                {previewing ? progMins + ":" + progSecs + " / 0:30" : "0:30"}
+                {previewing ? progMins + ":" + progSecs + " / 0:45" : "0:45"}
               </span>
             </div>
             {previewing && beat.url && (
