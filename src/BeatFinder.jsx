@@ -2337,30 +2337,13 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
             userSelect: "none",
           }}
         />
-        {/* Touch blocker — "More videos" overlay strip that appears when paused.
-            Covers the horizontal band where YouTube shows suggested thumbnails
-            and side-arrow nav buttons, while leaving the very center clear so
-            the play/pause tap still works. */}
+        {/* Touch blocker — full-width bottom strip covering "More videos" label,
+            suggested-video thumbnail, share button, and YouTube logo. Anything
+            below the progress bar gets blocked so the user can only play/pause
+            via the center of the video. */}
         <div style={{
-          position: "absolute", top: "30%", left: 0,
-          width: "30%", height: "40%",
-          zIndex: 20,
-        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
-        <div style={{
-          position: "absolute", top: "30%", right: 0,
-          width: "30%", height: "40%",
-          zIndex: 20,
-        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
-        {/* Touch blocker — bottom-right corner: YouTube logo / "Watch on YouTube" link */}
-        <div style={{
-          position: "absolute", bottom: 0, right: 0,
-          width: "30%", height: 40,
-          zIndex: 20,
-        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
-        {/* Touch blocker — bottom-left corner: share/save buttons that appear on hover */}
-        <div style={{
-          position: "absolute", bottom: 0, left: 0,
-          width: "15%", height: 40,
+          position: "absolute", bottom: 0, left: 0, right: 0,
+          height: 60,
           zIndex: 20,
         }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
       </div>
