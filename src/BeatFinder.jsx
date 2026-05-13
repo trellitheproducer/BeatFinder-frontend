@@ -8452,6 +8452,17 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
           beat_id: beat.id,
           ts: Date.now(),
         }));
+        // ALSO set a separate "in flight" flag with just the beat id and a
+        // timestamp. This is used by the global visibilitychange handler in
+        // BeatFinder() to detect when the user taps the system "Done" button
+        // on the Stripe popup (which closes the popup without firing the
+        // cancel_url redirect). When they return to the original tab with
+        // this flag still set and no success/cancel params, we reopen the
+        // sheet they were viewing.
+        sessionStorage.setItem("bf_payment_in_flight", JSON.stringify({
+          beat_id: beat.id,
+          ts: Date.now(),
+        }));
       } catch (e) {}
       window.location.href = r.checkout_url;
     } catch (e) {
@@ -23085,6 +23096,8 @@ export default function BeatFinder() {
   // which would otherwise dump them back to the default home tab.
   React.useEffect(function() {
     if (!leaseCancelled) return;
+    // Clear in-flight flag — visibility handler shouldn't double-fire.
+    try { sessionStorage.removeItem("bf_payment_in_flight"); } catch(e) {}
     var savedPath = null;
     var savedBeatId = null;
     try {
@@ -23121,11 +23134,59 @@ export default function BeatFinder() {
     }
   }, []);
 
+  // When Stripe opens in an iOS Safari in-app popup (SFAuthenticationSession /
+  // Safari View Controller), tapping the system "Done" button closes the popup
+  // WITHOUT navigating cancel_url. The original tab simply becomes visible
+  // again with no purchase completed. This handler detects that case and
+  // reopens the preview sheet the user had open before tapping Buy.
+  //
+  // Flow:
+  //   1. Buy tapped → bf_payment_in_flight written to sessionStorage with beat_id
+  //   2. Window blurs (tab hidden) as Stripe opens
+  //   3. If payment succeeds → success_url loads → bf_payment_in_flight cleared
+  //      and the "lease=success" param triggers the success modal instead.
+  //   4. If user taps "Done" → tab becomes visible again with no URL change →
+  //      detect flag still set → dispatch bf-reopen-sheet for that beat id.
+  React.useEffect(function() {
+    function onVisibility() {
+      if (document.visibilityState !== "visible") return;
+      // Don't fire on success/cancel returns — those handlers run instead.
+      var qs = window.location.search || "";
+      if (qs.indexOf("lease=success") !== -1 || qs.indexOf("lease=cancelled") !== -1) return;
+      var beatId = null;
+      try {
+        var raw = sessionStorage.getItem("bf_payment_in_flight");
+        if (raw) {
+          var parsed = JSON.parse(raw);
+          // Ignore stale flags older than 30 minutes — user probably
+          // closed and reopened the app entirely.
+          if (parsed && parsed.beat_id && parsed.ts && (Date.now() - parsed.ts) < 30 * 60 * 1000) {
+            beatId = parsed.beat_id;
+          }
+        }
+        // Clear so we don't double-fire on subsequent focus events.
+        sessionStorage.removeItem("bf_payment_in_flight");
+      } catch(e) {}
+      if (beatId) {
+        // Small delay to give the page time to settle visibility transitions
+        setTimeout(function() {
+          try {
+            window.dispatchEvent(new CustomEvent("bf-reopen-sheet", { detail: { beat_id: beatId } }));
+          } catch(e) {}
+        }, 200);
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return function() { document.removeEventListener("visibilitychange", onVisibility); };
+  }, []);
+
   // When returning from Stripe, fetch the purchased beat details and restore page
   React.useEffect(function() {
     if (!leaseSuccess || !leaseBeatId || !user) return;
     // Clear the URL params without reload
     window.history.replaceState({}, "", "/");
+    // Clear the in-flight flag so the visibility detector doesn't fire later.
+    try { sessionStorage.removeItem("bf_payment_in_flight"); } catch(e) {}
     // Restore the tab — default to members/exclusive area where beats are purchased
     try {
       var saved = JSON.parse(sessionStorage.getItem("bf_return_tab") || "{}");
