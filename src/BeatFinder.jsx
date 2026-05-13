@@ -5210,6 +5210,8 @@ function FreeMemberBeatCard({ beat, onViewProfile }) {
   }
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
 
+  var pct = previewing ? (previewTime / 45) * 100 : 0;
+
   return (
     <NewBeatCardShell
       beat={beat}
