@@ -21974,7 +21974,9 @@ export default function BeatFinder() {
     // If the page was opened on a public profile URL, skip the welcome gate
     // so the visitor sees the profile straight away (and the profile is
     // rendered inside the main app tree so scrolling works in Safari).
-    if (urlUsername) return true;
+    try {
+      if (/^\/(?:u|profile)\/[^/]+/.test(window.location.pathname)) return true;
+    } catch(e) {}
     return false;
   });
   // showAuthWall: true when user tapped "Sign In" — shows auth form full-screen, no app
