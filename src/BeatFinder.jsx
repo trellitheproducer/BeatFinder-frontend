@@ -4669,6 +4669,134 @@ function PopupBlockedModal() {
   return ReactDOM.createPortal(modal, document.body);
 }
 
+// ── Proactive pop-up block detection ──────────────────────────────
+// Called from inside a tap handler (when the user opens a contract sheet),
+// because iOS only permits window.open from a user gesture. Tests by opening
+// about:blank in a hidden popup and immediately closing it. If the browser
+// returned null / closed / undefined, pop-ups are blocked.
+//
+// Result is cached in sessionStorage so we don't re-test on every contract
+// open — once they enable popups they're trusted for the rest of the session.
+var __popupWarnListeners = [];
+function __setPopupWarn(state) {
+  __popupWarnListeners.forEach(function(fn) { try { fn(state); } catch (e) {} });
+}
+function usePopupWarn() {
+  var [state, setState] = React.useState(function() {
+    try { return sessionStorage.getItem("bf_popup_warn") === "1"; } catch (e) { return false; }
+  });
+  React.useEffect(function() {
+    __popupWarnListeners.push(setState);
+    return function() {
+      __popupWarnListeners = __popupWarnListeners.filter(function(fn) { return fn !== setState; });
+    };
+  }, []);
+  return [state, setState];
+}
+
+function detectPopupBlock() {
+  // Skip the test if the user has dismissed the warning this session
+  try {
+    if (sessionStorage.getItem("bf_popup_dismissed") === "1") return false;
+  } catch (e) {}
+  try {
+    var probe = window.open("about:blank", "_blank", "width=1,height=1,left=-9999,top=-9999");
+    var blocked = !probe || probe.closed || typeof probe.closed === "undefined";
+    if (probe && !probe.closed) {
+      try { probe.close(); } catch (e) {}
+    }
+    if (blocked) {
+      try { sessionStorage.setItem("bf_popup_warn", "1"); } catch (e) {}
+      __setPopupWarn(true);
+      return true;
+    }
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
+// ── Inline pop-up warning banner ──────────────────────────────────
+// Renders inside the contract sheet/modal. Compact, friendly, dismissible.
+// Doesn't block the contract — just lets the user know they'll need to
+// allow pop-ups before the MP3 download will work.
+function PopupWarningBanner() {
+  var [warn, setWarn] = usePopupWarn();
+  var [expanded, setExpanded] = React.useState(false);
+  if (!warn) return null;
+
+  function dismiss(e) {
+    e.stopPropagation();
+    try { sessionStorage.setItem("bf_popup_dismissed", "1"); } catch (e2) {}
+    setWarn(false);
+    __setPopupWarn(false);
+  }
+
+  return (
+    <div
+      onClick={function() { setExpanded(function(x) { return !x; }); }}
+      style={{
+        background: "linear-gradient(135deg, rgba(245,158,11,0.18), rgba(217,119,6,0.08))",
+        border: "1px solid rgba(245,158,11,0.4)",
+        borderRadius: 12,
+        padding: "10px 12px",
+        marginBottom: 12,
+        cursor: "pointer",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" style={{ flexShrink: 0 }}>
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="13"/>
+          <circle cx="12" cy="16.5" r="0.5" fill="#F59E0B"/>
+        </svg>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, letterSpacing: 0.2 }}>
+            Allow pop-ups for downloads
+          </div>
+          <div style={{ color: "#aaa", fontSize: 11, marginTop: 2 }}>
+            {expanded ? "Tap for full steps" : "Tap to see how"}
+          </div>
+        </div>
+        <button
+          onClick={dismiss}
+          style={{
+            width: 24, height: 24, borderRadius: "50%",
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid #333", color: "#888",
+            cursor: "pointer", fontSize: 12, lineHeight: 1,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >✕</button>
+      </div>
+
+      {expanded && (
+        <div style={{
+          marginTop: 10,
+          padding: "10px 12px",
+          background: "rgba(0,0,0,0.35)",
+          borderRadius: 10,
+          color: "#ccc", fontSize: 11.5, lineHeight: 1.6,
+        }}>
+          <div style={{ color: "#F59E0B", fontWeight: 700, fontSize: 10, letterSpacing: 1, marginBottom: 6 }}>
+            HOW TO FIX
+          </div>
+          <ol style={{ margin: 0, paddingLeft: 16 }}>
+            <li>Open iPhone <b style={{ color: "white" }}>Settings</b></li>
+            <li>Scroll down → tap <b style={{ color: "white" }}>Apps → Safari</b></li>
+            <li>Turn <b style={{ color: "white" }}>Block Pop-ups</b> off</li>
+            <li>Return to BeatFinder — downloads will work</li>
+          </ol>
+          <div style={{ marginTop: 8, color: "#666", fontSize: 10 }}>
+            Pop-ups are only used to open download prompts safely.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Smart MP3 download ────────────────────────────────────────────
 // Always fetches via blob first (so we control the result, can show progress,
 // and surface real errors). After download:
@@ -4717,20 +4845,55 @@ async function downloadBeatMp3(beat) {
     // STRATEGY 1 — iOS PWA: Web Share API with a real File. iOS will show
     // the system share sheet with "Save to Files" as a primary action,
     // plus AirDrop, Messages, Mail, etc.
+    //
+    // IMPORTANT: once we attempt navigator.share inside the PWA we must NOT
+    // fall through to Strategy 2 — Strategy 2 calls window.open(blobUrl,
+    // "_blank") which inside a standalone PWA navigates the CURRENT tab to
+    // the blob (the file viewer). That leaves the user stuck on a page that
+    // isn't part of the app. So we treat the PWA share path as terminal:
+    // success, cancel, or hard error — all three return without falling
+    // through to Strategy 2.
     if (isStandalonePWA && navigator.canShare && typeof File === "function") {
+      var file;
       try {
-        var file = new File([typedBlob], filename, { type: "audio/mpeg" });
-        if (navigator.canShare({ files: [file] })) {
+        file = new File([typedBlob], filename, { type: "audio/mpeg" });
+      } catch (e) { file = null; }
+
+      if (file && navigator.canShare({ files: [file] })) {
+        __setDownloadToast({ status: "downloading", title: "Opening share sheet…" });
+        try {
           await navigator.share({ files: [file], title: rawTitle });
+          // Share completed (user picked a destination)
           __setDownloadToast({ status: "success" });
           setTimeout(function() { __setDownloadToast(null); }, 1800);
           setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 5000);
-          return;
+        } catch (e) {
+          // navigator.share throws on cancel (AbortError) AND on internal
+          // failures (NotAllowedError, etc). Either way, we DO NOT navigate
+          // away. We just clear the toast and revoke the blob URL.
+          var isCancel = e && (e.name === "AbortError" ||
+                               String(e.message || "").toLowerCase().indexOf("abort") !== -1 ||
+                               String(e.message || "").toLowerCase().indexOf("cancel") !== -1);
+          if (isCancel) {
+            __setDownloadToast({
+              status: "error",
+              message: "Download cancelled — tap to try again",
+            });
+            setTimeout(function() { __setDownloadToast(null); }, 2500);
+          } else {
+            __setDownloadToast({
+              status: "error",
+              message: "Couldn't open share sheet — please try again",
+            });
+            setTimeout(function() { __setDownloadToast(null); }, 3500);
+          }
+          setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 1000);
         }
-      } catch (e) {
-        // User cancelled, or the platform refused — fall through to anchor flow.
-        // We keep going since cancellation isn't really an error.
+        return; // <-- terminal: do not fall through
       }
+      // If canShare returned false, we fall through to the anchor flow
+      // (Strategy 3) which is safe inside a PWA because it doesn't
+      // navigate the tab.
     }
 
     // STRATEGY 2 — iOS Safari (browser tab): open the blob in a NEW tab.
@@ -4761,19 +4924,36 @@ async function downloadBeatMp3(beat) {
       return;
     }
 
-    // STRATEGY 3 — Android / desktop: real <a download> click
-    var a = document.createElement("a");
-    a.href     = blobUrl;
-    a.download = filename;
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    __setDownloadToast({ status: "success" });
-    setTimeout(function() { __setDownloadToast(null); }, 1800);
-    setTimeout(function() {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    }, 1500);
+    // STRATEGY 3 — Android / desktop: real <a download> click.
+    // We DO NOT use this on iOS — Safari/WebKit ignores the `download`
+    // attribute and instead navigates to the blob URL, which on the
+    // standalone PWA strands the user on a file viewer page they can't
+    // close back into the app.
+    if (!isIOS) {
+      var a = document.createElement("a");
+      a.href     = blobUrl;
+      a.download = filename;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      __setDownloadToast({ status: "success" });
+      setTimeout(function() { __setDownloadToast(null); }, 1800);
+      setTimeout(function() {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+      }, 1500);
+      return;
+    }
+
+    // STRATEGY 4 — iOS PWA where Web Share didn't take the file.
+    // Last resort: tell the user we can't auto-save and they'll need to
+    // open the app in Safari for downloads. Crucially, do NOT navigate.
+    __setDownloadToast({
+      status: "error",
+      message: "Downloads need Safari — open BeatFinder in Safari to save",
+    });
+    setTimeout(function() { __setDownloadToast(null); }, 4000);
+    setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 1000);
   } catch (e) {
     __setDownloadToast({
       status: "error",
@@ -4978,6 +5158,7 @@ function FreeBeatCTA({ beat, user }) {
   if (step === "contract") {
     return (
       <div style={{ padding: "0 0 16px" }}>
+        <PopupWarningBanner />
         {/* Contract modal inline */}
         <div style={{ background: "#0d0d0d", border: "1px solid #222", borderRadius: 14, padding: 16, marginBottom: 12, maxHeight: 320, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
           <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, letterSpacing: 1, marginBottom: 12, textAlign: "center" }}>FREE BEAT LICENCE AGREEMENT</div>
@@ -5030,6 +5211,7 @@ function FreeBeatCTA({ beat, user }) {
             pdfDownloader={function() { return downloadFreeContractPdf(beat, user); }}
           />
         )}
+        <PopupWarningBanner />
         <div style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)", borderRadius: 14, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
           <div>
@@ -5065,7 +5247,7 @@ function FreeBeatCTA({ beat, user }) {
   // idle state
   return (
     <div style={{ padding: "0 0 16px" }}>
-      <button onClick={function() { setStep("contract"); }} style={{
+      <button onClick={function() { detectPopupBlock(); setStep("contract"); }} style={{
         width: "100%", borderRadius: 14, padding: "15px",
         background: "transparent", border: "2px solid #C026D3",
         color: "#C026D3", fontWeight: 800, fontSize: 14, cursor: "pointer",
@@ -7815,6 +7997,9 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
             }}>✕</button>
           </div>
 
+          {/* Pop-up block warning — only renders if blocked */}
+          <PopupWarningBanner />
+
           {/* STEP: preview / contract terms */}
           {step === "preview" && (
             <div>
@@ -8076,6 +8261,7 @@ function CompactBeatCard({ beat, currentUser }) {
         {isFree ? (
           <button onClick={function() {
             if (!currentUser) { alert("Sign up for a free or paid plan to download beats!"); return; }
+            detectPopupBlock();
             setSheetOpen(true);
           }} style={{
             background: "transparent", border: "1.5px solid " + (currentUser ? "#C026D3" : "#555"),
@@ -8094,6 +8280,7 @@ function CompactBeatCard({ beat, currentUser }) {
         ) : (
           <button onClick={function() {
             if (!currentUser) { alert("Sign up and purchase a plan to buy beat leases!"); return; }
+            detectPopupBlock();
             setSheetOpen(true);
           }} disabled={buyLoading} style={{
             background: "transparent", border: "1.5px solid " + (currentUser ? "#F59E0B" : "#555"),
