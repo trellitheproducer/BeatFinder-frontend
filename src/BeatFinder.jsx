@@ -4485,6 +4485,190 @@ function DownloadToast() {
   return ReactDOM.createPortal(toast, document.body);
 }
 
+// ── Popup-blocker explainer modal ──────────────────────────────────
+// Some users have Safari → Settings → "Block Pop-ups" enabled, which
+// silently kills the new-tab navigation we use for MP3 downloads.
+// When we detect this we show a friendly modal with two paths forward:
+// 1) Tap a button to retry the download in-place (within the same gesture),
+//    which often works since the click handler is still active.
+// 2) Step-by-step instructions for turning the setting off.
+var __popupBlockedModalListeners = [];
+function __setPopupBlockedModal(state) {
+  __popupBlockedModalListeners.forEach(function(fn) { try { fn(state); } catch (e) {} });
+}
+function usePopupBlockedModal() {
+  var [state, setState] = React.useState(null);
+  React.useEffect(function() {
+    __popupBlockedModalListeners.push(setState);
+    return function() {
+      __popupBlockedModalListeners = __popupBlockedModalListeners.filter(function(fn) { return fn !== setState; });
+    };
+  }, []);
+  return [state, setState];
+}
+
+function PopupBlockedModal() {
+  var [state, setState] = usePopupBlockedModal();
+  if (!state) return null;
+
+  function close() {
+    setState(null);
+    __setPopupBlockedModal(null);
+    if (state.blobUrl) {
+      try { URL.revokeObjectURL(state.blobUrl); } catch (e) {}
+    }
+  }
+
+  function retryDownload() {
+    // This click is a fresh user gesture, so window.open should succeed
+    // even with popup blocker active (in many cases Safari permits the
+    // popup when it comes from a direct tap).
+    var win = window.open(state.blobUrl, "_blank");
+    if (win && !win.closed) {
+      close();
+      __setDownloadToast({ status: "success" });
+      setTimeout(function() { __setDownloadToast(null); }, 1800);
+    } else {
+      // Still blocked — keep the modal open. The user really does need to
+      // change their settings. Animate the modal to draw their eye to it.
+      var el = document.getElementById("bf-popup-blocked-modal");
+      if (el) {
+        el.style.animation = "none";
+        // force reflow so the animation can re-trigger
+        void el.offsetWidth;
+        el.style.animation = "bf-shake 0.35s ease-out";
+      }
+    }
+  }
+
+  var modal = (
+    <>
+      <style>{"@keyframes bf-shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}"}</style>
+      <div
+        onClick={close}
+        style={{
+          position: "fixed", inset: 0, zIndex: 2147483645,
+          background: "rgba(0,0,0,0.78)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 20,
+          paddingTop: "max(env(safe-area-inset-top), 20px)",
+          paddingBottom: "max(env(safe-area-inset-bottom), 20px)",
+        }}
+      >
+        <div
+          id="bf-popup-blocked-modal"
+          onClick={function(e) { e.stopPropagation(); }}
+          style={{
+            width: "100%", maxWidth: 380,
+            background: "#0f0f0f",
+            border: "1px solid #2a2a2a",
+            borderRadius: 20,
+            padding: 22,
+            color: "white",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+          }}
+        >
+          {/* Icon */}
+          <div style={{
+            width: 56, height: 56, borderRadius: 16,
+            background: "linear-gradient(135deg,#F59E0B,#D97706)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            margin: "0 auto 14px",
+            boxShadow: "0 8px 24px rgba(245,158,11,0.35)",
+          }}>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="13"/>
+              <circle cx="12" cy="16.5" r="0.5" fill="white"/>
+            </svg>
+          </div>
+
+          {/* Title */}
+          <div style={{
+            fontSize: 18, fontWeight: 800, textAlign: "center",
+            marginBottom: 8, letterSpacing: 0.2,
+          }}>
+            Pop-ups Blocked
+          </div>
+
+          {/* Body */}
+          <div style={{
+            fontSize: 13, color: "#aaa", textAlign: "center",
+            lineHeight: 1.55, marginBottom: 18,
+          }}>
+            Your browser is blocking BeatFinder from opening the download window. Tap <b style={{color:"white"}}>Try Again</b> first — if that doesn't work, you'll need to allow pop-ups for this site.
+          </div>
+
+          {/* Try again button */}
+          <button
+            onClick={retryDownload}
+            style={{
+              width: "100%", borderRadius: 14, padding: "13px",
+              background: "linear-gradient(135deg,#C026D3,#9333EA)",
+              border: "none", color: "white",
+              fontWeight: 800, fontSize: 14,
+              letterSpacing: 0.3, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              marginBottom: 12,
+              boxShadow: "0 0 20px rgba(192,38,211,0.35)",
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+            Try Again
+          </button>
+
+          {/* Instructions */}
+          <div style={{
+            background: "#0a0a0a",
+            border: "1px solid #1f1f1f",
+            borderRadius: 12,
+            padding: "12px 14px",
+            marginBottom: 12,
+          }}>
+            <div style={{
+              fontSize: 10, fontWeight: 800, color: "#666",
+              letterSpacing: 1.2, marginBottom: 8,
+            }}>
+              HOW TO ALLOW POP-UPS
+            </div>
+            <ol style={{
+              margin: 0, paddingLeft: 18,
+              fontSize: 12, color: "#ccc", lineHeight: 1.7,
+            }}>
+              <li>Open the iPhone <b>Settings</b> app</li>
+              <li>Scroll down and tap <b>Apps → Safari</b></li>
+              <li>Turn <b>Block Pop-ups</b> off</li>
+              <li>Come back to BeatFinder and tap download again</li>
+            </ol>
+          </div>
+
+          {/* Close */}
+          <button
+            onClick={close}
+            style={{
+              width: "100%", borderRadius: 14, padding: "10px",
+              background: "transparent",
+              border: "1px solid #2a2a2a",
+              color: "#888", fontWeight: 700, fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </>
+  );
+
+  if (typeof document === "undefined" || !document.body || !ReactDOM.createPortal) {
+    return modal;
+  }
+  return ReactDOM.createPortal(modal, document.body);
+}
+
 // ── Smart MP3 download ────────────────────────────────────────────
 // Always fetches via blob first (so we control the result, can show progress,
 // and surface real errors). After download:
@@ -4555,18 +4739,21 @@ async function downloadBeatMp3(beat) {
     // tab keeps the React state, so "Done" returns the user to the same page.
     if (isIOS && !isStandalonePWA) {
       var win = window.open(blobUrl, "_blank");
-      if (!win) {
-        // Popup blocked — fall back to an in-page anchor click. iOS may then
-        // show the share sheet inline on the same tab; less ideal but works.
-        var aFallback = document.createElement("a");
-        aFallback.href   = blobUrl;
-        aFallback.target = "_blank";
-        aFallback.rel    = "noopener noreferrer";
-        aFallback.style.display = "none";
-        document.body.appendChild(aFallback);
-        aFallback.click();
-        setTimeout(function() { document.body.removeChild(aFallback); }, 1000);
+      // Robust popup-block detection: Safari may return null, undefined, or a
+      // window that's immediately closed. We check all three.
+      var popupBlocked = !win || win.closed || typeof win.closed === "undefined";
+
+      if (popupBlocked) {
+        __setDownloadToast(null);
+        __setPopupBlockedModal({
+          blobUrl: blobUrl,
+          filename: filename,
+          title: rawTitle,
+        });
+        // Don't revoke the blob URL — the user may retry from the modal
+        return;
       }
+
       __setDownloadToast({ status: "success" });
       setTimeout(function() { __setDownloadToast(null); }, 1800);
       // Hold the blob URL longer so the new tab can finish loading the file
@@ -20862,6 +21049,7 @@ export default function BeatFinder() {
       <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", height: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
         <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
         <DownloadToast />
+        <PopupBlockedModal />
         <PublicProfileScreen
           username={urlUsername}
           onBack={() => { window.history.replaceState({}, "", "/"); window.location.reload(); }}
@@ -20878,6 +21066,7 @@ export default function BeatFinder() {
     return (
       <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
         <DownloadToast />
+        <PopupBlockedModal />
         <ResetPasswordScreen token={resetToken} onDone={() => { window.history.replaceState({}, "", "/"); window.location.reload(); }} />
       </div>
     );
@@ -20887,6 +21076,7 @@ export default function BeatFinder() {
     <div key="app-root" data-bf-app="1" id="bf-portrait-lock" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <DownloadToast />
+      <PopupBlockedModal />
 
       {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
 
