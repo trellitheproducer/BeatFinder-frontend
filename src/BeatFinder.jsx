@@ -1254,7 +1254,7 @@ const GRAD = [
 ];
 const initials = n => n.split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase();
 const watchUrl  = id => `https://www.youtube.com/watch?v=${id}`;
-const embedUrl  = id => `https://www.youtube.com/embed/${id}?autoplay=1&playsinline=1&rel=0&modestbranding=1&disablekb=1&iv_load_policy=3&fs=0&color=white&showinfo=0&controls=1&loop=1&playlist=${id}`;
+const embedUrl  = id => `https://www.youtube.com/embed/${id}?autoplay=1&playsinline=1&rel=0&modestbranding=1&disablekb=1&iv_load_policy=3&fs=0&color=white&showinfo=0&controls=1&playlist=${id}`;
 
 // =============================================================================
 // ARTIST DATABASE
