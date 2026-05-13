@@ -7416,6 +7416,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
   // Update beat in-place when producer edits — no page refresh needed
   useBeatUpdatedListener(React.useCallback(function(detail) {
+    // Patch in-place immediately for zero-lag update
     setProfile(function(prev) {
       if (!prev || !prev.beats) return prev;
       return Object.assign({}, prev, {
