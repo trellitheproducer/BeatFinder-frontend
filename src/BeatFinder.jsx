@@ -6248,8 +6248,8 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
               </span>
             </div>
             {previewing && beat.url && (
-              <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-                onPlay={onAudioPlay}
+              <audio ref={audioRef} src={beat.url + ((beat.preview_start||0) > 0 ? "#t=" + (beat.preview_start||0) : "")} autoPlay data-start-time={String(beat.preview_start || 0)}
+                onPlay={function(){ onAudioPlay(); if (audioRef.current && (beat.preview_start||0) > 0 && !seekedRef.current) { audioRef.current.currentTime = beat.preview_start; seekedRef.current = true; } }}
                 onPause={function(){ clearInterval(timerRef.current); }}
                 onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
             )}
@@ -6753,8 +6753,9 @@ function CompactBeatCard({ beat }) {
         </div>
       </div>
       {previewing && beat.url && (
-        <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-          onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
+        <audio ref={audioRef} src={beat.url + ((beat.preview_start||0) > 0 ? "#t=" + (beat.preview_start||0) : "")} autoPlay data-start-time={String(beat.preview_start || 0)}
+          onPlay={function(){ onAudioPlay(); if (audioRef.current && (beat.preview_start||0) > 0 && !seekedRef.current) { audioRef.current.currentTime = beat.preview_start; seekedRef.current = true; } }}
+          onPause={function(){ clearInterval(timerRef.current); }}
           onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
       )}
     </div>
