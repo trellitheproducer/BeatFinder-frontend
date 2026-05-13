@@ -8364,35 +8364,11 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
   var [verifyingLease, setVerifyingLease] = React.useState(!isFree);
   var [verifiedLease,  setVerifiedLease]  = React.useState(null); // { id, ... } once confirmed
   var [contractDownloaded, setContractDownloaded] = React.useState(false);
-  // Ref on the inner sheet panel so we can guarantee it opens at the top —
-  // prevents the bug where the modal appears scrolled mid-way (e.g. when
-  // opened from a profile/trending tab that the user had already scrolled
-  // down on the underlying page).
   var sheetPanelRef = React.useRef(null);
   React.useEffect(function() {
     if (sheetPanelRef.current) {
       try { sheetPanelRef.current.scrollTop = 0; } catch(e) {}
     }
-    // ── LOCK BODY SCROLL while the sheet is open ──────────────────────────
-    // We just set overflow:hidden on the html and body elements. This stops
-    // the underlying page from scrolling behind the modal but, unlike
-    // position:fixed on body, doesn't break iOS Safari's ability to scroll
-    // the modal content itself. The scroll position of the underlying page
-    // is preserved automatically because we never re-position it.
-    var prevHtmlOverflow = "";
-    var prevBodyOverflow = "";
-    try {
-      prevHtmlOverflow = document.documentElement.style.overflow || "";
-      prevBodyOverflow = document.body.style.overflow || "";
-      document.documentElement.style.overflow = "hidden";
-      document.body.style.overflow            = "hidden";
-    } catch(e) {}
-    return function() {
-      try {
-        document.documentElement.style.overflow = prevHtmlOverflow;
-        document.body.style.overflow            = prevBodyOverflow;
-      } catch(e) {}
-    };
   }, []);
 
   // For LICENSED beats, check the server to see if the user already owns this lease.
@@ -8521,19 +8497,14 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
       <div onClick={onClose} style={{
         position: "fixed", inset: 0, zIndex: 99998,
         background: "rgba(0,0,0,0.75)",
+        display: "flex", alignItems: "flex-end", justifyContent: "center",
       }}>
         <div ref={sheetPanelRef} onClick={function(e) { e.stopPropagation(); }} style={{
-          position: "fixed",
-          left: 0, right: 0, bottom: 0,
-          margin: "0 auto",
           width: "100%", maxWidth: 480,
           background: "#0d0d0d", borderTop: "1px solid #222",
           borderRadius: "20px 20px 0 0", padding: 18,
           paddingBottom: "max(env(safe-area-inset-bottom), 18px)",
-          maxHeight: "85vh",
-          overflowY: "auto",
-          WebkitOverflowScrolling: "touch",
-          overscrollBehavior: "contain",
+          maxHeight: "85vh", overflowY: "auto", WebkitOverflowScrolling: "touch",
         }}>
           {/* Drag handle */}
           <div style={{ width: 40, height: 4, background: "#333", borderRadius: 2, margin: "0 auto 14px" }} />
