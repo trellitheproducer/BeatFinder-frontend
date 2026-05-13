@@ -6006,6 +6006,12 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
   }, [beat.id]));
   function onAudioPlay() {
+    // Seek to preview_start immediately on play
+    var ps = beat.preview_start || 0;
+    if (ps > 0 && audioRef.current && !seekedRef.current) {
+      try { audioRef.current.currentTime = ps; } catch(e) {}
+      seekedRef.current = true;
+    }
     clearInterval(timerRef.current);
     var start = Date.now() - (previewTime * 1000);
     timerRef.current = setInterval(function() {
@@ -6015,9 +6021,15 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
     }, 100);
   }
   function onTimeUpdate(e) {
-    var el = e.target, startT = parseFloat(el.dataset.startTime || 0);
+    var el = e.target;
+    var startT = parseFloat(el.dataset.startTime || 0);
+    // Hard enforce: if before start point, jump to it (handles cold-load iOS)
+    if (startT > 0 && el.currentTime < startT && !seekedRef.current) {
+      el.currentTime = startT;
+      seekedRef.current = true;
+    }
+    // Hard enforce: stop at 45s from start
     if (el.currentTime >= startT + 45) { el.pause(); stopPreview(); }
-    if (el.currentTime < startT) el.currentTime = startT;
   }
   async function handleBuy() {
     if (!currentUser) { setBuyErr("Please log in to purchase"); return; }
@@ -6228,7 +6240,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
             </div>
             {previewing && beat.url && (
               <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-                onPlay={function(){ onAudioPlay(); if (audioRef.current && (beat.preview_start||0) > 0 && !seekedRef.current) { audioRef.current.currentTime = beat.preview_start; seekedRef.current = true; } }}
+                onPlay={onAudioPlay}
                 onPause={function(){ clearInterval(timerRef.current); }}
                 onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
             )}
@@ -7003,35 +7015,187 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
           </div>
         );
 
-        return (
-          <div style={{ padding: "0 16px" }}>
-            {/* Free Beats section */}
-            {freeBeats.length > 0 && (
-              <div style={{ marginBottom: 24 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(192,38,211,0.2)" }}>
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#C026D3", boxShadow: "0 0 6px #C026D3" }} />
-                  <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>FREE BEATS</div>
-                  <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "1px 8px", fontSize: 10, color: "#C026D3", fontWeight: 700 }}>{freeBeats.length}</div>
-                </div>
-                {freeBeats.map(function(beat) {
-                  return <ProfileBeatCard key={beat.id} beat={beat} currentUser={currentUser} onViewProfile={onViewProfile} />;
-                })}
-              </div>
-            )}
+        // Compact beat card for two-column layout
+        function CompactBeatCard({ beat }) {
+          var isFree = isFreePrice(beat.price);
+          var accent = isFree ? "#C026D3" : "#F59E0B";
+          var [previewing, setPreviewing] = React.useState(false);
+          var [previewTime, setPreviewTime] = React.useState(0);
+          var audioRef = React.useRef(null);
+          var timerRef = React.useRef(null);
+          var seekedRef = React.useRef(false);
+          var previewId = React.useRef("compact_" + beat.id);
 
-            {/* Licensed Beats section */}
-            {licensedBeats.length > 0 && (
-              <div style={{ marginBottom: 24 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(245,158,11,0.2)" }}>
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#F59E0B", boxShadow: "0 0 6px #F59E0B" }} />
-                  <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>LICENSED BEATS</div>
-                  <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "1px 8px", fontSize: 10, color: "#F59E0B", fontWeight: 700 }}>{licensedBeats.length}</div>
+          function startPreview() {
+            if (previewing) { stopPreview(); return; }
+            seekedRef.current = false;
+            startGlobalPreview(previewId.current);
+            setPreviewing(true); setPreviewTime(0);
+            recordPlay(beat.id);
+          }
+          function stopPreview() {
+            clearGlobalPreview(previewId.current);
+            setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+            cancelPlayTimer(beat.id);
+            if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
+          }
+          useGlobalPreviewStop(previewId.current, React.useCallback(function() {
+            setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+            cancelPlayTimer(beat.id);
+            if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
+          }, [beat.id]));
+          function onAudioPlay() {
+            var ps = beat.preview_start || 0;
+            if (ps > 0 && audioRef.current && !seekedRef.current) {
+              try { audioRef.current.currentTime = ps; } catch(e) {}
+              seekedRef.current = true;
+            }
+            clearInterval(timerRef.current);
+            var start = Date.now();
+            timerRef.current = setInterval(function() {
+              var el = (Date.now() - start) / 1000;
+              setPreviewTime(Math.min(el, 45));
+              if (el >= 45) { clearInterval(timerRef.current); stopPreview(); }
+            }, 100);
+          }
+          function onTimeUpdate(e) {
+            var el = e.target, st = parseFloat(el.dataset.startTime || 0);
+            if (st > 0 && el.currentTime < st && !seekedRef.current) { el.currentTime = st; seekedRef.current = true; }
+            if (el.currentTime >= st + 45) { el.pause(); stopPreview(); }
+          }
+          React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
+
+          var pct = previewing ? (previewTime / 45) * 100 : 0;
+
+          return (
+            <div style={{
+              background: "linear-gradient(160deg,#151515,#0f0f0f)",
+              borderRadius: 14, marginBottom: 10, overflow: "hidden",
+              border: "1px solid " + accent + "33",
+            }}>
+              <div style={{ height: 2, background: "linear-gradient(90deg," + accent + "cc,transparent)" }} />
+              <div style={{ padding: "10px 10px 0" }}>
+                {/* Thumbnail + title */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 8, flexShrink: 0, overflow: "hidden", background: "#111" }}>
+                    <img src="https://i.ibb.co/v4wcZVJW/IMG-9119.jpg" alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: "white", fontWeight: 700, fontSize: 11, lineHeight: 1.3,
+                      overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box",
+                      WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                      {beat.title}
+                    </div>
+                    <div style={{ color: "#555", fontSize: 9, marginTop: 2 }}>{beat.genre}</div>
+                  </div>
                 </div>
-                {licensedBeats.map(function(beat) {
-                  return <ProfileBeatCard key={beat.id} beat={beat} currentUser={currentUser} onViewProfile={onViewProfile} />;
-                })}
+
+                {/* BPM + Key badges */}
+                {(beat.bpm > 0 || beat.key) && (
+                  <div style={{ display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap" }}>
+                    {beat.bpm > 0 && <span style={{ background: "rgba(6,182,212,0.1)", border: "1px solid rgba(6,182,212,0.2)", borderRadius: 10, padding: "2px 6px", fontSize: 8, color: "#06B6D4", fontWeight: 700 }}>{beat.bpm} BPM</span>}
+                    {beat.key && <span style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.2)", borderRadius: 10, padding: "2px 6px", fontSize: 8, color: "#22C55E", fontWeight: 700 }}>{beat.key}</span>}
+                  </div>
+                )}
+
+                {/* Waveform progress bar */}
+                <div style={{ height: 3, background: "#1a1a1a", borderRadius: 2, marginBottom: 8, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: pct + "%", background: accent, borderRadius: 2, transition: "width 0.1s linear" }} />
+                </div>
               </div>
-            )}
+
+              {/* Play button + price */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 10px 10px" }}>
+                <button onClick={startPreview} style={{
+                  width: 28, height: 28, borderRadius: "50%", border: "1.5px solid " + accent,
+                  background: previewing ? accent : "transparent",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  cursor: "pointer", flexShrink: 0,
+                }}>
+                  {previewing
+                    ? <svg width="8" height="8" viewBox="0 0 24 24" fill="white"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                    : <svg width="8" height="8" viewBox="0 0 24 24" fill={accent}><polygon points="5,3 19,12 5,21"/></svg>
+                  }
+                </button>
+                <div style={{ flex: 1 }}>
+                  {isFree ? (
+                    <div style={{ color: "#C026D3", fontSize: 9, fontWeight: 800 }}>FREE</div>
+                  ) : (
+                    <div style={{ color: "#F59E0B", fontSize: 10, fontWeight: 800 }}>{beat.price}</div>
+                  )}
+                  {previewing && (
+                    <div style={{ color: "#555", fontSize: 8 }}>{Math.floor(previewTime)}s / 45s</div>
+                  )}
+                </div>
+              </div>
+
+              {previewing && beat.url && (
+                <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
+                  onPlay={onAudioPlay} onPause={function(){ clearInterval(timerRef.current); }}
+                  onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
+              )}
+            </div>
+          );
+        }
+
+        var onlyFree     = freeBeats.length > 0 && licensedBeats.length === 0;
+        var onlyLicensed = licensedBeats.length === 0 || freeBeats.length === 0;
+
+        // If only one type, show full-width ProfileBeatCards
+        if (onlyFree || onlyLicensed) {
+          return (
+            <div style={{ padding: "0 16px" }}>
+              {freeBeats.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(192,38,211,0.2)" }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#C026D3", boxShadow: "0 0 6px #C026D3" }} />
+                    <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>FREE BEATS</div>
+                    <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "1px 8px", fontSize: 10, color: "#C026D3", fontWeight: 700 }}>{freeBeats.length}</div>
+                  </div>
+                  {freeBeats.map(function(beat) { return <ProfileBeatCard key={beat.id} beat={beat} currentUser={currentUser} onViewProfile={onViewProfile} />; })}
+                </div>
+              )}
+              {licensedBeats.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(245,158,11,0.2)" }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#F59E0B", boxShadow: "0 0 6px #F59E0B" }} />
+                    <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>LICENSED BEATS</div>
+                    <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "1px 8px", fontSize: 10, color: "#F59E0B", fontWeight: 700 }}>{licensedBeats.length}</div>
+                  </div>
+                  {licensedBeats.map(function(beat) { return <ProfileBeatCard key={beat.id} beat={beat} currentUser={currentUser} onViewProfile={onViewProfile} />; })}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        // Both types exist — show side by side with compact cards
+        return (
+          <div style={{ padding: "0 12px" }}>
+            <div style={{ display: "flex", gap: 10 }}>
+              {/* Free Beats column */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(192,38,211,0.2)" }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#C026D3", flexShrink: 0 }} />
+                  <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 11, letterSpacing: 0.3 }}>FREE</div>
+                  <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "1px 6px", fontSize: 9, color: "#C026D3", fontWeight: 700 }}>{freeBeats.length}</div>
+                </div>
+                {freeBeats.map(function(beat) { return <CompactBeatCard key={beat.id} beat={beat} />; })}
+              </div>
+
+              {/* Divider */}
+              <div style={{ width: 1, background: "rgba(255,255,255,0.05)", flexShrink: 0, marginTop: 4 }} />
+
+              {/* Licensed Beats column */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(245,158,11,0.2)" }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#F59E0B", flexShrink: 0 }} />
+                  <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 11, letterSpacing: 0.3 }}>LICENSED</div>
+                  <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "1px 6px", fontSize: 9, color: "#F59E0B", fontWeight: 700 }}>{licensedBeats.length}</div>
+                </div>
+                {licensedBeats.map(function(beat) { return <CompactBeatCard key={beat.id} beat={beat} />; })}
+              </div>
+            </div>
           </div>
         );
       })()}
