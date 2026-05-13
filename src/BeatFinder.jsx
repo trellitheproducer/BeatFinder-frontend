@@ -5782,6 +5782,16 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
   const [previewing,  setPreviewing]  = useState(false);
   const [previewTime, setPreviewTime] = useState(0);
   const [sheetOpen,   setSheetOpen]   = useState(false); // opens contract preview before Stripe
+  // Reopen sheet automatically if user cancelled out of Stripe checkout for
+  // THIS beat. The cancel-restore effect dispatches bf-reopen-sheet with
+  // detail.beat_id; we open if it matches.
+  React.useEffect(function() {
+    function onReopen(e) {
+      if (e && e.detail && e.detail.beat_id === beat.id) setSheetOpen(true);
+    }
+    window.addEventListener("bf-reopen-sheet", onReopen);
+    return function() { window.removeEventListener("bf-reopen-sheet", onReopen); };
+  }, [beat.id]);
   const audioRef = React.useRef(null);
   const timerRef = React.useRef(null);
   const seekedRef = React.useRef(false);
@@ -6071,6 +6081,13 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
     const [buyLoading, setBuyLoading] = React.useState(false);
     const [buyErr,     setBuyErr]     = React.useState("");
     const [sheetOpen,  setSheetOpen]  = React.useState(false); // contract preview before Stripe
+    React.useEffect(function() {
+      function onReopen(e) {
+        if (e && e.detail && e.detail.beat_id === beat.id) setSheetOpen(true);
+      }
+      window.addEventListener("bf-reopen-sheet", onReopen);
+      return function() { window.removeEventListener("bf-reopen-sheet", onReopen); };
+    }, [beat.id]);
     const aRef = React.useRef(null);
     const tRef = React.useRef(null);
     const seekedRef = React.useRef(false);
@@ -7595,6 +7612,13 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   var [buyErr,      setBuyErr]      = React.useState("");
   var [deleted,     setDeleted]     = React.useState(false);
   var [sheetOpen,   setSheetOpen]   = React.useState(false); // opens contract preview before Stripe
+  React.useEffect(function() {
+    function onReopen(e) {
+      if (e && e.detail && e.detail.beat_id === beat.id) setSheetOpen(true);
+    }
+    window.addEventListener("bf-reopen-sheet", onReopen);
+    return function() { window.removeEventListener("bf-reopen-sheet", onReopen); };
+  }, [beat.id]);
   var playCount = usePlayCount(beat.id, beat.playCount);
   var audioRef  = React.useRef(null);
   var timerRef  = React.useRef(null);
@@ -8418,7 +8442,16 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
       });
       try {
         var ct = sessionStorage.getItem("bf_tab") || "exclusive";
-        sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, path: window.location.pathname + window.location.search, ts: Date.now() }));
+        // Save full return context: tab, current path, AND which beat's sheet to
+        // reopen if the user cancels out of Stripe. The cancel handler will
+        // restore the path and dispatch a "bf-reopen-sheet" event that the card
+        // components listen for to reopen this same preview modal.
+        sessionStorage.setItem("bf_return_tab", JSON.stringify({
+          tab: ct,
+          path: window.location.pathname + window.location.search,
+          beat_id: beat.id,
+          ts: Date.now(),
+        }));
       } catch (e) {}
       window.location.href = r.checkout_url;
     } catch (e) {
@@ -8832,6 +8865,13 @@ function CompactBeatCard({ beat, currentUser }) {
   var [previewTime, setPreviewTime] = React.useState(0);
   var [buyLoading, setBuyLoading] = React.useState(false);
   var [sheetOpen, setSheetOpen] = React.useState(false);
+  React.useEffect(function() {
+    function onReopen(e) {
+      if (e && e.detail && e.detail.beat_id === beat.id) setSheetOpen(true);
+    }
+    window.addEventListener("bf-reopen-sheet", onReopen);
+    return function() { window.removeEventListener("bf-reopen-sheet", onReopen); };
+  }, [beat.id]);
   var audioRef  = React.useRef(null);
   var timerRef  = React.useRef(null);
   var seekedRef = React.useRef(false);
@@ -9887,7 +9927,35 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
       ? "/api/auth/profile-auth/" + encodeURIComponent(username)
       : "/api/auth/profile/" + encodeURIComponent(username);
     apiFetch(endpoint)
-      .then(d => { setProfile(d); setFollowing(d.isFollowing || false); setLoading(false); })
+      .then(async (d) => {
+        // The /api/auth/profile/* endpoint returns beats but historically
+        // doesn't include two-tier fields (basic_lease_price, premium_lease_price,
+        // premium_sold). Without these the UI falls back to legacy single-price
+        // "BUY £50" rendering. So we cross-reference the public producer beats
+        // endpoint and merge tier fields by beat id.
+        try {
+          if (d && Array.isArray(d.beats) && d.beats.length > 0) {
+            const allBeats = await apiFetch("/api/producer/beats");
+            const byId = {};
+            (allBeats || []).forEach(function(b) { byId[b.id] = b; });
+            d.beats = d.beats.map(function(b) {
+              const enriched = byId[b.id];
+              if (!enriched) return b;
+              return Object.assign({}, b, {
+                basic_lease_price:   enriched.basic_lease_price,
+                premium_lease_price: enriched.premium_lease_price,
+                premium_sold:        enriched.premium_sold,
+                premium_sold_to:     enriched.premium_sold_to,
+              });
+            });
+          }
+        } catch(mergeErr) {
+          // Non-fatal — UI just falls back to legacy single-price for beats
+          // that don't have tier data baked in already.
+          console.warn("[Profile] Could not enrich beats with tier prices:", mergeErr);
+        }
+        setProfile(d); setFollowing(d.isFollowing || false); setLoading(false);
+      })
       .catch(e => { setError(e.message); setLoading(false); });
   }, [username, currentUser?.id]);
 
@@ -23017,10 +23085,8 @@ export default function BeatFinder() {
   // which would otherwise dump them back to the default home tab.
   React.useEffect(function() {
     if (!leaseCancelled) return;
-    // Restore the tab they were on before checkout AND, if the user was on a
-    // sub-route like /u/somebody (a profile page), restore that URL too so
-    // they don't get bounced to the home feed.
     var savedPath = null;
+    var savedBeatId = null;
     try {
       var saved = JSON.parse(sessionStorage.getItem("bf_return_tab") || "{}");
       sessionStorage.removeItem("bf_return_tab");
@@ -23028,11 +23094,31 @@ export default function BeatFinder() {
       if (saved && saved.path && saved.path !== "/" && saved.path.indexOf("lease=") === -1) {
         savedPath = saved.path;
       }
+      if (saved && saved.beat_id) savedBeatId = saved.beat_id;
     } catch(e) {}
     try {
       // Replace history entry — either to the original path or just "/"
       window.history.replaceState({}, "", savedPath || "/");
     } catch(e) {}
+    // If the user was on a public profile route (/u/username or /profile/username),
+    // restore that view in-app so they're not dumped to the home feed.
+    if (savedPath) {
+      var profileMatch = savedPath.match(/^\/(u|profile)\/([^\/?#]+)/);
+      if (profileMatch && profileMatch[2]) {
+        try {
+          setPublicProfile(decodeURIComponent(profileMatch[2]));
+        } catch(e) {}
+      }
+    }
+    // Dispatch a custom event so the card whose Buy was tapped can re-open
+    // its preview sheet. Tiny delay so the route/profile has time to mount.
+    if (savedBeatId) {
+      setTimeout(function() {
+        try {
+          window.dispatchEvent(new CustomEvent("bf-reopen-sheet", { detail: { beat_id: savedBeatId } }));
+        } catch(e) {}
+      }, 400);
+    }
   }, []);
 
   // When returning from Stripe, fetch the purchased beat details and restore page
