@@ -17808,7 +17808,14 @@ function StudioScreen({ user, onExit }) {
         node = hissFilter;
 
         // ── Noise Gate AudioWorklet (primary path) ────────────────────────────
-        if (noiseGateWorkletReady.current) {
+        // noiseGateWorkletReady is an optional ref — if it's not declared in this
+        // build, skip the worklet path entirely and use the DynamicsCompressor fallback.
+        // (A missing ref previously threw a ReferenceError here that killed buildChain
+        //  for every track, resulting in total Studio silence.)
+        const gateReady = (typeof noiseGateWorkletReady !== "undefined")
+          && noiseGateWorkletReady
+          && noiseGateWorkletReady.current;
+        if (gateReady) {
           try {
             const gateNode = new AudioWorkletNode(actx, "noise-gate-processor", {
               numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
