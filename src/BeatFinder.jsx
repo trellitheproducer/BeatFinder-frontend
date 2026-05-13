@@ -4503,11 +4503,13 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
     const [buyErr,     setBuyErr]     = React.useState("");
     const aRef = React.useRef(null);
     const tRef = React.useRef(null);
+    const seekedRef = React.useRef(false);
     const isFree = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
     var prevId = React.useRef("producer_" + beat.id);
 
     function startPrev() {
       if (prev) { stopPrev(); return; }
+      seekedRef.current = false;
       startGlobalPreview(prevId.current);
       setPrev(true); setPTime(0);
       recordPlay(beat.id);
