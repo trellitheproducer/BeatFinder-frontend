@@ -2206,6 +2206,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
               height="160"
               style={{ display: "block", border: "none" }}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              sandbox="allow-scripts allow-same-origin allow-presentation"
               title={beat.title}
             />
             <div style={{ padding: "8px 16px", background: "#0d0d0d" }}>
@@ -2322,6 +2323,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
           width="100%" height="220"
           style={{ display: "block", border: "none", background: "#000", position: "absolute", top: 0, left: 0 }}
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          sandbox="allow-scripts allow-same-origin allow-presentation"
           title={beat.title}
         />
         {/* BeatFinder branded overlay — visual only, no pointer events */}
