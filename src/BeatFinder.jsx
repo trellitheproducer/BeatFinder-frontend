@@ -43,6 +43,25 @@ const LOADER_STYLE = `
   .bf-nav-btn:active { transform: scale(0.85); }
   .bf-play    { animation: bf-play-pulse 2s ease infinite; }
   .bf-carousel { scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
+  /* ── Contract / Action Sheet — iOS PWA scroll fix ──
+     The sheet's backdrop overlay MUST scroll in iOS PWA contexts even when
+     its parent tab container has a captured -webkit-overflow-scrolling
+     context. !important is required to defeat any clamp from a parent class.
+     The inner panel scrolls inside the wrapper; the wrapper itself scrolls
+     in case the panel content is taller than 85vh on small screens. */
+  .bf-sheet-wrapper {
+    position: fixed !important;
+    inset: 0 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    overscroll-behavior: contain !important;
+  }
+  .bf-sheet-panel {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    overscroll-behavior: contain !important;
+    padding-bottom: 120px !important;
+  }
   * { scrollbar-width: none; -ms-overflow-style: none; }
   *::-webkit-scrollbar { display: none; }
   .bf-save    { transition: transform 0.18s cubic-bezier(0.34,1.56,0.64,1), color 0.15s ease; }
@@ -8536,28 +8555,33 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
         />
       )}
 
-      <div onClick={onClose}
-        onTouchMove={function(e){ e.stopPropagation(); }}
-        style={{
-        position: "fixed", inset: 0, zIndex: 99998,
+      <div onClick={onClose} className="bf-sheet-wrapper" style={{
+        zIndex: 99998,
         background: "rgba(0,0,0,0.75)",
         display: "flex", alignItems: "flex-end", justifyContent: "center",
       }}>
-        <div ref={sheetPanelRef}
-          onClick={function(e) { e.stopPropagation(); }}
-          onTouchMove={function(e){ e.stopPropagation(); }}
-          style={{
+        <div ref={sheetPanelRef} onClick={function(e) { e.stopPropagation(); }} className="bf-sheet-panel" style={{
           width: "100%", maxWidth: 480,
           background: "#0d0d0d", borderTop: "1px solid #222",
           borderRadius: "20px 20px 0 0", padding: 18,
-          paddingBottom: "max(env(safe-area-inset-bottom), 18px)",
-          maxHeight: "85vh", overflowY: "auto", WebkitOverflowScrolling: "touch",
+          maxHeight: "85vh",
+          position: "relative",
         }}>
           {/* Drag handle */}
           <div style={{ width: 40, height: 4, background: "#333", borderRadius: 2, margin: "0 auto 14px" }} />
 
+          {/* Close button — position absolute so it doesn't interfere with scroll */}
+          <button onClick={onClose} style={{
+            position: "absolute", top: 14, right: 14, zIndex: 5,
+            width: 32, height: 32, borderRadius: "50%",
+            background: "rgba(0,0,0,0.7)", border: "1px solid #333",
+            color: "#aaa", fontSize: 15, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+          }}>✕</button>
+
           {/* Beat header */}
-          <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, paddingRight: 40 }}>
             <div style={{ width: 48, height: 48, borderRadius: 10, overflow: "hidden", flexShrink: 0, background: "#111" }}>
               <img src="https://i.ibb.co/v4wcZVJW/IMG-9119.jpg" alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             </div>
@@ -8566,12 +8590,6 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
               <div style={{ color: "white", fontWeight: 800, fontSize: 14, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{beat.title}</div>
               <div style={{ color: "#666", fontSize: 11, marginTop: 2 }}>by {producer}</div>
             </div>
-            <button onClick={onClose} style={{
-              width: 30, height: 30, borderRadius: "50%",
-              background: "rgba(255,255,255,0.05)", border: "1px solid #222",
-              color: "#888", fontSize: 14, cursor: "pointer", flexShrink: 0,
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>✕</button>
           </div>
 
           {/* Pop-up block warning — only renders if blocked */}
@@ -23751,19 +23769,8 @@ export default function BeatFinder() {
               zIndex: 10,
               overflow: "hidden",
             } : {
-              // position:fixed wrapper — matches the working PublicProfile
-              // overlay structure (line 23733) so that CompactBeatActionSheet
-              // (position:fixed, z-index 99998) renders into the same kind of
-              // top-level viewport-relative context. The previous overflow:auto
-              // wrapper trapped iOS touch events: the sheet rendered visually
-              // but every touchmove got absorbed by the parent's
-              // WebkitOverflowScrolling context, so the sheet couldn't scroll
-              // and the underlying page scrolled instead. Switching to
-              // position:fixed removes that touch trap.
-              position: "fixed",
-              top: 0, left: 0, right: 0,
-              bottom: "calc(72px + env(safe-area-inset-bottom))",
               overflowY: "auto",
+              height: "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))",
               WebkitOverflowScrolling: "touch",
               overscrollBehavior: "none",
             }),
@@ -23780,7 +23787,7 @@ export default function BeatFinder() {
           </div>
         ))}
         {tab === "profile" && (
-          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: "calc(72px + env(safe-area-inset-bottom))", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "none" }} onTouchMove={function(e){ e.stopPropagation(); }}>
+          <div style={{ overflowY: "auto", height: "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))", WebkitOverflowScrolling: "touch", overscrollBehavior: "none" }} onTouchMove={function(e){ e.stopPropagation(); }}>
             <ProfileScreen key={user ? user.id : "guest"} user={user} setUser={setUser} onLogout={() => {
               AuthAPI.logout();
               setUser(null);
