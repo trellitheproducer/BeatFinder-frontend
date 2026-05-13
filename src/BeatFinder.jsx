@@ -8496,7 +8496,14 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
     }
   }
 
-  return (
+  // Portaled to document.body so the sheet renders identically regardless of
+  // which card invokes it. Without the portal, the sheet would be a child of
+  // the card's deeply-nested scrolling container — that's why opening from
+  // Members/Trending tabs looked different from opening on the public profile
+  // (each tab has different parent overflow/transform contexts that bled
+  // through). Portal hoists the modal to document.body so it sits at the
+  // top of the DOM in every case.
+  var sheetJsx = (
     <>
       {showContract && (
         <ContractViewer
@@ -8889,6 +8896,11 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
       </div>
     </>
   );
+
+  if (typeof document === "undefined" || !document.body || !ReactDOM.createPortal) {
+    return sheetJsx;
+  }
+  return ReactDOM.createPortal(sheetJsx, document.body);
 }
 
 // ── Compact beat card for two-column profile layout ───────────────────────────
