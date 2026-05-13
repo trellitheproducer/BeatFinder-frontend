@@ -19442,15 +19442,16 @@ export default function BeatFinder() {
     return false;
   });
   // welcomeDone: true once user has passed the welcome gate this session
+  // Uses sessionStorage so it resets every time the tab is opened
   const [welcomeDone, setWelcomeDone] = useState(function() {
-    try { return !!localStorage.getItem("bf_welcomed"); } catch(e) { return false; }
+    // If user is already logged in, skip the welcome gate
+    try { return !!localStorage.getItem("bf_token"); } catch(e) { return false; }
   });
   // showAuthWall: true when user tapped "Sign In" — shows auth form full-screen, no app
   const [showAuthWall,   setShowAuthWall]   = useState(false);
   const [authStartMode,  setAuthStartMode]  = useState("login");
 
   const doWelcome = function() {
-    try { localStorage.setItem("bf_welcomed", "1"); } catch(e) {}
     setWelcomeDone(true);
   };
   const doWelcomeAsGuest = function() {
