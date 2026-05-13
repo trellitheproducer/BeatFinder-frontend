@@ -893,35 +893,35 @@ function useGlobalPreviewStop(myId, stopFn) {
 
 // Spotify embed coordinator — only one embed loads at a time.
 // ── Open an external URL without leaving a blank tab behind ──────────
-// On iOS Safari (browser tab), window.open("_blank") creates a tab that
-// stays open after the user returns to BeatFinder, plus iOS sometimes
-// blanks the original tab. The clean fix is to navigate the current tab
-// directly — iOS deep-links into native apps (Instagram, TikTok, YouTube,
-// Spotify, Apple Music) via universal links if installed, and Safari
-// restores BeatFinder from bfcache when the user hits back.
+// iOS Safari treats a programmatic <a target="_blank"> click DIFFERENTLY
+// from window.open(): it doesn't fire the "attempting to open pop-up"
+// confirmation, AND it keeps the original tab alive in the background
+// rather than blanking it. This is the standard pattern for opening
+// external links from a SPA on iOS Safari.
 //
-// For iOS PWA we use window.open because the only "tab" IS the app — we
-// can't navigate away or the user would be kicked out. iOS opens it
-// externally and the PWA continues running underneath.
+// For iOS PWA the same anchor approach works — iOS opens the URL
+// externally and the PWA stays running.
 //
-// Desktop/Android: standard new-tab behaviour.
+// Desktop/Android: same anchor approach for consistency and security
+// (noopener prevents the new tab from accessing window.opener).
 function openExternalLink(url) {
   if (!url) return;
   var normalised = url.indexOf("http") === 0 ? url : "https://" + url;
-  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-              (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  var isStandalonePWA = window.matchMedia && window.matchMedia("(display-mode: standalone)").matches;
-
-  if (isIOS && !isStandalonePWA) {
-    window.location.href = normalised;
-    return;
-  }
-  if (isIOS && isStandalonePWA) {
-    window.open(normalised, "_blank");
-    return;
-  }
-  var w = window.open(normalised, "_blank", "noopener,noreferrer");
-  if (w) { try { w.opener = null; } catch (e) {} }
+  // Create a one-shot anchor, click it, then remove it. iOS recognises
+  // this as a user-initiated navigation (because we're still inside the
+  // tap handler's call stack) and opens the link in a new tab without
+  // showing the pop-up confirmation prompt. The original BeatFinder tab
+  // stays mounted in the background — no bfcache trickery needed.
+  var a = document.createElement("a");
+  a.href = normalised;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function() {
+    try { document.body.removeChild(a); } catch (e) {}
+  }, 100);
 }
 
 // Spotify iframes can't be paused via JS (cross-origin) so we unmount
@@ -2332,6 +2332,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
             position: "absolute", top: 0, left: 0,
             width: "100%", height: "100%",
             objectFit: "cover",
+            opacity: 0.75,
             zIndex: 10,
             pointerEvents: "none",
             userSelect: "none",
@@ -21193,38 +21194,79 @@ export default function BeatFinder() {
     installGlobalPopupProbe();
   }, []);
 
-  // ── In-app browser dismissal recovery ────────────────────────────────────
-  // When a YouTube link opens Safari's in-app browser (the grey "Done" bar),
-  // iOS fires the `pageshow` event when the user taps Done and returns.
-  // If the page was restored from bfcache it may be blank — we force a reload.
+  // ── External browser dismissal recovery ──────────────────────────────────
+  // When BeatFinder navigates the user away to a social media / external URL
+  // (YouTube, Instagram, TikTok, Spotify, Apple Music etc.), iOS Safari may
+  // restore BeatFinder as a blank white page when the user comes back via
+  // the back button. The bfcache restoration isn't reliable for SPAs.
+  //
+  // We use multiple signals to detect and recover from blank state:
+  //   1. pageshow with e.persisted = true (definitive bfcache restore)
+  //   2. visibilitychange becoming visible — if app root is missing or
+  //      body background is white, the React tree died and we reload
+  //   3. pagehide with persisted=true means the page WAS bfcached, so the
+  //      next pageshow needs special handling
   React.useEffect(function() {
+    var wasBFCached = false;
+
     function onPageShow(e) {
-      // e.persisted = true means page was restored from back-forward cache (blank)
-      if (e.persisted) {
+      // e.persisted = true means page was restored from back-forward cache.
+      // On iOS this often means the React tree is alive but the DOM may
+      // be visually blank. A reload guarantees a clean state.
+      if (e.persisted || wasBFCached) {
+        wasBFCached = false;
+        window.location.reload();
+        return;
+      }
+      // Even if not bfcached, check immediately if the app root is missing
+      var appEl = document.querySelector("[data-bf-app]");
+      if (!appEl) {
         window.location.reload();
       }
     }
-    function onVisibilityChange() {
-      if (document.visibilityState === "visible") {
-        // Give the browser 300ms to finish restoring, then check if blank
-        setTimeout(function() {
-          var root = document.getElementById("root") || document.body;
-          if (root && root.children.length === 0) {
-            window.location.reload();
-          }
-          // Also check if body background is white (blank state indicator)
-          var bg = window.getComputedStyle(document.body).backgroundColor;
-          if (bg === "rgb(255, 255, 255)" || bg === "rgba(0, 0, 0, 0)") {
-            var appEl = document.querySelector("[data-bf-app]");
-            if (!appEl) window.location.reload();
-          }
-        }, 300);
+
+    function onPageHide(e) {
+      // If the page is being put into bfcache, remember so we can recover
+      // even if pageshow.persisted reports false on the return trip
+      if (e.persisted) {
+        wasBFCached = true;
       }
     }
-    window.addEventListener("pageshow", onPageShow);
+
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        // Multiple checks at different delays to catch slow restorations
+        function checkBlank() {
+          var appEl = document.querySelector("[data-bf-app]");
+          if (!appEl) {
+            window.location.reload();
+            return;
+          }
+          // Check if the app root has any rendered content
+          var root = document.getElementById("root") || appEl;
+          if (root && root.children.length === 0) {
+            window.location.reload();
+            return;
+          }
+          // Detect a white/transparent background which signals dead React tree
+          var bg = window.getComputedStyle(document.body).backgroundColor;
+          if (bg === "rgb(255, 255, 255)" || bg === "rgba(0, 0, 0, 0)") {
+            window.location.reload();
+          }
+        }
+        // Run checks at 100ms, 400ms, and 800ms to catch slow renders
+        setTimeout(checkBlank, 100);
+        setTimeout(checkBlank, 400);
+        setTimeout(checkBlank, 800);
+      }
+    }
+
+    window.addEventListener("pageshow",      onPageShow);
+    window.addEventListener("pagehide",      onPageHide);
     document.addEventListener("visibilitychange", onVisibilityChange);
     return function() {
-      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("pageshow",      onPageShow);
+      window.removeEventListener("pagehide",      onPageHide);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
