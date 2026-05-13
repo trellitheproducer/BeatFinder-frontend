@@ -4413,47 +4413,113 @@ function generateLeaseContract(lease) {
   setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
 }
 
-function downloadMp3(url, title, beatId) {
-  // Always use the backend proxy when we have a beatId.
-  // The proxy sets Content-Disposition: attachment + CORS headers so iOS Safari
-  // shows the native download prompt instead of opening a blank media-player page.
-  var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
-  var downloadUrl;
+// ── Smart MP3 download ────────────────────────────────────────────
+// Fetches the file as a blob first so we always know whether it succeeded
+// (no more silent blank pages on failure). Once we have the blob:
+//   - iOS: navigate same-tab to the blob URL → iOS shows its native
+//     download prompt ("Save to Files" / "View" overlay).
+//   - Android/desktop: trigger a real <a download> click.
+// Works for any beat in `producer_beats`, regardless of who uploaded it,
+// because the auth-free backend proxy serves all of them.
+async function downloadBeatMp3(beat) {
+  var beatId   = beat && (beat.id || beat.beat_id || beat._id);
+  var beatUrl  = beat && (beat.url || beat.beat_url);
+  var rawTitle = (beat && (beat.title || beat.beat_title)) || "beat";
+  var filename = String(rawTitle).replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
+
+  var endpoint;
   if (beatId) {
-    downloadUrl = API_BASE + "/api/producer/beats/" + beatId + "/file";
-  } else if (url) {
-    downloadUrl = url.replace("/upload/", "/upload/fl_attachment/");
+    endpoint = API_BASE + "/api/producer/beats/" + beatId + "/file";
+  } else if (beatUrl) {
+    // Cloudinary fl_attachment makes the response a downloadable file
+    endpoint = beatUrl.replace("/upload/", "/upload/fl_attachment/");
   } else {
+    alert("This beat has no file attached yet.");
     return;
   }
-  var a = document.createElement("a");
-  a.href     = downloadUrl;
-  a.download = filename;
-  a.target   = "_blank";
-  a.rel      = "noopener noreferrer";
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(function() { document.body.removeChild(a); }, 1000);
+
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+              (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var isStandalonePWA = window.matchMedia && window.matchMedia("(display-mode: standalone)").matches;
+
+  // STRATEGY A — iOS Safari (browser tab, not PWA):
+  // direct same-tab navigation shows the native "Do you want to download?"
+  // prompt. We don't need to pre-fetch; the browser handles it.
+  if (isIOS && !isStandalonePWA) {
+    window.location.href = endpoint;
+    return;
+  }
+
+  // STRATEGY B — everything else (incl. iOS PWA standalone, Android, desktop):
+  // Fetch as blob so we control the lifecycle and surface real errors.
+  try {
+    var res = await fetch(endpoint, { method: "GET" });
+    if (!res.ok) {
+      throw new Error("Server returned " + res.status);
+    }
+    var blob = await res.blob();
+    var blobUrl = URL.createObjectURL(blob);
+
+    // Try the native Web Share API with a real File first — gives the iOS
+    // PWA user the same share sheet as Files.app would.
+    if (isStandalonePWA && navigator.canShare && typeof File === "function") {
+      try {
+        var file = new File([blob], filename, { type: "audio/mpeg" });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: rawTitle });
+          setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 5000);
+          return;
+        }
+      } catch (e) { /* fall through to anchor download */ }
+    }
+
+    var a = document.createElement("a");
+    a.href     = blobUrl;
+    a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    }, 1500);
+  } catch (e) {
+    alert("Couldn't download the beat: " + (e.message || "unknown error") +
+          ". The producer may have removed it, or your connection dropped.");
+  }
+}
+
+// Legacy wrapper kept for older callers that pass (url, title, beatId)
+function downloadMp3(url, title, beatId) {
+  return downloadBeatMp3({ url: url, title: title, id: beatId });
 }
 
 // ── Download Button ───────────────────────────────────────────────
+// Renders a button (not an <a>) so we can intercept the click and run
+// downloadBeatMp3 — that way we get the iOS share-sheet flow on Safari
+// and a real blob download elsewhere, with proper error reporting.
 function DownloadButton({ url, title, beatId, beat, user, style, children }) {
-  var resolvedBeatId = beatId || (beat && beat.id);
-  var downloadUrl = resolvedBeatId
-    ? API_BASE + "/api/producer/beats/" + resolvedBeatId + "/file"
-    : (url ? url.replace("/upload/", "/upload/fl_attachment/") : "#");
-  var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
+  var resolvedBeat = {
+    id:    beatId || (beat && beat.id),
+    url:   url    || (beat && beat.url),
+    title: title  || (beat && beat.title) || "beat",
+  };
+  var [busy, setBusy] = React.useState(false);
   return (
-    <a
-      href={downloadUrl}
-      download={filename}
-      target="_blank"
-      rel="noopener noreferrer"
-      style={Object.assign({ textDecoration: "none" }, style)}
+    <button
+      type="button"
+      onClick={async function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (busy) return;
+        setBusy(true);
+        try { await downloadBeatMp3(resolvedBeat); }
+        finally { setBusy(false); }
+      }}
+      style={Object.assign({ textDecoration: "none", cursor: busy ? "wait" : "pointer" }, style)}
     >
       {children}
-    </a>
+    </button>
   );
 }
 
@@ -4687,17 +4753,17 @@ function FreeBeatCTA({ beat, user }) {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           View Licence Contract
         </button>
-        <a href={downloadUrl} target="_blank" rel="noopener noreferrer" style={{
-          width: "100%", borderRadius: 14, padding: "15px",
+        <button onClick={function() { downloadBeatMp3(beat); }} style={{
+          width: "100%", borderRadius: 14, padding: "15px", border: "none",
           background: "linear-gradient(135deg,#C026D3,#9333EA)",
           color: "white", fontWeight: 800, fontSize: 14,
           letterSpacing: 0.5, textTransform: "uppercase",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-          textDecoration: "none", boxShadow: "0 0 20px rgba(192,38,211,0.4)",
+          cursor: "pointer", boxShadow: "0 0 20px rgba(192,38,211,0.4)",
         }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
           Save MP3 to Device
-        </a>
+        </button>
       </div>
     );
   }
@@ -5058,18 +5124,15 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
         <div style={{ marginBottom: 20 }}>
           <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Your Purchased Leases</div>
           {leases.map(lease => {
-            var dlUrl = lease.beat_id
-              ? API_BASE + "/api/producer/beats/" + lease.beat_id + "/file"
-              : (lease.beat_url ? lease.beat_url.replace("/upload/", "/upload/fl_attachment/") : "#");
             return (
             <div key={lease.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(34,197,94,0.3)" }}>
               <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{lease.beat_title}</div>
               <div style={{ color: "#666", fontSize: 12, marginBottom: 12 }}>By {lease.producer} • {lease.price} • {new Date(lease.purchased_at).toLocaleDateString()}</div>
-              <a href={dlUrl} target="_blank" rel="noopener noreferrer"
-                style={{ width: "100%", borderRadius: 12, padding: "13px", background: "linear-gradient(135deg,#22C55E,#16A34A)", color: "white", fontWeight: 800, fontSize: 14, display:"flex", alignItems:"center", justifyContent:"center", gap:8, marginBottom: 8, textDecoration: "none" }}>
+              <button onClick={function() { downloadBeatMp3({ id: lease.beat_id, url: lease.beat_url, title: lease.beat_title }); }}
+                style={{ width: "100%", borderRadius: 12, padding: "13px", border: "none", background: "linear-gradient(135deg,#22C55E,#16A34A)", color: "white", fontWeight: 800, fontSize: 14, display:"flex", alignItems:"center", justifyContent:"center", gap:8, marginBottom: 8, cursor: "pointer" }}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
                 Save Lease MP3 to Device
-              </a>
+              </button>
               <LeaseContractButton lease={lease} />
             </div>
             );
@@ -7559,17 +7622,17 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                 View Licence Contract
               </button>
-              <a href={downloadUrl} target="_blank" rel="noopener noreferrer" style={{
-                width: "100%", borderRadius: 14, padding: "14px",
+              <button onClick={function() { downloadBeatMp3(beat); }} style={{
+                width: "100%", borderRadius: 14, padding: "14px", border: "none",
                 background: "linear-gradient(135deg,#C026D3,#9333EA)",
                 color: "white", fontWeight: 800, fontSize: 14,
                 letterSpacing: 0.5, textTransform: "uppercase",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-                textDecoration: "none", boxShadow: "0 0 20px rgba(192,38,211,0.4)",
+                cursor: "pointer", boxShadow: "0 0 20px rgba(192,38,211,0.4)",
               }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
                 Save MP3 to Device
-              </a>
+              </button>
             </div>
           )}
 
@@ -20922,17 +20985,17 @@ export default function BeatFinder() {
 
                   {/* Download MP3 */}
                   {leaseBeat.beat_url && (
-                    <a href={dlUrl} target="_blank" rel="noopener noreferrer" style={{
+                    <button onClick={function() { downloadBeatMp3({ id: leaseBeat.beat_id, url: leaseBeat.beat_url, title: leaseBeat.beat_title }); }} style={{
                       width: "100%", borderRadius: 14, padding: "13px",
                       background: "transparent", border: "2px solid #F59E0B",
                       color: "#F59E0B", fontWeight: 800, fontSize: 14,
                       letterSpacing: 0.5, textTransform: "uppercase",
                       display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                      textDecoration: "none", marginBottom: 8,
+                      cursor: "pointer", marginBottom: 8,
                     }}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
                       Download MP3
-                    </a>
+                    </button>
                   )}
                 </>
               );
