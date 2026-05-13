@@ -4737,13 +4737,16 @@ function PopupWarningBanner() {
       onClick={function() { setExpanded(function(x) { return !x; }); }}
       style={{
         background: "linear-gradient(135deg, rgba(245,158,11,0.18), rgba(217,119,6,0.08))",
-        border: "1px solid rgba(245,158,11,0.4)",
+        border: "1px solid rgba(245,158,11,0.5)",
         borderRadius: 12,
         padding: "10px 12px",
         marginBottom: 12,
         cursor: "pointer",
+        animation: "bf-warn-in 0.4s ease-out, bf-warn-pulse 2s ease-out 0.4s 2",
+        boxShadow: "0 0 0 0 rgba(245,158,11,0.5)",
       }}
     >
+      <style>{"@keyframes bf-warn-in{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}@keyframes bf-warn-pulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0)}50%{box-shadow:0 0 0 8px rgba(245,158,11,0.18)}}"}</style>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" style={{ flexShrink: 0 }}>
           <circle cx="12" cy="12" r="10"/>
@@ -5412,7 +5415,7 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
         <FreeBeatCTA beat={beat} user={user} />
       ) : (
         <div style={{ padding: "0 16px 16px" }}>
-          <button onClick={onBuy} disabled={buyLoading} style={{ width: "100%", borderRadius: 14, padding: "15px", background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)", border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"), color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 15, cursor: buyLoading ? "not-allowed" : "pointer", letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: buyLoading ? "none" : "0 0 18px rgba(245,158,11,0.25)" }}>
+          <button onClick={function() { detectPopupBlock(); onBuy(); }} disabled={buyLoading} style={{ width: "100%", borderRadius: 14, padding: "15px", background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)", border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"), color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 15, cursor: buyLoading ? "not-allowed" : "pointer", letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: buyLoading ? "none" : "0 0 18px rgba(245,158,11,0.25)" }}>
             {buyLoading ? "Loading..." : "Buy Lease — " + beat.price}
           </button>
           <div style={{ display: "flex", marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
@@ -7512,7 +7515,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
       ) : (
         <div style={{ padding: "0 16px 16px" }}>
           {currentUser ? (
-            <button onClick={handleBuy} disabled={buyLoading} style={{
+            <button onClick={function() { detectPopupBlock(); handleBuy(); }} disabled={buyLoading} style={{
               width: "100%", borderRadius: 14, padding: "15px",
               background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
               border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"),
