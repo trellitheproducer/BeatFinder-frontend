@@ -4275,19 +4275,7 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
       onViewProfile={onViewProfile}
       audioEl={previewing && beat.url ? (
         <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-          onPlay={function(){
-            onAudioPlay();
-            if (!seekedRef.current && (beat.preview_start || 0) > 0 && audioRef.current) {
-              audioRef.current.currentTime = beat.preview_start;
-              seekedRef.current = true;
-            }
-          }}
-          onCanPlay={function(){
-            if (!seekedRef.current && (beat.preview_start || 0) > 0 && audioRef.current) {
-              audioRef.current.currentTime = beat.preview_start;
-              seekedRef.current = true;
-            }
-          }}
+          onPlay={function(){ onAudioPlay(); if (audioRef.current && (beat.preview_start||0) > 0 && !seekedRef.current) { audioRef.current.currentTime = beat.preview_start; seekedRef.current = true; } }}
           onPause={function(){ clearInterval(timerRef.current); }}
           onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
       ) : null}
@@ -4571,19 +4559,7 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
           onViewProfile={onViewProfile}
           audioEl={prev && beat.url ? (
             <audio ref={aRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-              onPlay={function(){
-                onPlay();
-                if (!seekedRef.current && (beat.preview_start || 0) > 0 && aRef.current) {
-                  aRef.current.currentTime = beat.preview_start;
-                  seekedRef.current = true;
-                }
-              }}
-              onCanPlay={function(){
-                if (!seekedRef.current && (beat.preview_start || 0) > 0 && aRef.current) {
-                  aRef.current.currentTime = beat.preview_start;
-                  seekedRef.current = true;
-                }
-              }}
+              onPlay={function(){ onPlay(); if (aRef.current && (beat.preview_start||0) > 0 && !seekedRef.current) { aRef.current.currentTime = beat.preview_start; seekedRef.current = true; } }}
               onPause={function(){ clearInterval(tRef.current); }}
               onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
           ) : null}
@@ -5244,19 +5220,7 @@ function FreeMemberBeatCard({ beat, onViewProfile }) {
       onViewProfile={onViewProfile}
       audioEl={previewing && beat.url ? (
         <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-          onPlay={function(){
-            onAudioPlay();
-            if (!seekedRef.current && (beat.preview_start || 0) > 0 && audioRef.current) {
-              audioRef.current.currentTime = beat.preview_start;
-              seekedRef.current = true;
-            }
-          }}
-          onCanPlay={function(){
-            if (!seekedRef.current && (beat.preview_start || 0) > 0 && audioRef.current) {
-              audioRef.current.currentTime = beat.preview_start;
-              seekedRef.current = true;
-            }
-          }}
+          onPlay={function(){ onAudioPlay(); if (audioRef.current && (beat.preview_start||0) > 0 && !seekedRef.current) { audioRef.current.currentTime = beat.preview_start; seekedRef.current = true; } }}
           onPause={function(){ clearInterval(timerRef.current); }}
           onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
       ) : null}
@@ -6259,22 +6223,9 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
             </div>
             {previewing && beat.url && (
               <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-                onPlay={function(){
-                  onAudioPlay();
-                  if (!seekedRef.current && (beat.preview_start || 0) > 0 && audioRef.current) {
-                    audioRef.current.currentTime = beat.preview_start;
-                    seekedRef.current = true;
-                  }
-                }}
-                onCanPlay={function(){
-                  if (!seekedRef.current && (beat.preview_start || 0) > 0 && audioRef.current) {
-                    audioRef.current.currentTime = beat.preview_start;
-                    seekedRef.current = true;
-                  }
-                }}
-                onTimeUpdate={onTimeUpdate}
+                onPlay={function(){ onAudioPlay(); if (audioRef.current && (beat.preview_start||0) > 0 && !seekedRef.current) { audioRef.current.currentTime = beat.preview_start; seekedRef.current = true; } }}
                 onPause={function(){ clearInterval(timerRef.current); }}
-                onEnded={stopPreview} />
+                onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
             )}
           </div>
         )}
