@@ -3879,6 +3879,43 @@ function ArtistDetailScreen({ artist, onBack, onPlay, savedIds, onSave }) {
 // Safari sees Content-Disposition: attachment and shows the native
 // "Do you want to download?" popup WITHOUT opening a new page.
 // The CORS headers on the backend allow this cross-origin.
+// ── Lease contract button with inline viewer ──────────────────────────────────
+function LeaseContractButton({ lease }) {
+  var [show, setShow] = React.useState(false);
+  var html = generateLeaseContractHtml(lease);
+  return (
+    <>
+      {show && <ContractViewer html={html} onClose={function() { setShow(false); }} />}
+      <button onClick={function() { setShow(true); }} style={{
+        width: "100%", borderRadius: 12, padding: "11px", background: "transparent",
+        border: "1px solid #2a2a2a", color: "#888", fontWeight: 700, fontSize: 13,
+        cursor: "pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+      }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        View Lease Contract
+      </button>
+    </>
+  );
+}
+
+// ── In-app contract viewer — shows contract as scrollable overlay ─────────────
+function ContractViewer({ html, onClose }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 999999, background: "#fff", display: "flex", flexDirection: "column" }}>
+      <div style={{ background: "#0a0a0a", padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+        <div style={{ color: "white", fontWeight: 800, fontSize: 15, letterSpacing: 0.5 }}>BEATFINDER</div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <div style={{ color: "#888", fontSize: 11 }}>Tap & hold to save</div>
+          <button onClick={onClose} style={{ background: "transparent", border: "1px solid #333", borderRadius: 8, color: "#aaa", padding: "6px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Close</button>
+        </div>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </div>
+  );
+}
+
 function generateFreeLeaseContractHtml(beat, user) {
   var date     = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
   var leaseId  = "BF-FREE-" + Date.now();
@@ -4126,8 +4163,8 @@ function generateLeaseContract(lease) {
 function downloadMp3(url, title, beatId) {
   // For free beats use the Cloudinary URL directly with fl_attachment for forced download
   // Only use the backend proxy for paid/authenticated downloads
-  var downloadUrl = beatId
-    ? API_BASE + "/api/producer/beats/" + beatId + "/file"
+  var downloadUrl = url
+    ? url.replace("/upload/", "/upload/fl_attachment/")
     : url;
   var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
   var a = document.createElement("a");
@@ -4143,8 +4180,8 @@ function downloadMp3(url, title, beatId) {
 
 // ── Download Button ───────────────────────────────────────────────
 function DownloadButton({ url, title, beatId, beat, user, style, children }) {
-  var downloadUrl = beatId
-    ? API_BASE + "/api/producer/beats/" + beatId + "/file"
+  var downloadUrl = url
+    ? url.replace("/upload/", "/upload/fl_attachment/")
     : url;
   var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
   return (
@@ -4269,9 +4306,10 @@ function BeatCardShell({ beat, accentColor, children, onViewProfile, extraStats 
 // =============================================================================
 // ── Free Beat CTA — contract must be accepted before MP3 unlocks ──────────────
 function FreeBeatCTA({ beat, user }) {
-  var [step, setStep] = React.useState("idle"); // idle | contract | done
-  var downloadUrl = beat.id
-    ? API_BASE + "/api/producer/beats/" + beat.id + "/file"
+  var [step, setStep] = React.useState("idle");
+  var [showContract, setShowContract] = React.useState(false);
+  var downloadUrl = beat.url
+    ? beat.url.replace("/upload/", "/upload/fl_attachment/")
     : beat.url;
   var filename = (beat.title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
   var date      = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
@@ -4323,40 +4361,39 @@ function FreeBeatCTA({ beat, user }) {
   }
 
   if (step === "done") {
-    var contractHtml = generateFreeLeaseContractHtml(beat, user);
-    var dataUri = "data:text/html;charset=utf-8," + encodeURIComponent(contractHtml);
     return (
       <div style={{ padding: "0 0 16px" }}>
+        {showContract && (
+          <ContractViewer
+            html={generateFreeLeaseContractHtml(beat, user)}
+            onClose={function() { setShowContract(false); }}
+          />
+        )}
         <div style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)", borderRadius: 14, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
           <div>
             <div style={{ color: "#22C55E", fontWeight: 800, fontSize: 12 }}>Licence Agreed ✓</div>
-            <div style={{ color: "#555", fontSize: 11 }}>Save your contract below</div>
+            <div style={{ color: "#555", fontSize: 11 }}>Download your contract & MP3 below</div>
           </div>
         </div>
-        <a href={dataUri} target="_blank" rel="noopener noreferrer" style={{
+        <button onClick={function() { setShowContract(true); }} style={{
           width: "100%", borderRadius: 14, padding: "12px",
           background: "transparent", border: "1px solid #333",
-          color: "#888", fontWeight: 700, fontSize: 12,
+          color: "#888", fontWeight: 700, fontSize: 12, cursor: "pointer",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-          textDecoration: "none", marginBottom: 8,
+          marginBottom: 8,
         }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          View / Save Licence Contract
-        </a>
-        <a
-          href={downloadUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            width: "100%", borderRadius: 14, padding: "15px",
-            background: "linear-gradient(135deg,#C026D3,#9333EA)",
-            color: "white", fontWeight: 800, fontSize: 14,
-            letterSpacing: 0.5, textTransform: "uppercase",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-            textDecoration: "none", boxShadow: "0 0 20px rgba(192,38,211,0.4)",
-          }}
-        >
+          View Licence Contract
+        </button>
+        <a href={downloadUrl} target="_blank" rel="noopener noreferrer" style={{
+          width: "100%", borderRadius: 14, padding: "15px",
+          background: "linear-gradient(135deg,#C026D3,#9333EA)",
+          color: "white", fontWeight: 800, fontSize: 14,
+          letterSpacing: 0.5, textTransform: "uppercase",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+          textDecoration: "none", boxShadow: "0 0 20px rgba(192,38,211,0.4)",
+        }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
           Save MP3 to Device
         </a>
@@ -4720,10 +4757,9 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
         <div style={{ marginBottom: 20 }}>
           <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 12 }}>Your Purchased Leases</div>
           {leases.map(lease => {
-            var dlUrl = lease.beat_id
-              ? API_BASE + "/api/producer/beats/" + lease.beat_id + "/file"
+            var dlUrl = lease.beat_url
+              ? lease.beat_url.replace("/upload/", "/upload/fl_attachment/")
               : lease.beat_url;
-            var contractUri = "data:text/html;charset=utf-8," + encodeURIComponent(generateLeaseContractHtml(lease));
             return (
             <div key={lease.id} style={{ background: "#111", borderRadius: 14, padding: 16, marginBottom: 12, border: "1px solid rgba(34,197,94,0.3)" }}>
               <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{lease.beat_title}</div>
@@ -4733,11 +4769,7 @@ function ProducerBeatsScreen({ onPlay, savedIds, onSave, user }) {
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
                 Save Lease MP3 to Device
               </a>
-              <a href={contractUri} target="_blank" rel="noopener noreferrer"
-                style={{ width: "100%", borderRadius: 12, padding: "11px", background: "transparent", border: "1px solid #2a2a2a", color: "#888", fontWeight: 700, fontSize: 13, display:"flex", alignItems:"center", justifyContent:"center", gap:8, textDecoration: "none" }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                View / Save Lease Contract
-              </a>
+              <LeaseContractButton lease={lease} />
             </div>
             );
           })}
@@ -19824,6 +19856,7 @@ export default function BeatFinder() {
   const leaseBeatId  = new URLSearchParams(window.location.search).get("beat_id");
   const [leaseModal, setLeaseModal] = React.useState(leaseSuccess);
   const [leaseBeat,  setLeaseBeat]  = React.useState(null);
+  const [showLeaseContract, setShowLeaseContract] = React.useState(false);
 
   // When returning from Stripe, fetch the purchased beat details and restore page
   React.useEffect(function() {
@@ -20281,13 +20314,15 @@ export default function BeatFinder() {
 
             {leaseBeat && (function() {
               var contractHtml = generateLeaseContractHtml(leaseBeat);
-              var contractUri  = "data:text/html;charset=utf-8," + encodeURIComponent(contractHtml);
-              var dlUrl = leaseBeat.beat_id
-                ? API_BASE + "/api/producer/beats/" + leaseBeat.beat_id + "/file"
+              var dlUrl = leaseBeat.beat_url
+                ? leaseBeat.beat_url.replace("/upload/", "/upload/fl_attachment/")
                 : leaseBeat.beat_url;
               return (
                 <>
-                  {/* Step 1 — Contract */}
+                  {showLeaseContract && (
+                    <ContractViewer html={contractHtml} onClose={function() { setShowLeaseContract(false); }} />
+                  )}
+                  {/* Contract summary */}
                   <div style={{ background: "#0d0d0d", border: "1px solid #222", borderRadius: 12, padding: 14, marginBottom: 12, maxHeight: 200, overflowY: "auto", WebkitOverflowScrolling: "touch", fontSize: 11, color: "#888", lineHeight: 1.6 }}>
                     <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 11, marginBottom: 8, textAlign: "center", letterSpacing: 1 }}>BEAT LEASE AGREEMENT</div>
                     <div style={{ marginBottom: 6 }}><span style={{ color: "#aaa", fontWeight: 700 }}>Beat:</span> "{leaseBeat.beat_title}"</div>
@@ -20303,18 +20338,18 @@ export default function BeatFinder() {
                     <div style={{ color: "#555", fontSize: 10, marginTop: 8 }}>By tapping "I Agree" you accept all lease terms. Ref: {leaseBeat.id}</div>
                   </div>
 
-                  {/* I Agree + View Contract */}
-                  <a href={contractUri} target="_blank" rel="noopener noreferrer" style={{
+                  {/* I Agree — opens full contract viewer */}
+                  <button onClick={function() { setShowLeaseContract(true); }} style={{
                     width: "100%", borderRadius: 14, padding: "13px",
                     background: "linear-gradient(135deg,#F59E0B,#D97706)",
-                    color: "white", fontWeight: 800, fontSize: 14,
+                    border: "none", color: "white", fontWeight: 800, fontSize: 14,
                     letterSpacing: 0.5, textTransform: "uppercase",
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                    textDecoration: "none", marginBottom: 8,
+                    cursor: "pointer", marginBottom: 8,
                   }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
-                    I Agree — View & Save Contract
-                  </a>
+                    I Agree — View Full Contract
+                  </button>
 
                   {/* Download MP3 */}
                   {leaseBeat.beat_url && (
