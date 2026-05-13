@@ -8375,34 +8375,10 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
   var [verifiedLease,  setVerifiedLease]  = React.useState(null); // { id, ... } once confirmed
   var [contractDownloaded, setContractDownloaded] = React.useState(false);
   var sheetPanelRef = React.useRef(null);
-  var backdropRef   = React.useRef(null);
   React.useEffect(function() {
     if (sheetPanelRef.current) {
       try { sheetPanelRef.current.scrollTop = 0; } catch(e) {}
     }
-    // Block touchmove on the backdrop ONLY — leave the panel alone so its
-    // overflowY:auto can scroll normally. This is what stops the underlying
-    // page from scrolling behind the sheet on Trending/Members tabs without
-    // breaking the sheet's own scroll on iOS Safari.
-    var backdropEl = backdropRef.current;
-    var panelEl    = sheetPanelRef.current;
-    function onTouchMove(e) {
-      // If the touch is on the panel (or any descendant), let it scroll.
-      if (panelEl && (e.target === panelEl || panelEl.contains(e.target))) {
-        return;
-      }
-      // Otherwise (touch on backdrop / outside panel) → prevent page scroll.
-      try { e.preventDefault(); } catch(_) {}
-    }
-    if (backdropEl) {
-      // Must be non-passive so preventDefault works.
-      try { backdropEl.addEventListener("touchmove", onTouchMove, { passive: false }); } catch(_) {}
-    }
-    return function() {
-      if (backdropEl) {
-        try { backdropEl.removeEventListener("touchmove", onTouchMove); } catch(_) {}
-      }
-    };
   }, []);
 
   // For LICENSED beats, check if the user owns a lease for this beat. Reads
@@ -8538,14 +8514,7 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
     }
   }
 
-  // ── Render via React portal to document.body ─────────────────────────────
-  // The card invoking this sheet may live inside parent containers that have
-  // their own stacking context (horizontal-scroll carousels on Trending,
-  // Members area card on Members tab). When that happens, the sheet's
-  // zIndex:99998 only applies WITHIN the local stacking context — from
-  // outside, the entire context sits below the bottom nav at z-index 1000.
-  // Portal escapes all parent stacking contexts by mounting under <body>.
-  var sheetJsx = (
+  return (
     <>
       {showContract && (
         <ContractViewer
@@ -8567,12 +8536,17 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
         />
       )}
 
-      <div ref={backdropRef} onClick={onClose} style={{
+      <div onClick={onClose}
+        onTouchMove={function(e){ e.stopPropagation(); }}
+        style={{
         position: "fixed", inset: 0, zIndex: 99998,
         background: "rgba(0,0,0,0.75)",
         display: "flex", alignItems: "flex-end", justifyContent: "center",
       }}>
-        <div ref={sheetPanelRef} onClick={function(e) { e.stopPropagation(); }} style={{
+        <div ref={sheetPanelRef}
+          onClick={function(e) { e.stopPropagation(); }}
+          onTouchMove={function(e){ e.stopPropagation(); }}
+          style={{
           width: "100%", maxWidth: 480,
           background: "#0d0d0d", borderTop: "1px solid #222",
           borderRadius: "20px 20px 0 0", padding: 18,
@@ -8938,11 +8912,6 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
       </div>
     </>
   );
-
-  if (typeof document === "undefined" || !document.body || !ReactDOM.createPortal) {
-    return sheetJsx;
-  }
-  return ReactDOM.createPortal(sheetJsx, document.body);
 }
 
 // ── Compact beat card for two-column profile layout ───────────────────────────
@@ -23782,8 +23751,19 @@ export default function BeatFinder() {
               zIndex: 10,
               overflow: "hidden",
             } : {
+              // position:fixed wrapper — matches the working PublicProfile
+              // overlay structure (line 23733) so that CompactBeatActionSheet
+              // (position:fixed, z-index 99998) renders into the same kind of
+              // top-level viewport-relative context. The previous overflow:auto
+              // wrapper trapped iOS touch events: the sheet rendered visually
+              // but every touchmove got absorbed by the parent's
+              // WebkitOverflowScrolling context, so the sheet couldn't scroll
+              // and the underlying page scrolled instead. Switching to
+              // position:fixed removes that touch trap.
+              position: "fixed",
+              top: 0, left: 0, right: 0,
+              bottom: "calc(72px + env(safe-area-inset-bottom))",
               overflowY: "auto",
-              height: "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))",
               WebkitOverflowScrolling: "touch",
               overscrollBehavior: "none",
             }),
@@ -23800,7 +23780,7 @@ export default function BeatFinder() {
           </div>
         ))}
         {tab === "profile" && (
-          <div style={{ overflowY: "auto", height: "calc(100dvh - calc(72px + env(safe-area-inset-bottom)))", WebkitOverflowScrolling: "touch", overscrollBehavior: "none" }} onTouchMove={function(e){ e.stopPropagation(); }}>
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: "calc(72px + env(safe-area-inset-bottom))", overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "none" }} onTouchMove={function(e){ e.stopPropagation(); }}>
             <ProfileScreen key={user ? user.id : "guest"} user={user} setUser={setUser} onLogout={() => {
               AuthAPI.logout();
               setUser(null);
