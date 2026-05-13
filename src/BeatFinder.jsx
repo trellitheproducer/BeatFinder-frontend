@@ -522,7 +522,7 @@ function LogicPanSlider({ value = 0, onChange }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function LogicTrackHeader({
   track, isRec, isSelected, fxOpen, showTakes,
-  onSelect, onMute, onSolo, onFx, onTakes, onRemove,
+  onSelect, onMute, onSolo, onFx, onTakes, onRemove, onDuplicate,
   updateTrack, analyserNode, isPlaying,
   isDragging, isDropTarget,
   onLongPressStart, onLongPressCancel, onDragMove, onDragEnd,
@@ -530,10 +530,11 @@ function LogicTrackHeader({
   const [renaming, setRenaming] = React.useState(false);
   const [nameVal,  setNameVal]  = React.useState(track.name);
   const [holdProgress, setHoldProgress] = React.useState(0); // 0–1 fill while holding
+  const [menuOpen, setMenuOpen] = React.useState(false); // ⋮ overflow menu
   const inputRef    = React.useRef(null);
   const holdRafRef  = React.useRef(null);
   const holdStartRef = React.useRef(null);
-  const HOLD_MS = 1500;
+  const HOLD_MS = 500;
 
   React.useEffect(() => { setNameVal(track.name); }, [track.name]);
   React.useEffect(() => { if (renaming && inputRef.current) inputRef.current.focus(); }, [renaming]);
@@ -737,16 +738,74 @@ function LogicTrackHeader({
             }}>{track.clips.length}▾</button>
         )}
 
-        {/* Delete — always red, shows confirm modal */}
-        <button onClick={e => { e.stopPropagation(); onRemove(); }}
-          style={{
-            background:"none", border:"none", color:"#FF3B30",
-            fontSize:10, cursor:"pointer", padding:"0 1px", lineHeight:1, flexShrink:0,
-            opacity: 0.7,
-          }}
-          onPointerEnter={e => { e.currentTarget.style.opacity="1"; }}
-          onPointerLeave={e => { e.currentTarget.style.opacity="0.7"; }}
-        >✕</button>
+        {/* ⋮ Overflow menu — contains Duplicate + Delete */}
+        <div style={{ position:"relative", flexShrink:0 }}>
+          <button onClick={e => { e.stopPropagation(); setMenuOpen(function(v){ return !v; }); }}
+            style={{
+              background:"none", border:"none", color:"#666",
+              fontSize:14, cursor:"pointer", padding:"0 2px", lineHeight:1,
+              fontWeight:900,
+            }}
+            onPointerEnter={e => { e.currentTarget.style.color="#aaa"; }}
+            onPointerLeave={e => { e.currentTarget.style.color="#666"; }}
+          >⋮</button>
+          {menuOpen && (
+            <>
+              {/* Backdrop to close on outside tap */}
+              <div onClick={e => { e.stopPropagation(); setMenuOpen(false); }}
+                style={{ position:"fixed", inset:0, zIndex:90 }} />
+              <div style={{
+                position:"absolute", top:18, right:0, zIndex:91,
+                background:"#1a1a1a", border:"1px solid #333", borderRadius:8,
+                boxShadow:"0 4px 16px rgba(0,0,0,0.6)",
+                minWidth:130, overflow:"hidden",
+              }} onClick={e => e.stopPropagation()}>
+                <button onClick={function(e){
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  if (onDuplicate) onDuplicate();
+                }}
+                  style={{
+                    width:"100%", background:"none", border:"none",
+                    color:"#d0d0d0", fontSize:12, fontWeight:600,
+                    padding:"10px 14px", textAlign:"left", cursor:"pointer",
+                    display:"flex", alignItems:"center", gap:8,
+                  }}
+                  onPointerEnter={e => { e.currentTarget.style.background="#252525"; }}
+                  onPointerLeave={e => { e.currentTarget.style.background="transparent"; }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                  Duplicate
+                </button>
+                <div style={{ height:1, background:"#2a2a2a" }} />
+                <button onClick={function(e){
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  if (onRemove) onRemove();
+                }}
+                  style={{
+                    width:"100%", background:"none", border:"none",
+                    color:"#FF3B30", fontSize:12, fontWeight:600,
+                    padding:"10px 14px", textAlign:"left", cursor:"pointer",
+                    display:"flex", alignItems:"center", gap:8,
+                  }}
+                  onPointerEnter={e => { e.currentTarget.style.background="#252525"; }}
+                  onPointerLeave={e => { e.currentTarget.style.background="transparent"; }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#FF3B30" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                    <path d="M10 11v6M14 11v6"/>
+                  </svg>
+                  Delete
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* ── Row 2: VU meters ── */}
@@ -16279,7 +16338,7 @@ function StudioScreen({ user, onExit }) {
       setReorderDragId(track.id);
       setReorderDropIdx(currentIdx);
       reorderDragRef.current = { trackId: track.id, startY, currentIdx };
-    }, 1500);
+    }, 500);
   }, [tracks]);
 
   const handleHeaderLongPressCancel = useCallback(function() {
@@ -18312,6 +18371,41 @@ function StudioScreen({ user, onExit }) {
     setIsSaved(false);
   };
 
+  // Duplicate a track: clones the FX chain only (no clips, no recordings).
+  // Inserts the new track directly after the source track.
+  // Use case: build an FX chain on one track, then duplicate to record dry
+  // and re-process through the same chain later.
+  const duplicateTrack = function (srcId) {
+    setTracks(function(prev) {
+      const idx = prev.findIndex(function(t){ return t.id === srcId; });
+      if (idx === -1) return prev;
+      const src = prev[idx];
+      // Pick the next vocal number based on existing vocal tracks
+      const vocalCount = prev.filter(function(t){ return t.type === "vocal"; }).length;
+      const newId = Date.now() + Math.random();
+      // Deep-clone effects so toggles on the new track don't mutate the source
+      const clonedEffects = src.effects ? JSON.parse(JSON.stringify(src.effects)) : defaultEffects();
+      const isVocal = src.type === "vocal";
+      const baseName = isVocal ? ("Vocal " + (vocalCount + 1)) : (src.name + " Copy");
+      const clone = {
+        id: newId,
+        name: baseName,
+        type: src.type,
+        color: isVocal ? VOCAL_COLORS[(vocalCount) % VOCAL_COLORS.length] : src.color,
+        volume: src.volume ?? 1,
+        pan: src.pan ?? 0,
+        isMuted: false,
+        isSoloed: false,
+        effects: clonedEffects,
+        clips: [], // FX only — no recordings copied
+      };
+      const next = [...prev];
+      next.splice(idx + 1, 0, clone);
+      return next;
+    });
+    setIsSaved(false);
+  };
+
   const updateTrack = function (id, patch) {
     setTracks(function (prev) {
       const next = prev.map(function(t){ return t.id===id?{...t,...patch}:t; });
@@ -18359,6 +18453,31 @@ function StudioScreen({ user, onExit }) {
       });
     });
     setContextMenu(null); setIsSaved(false);
+  };
+
+  // Move a clip between tracks atomically (one setTracks call so it's a single
+  // re-render and undo-history entry). Optionally update the clip's startTime
+  // at the same time (when the user dragged it horizontally too).
+  const moveClipToTrack = function (fromTrackId, clipId, toTrackId, patch) {
+    if (fromTrackId === toTrackId) return;
+    setTracks(function(prev) {
+      let moved = null;
+      // First pass: find and detach the clip from its source track
+      const detached = prev.map(function(t) {
+        if (t.id !== fromTrackId) return t;
+        const clip = (t.clips || []).find(function(cl){ return cl.id === clipId; });
+        if (!clip) return t;
+        moved = patch ? { ...clip, ...patch } : clip;
+        return { ...t, clips: t.clips.filter(function(cl){ return cl.id !== clipId; }) };
+      });
+      if (!moved) return prev;
+      // Second pass: attach to destination track
+      return detached.map(function(t) {
+        if (t.id !== toTrackId) return t;
+        return { ...t, clips: [...(t.clips || []), { ...moved, active: true }] };
+      });
+    });
+    setIsSaved(false);
   };
 
   const setActiveClip = function (trackId, clipId) {
@@ -18912,18 +19031,35 @@ function StudioScreen({ user, onExit }) {
     e.stopPropagation();
     selectClip(clip.id);
     const startX = e.clientX;
+    const startY = e.clientY;
     const startT = clip.startTime || 0;
+    const startTrackIdx = tracksRef.current.findIndex(function(t){ return t.id === track.id; });
     let moved = false;
+    let lastTargetIdx = startTrackIdx;
+    let pendingStartT = startT;
     const onMove = function (me) {
       const dx = me.clientX - startX;
-      if (!moved && Math.abs(dx) < 5) return;
+      const dy = me.clientY - startY;
+      if (!moved && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
       moved = true;
-      const newT = snapSecs(startT + dx / effectivePPS);
-      updateClip(track.id, clip.id, { startTime: newT });
+      // Horizontal: live-update startTime within current track
+      pendingStartT = snapSecs(startT + dx / effectivePPS);
+      updateClip(track.id, clip.id, { startTime: pendingStartT });
+      // Vertical: compute target track index but defer the move until drop
+      const rowDelta = Math.round(dy / TRACK_H);
+      const newTargetIdx = Math.max(0, Math.min(tracksRef.current.length - 1, startTrackIdx + rowDelta));
+      lastTargetIdx = newTargetIdx;
     };
     const onUp = function () {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
+      // If dropped on a different track row, transfer the clip
+      if (moved && lastTargetIdx !== startTrackIdx) {
+        const targetTrack = tracksRef.current[lastTargetIdx];
+        if (targetTrack && targetTrack.id !== track.id) {
+          moveClipToTrack(track.id, clip.id, targetTrack.id, { startTime: pendingStartT });
+        }
+      }
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
@@ -19101,9 +19237,11 @@ function StudioScreen({ user, onExit }) {
     e.stopPropagation();
     selectClip(clip.id);
     const startX = e.touches[0].clientX;
+    const startY = e.touches[0].clientY;
     const startT = clip.startTime || 0;
     const menuX  = e.touches[0].clientX;
     const menuY  = e.touches[0].clientY - 60;
+    const startTrackIdx = tracksRef.current.findIndex(function(t){ return t.id === track.id; });
 
     // If this clip is part of a multi-selection, snapshot all selected clips' start times
     // so we can shift them all by the same delta during drag.
@@ -19127,6 +19265,9 @@ function StudioScreen({ user, onExit }) {
     }, 500);
 
     dragRef.current = { trackId: track.id, clipId: clip.id, startX, startT, moved: false, lp };
+    // Track which row the finger is currently over so we can move the clip on release
+    let lastTargetIdx = startTrackIdx;
+    let pendingStartT = startT;
 
     // Add non-passive touchmove directly on the element so we can preventDefault
     // This stops the scroll container from stealing the gesture during clip drag
@@ -19135,7 +19276,9 @@ function StudioScreen({ user, onExit }) {
       if (!dragRef.current) return;
       me.preventDefault(); // must be non-passive to work
       const dx = me.touches[0].clientX - dragRef.current.startX;
-      if (Math.abs(dx) > 6) {
+      const dy = me.touches[0].clientY - startY;
+      // Treat movement in either axis as a drag (cancels the long-press menu)
+      if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
         clearTimeout(dragRef.current.lp);
         dragRef.current.moved = true;
         if (isMultiDrag) {
@@ -19154,13 +19297,26 @@ function StudioScreen({ user, onExit }) {
             });
           });
         } else {
-          const newT = snapSecs(dragRef.current.startT + dx / effectivePPS);
-          updateClip(dragRef.current.trackId, dragRef.current.clipId, { startTime: newT });
+          pendingStartT = snapSecs(dragRef.current.startT + dx / effectivePPS);
+          updateClip(dragRef.current.trackId, dragRef.current.clipId, { startTime: pendingStartT });
+        }
+        // Track target row for vertical drag — only applies to single-clip drag.
+        // Multi-select drag stays in original rows.
+        if (!isMultiDrag) {
+          const rowDelta = Math.round(dy / TRACK_H);
+          lastTargetIdx = Math.max(0, Math.min(tracksRef.current.length - 1, startTrackIdx + rowDelta));
         }
       }
     };
     const onEnd = function () {
       clearTimeout(dragRef.current && dragRef.current.lp);
+      // If user dropped on a different track row, transfer the clip now
+      if (!isMultiDrag && dragRef.current && dragRef.current.moved && lastTargetIdx !== startTrackIdx) {
+        const targetTrack = tracksRef.current[lastTargetIdx];
+        if (targetTrack && targetTrack.id !== track.id) {
+          moveClipToTrack(track.id, clip.id, targetTrack.id, { startTime: pendingStartT });
+        }
+      }
       dragRef.current = null;
       elem.removeEventListener("touchmove", onMove);
       elem.removeEventListener("touchend",  onEnd);
@@ -21007,6 +21163,7 @@ userPickedMicRef.current = true;
                       onFx={function(){ setFxTrackId(function(v){ return v===track.id?null:track.id; }); }}
                       onTakes={function(){ setShowTakes(function(v){ return v===track.id?null:track.id; }); }}
                       onRemove={function(){ setConfirmDeleteTrackId(track.id); }}
+                      onDuplicate={function(){ duplicateTrack(track.id); }}
                       updateTrack={updateTrack}
                       analyserNode={trackAnalysersRef.current[track.id] || null}
                       isPlaying={isPlaying}
