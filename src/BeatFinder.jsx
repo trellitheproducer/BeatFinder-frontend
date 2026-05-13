@@ -4241,12 +4241,20 @@ function generateLeaseContract(lease) {
 }
 
 function downloadMp3(url, title, beatId) {
-  var proxyUrl = beatId
-    ? API_BASE + "/api/producer/beats/" + beatId + "/file"
-    : url;
+  // For free beats use the Cloudinary URL directly with fl_attachment for forced download
+  // Only use the backend proxy for paid/authenticated downloads
+  var downloadUrl;
+  if (url && url.includes("cloudinary.com")) {
+    // Insert fl_attachment into Cloudinary URL to force download
+    downloadUrl = url.replace("/upload/", "/upload/fl_attachment/");
+  } else if (beatId) {
+    downloadUrl = API_BASE + "/api/producer/beats/" + beatId + "/file";
+  } else {
+    downloadUrl = url;
+  }
   var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
   var a = document.createElement("a");
-  a.href     = proxyUrl;
+  a.href     = downloadUrl;
   a.download = filename;
   a.target   = "_blank";
   a.rel      = "noopener noreferrer";
