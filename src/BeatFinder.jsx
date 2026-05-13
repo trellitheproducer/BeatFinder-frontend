@@ -5661,11 +5661,16 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
   }
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
 
-  async function handleBuy() {
+  async function handleBuy(tier) {
     if (!user) { setErr("Please log in to purchase a lease"); return; }
+    var safeTier = (tier === "premium") ? "premium" : "basic";
     setLoading(true); setErr("");
     try {
-      const result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
+      const result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier: safeTier }),
+      });
       const resetOnReturn = () => {
         if (document.visibilityState === "visible") {
           document.removeEventListener("visibilitychange", resetOnReturn);
@@ -5949,7 +5954,11 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
       if (!user) { setBuyErr("Log in to purchase"); return; }
       setBuyLoading(true); setBuyErr("");
       try {
-        var result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
+        var result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tier: "basic" }),
+        });
         var resetOnReturn = function() {
           if (document.visibilityState === "visible") {
             document.removeEventListener("visibilitychange", resetOnReturn);
@@ -7495,7 +7504,11 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
     if (!currentUser) { setBuyErr("Please log in to purchase"); return; }
     setBuyLoading(true); setBuyErr("");
     try {
-      var result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
+      var result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier: "basic" }),
+      });
       var resetOnReturn = function() {
         if (document.visibilityState === "visible") {
           document.removeEventListener("visibilitychange", resetOnReturn);
@@ -8108,25 +8121,65 @@ function ArtistTrackCard({ track, isOwner, onDeleted, onViewProfile }) {
 // Used by CompactBeatCard. Persists signed state in localStorage so iOS users
 // returning from the file viewer (after saving the HTML contract) still see
 // the MP3 download button. Mirrors FreeBeatCTA logic in a sheet UI.
+//
+// IMPORTANT: For LICENSED beats, "step = done" is ONLY reached after the
+// server confirms the user actually owns a lease (via /api/producer/my-leases).
+// The local signedKey flag is reserved for the contract-acceptance state AFTER
+// the purchase is verified — it never marks a paid purchase. Cancelling the
+// Stripe checkout therefore can NEVER unlock the download.
 function CompactBeatActionSheet({ beat, user, onClose }) {
   var isFreePrice = function(p) { return !p || p === "free" || p === "£0" || p === "0" || p === "£0.00" || p === "0.00"; };
   var isFree   = isFreePrice(beat.price);
   var accent   = isFree ? "#C026D3" : "#F59E0B";
   var signedKey = (isFree ? "bf_signed_free_" : "bf_signed_lease_") + (beat.id || beat.url || beat.title || "x");
 
+  // For FREE beats: the signed flag is the gate. For LICENSED beats: ignore
+  // any stored flag (it's stale from old flow) and require server confirmation.
   var initialStep = "preview";
   try {
-    if (typeof window !== "undefined" && window.localStorage && window.localStorage.getItem(signedKey)) {
+    if (isFree && typeof window !== "undefined" && window.localStorage && window.localStorage.getItem(signedKey)) {
       initialStep = "done";
+    }
+    // Clean up any old/stale licensed signedKey that might unlock the download
+    // without actual server-verified payment (legacy flag from earlier flow)
+    if (!isFree && typeof window !== "undefined" && window.localStorage) {
+      window.localStorage.removeItem(signedKey);
     }
   } catch (e) {}
 
   var [step, setStep]               = React.useState(initialStep);
   var [showContract, setShowContract] = React.useState(false);
   var [buyLoading, setBuyLoading]     = React.useState(false);
+  var [verifyingLease, setVerifyingLease] = React.useState(!isFree);
+  var [verifiedLease,  setVerifiedLease]  = React.useState(null); // { id, ... } once confirmed
+  var [contractDownloaded, setContractDownloaded] = React.useState(false);
 
-  // Re-check localStorage on mount + on visibility change (iOS resume)
+  // For LICENSED beats, check the server to see if the user already owns this lease.
+  // This is the ONLY way "step = done" is reached for paid beats.
   React.useEffect(function() {
+    if (isFree) return;
+    if (!user) { setVerifyingLease(false); return; }
+    var cancelled = false;
+    setVerifyingLease(true);
+    apiFetch("/api/producer/my-leases").then(function(leases) {
+      if (cancelled) return;
+      var match = (leases || []).find(function(l) {
+        return l.beat_id === beat.id || l.id === beat.id;
+      });
+      if (match) {
+        setVerifiedLease(match);
+        setStep("done");
+      }
+      setVerifyingLease(false);
+    }).catch(function() {
+      if (!cancelled) setVerifyingLease(false);
+    });
+    return function() { cancelled = true; };
+  }, [isFree, beat.id, user]);
+
+  // FREE-only: re-check localStorage on visibility change (iOS resume)
+  React.useEffect(function() {
+    if (!isFree) return;
     try {
       if (window.localStorage && window.localStorage.getItem(signedKey)) {
         setStep("done");
@@ -8141,7 +8194,7 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
     }
     document.addEventListener("visibilitychange", onVis);
     return function() { document.removeEventListener("visibilitychange", onVis); };
-  }, [signedKey]);
+  }, [signedKey, isFree]);
 
   function markSigned() {
     try { window.localStorage.setItem(signedKey, "1"); } catch (e) {}
@@ -8154,19 +8207,23 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
   var producer = beat.producer || beat.producer_username || "Producer";
   var artist   = (user && (user.name || user.username)) || "Artist";
 
-  // Stripe buy flow for LICENSED beats
-  async function handleBuy() {
+  // Stripe buy flow for LICENSED beats — tier is "basic" or "premium"
+  async function handleBuy(tier) {
     if (!user) {
       alert("Sign up and purchase a plan to buy beat leases!");
       return;
     }
+    var safeTier = (tier === "premium") ? "premium" : "basic";
     setBuyLoading(true);
     try {
-      // Mark accepted BEFORE leaving for Stripe so when they come back the
-      // download stays unlocked. The actual lease record is also persisted
-      // server-side via the Stripe webhook.
-      markSigned();
-      var r = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
+      // Do NOT mark signed before payment — only the server-confirmed lease
+      // (verified via /api/producer/my-leases after Stripe webhook fires)
+      // unlocks the download. Cancelling Stripe must leave the gate locked.
+      var r = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier: safeTier }),
+      });
       try {
         var ct = sessionStorage.getItem("bf_tab") || "exclusive";
         sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, ts: Date.now() }));
@@ -8174,6 +8231,7 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
       window.location.href = r.checkout_url;
     } catch (e) {
       setBuyLoading(false);
+      alert(e.message || "Could not start checkout");
     }
   }
 
@@ -8250,7 +8308,7 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
                   <div style={{ marginBottom: 6 }}><span style={{ color: "#aaa", fontWeight: 700 }}>Beat:</span> "{beat.title}"</div>
                   <div style={{ marginBottom: 6 }}><span style={{ color: "#aaa", fontWeight: 700 }}>Producer:</span> {producer}</div>
                   <div style={{ marginBottom: 6 }}><span style={{ color: "#aaa", fontWeight: 700 }}>Artist:</span> {artist}</div>
-                  <div style={{ marginBottom: 6 }}><span style={{ color: "#aaa", fontWeight: 700 }}>{isFree ? "Type" : "Price"}:</span> {isFree ? "FREE Non-Commercial" : beat.price}</div>
+                  <div style={{ marginBottom: 6 }}><span style={{ color: "#aaa", fontWeight: 700 }}>{isFree ? "Type" : "Price"}:</span> {isFree ? "FREE Non-Commercial" : "Choose tier below"}</div>
                   <div style={{ height: 1, background: "#222", margin: "10px 0" }} />
                   {isFree ? (
                     <>
@@ -8263,10 +8321,22 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
                     </>
                   ) : (
                     <>
-                      <div style={{ marginBottom: 6 }}><span style={{ color: accent, fontWeight: 700 }}>Non-Exclusive MP3 Lease</span> — stream, perform, distribute commercially up to 100k streams.</div>
+                      <div style={{ marginBottom: 8 }}>
+                        <span style={{ color: "#F59E0B", fontWeight: 700 }}>BASIC LEASE (£{Number(beat.basic_lease_price) || 50})</span> — non-exclusive · 100k stream cap · resaleable record · <strong>75%</strong> composition royalties to producer.
+                      </div>
+                      {(Number(beat.premium_lease_price) > 0) && (
+                        <div style={{ marginBottom: 8 }}>
+                          <span style={{ color: "#A855F7", fontWeight: 700 }}>PREMIUM LEASE (£{Number(beat.premium_lease_price)})</span> — EXCLUSIVE · unlimited streams · beat retired from sale · no resale · <strong>50%</strong> composition royalties to producer.
+                        </div>
+                      )}
+                      <div style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 8, padding: 8, marginBottom: 8 }}>
+                        <span style={{ color: "#F59E0B", fontWeight: 800, fontSize: 10, letterSpacing: 0.5 }}>⚠ IMPORTANT — Basic Lease buyers:</span>
+                        <div style={{ color: "#aaa", fontSize: 10, marginTop: 4, lineHeight: 1.5 }}>
+                          Your Basic Lease is <strong>automatically revoked</strong> if another buyer purchases the Premium (Exclusive) Lease for this beat. On revocation you must cease distribution of the New Work. <strong>No refund</strong> is issued. By buying Basic you accept this risk (Clause 6 of the Basic contract).
+                        </div>
+                      </div>
                       <div style={{ marginBottom: 6 }}>Must credit: <em>(Prod. by {producer})</em> in all releases.</div>
-                      <div style={{ marginBottom: 6 }}>Producer retains copyright. 50% composition royalties to producer.</div>
-                      <div style={{ marginBottom: 6 }}>No resale, no sub-licensing, no copyright claim on the Beat.</div>
+                      <div style={{ marginBottom: 6 }}>Producer retains copyright on the Beat. Buyer owns vocals & finished record.</div>
                       <div style={{ marginBottom: 6 }}>Governed by England and Wales law.</div>
                     </>
                   )}
@@ -8292,17 +8362,71 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
                   </button>
                 </>
               ) : (
-                <button onClick={handleBuy} disabled={buyLoading} style={{
-                  width: "100%", borderRadius: 14, padding: "13px",
-                  background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
-                  border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"),
-                  color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 13,
-                  letterSpacing: 0.5, cursor: buyLoading ? "not-allowed" : "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  marginBottom: 8,
-                }}>
-                  {buyLoading ? "Loading..." : "Agree & Buy Lease — " + beat.price}
-                </button>
+                <div>
+                  {(function() {
+                    var basicPrice   = Number(beat.basic_lease_price)   || 50;
+                    var premiumPrice = Number(beat.premium_lease_price) || 0;
+                    var premiumSold  = !!beat.premium_sold;
+                    var premiumAvailable = (premiumPrice >= 100 && premiumPrice <= 500 && !premiumSold);
+                    var disabled = buyLoading || verifyingLease;
+                    return (
+                      <>
+                        {/* Basic Lease card */}
+                        <button onClick={function() { handleBuy("basic"); }} disabled={disabled} style={{
+                          width: "100%", borderRadius: 12, padding: "12px 14px",
+                          background: disabled ? "transparent" : "rgba(245,158,11,0.08)",
+                          border: "2px solid " + (disabled ? "#333" : "#F59E0B"),
+                          color: disabled ? "#555" : "white",
+                          cursor: disabled ? "not-allowed" : "pointer",
+                          marginBottom: 8, textAlign: "left",
+                        }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                            <div style={{ color: disabled ? "#555" : "#F59E0B", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>BASIC LEASE</div>
+                            <div style={{ color: disabled ? "#555" : "#F59E0B", fontWeight: 800, fontSize: 16 }}>£{basicPrice}</div>
+                          </div>
+                          <div style={{ color: disabled ? "#333" : "#888", fontSize: 10, lineHeight: 1.4 }}>
+                            Non-exclusive · 100k stream cap · Resaleable record
+                          </div>
+                        </button>
+
+                        {/* Premium Lease card */}
+                        {premiumPrice > 0 && (
+                          <button
+                            onClick={function() { if (premiumAvailable && !disabled) handleBuy("premium"); }}
+                            disabled={disabled || !premiumAvailable}
+                            style={{
+                              width: "100%", borderRadius: 12, padding: "12px 14px",
+                              background: (disabled || !premiumAvailable) ? "transparent" : "rgba(168,85,247,0.10)",
+                              border: "2px solid " + ((disabled || !premiumAvailable) ? "#333" : "#A855F7"),
+                              color: (disabled || !premiumAvailable) ? "#555" : "white",
+                              cursor: (disabled || !premiumAvailable) ? "not-allowed" : "pointer",
+                              marginBottom: 8, textAlign: "left",
+                              opacity: (premiumSold ? 0.55 : 1),
+                            }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                              <div style={{ color: (disabled || !premiumAvailable) ? "#555" : "#A855F7", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>
+                                PREMIUM (EXCLUSIVE){premiumSold ? " — SOLD" : ""}
+                              </div>
+                              <div style={{ color: (disabled || !premiumAvailable) ? "#555" : "#A855F7", fontWeight: 800, fontSize: 16 }}>£{premiumPrice}</div>
+                            </div>
+                            <div style={{ color: (disabled || !premiumAvailable) ? "#333" : "#888", fontSize: 10, lineHeight: 1.4 }}>
+                              {premiumSold
+                                ? "This beat has been bought exclusively and is no longer available."
+                                : "Exclusive · Unlimited streams · Beat retired · No resale"}
+                            </div>
+                          </button>
+                        )}
+
+                        {verifyingLease && (
+                          <div style={{ color: "#555", fontSize: 11, textAlign: "center", marginTop: 6 }}>Checking purchase status…</div>
+                        )}
+                        {buyLoading && (
+                          <div style={{ color: "#F59E0B", fontSize: 11, textAlign: "center", marginTop: 6 }}>Redirecting to Stripe…</div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
               )}
               <button onClick={onClose} style={{
                 width: "100%", borderRadius: 14, padding: "10px",
@@ -8350,27 +8474,86 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
             </div>
           )}
 
-          {/* STEP: done for LICENSED — directs them to their purchases */}
-          {step === "done" && !isFree && (
+          {/* STEP: done for LICENSED — show two-step download:
+              1) View/Download Contract  →  2) Save MP3 to Device.
+              The MP3 button only unlocks once the contract has been opened.
+              If the lease was VOIDED (premium sold by someone else after this
+              basic purchase), show a revoked state and block downloads. */}
+          {step === "done" && !isFree && (verifiedLease && verifiedLease.voided) && (
             <div>
               <div style={{
-                background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)",
-                borderRadius: 14, padding: "11px 14px", marginBottom: 10,
-                display: "flex", alignItems: "center", gap: 10,
+                background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)",
+                borderRadius: 14, padding: "12px 14px", marginBottom: 10,
+                display: "flex", alignItems: "flex-start", gap: 10,
               }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2.5" strokeLinecap="round" style={{ flexShrink: 0, marginTop: 1 }}>
+                  <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
                 <div>
-                  <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12 }}>Lease Already Purchased</div>
-                  <div style={{ color: "#555", fontSize: 10 }}>Find the contract & MP3 in your Profile → Purchases</div>
+                  <div style={{ color: "#EF4444", fontWeight: 800, fontSize: 13 }}>Basic Lease Revoked</div>
+                  <div style={{ color: "#888", fontSize: 11, marginTop: 4, lineHeight: 1.5 }}>
+                    Your Basic Lease for this beat was revoked because the Producer sold the Premium (Exclusive) Lease to another buyer. As agreed at purchase (Clause 6 of the Basic Lease), no refund is issued and you must cease distribution of any New Work derived from this beat.
+                  </div>
                 </div>
               </div>
               <button onClick={onClose} style={{
                 width: "100%", borderRadius: 14, padding: "12px",
-                background: "linear-gradient(135deg,#F59E0B,#D97706)",
-                border: "none", color: "white", fontWeight: 800, fontSize: 13,
-                letterSpacing: 0.5, cursor: "pointer",
+                background: "transparent", border: "1px solid #333",
+                color: "#888", fontWeight: 700, fontSize: 12, cursor: "pointer",
+              }}>Close</button>
+            </div>
+          )}
+
+          {step === "done" && !isFree && !(verifiedLease && verifiedLease.voided) && (
+            <div>
+              <div style={{
+                background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)",
+                borderRadius: 14, padding: "11px 14px", marginBottom: 10,
+                display: "flex", alignItems: "center", gap: 10,
               }}>
-                Close
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                <div>
+                  <div style={{ color: "#22C55E", fontWeight: 800, fontSize: 12 }}>Payment Confirmed ✓ {verifiedLease && verifiedLease.tier === "premium" ? "— Premium" : "— Basic"}</div>
+                  <div style={{ color: "#555", fontSize: 10 }}>
+                    {contractDownloaded
+                      ? "Contract downloaded — you can now save the MP3"
+                      : "Download your contract first to unlock the MP3"}
+                  </div>
+                </div>
+              </div>
+              <button onClick={function() { setShowContract(true); setContractDownloaded(true); }} style={{
+                width: "100%", borderRadius: 14, padding: "11px",
+                background: contractDownloaded ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
+                border: contractDownloaded ? "1px solid #333" : "none",
+                color: contractDownloaded ? "#888" : "white",
+                fontWeight: 700, fontSize: 12, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                marginBottom: 8,
+              }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={contractDownloaded ? "#888" : "white"} strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                {contractDownloaded ? "View Licence Contract Again" : "Download Licence Contract"}
+              </button>
+              <button
+                onClick={function() {
+                  if (!contractDownloaded) return;
+                  downloadBeatMp3(beat);
+                }}
+                disabled={!contractDownloaded}
+                style={{
+                  width: "100%", borderRadius: 14, padding: "14px", border: "none",
+                  background: contractDownloaded
+                    ? "linear-gradient(135deg,#F59E0B,#D97706)"
+                    : "#1a1a1a",
+                  color: contractDownloaded ? "white" : "#444",
+                  fontWeight: 800, fontSize: 14,
+                  letterSpacing: 0.5, textTransform: "uppercase",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                  cursor: contractDownloaded ? "pointer" : "not-allowed",
+                  boxShadow: contractDownloaded ? "0 0 20px rgba(245,158,11,0.4)" : "none",
+                  opacity: contractDownloaded ? 1 : 0.6,
+                }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={contractDownloaded ? "white" : "#444"} strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+                {contractDownloaded ? "Save MP3 to Device" : "MP3 — Locked"}
               </button>
             </div>
           )}
@@ -10307,6 +10490,177 @@ function MyUploadsSection({ user }) {
 
 
 // =============================================================================
+// MY PURCHASES — list of all beats the user has purchased a lease for.
+// Shows tier, voided state, and lets buyer re-download the contract & MP3.
+// =============================================================================
+function MyPurchasesSection({ user }) {
+  const [leases,  setLeases]  = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err,     setErr]     = useState("");
+  const [busyId,  setBusyId]  = useState(null);
+
+  const load = function() {
+    setLoading(true); setErr("");
+    apiFetch("/api/producer/my-leases")
+      .then(function(d) { setLeases(Array.isArray(d) ? d : []); setLoading(false); })
+      .catch(function(e) { setErr(e.message || "Could not load purchases"); setLoading(false); });
+  };
+  React.useEffect(function() { load(); }, []);
+
+  async function handleDownloadContract(lease) {
+    setBusyId("contract_" + lease.id);
+    try { await downloadLeaseContractPdf(lease); }
+    catch (e) { alert(e.message || "Contract download failed"); }
+    setBusyId(null);
+  }
+
+  async function handleDownloadMp3(lease) {
+    setBusyId("mp3_" + lease.id);
+    try {
+      // Build a beat-like object for downloadBeatMp3 which expects { id, title, url }
+      await downloadBeatMp3({
+        id:    lease.beat_id,
+        title: lease.beat_title,
+        url:   lease.beat_url,
+      });
+    } catch (e) {
+      alert(e.message || "MP3 download failed");
+    }
+    setBusyId(null);
+  }
+
+  function fmtDate(s) {
+    if (!s) return "";
+    try {
+      var d = new Date(s);
+      if (isNaN(d.getTime())) return s;
+      return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+    } catch (e) { return s; }
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>My Purchases</div>
+        <button onClick={load} disabled={loading} style={{
+          background: "transparent", border: "1px solid #333", borderRadius: 10,
+          color: loading ? "#444" : "#888", fontSize: 11, fontWeight: 700,
+          padding: "5px 12px", cursor: loading ? "default" : "pointer",
+        }}>
+          {loading ? "Loading…" : "Refresh"}
+        </button>
+      </div>
+      <div style={{ color: "#666", fontSize: 12, marginBottom: 16 }}>
+        Every beat lease you’ve bought. Re-download your contracts and MP3s any time.
+      </div>
+
+      {loading && (
+        <div style={{ color: "#555", fontSize: 13, textAlign: "center", padding: "30px 0" }}>Loading purchases…</div>
+      )}
+
+      {!loading && err && (
+        <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 12, padding: 12, color: "#EF4444", fontSize: 12 }}>
+          {err}
+        </div>
+      )}
+
+      {!loading && !err && leases.length === 0 && (
+        <div style={{ background: "#0d0d0d", border: "1px solid #1a1a1a", borderRadius: 14, padding: 28, textAlign: "center" }}>
+          <div style={{ fontSize: 30, marginBottom: 10 }}>🎟️</div>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 14, marginBottom: 4 }}>No purchases yet</div>
+          <div style={{ color: "#666", fontSize: 12 }}>Browse producer profiles and tap a paid beat to buy your first lease.</div>
+        </div>
+      )}
+
+      {!loading && !err && leases.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {leases.map(function(lease) {
+            var isPremium = (lease.tier === "premium");
+            var isVoided = !!lease.voided;
+            var accent   = isVoided ? "#EF4444" : (isPremium ? "#A855F7" : "#F59E0B");
+            return (
+              <div key={lease.id} style={{
+                background: "#0d0d0d",
+                border: "1px solid " + (isVoided ? "rgba(239,68,68,0.3)" : "#1a1a1a"),
+                borderRadius: 14, padding: 14,
+                opacity: isVoided ? 0.85 : 1,
+              }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: "white", fontWeight: 800, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {lease.beat_title || "Beat"}
+                    </div>
+                    <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>
+                      by {lease.producer || "Producer"} · {fmtDate(lease.purchased_at)}
+                    </div>
+                  </div>
+                  <div style={{
+                    background: "rgba(" + (isVoided ? "239,68,68" : (isPremium ? "168,85,247" : "245,158,11")) + ",0.15)",
+                    border: "1px solid " + accent,
+                    color: accent,
+                    borderRadius: 20, padding: "3px 10px",
+                    fontSize: 10, fontWeight: 800, letterSpacing: 0.5,
+                    whiteSpace: "nowrap",
+                  }}>
+                    {isVoided ? "VOIDED" : (isPremium ? "PREMIUM" : "BASIC")} {lease.price ? "· " + lease.price : ""}
+                  </div>
+                </div>
+
+                {isVoided ? (
+                  <div style={{
+                    background: "rgba(239,68,68,0.06)",
+                    border: "1px solid rgba(239,68,68,0.2)",
+                    borderRadius: 10, padding: 10,
+                    color: "#aaa", fontSize: 11, lineHeight: 1.5,
+                  }}>
+                    <strong style={{ color: "#EF4444" }}>Lease revoked.</strong> The producer sold the exclusive (Premium) lease for this beat to another buyer. As accepted at purchase (Clause 6 of the Basic Lease), no refund is issued and you must cease distribution of any New Work derived from this beat.
+                    {lease.voided_at && (
+                      <div style={{ color: "#666", marginTop: 6, fontSize: 10 }}>
+                        Voided on {fmtDate(lease.voided_at)}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={function() { handleDownloadContract(lease); }} disabled={busyId === ("contract_" + lease.id)} style={{
+                      flex: 1,
+                      background: "transparent",
+                      border: "1px solid #333",
+                      borderRadius: 10, padding: "9px 10px",
+                      color: busyId === ("contract_" + lease.id) ? "#555" : "#aaa",
+                      fontWeight: 700, fontSize: 12,
+                      cursor: busyId === ("contract_" + lease.id) ? "default" : "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                    }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                      {busyId === ("contract_" + lease.id) ? "..." : "Contract"}
+                    </button>
+                    <button onClick={function() { handleDownloadMp3(lease); }} disabled={busyId === ("mp3_" + lease.id) || !lease.beat_url} style={{
+                      flex: 1,
+                      background: (busyId === ("mp3_" + lease.id) || !lease.beat_url) ? "#1a1a1a" : "linear-gradient(135deg," + accent + ",#D97706)",
+                      border: "none",
+                      borderRadius: 10, padding: "9px 10px",
+                      color: (busyId === ("mp3_" + lease.id) || !lease.beat_url) ? "#555" : "white",
+                      fontWeight: 800, fontSize: 12,
+                      cursor: (busyId === ("mp3_" + lease.id) || !lease.beat_url) ? "default" : "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                    }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+                      {busyId === ("mp3_" + lease.id) ? "..." : "MP3"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// =============================================================================
 // ROOT AUTH SCREEN - shown at app root when no user logged in
 // =============================================================================
 function RootAuthScreen({ onLogin, startMode }) {
@@ -10867,6 +11221,9 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   const [usernameMsg,      setUsernameMsg]      = useState("");
   const [uploadGenre,      setUploadGenre]      = useState("");
   const [uploadPrice,      setUploadPrice]      = useState("");
+  // Two-tier lease pricing — only used when uploadPrice is paid (not free).
+  // Basic is locked to £50 platform-wide; premium is producer-set £100-£500.
+  const [uploadPremiumPrice, setUploadPremiumPrice] = useState("");
   const [uploadBpm,        setUploadBpm]        = useState("");
   const [uploadKey,        setUploadKey]        = useState("");
   const [uploadDesc,       setUploadDesc]       = useState("");
@@ -11161,6 +11518,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     {[
                       { id: "lyrics",    icon: "edit",     label: "My Lyrics",    desc: savedLyrics.length + " saved", color: "#C026D3" },
+                      { id: "purchases", icon: "stripe",   label: "My Purchases", desc: "Beats you've bought",          color: "#F59E0B" },
                       { id: "members",   icon: "note",     label: "Members Area", desc: "Exclusive beats",              color: "#F59E0B" },
                       { id: "postmusic", icon: "note",     label: "Post Music",   desc: "Add Spotify track",            color: "#1DB954" },
                       { id: "postvideo", icon: "vocalmic", label: "Post Video",   desc: "Upload from phone",            color: "#3B82F6" },
@@ -11199,6 +11557,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                     {[
                       { id: "upload",    icon: "upload",   label: "Upload Beat",    desc: "Add new beat",                                                              color: "#C026D3" },
                       { id: "manage",    icon: "knobs",    label: "My Uploads",     desc: uploads.length + " beats",                                                  color: "#F59E0B" },
+                      { id: "purchases", icon: "stripe",   label: "My Purchases",   desc: "Beats you've bought",                                                       color: "#F59E0B" },
                       { id: "postmusic", icon: "note",     label: "Post Music",     desc: "Add Spotify track",                                                        color: "#1DB954" },
                       { id: "postvideo", icon: "vocalmic", label: "Post Video",     desc: "Upload from phone",                                                        color: "#3B82F6" },
                       { id: "lyrics",    icon: "edit",     label: "My Lyrics",      desc: savedLyrics.length + " saved",                                              color: "#818CF8" },
@@ -11631,7 +11990,73 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
           <div style={{ background: "#111", borderRadius: 14, padding: 16, border: "1px solid #222" }}>
             <input value={ytLink} onChange={e => setYtLink(e.target.value)} placeholder="Beat title e.g. Dark Trap Beat" style={inp} />
             <input value={uploadGenre || ""} onChange={e => setUploadGenre(e.target.value)} placeholder="Genre e.g. Trap, R&B, Afrobeats" style={inp} />
-            <input value={uploadPrice || ""} onChange={e => setUploadPrice(e.target.value)} placeholder="Price e.g. £9.99 (enter £0 for free)" style={inp} />
+
+            {/* PRICING — free toggle OR two-tier lease */}
+            <div style={{ color: "#666", fontSize: 11, fontWeight: 700, marginBottom: 6, letterSpacing: 0.5 }}>PRICING</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <button type="button" onClick={function() { setUploadPrice("free"); setUploadPremiumPrice(""); }}
+                style={{
+                  flex: 1, padding: "10px", borderRadius: 10,
+                  border: (uploadPrice === "free" ? "2px solid #C026D3" : "1px solid #333"),
+                  background: (uploadPrice === "free" ? "rgba(192,38,211,0.15)" : "transparent"),
+                  color: (uploadPrice === "free" ? "#C026D3" : "#888"),
+                  fontWeight: 800, fontSize: 12, cursor: "pointer",
+                }}>
+                FREE Beat
+              </button>
+              <button type="button" onClick={function() { if (uploadPrice === "free" || !uploadPrice) setUploadPrice("£50"); }}
+                style={{
+                  flex: 1, padding: "10px", borderRadius: 10,
+                  border: (uploadPrice && uploadPrice !== "free" ? "2px solid #F59E0B" : "1px solid #333"),
+                  background: (uploadPrice && uploadPrice !== "free" ? "rgba(245,158,11,0.15)" : "transparent"),
+                  color: (uploadPrice && uploadPrice !== "free" ? "#F59E0B" : "#888"),
+                  fontWeight: 800, fontSize: 12, cursor: "pointer",
+                }}>
+                PAID Lease
+              </button>
+            </div>
+
+            {uploadPrice && uploadPrice !== "free" && (
+              <div style={{ background: "#0a0a0a", border: "1px solid #1f1f1f", borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                <div style={{ color: "#aaa", fontSize: 11, fontWeight: 700, marginBottom: 8, letterSpacing: 0.5 }}>
+                  TWO LEASE TIERS — buyers pick one
+                </div>
+                {/* Basic — fixed £50 */}
+                <div style={{ background: "#0d0d0d", border: "1px solid #222", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12 }}>Basic Lease</div>
+                    <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 14 }}>£50</div>
+                  </div>
+                  <div style={{ color: "#666", fontSize: 10, marginTop: 4, lineHeight: 1.4 }}>
+                    Non-exclusive · 75% royalties to you · 100k stream cap · Buyer can resell finished record
+                  </div>
+                </div>
+                {/* Premium — producer-set £100-£500 */}
+                <div style={{ background: "#0d0d0d", border: "1px solid #222", borderRadius: 8, padding: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <div style={{ color: "#A855F7", fontWeight: 800, fontSize: 12 }}>Premium Lease (Exclusive)</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ color: "#A855F7", fontSize: 14, fontWeight: 800 }}>£</span>
+                    <input
+                      type="number"
+                      min={100} max={500}
+                      value={uploadPremiumPrice}
+                      onChange={e => setUploadPremiumPrice(e.target.value)}
+                      placeholder="100 – 500"
+                      style={{
+                        flex: 1, background: "#000", border: "1px solid #333",
+                        borderRadius: 6, padding: "6px 10px", color: "white",
+                        fontSize: 13, outline: "none",
+                      }}
+                    />
+                  </div>
+                  <div style={{ color: "#666", fontSize: 10, marginTop: 6, lineHeight: 1.4 }}>
+                    EXCLUSIVE · 50% royalties to you · Unlimited streams · Beat removed from sale once purchased · No resale by buyer
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* BPM + Key row */}
             <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
@@ -11697,6 +12122,17 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 const fd = new FormData();
                 var priceVal = (uploadPrice || "").trim();
                 if (priceVal === "0" || priceVal === "£0" || priceVal === "0.00" || priceVal === "£0.00" || priceVal === "") priceVal = "free";
+                var isPaid = (priceVal !== "free");
+                // For paid beats, validate premium tier price (£100-£500)
+                var premiumNum = 0;
+                if (isPaid) {
+                  premiumNum = parseInt(uploadPremiumPrice, 10);
+                  if (!premiumNum || isNaN(premiumNum) || premiumNum < 100 || premiumNum > 500) {
+                    setUploadMsg("Premium lease price must be between £100 and £500");
+                    setUploadLoading(false);
+                    return;
+                  }
+                }
                 fd.append("title",         ytLink.trim());
                 fd.append("genre",         uploadGenre || "");
                 fd.append("price",         priceVal);
@@ -11704,6 +12140,9 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 fd.append("key",           uploadKey || "");
                 fd.append("description",   uploadDesc || "");
                 fd.append("preview_start", String(uploadPreviewStart || 0));
+                // Two-tier prices — only meaningful for paid beats
+                fd.append("basic_lease_price",   "50");
+                fd.append("premium_lease_price", isPaid ? String(premiumNum) : "0");
                 fd.append("file",          uploadFile);
                 const token = typeof getToken === "function" ? getToken() : (localStorage.getItem("bf_token") || "");
                 const res = await fetch(API_BASE + "/api/producer/upload", { method: "POST", headers: { "Authorization": "Bearer " + token }, body: fd });
@@ -11712,7 +12151,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 setUploads(prev => [data.beat, ...prev]);
                 setUploadMsg("Beat uploaded!");
                 // Clear all fields
-                setYtLink(""); setUploadGenre(""); setUploadPrice("");
+                setYtLink(""); setUploadGenre(""); setUploadPrice(""); setUploadPremiumPrice("");
                 setUploadBpm(""); setUploadKey(""); setUploadDesc(""); setUploadPreviewStart(0);
                 setUploadFile(null);
                 if (uploadFileRef.current) uploadFileRef.current.value = "";
@@ -11764,6 +12203,13 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         <div>
           <SectionBack onBack={() => setActiveSection(null)} label="Back to Dashboard" />
           <MyUploadsSection user={user} />
+        </div>
+      )}
+
+      {activeSection === "purchases" && (
+        <div>
+          <SectionBack onBack={() => setActiveSection(null)} label="Back to Dashboard" />
+          <MyPurchasesSection user={user} />
         </div>
       )}
 
