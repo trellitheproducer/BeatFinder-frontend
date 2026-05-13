@@ -4207,11 +4207,13 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
   const [previewTime, setPreviewTime] = useState(0);
   const audioRef = React.useRef(null);
   const timerRef = React.useRef(null);
+  const seekedRef = React.useRef(false);
   const isFree   = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
   var previewId  = React.useRef("lease_" + beat.id);
 
   function startPreview() {
     if (previewing) { stopPreview(); return; }
+    seekedRef.current = false;
     startGlobalPreview(previewId.current);
     setPreviewing(true); setPreviewTime(0);
     recordPlay(beat.id);
@@ -4273,8 +4275,19 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
       onViewProfile={onViewProfile}
       audioEl={previewing && beat.url ? (
         <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-          onPlay={function(){ onAudioPlay(); if (audioRef.current && (beat.preview_start || 0) > 0 && audioRef.current.currentTime < (beat.preview_start || 0)) audioRef.current.currentTime = beat.preview_start || 0; }}
-          onCanPlay={function(){ if (audioRef.current && (beat.preview_start || 0) > 0 && audioRef.current.currentTime < (beat.preview_start || 0)) audioRef.current.currentTime = beat.preview_start || 0; }}
+          onPlay={function(){
+            onAudioPlay();
+            if (!seekedRef.current && (beat.preview_start || 0) > 0 && audioRef.current) {
+              audioRef.current.currentTime = beat.preview_start;
+              seekedRef.current = true;
+            }
+          }}
+          onCanPlay={function(){
+            if (!seekedRef.current && (beat.preview_start || 0) > 0 && audioRef.current) {
+              audioRef.current.currentTime = beat.preview_start;
+              seekedRef.current = true;
+            }
+          }}
           onPause={function(){ clearInterval(timerRef.current); }}
           onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
       ) : null}
@@ -4556,8 +4569,19 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
           onViewProfile={onViewProfile}
           audioEl={prev && beat.url ? (
             <audio ref={aRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-              onPlay={function(){ onPlay(); if (aRef.current && (beat.preview_start || 0) > 0 && aRef.current.currentTime < (beat.preview_start || 0)) aRef.current.currentTime = beat.preview_start || 0; }}
-              onCanPlay={function(){ if (aRef.current && (beat.preview_start || 0) > 0 && aRef.current.currentTime < (beat.preview_start || 0)) aRef.current.currentTime = beat.preview_start || 0; }}
+              onPlay={function(){
+                onPlay();
+                if (!seekedRef.current && (beat.preview_start || 0) > 0 && aRef.current) {
+                  aRef.current.currentTime = beat.preview_start;
+                  seekedRef.current = true;
+                }
+              }}
+              onCanPlay={function(){
+                if (!seekedRef.current && (beat.preview_start || 0) > 0 && aRef.current) {
+                  aRef.current.currentTime = beat.preview_start;
+                  seekedRef.current = true;
+                }
+              }}
               onPause={function(){ clearInterval(tRef.current); }}
               onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
           ) : null}
@@ -5169,12 +5193,14 @@ function SavedScreen({ savedMap, savedIds, onSave, onPlay, user, onGoProfile, sa
 function FreeMemberBeatCard({ beat, onViewProfile }) {
   var [previewing,  setPreviewing]  = React.useState(false);
   var [previewTime, setPreviewTime] = React.useState(0);
-  var audioRef = React.useRef(null);
-  var timerRef = React.useRef(null);
+  var audioRef  = React.useRef(null);
+  var timerRef  = React.useRef(null);
+  var seekedRef = React.useRef(false);
   var previewId = React.useRef("member_" + beat.id);
 
   function startPreview() {
     if (previewing) { stopPreview(); return; }
+    seekedRef.current = false;
     startGlobalPreview(previewId.current);
     setPreviewing(true); setPreviewTime(0);
     recordPlay(beat.id);
@@ -5216,8 +5242,19 @@ function FreeMemberBeatCard({ beat, onViewProfile }) {
       onViewProfile={onViewProfile}
       audioEl={previewing && beat.url ? (
         <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-          onPlay={function(){ onAudioPlay(); if (audioRef.current && (beat.preview_start || 0) > 0 && audioRef.current.currentTime < (beat.preview_start || 0)) audioRef.current.currentTime = beat.preview_start || 0; }}
-          onCanPlay={function(){ if (audioRef.current && (beat.preview_start || 0) > 0 && audioRef.current.currentTime < (beat.preview_start || 0)) audioRef.current.currentTime = beat.preview_start || 0; }}
+          onPlay={function(){
+            onAudioPlay();
+            if (!seekedRef.current && (beat.preview_start || 0) > 0 && audioRef.current) {
+              audioRef.current.currentTime = beat.preview_start;
+              seekedRef.current = true;
+            }
+          }}
+          onCanPlay={function(){
+            if (!seekedRef.current && (beat.preview_start || 0) > 0 && audioRef.current) {
+              audioRef.current.currentTime = beat.preview_start;
+              seekedRef.current = true;
+            }
+          }}
           onPause={function(){ clearInterval(timerRef.current); }}
           onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
       ) : null}
@@ -5979,23 +6016,18 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   var playCount = usePlayCount(beat.id, beat.playCount);
   var audioRef  = React.useRef(null);
   var timerRef  = React.useRef(null);
+  var seekedRef = React.useRef(false);  // tracks whether we've seeked to preview_start yet
   var isFree    = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
   var accentClr = isFree ? "#C026D3" : "#F59E0B";
   var previewId = React.useRef("profile_" + beat.id);
 
   function startPreview() {
     if (previewing) { stopPreview(); return; }
+    seekedRef.current = false;
     startGlobalPreview(previewId.current);
     setPreviewing(true); setPreviewTime(0);
     // recordPlay handles 3s minimum + 30min cooldown + server sync
     recordPlay(beat.id);
-  }
-  function stopPreview() {
-    clearGlobalPreview(previewId.current);
-    setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
-    // Cancel play timer if user stopped before 3 seconds
-    cancelPlayTimer(beat.id);
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
   }
   useGlobalPreviewStop(previewId.current, React.useCallback(function() {
     setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
@@ -6227,17 +6259,20 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
               <audio ref={audioRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
                 onPlay={function(){
                   onAudioPlay();
-                  if (audioRef.current && (beat.preview_start || 0) > 0 && audioRef.current.currentTime < (beat.preview_start || 0)) {
-                    audioRef.current.currentTime = beat.preview_start || 0;
+                  if (!seekedRef.current && (beat.preview_start || 0) > 0 && audioRef.current) {
+                    audioRef.current.currentTime = beat.preview_start;
+                    seekedRef.current = true;
                   }
                 }}
                 onCanPlay={function(){
-                  if (audioRef.current && (beat.preview_start || 0) > 0 && audioRef.current.currentTime < (beat.preview_start || 0)) {
-                    audioRef.current.currentTime = beat.preview_start || 0;
+                  if (!seekedRef.current && (beat.preview_start || 0) > 0 && audioRef.current) {
+                    audioRef.current.currentTime = beat.preview_start;
+                    seekedRef.current = true;
                   }
                 }}
+                onTimeUpdate={onTimeUpdate}
                 onPause={function(){ clearInterval(timerRef.current); }}
-                onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
+                onEnded={stopPreview} />
             )}
           </div>
         )}
