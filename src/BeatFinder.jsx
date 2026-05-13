@@ -4390,88 +4390,112 @@ function BeatCardShell({ beat, accentColor, children, onViewProfile, extraStats 
 // Matches the ProfileBeatCard design: logo thumbnail, waveform player,
 // purple=free, gold=paid, footer info pills on free beats.
 // =============================================================================
-// ── Free Beat CTA — contract must be downloaded before MP3 unlocks ────────────
+// ── Free Beat CTA — contract must be accepted before MP3 unlocks ──────────────
 function FreeBeatCTA({ beat, user }) {
-  var [contractDone, setContractDone] = React.useState(false);
+  var [step, setStep] = React.useState("idle"); // idle | contract | done
   var downloadUrl = beat.url && beat.url.includes("cloudinary.com")
     ? beat.url.replace("/upload/", "/upload/fl_attachment/")
     : beat.url;
   var filename = (beat.title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
+  var date      = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  var artist    = (user && (user.name || user.username)) || "Artist";
+  var producer  = beat.producer || beat.producer_username || "Producer";
 
-  function handleContract() {
-    generateFreeLeaseContract(beat, user);
-    setContractDone(true);
-  }
-
-  return (
-    <div style={{ padding: "0 16px 16px" }}>
-      {/* Step 1 — Download contract */}
-      <button
-        onClick={handleContract}
-        style={{
-          width: "100%", borderRadius: 14, padding: "15px",
-          background: contractDone ? "rgba(34,197,94,0.1)" : "transparent",
-          border: "2px solid " + (contractDone ? "#22C55E" : "#C026D3"),
-          color: contractDone ? "#22C55E" : "#C026D3",
-          fontWeight: 800, fontSize: 14, cursor: "pointer",
+  if (step === "contract") {
+    return (
+      <div style={{ padding: "0 0 16px" }}>
+        {/* Contract modal inline */}
+        <div style={{ background: "#0d0d0d", border: "1px solid #222", borderRadius: 14, padding: 16, marginBottom: 12, maxHeight: 320, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+          <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, letterSpacing: 1, marginBottom: 12, textAlign: "center" }}>FREE BEAT LICENCE AGREEMENT</div>
+          <div style={{ color: "#888", fontSize: 11, lineHeight: 1.7 }}>
+            <div style={{ marginBottom: 8 }}><span style={{ color: "#aaa", fontWeight: 700 }}>Beat:</span> "{beat.title}"</div>
+            <div style={{ marginBottom: 8 }}><span style={{ color: "#aaa", fontWeight: 700 }}>Producer:</span> {producer}</div>
+            <div style={{ marginBottom: 8 }}><span style={{ color: "#aaa", fontWeight: 700 }}>Artist:</span> {artist}</div>
+            <div style={{ marginBottom: 8 }}><span style={{ color: "#aaa", fontWeight: 700 }}>Date:</span> {date}</div>
+            <div style={{ height: 1, background: "#222", margin: "12px 0" }} />
+            <div style={{ marginBottom: 8 }}><span style={{ color: "#C026D3", fontWeight: 700 }}>1. GRANT</span> — Producer grants Artist a free, non-exclusive licence to use the Beat for non-commercial purposes only.</div>
+            <div style={{ marginBottom: 8 }}><span style={{ color: "#C026D3", fontWeight: 700 }}>2. PERMITTED</span> — Record one song, share on free platforms (SoundCloud, YouTube non-monetised), perform at non-ticketed events.</div>
+            <div style={{ marginBottom: 8 }}><span style={{ color: "#C026D3", fontWeight: 700 }}>3. CREDIT</span> — Artist must credit: <em>(Prod. by {producer})</em> in all uses.</div>
+            <div style={{ marginBottom: 8 }}><span style={{ color: "#C026D3", fontWeight: 700 }}>4. RESTRICTIONS</span> — No monetisation, no selling recordings, no sub-licensing, no copyright claim on the Beat. If recording exceeds 10,000 streams or generates revenue, a paid lease must be purchased.</div>
+            <div style={{ marginBottom: 8 }}><span style={{ color: "#C026D3", fontWeight: 700 }}>5. OWNERSHIP</span> — Producer retains full copyright of the Beat. Artist owns their original vocals/lyrics only.</div>
+            <div style={{ marginBottom: 8 }}><span style={{ color: "#C026D3", fontWeight: 700 }}>6. PLATFORM</span> — BeatFinder (beatfinder.co.uk) facilitates this licence. Not liable for disputes between parties.</div>
+            <div style={{ marginBottom: 8 }}><span style={{ color: "#C026D3", fontWeight: 700 }}>7. GOVERNING LAW</span> — England and Wales.</div>
+            <div style={{ height: 1, background: "#222", margin: "12px 0" }} />
+            <div style={{ color: "#555", fontSize: 10 }}>By tapping "I Agree" below you accept all terms of this licence. Reference: BF-FREE-{Date.now()}</div>
+          </div>
+        </div>
+        <button onClick={function() { generateFreeLeaseContract(beat, user); setStep("done"); }} style={{
+          width: "100%", borderRadius: 14, padding: "14px",
+          background: "linear-gradient(135deg,#C026D3,#9333EA)", border: "none",
+          color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer",
           letterSpacing: 0.5, textTransform: "uppercase",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-        }}
-      >
-        {contractDone ? (
-          <>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
-            Contract Downloaded
-          </>
-        ) : (
-          <>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            Step 1 — Download Licence Contract
-          </>
-        )}
-      </button>
+          marginBottom: 8,
+        }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+          I Agree — Save Contract
+        </button>
+        <button onClick={function() { setStep("idle"); }} style={{
+          width: "100%", borderRadius: 14, padding: "10px", background: "transparent",
+          border: "1px solid #222", color: "#555", fontWeight: 600, fontSize: 12, cursor: "pointer",
+        }}>
+          Cancel
+        </button>
+      </div>
+    );
+  }
 
-      {/* Step 2 — Download beat (locked until contract done) */}
-      <div style={{ marginTop: 8, position: "relative" }}>
-        {contractDone ? (
-          <a
-            href={downloadUrl}
-            download={filename}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              width: "100%", borderRadius: 14, padding: "15px",
-              background: "linear-gradient(135deg,#C026D3,#9333EA)",
-              border: "none", color: "white",
-              fontWeight: 800, fontSize: 14, cursor: "pointer",
-              letterSpacing: 0.5, textTransform: "uppercase",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-              textDecoration: "none", boxShadow: "0 0 20px rgba(192,38,211,0.4)",
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
-            Step 2 — Save MP3 to Device
-          </a>
-        ) : (
-          <div style={{
+  if (step === "done") {
+    return (
+      <div style={{ padding: "0 0 16px" }}>
+        <div style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)", borderRadius: 14, padding: "12px 16px", marginBottom: 12, display: "flex", alignItems: "center", gap: 10 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+          <div>
+            <div style={{ color: "#22C55E", fontWeight: 800, fontSize: 12 }}>Licence Agreed</div>
+            <div style={{ color: "#555", fontSize: 11 }}>Contract saved to your device</div>
+          </div>
+        </div>
+        <a
+          href={downloadUrl}
+          download={filename}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
             width: "100%", borderRadius: 14, padding: "15px",
-            background: "transparent", border: "2px solid #222",
-            color: "#333", fontWeight: 800, fontSize: 14,
+            background: "linear-gradient(135deg,#C026D3,#9333EA)",
+            border: "none", color: "white",
+            fontWeight: 800, fontSize: 14,
             letterSpacing: 0.5, textTransform: "uppercase",
             display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-          }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            Step 2 — Save MP3 (Download Contract First)
-          </div>
-        )}
+            textDecoration: "none", boxShadow: "0 0 20px rgba(192,38,211,0.4)",
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+          Save MP3 to Device
+        </a>
       </div>
+    );
+  }
 
-      {/* Info pills */}
-      <div style={{ display: "flex", marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
+  // idle state
+  return (
+    <div style={{ padding: "0 0 16px" }}>
+      <button onClick={function() { setStep("contract"); }} style={{
+        width: "100%", borderRadius: 14, padding: "15px",
+        background: "transparent", border: "2px solid #C026D3",
+        color: "#C026D3", fontWeight: 800, fontSize: 14, cursor: "pointer",
+        letterSpacing: 0.5, textTransform: "uppercase",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+        marginBottom: 8,
+      }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Get Free Beat
+      </button>
+      <div style={{ display: "flex", gap: 0, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12, marginTop: 4 }}>
         {[
           { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>, title: "LICENCE FIRST", sub: "Contract required." },
-          { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>, title: "100% FREE", sub: "No tags, just vibes." },
-          { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>, title: "NON-PROFIT ONLY", sub: "Free use only." },
+          { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>, title: "100% FREE", sub: "No tags." },
+          { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>, title: "NON-PROFIT", sub: "Free use only." },
         ].map(function(item, i) {
           return (
             <div key={i} style={{ flex: 1, textAlign: "center", padding: "0 4px", borderRight: i < 2 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
