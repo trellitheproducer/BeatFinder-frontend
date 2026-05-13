@@ -19722,7 +19722,7 @@ export default function BeatFinder() {
   // Public profile URL — /u/:username — accessible without login
   if (urlUsername) {
     return (
-      <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
+      <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", height: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
         <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
         <PublicProfileScreen
           username={urlUsername}
