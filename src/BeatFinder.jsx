@@ -892,6 +892,38 @@ function useGlobalPreviewStop(myId, stopFn) {
 }
 
 // Spotify embed coordinator — only one embed loads at a time.
+// ── Open an external URL without leaving a blank tab behind ──────────
+// On iOS Safari (browser tab), window.open("_blank") creates a tab that
+// stays open after the user returns to BeatFinder, plus iOS sometimes
+// blanks the original tab. The clean fix is to navigate the current tab
+// directly — iOS deep-links into native apps (Instagram, TikTok, YouTube,
+// Spotify, Apple Music) via universal links if installed, and Safari
+// restores BeatFinder from bfcache when the user hits back.
+//
+// For iOS PWA we use window.open because the only "tab" IS the app — we
+// can't navigate away or the user would be kicked out. iOS opens it
+// externally and the PWA continues running underneath.
+//
+// Desktop/Android: standard new-tab behaviour.
+function openExternalLink(url) {
+  if (!url) return;
+  var normalised = url.indexOf("http") === 0 ? url : "https://" + url;
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+              (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var isStandalonePWA = window.matchMedia && window.matchMedia("(display-mode: standalone)").matches;
+
+  if (isIOS && !isStandalonePWA) {
+    window.location.href = normalised;
+    return;
+  }
+  if (isIOS && isStandalonePWA) {
+    window.open(normalised, "_blank");
+    return;
+  }
+  var w = window.open(normalised, "_blank", "noopener,noreferrer");
+  if (w) { try { w.opener = null; } catch (e) {} }
+}
+
 // Spotify iframes can't be paused via JS (cross-origin) so we unmount
 // all others when one is activated, keeping the active one alive.
 // SpotifyEmbed renders the iframe only when active, and a tap-to-play
@@ -2392,10 +2424,11 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
 
         {/* ── Contact creator button ── */}
         {beat.channel && (
-          <a
-            href={"https://www.youtube.com/results?search_query=" + encodeURIComponent(beat.channel)}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
+            onClick={function() {
+              openExternalLink("https://www.youtube.com/results?search_query=" + encodeURIComponent(beat.channel));
+            }}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
               marginTop: 12, width: "100%", borderRadius: 14, padding: "15px",
@@ -2410,7 +2443,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
               <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
             </svg>
             Contact {beat.channel} on YouTube
-          </a>
+          </button>
         )}
 
         {/* ── License notice — shown on every beat ── */}
@@ -4900,28 +4933,53 @@ function detectPopupBlock() {
   }
 }
 
-// Global one-time detection on the FIRST user interaction anywhere on the page.
-// iOS requires window.open inside a user gesture, so we attach a one-shot
-// pointerdown listener to document. The instant a user taps anywhere — even
-// before they get to a CTA — we run the probe and surface the banner.
-// This catches users whose contract state is already "done" from localStorage
-// (returning users who signed an agreement in a previous session), because
-// they bypass the CTA tap handler entirely.
+// Mark popup state as "blocked" without doing a probe — used when the
+// real download flow has already detected a blocked window.open() so we
+// don't burn a second user-gesture activation on a redundant test.
+function markPopupBlocked() {
+  try { sessionStorage.setItem("bf_popup_warn", "1"); } catch (e) {}
+  __setPopupWarn(true);
+}
+
+// Mark popups as confirmed working — called when a real window.open()
+// succeeded, so the banner can disappear immediately.
+function markPopupAllowed() {
+  try { sessionStorage.removeItem("bf_popup_warn"); } catch (e) {}
+  __setPopupWarn(false);
+}
+
+// Install a visibility-change listener. When the user returns to the app
+// after going to Settings (where they may have toggled Block Pop-ups), we
+// run a fresh probe on their NEXT non-CTA tap — so by the time they tap
+// "Save MP3", the banner has already cleared if popups are now allowed.
+// This avoids burning user activation on the actual CTA tap.
 var __popupGlobalProbeInstalled = false;
 function installGlobalPopupProbe() {
   if (__popupGlobalProbeInstalled) return;
   if (typeof document === "undefined") return;
   __popupGlobalProbeInstalled = true;
-  function onRelevantTap(e) {
-    // Only run for taps on relevant beat/download/contract buttons.
-    // Filter by walking up the DOM looking for a marker class or button text.
+
+  // Flag set to true whenever the page becomes visible after being hidden.
+  // The next non-CTA tap will then run a probe to refresh popup status.
+  var __needsReprobe = false;
+
+  document.addEventListener("visibilitychange", function() {
+    if (document.visibilityState === "visible") {
+      __needsReprobe = true;
+    }
+  });
+
+  function onAnyTap(e) {
+    // CRITICAL: if the user tapped a CTA button, do NOT run the probe.
+    // iOS allows only ONE window.open per user gesture, and the CTA's
+    // own onClick will need that activation for the real download. If we
+    // probe first, the real window.open call inside downloadBeatMp3 or
+    // triggerBlobDownload will silently fail.
     var target = e.target;
     var depth = 0;
-    var relevant = false;
     while (target && depth < 8) {
       if (target.dataset && target.dataset.bfDownloadCta === "1") {
-        relevant = true;
-        break;
+        return; // Skip — let the real flow consume the activation
       }
       var txt = (target.innerText || target.textContent || "").toUpperCase();
       if (txt.indexOf("FREE DOWNLOAD") !== -1 ||
@@ -4931,24 +4989,25 @@ function installGlobalPopupProbe() {
           txt.indexOf("VIEW LICENCE CONTRACT") !== -1 ||
           txt.indexOf("VIEW LEASE CONTRACT") !== -1 ||
           txt.indexOf("GET FREE BEAT") !== -1) {
-        relevant = true;
-        break;
+        return; // Skip — let the real flow consume the activation
       }
       target = target.parentElement;
       depth++;
     }
-    if (!relevant) return;
-    // Run SYNCHRONOUSLY inside the user gesture — iOS only treats
-    // window.open as user-initiated for the synchronous portion of the
-    // event handler. Re-runs on EVERY relevant tap (not one-shot) so that
-    // when the user fixes their Safari setting, the banner clears the
-    // next time they tap a button.
+
+    // Non-CTA tap (scrolling, tab nav, etc) — safe to probe.
+    // Only run if we haven't tested yet this session OR the user returned
+    // from another app (might have changed Settings).
+    var alreadyTested = false;
+    try { alreadyTested = sessionStorage.getItem("bf_popup_tested") === "1"; } catch (e2) {}
+    if (alreadyTested && !__needsReprobe) return;
+    __needsReprobe = false;
     try {
       detectPopupBlock();
+      try { sessionStorage.setItem("bf_popup_tested", "1"); } catch (e2) {}
     } catch (e2) {}
   }
-  // capture phase so we run before any handlers
-  document.addEventListener("pointerdown", onRelevantTap, true);
+  document.addEventListener("pointerdown", onAnyTap, true);
 }
 
 // ── Inline pop-up warning banner ──────────────────────────────────
@@ -5045,6 +5104,39 @@ async function downloadBeatMp3(beat) {
               (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   var isStandalonePWA = window.matchMedia && window.matchMedia("(display-mode: standalone)").matches;
 
+  // CRITICAL iOS WORKAROUND: open a placeholder window NOW, synchronously
+  // inside the user gesture. After the async fetch completes we'll navigate
+  // this same window to the blob URL. This is the only reliable way to
+  // get a new tab on iOS Safari after an await, because user activation
+  // doesn't survive across async boundaries.
+  //
+  // The window is only created on iOS Safari (browser tab). For PWA we
+  // use Web Share API which doesn't need a popup at all. For non-iOS we
+  // use <a download>.
+  var preOpenedWin = null;
+  if (isIOS && !isStandalonePWA) {
+    preOpenedWin = window.open("about:blank", "_blank");
+    // If popups are blocked, preOpenedWin is null/closed right away
+    if (!preOpenedWin || preOpenedWin.closed) {
+      // Block confirmed inside the gesture — set the warning IMMEDIATELY
+      markPopupBlocked();
+      __setDownloadToast({ status: "error", message: "Pop-ups blocked — see banner above" });
+      setTimeout(function() { __setDownloadToast(null); }, 3500);
+      return;
+    }
+    // Pop-ups working — clear any stale warning
+    markPopupAllowed();
+    // Show a quick loading message inside the placeholder window
+    try {
+      preOpenedWin.document.write(
+        '<html><head><title>' + rawTitle.replace(/</g, "") + '</title>' +
+        '<meta name="viewport" content="width=device-width,initial-scale=1"/>' +
+        '<style>body{background:#0a0a0a;color:#fff;font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:14px}.box{text-align:center}.dot{display:inline-block;width:6px;height:6px;background:#C026D3;border-radius:50%;margin:0 2px;animation:b 1.4s infinite both}.dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}@keyframes b{0%,80%,100%{opacity:0.3}40%{opacity:1}}</style></head>' +
+        '<body><div class="box"><div style="margin-bottom:14px;font-weight:700">Preparing download</div><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></body></html>'
+      );
+    } catch (e) {}
+  }
+
   // Visual feedback — appears instantly so the user knows the tap registered
   __setDownloadToast({ status: "downloading", title: rawTitle });
 
@@ -5114,31 +5206,34 @@ async function downloadBeatMp3(beat) {
       // navigate the tab.
     }
 
-    // STRATEGY 2 — iOS Safari (browser tab): open the blob in a NEW tab.
-    // The new tab renders the audio file with Content-Disposition: attachment
-    // which triggers iOS's native download prompt. Critically, our original
-    // tab keeps the React state, so "Done" returns the user to the same page.
+    // STRATEGY 2 — iOS Safari (browser tab): navigate the PRE-OPENED window
+    // (created synchronously inside the tap gesture above) to the blob URL.
+    // We can't call window.open here — we're past the gesture boundary
+    // because of the await on fetch. The pre-opened window is still ours
+    // to drive, so we set its location directly.
     if (isIOS && !isStandalonePWA) {
-      var win = window.open(blobUrl, "_blank");
-      // Robust popup-block detection: Safari may return null, undefined, or a
-      // window that's immediately closed. We check all three.
-      var popupBlocked = !win || win.closed || typeof win.closed === "undefined";
-
-      if (popupBlocked) {
-        __setDownloadToast(null);
-        __setPopupBlockedModal({
-          blobUrl: blobUrl,
-          filename: filename,
-          title: rawTitle,
-        });
-        // Don't revoke the blob URL — the user may retry from the modal
-        return;
+      if (preOpenedWin && !preOpenedWin.closed) {
+        try {
+          preOpenedWin.location.href = blobUrl;
+          markPopupAllowed();
+          __setDownloadToast({ status: "success" });
+          setTimeout(function() { __setDownloadToast(null); }, 1800);
+          // Hold the blob URL long enough for the new tab to load it
+          setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 60000);
+          return;
+        } catch (e) {
+          // navigation blocked or window died — fall through to modal
+          try { preOpenedWin.close(); } catch (e2) {}
+        }
       }
-
-      __setDownloadToast({ status: "success" });
-      setTimeout(function() { __setDownloadToast(null); }, 1800);
-      // Hold the blob URL longer so the new tab can finish loading the file
-      setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 60000);
+      // Pre-opened window unavailable — show the popup-blocked modal
+      markPopupBlocked();
+      __setDownloadToast(null);
+      __setPopupBlockedModal({
+        blobUrl: blobUrl,
+        filename: filename,
+        title: rawTitle,
+      });
       return;
     }
 
@@ -5173,6 +5268,10 @@ async function downloadBeatMp3(beat) {
     setTimeout(function() { __setDownloadToast(null); }, 4000);
     setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 1000);
   } catch (e) {
+    // Clean up the pre-opened iOS window if the fetch/processing failed
+    if (preOpenedWin && !preOpenedWin.closed) {
+      try { preOpenedWin.close(); } catch (e2) {}
+    }
     __setDownloadToast({
       status: "error",
       message: "Download failed — " + (e.message || "please try again"),
@@ -8976,7 +9075,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
             </button>
 
             {item.type === "music" && item.spotifyUrl && (
-              <button onClick={function() { window.open(item.spotifyUrl, "_blank"); }}
+              <button onClick={function() { openExternalLink(item.spotifyUrl); }}
                 style={{ marginLeft: "auto", background: "#1DB954", border: "none", borderRadius: 20,
                   color: "white", fontWeight: 700, fontSize: 12, padding: "6px 14px", cursor: "pointer",
                   display: "flex", alignItems: "center", gap: 6 }}>
@@ -9210,7 +9309,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
                       <span style={{ fontSize: 13 }}>{post.commentCount || 0}</span>
                     </button>
                     {post.type === "music" && post.spotifyUrl && (
-                      <button onClick={function() { window.open(post.spotifyUrl, "_blank"); }}
+                      <button onClick={function() { openExternalLink(post.spotifyUrl); }}
                         style={{ marginLeft: "auto", background: "#1DB954", border: "none", borderRadius: 20,
                           color: "white", fontWeight: 700, fontSize: 11, padding: "5px 12px", cursor: "pointer" }}>
                         Open in Spotify
@@ -9719,22 +9818,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
               },
             ].filter(s => s.url).map(s => (
               <button key={s.key}
-                onClick={() => {
-                  const url = s.url.startsWith("http") ? s.url : "https://" + s.url;
-                  // When the in-app Safari browser is dismissed, iOS fires visibilitychange.
-                  // We force a tiny re-render so the blank white overlay clears automatically.
-                  const handleReturn = () => {
-                    if (document.visibilityState === "visible") {
-                      document.removeEventListener("visibilitychange", handleReturn);
-                      // Force the browser to repaint the app layer
-                      window.dispatchEvent(new Event("resize"));
-                      document.body.style.opacity = "0.99";
-                      requestAnimationFrame(() => { document.body.style.opacity = "1"; });
-                    }
-                  };
-                  document.addEventListener("visibilitychange", handleReturn);
-                  window.open(url, "_blank");
-                }}
+                onClick={() => { openExternalLink(s.url); }}
                 style={{ display: "flex", alignItems: "center", gap: 7, background: "#111",
                   border: "1px solid #1e1e1e", borderRadius: 20, padding: "8px 14px",
                   cursor: "pointer", color: "white", fontWeight: 600, fontSize: 13 }}>
