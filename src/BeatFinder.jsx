@@ -4244,50 +4244,27 @@ function downloadMp3(url, title, beatId) {
   var proxyUrl = beatId
     ? API_BASE + "/api/producer/beats/" + beatId + "/file"
     : url;
-
-  // Use window.open with _blank — prevents iOS from navigating the current tab
-  var w = window.open(proxyUrl, "_blank");
-  if (!w) {
-    // Fallback if popup blocked — hidden anchor
-    var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
-    var a = document.createElement("a");
-    a.href = proxyUrl;
-    a.download = filename;
-    a.rel = "noopener";
-    a.target = "_blank";
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function() { document.body.removeChild(a); }, 1000);
-  }
+  var filename = (title || "beat").replace(/[^\w\s\-]/g, "").trim().replace(/\s+/g, "_") + ".mp3";
+  var a = document.createElement("a");
+  a.href     = proxyUrl;
+  a.download = filename;
+  a.target   = "_blank";
+  a.rel      = "noopener noreferrer";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function() { document.body.removeChild(a); }, 1000);
 }
 
 // ── Download Button ───────────────────────────────────────────────
 function DownloadButton({ url, title, beatId, beat, user, style, children }) {
-  var [showContract, setShowContract] = React.useState(false);
   return (
-    <>
-      <button
-        onClick={function() {
-          downloadMp3(url, title, beatId);
-          if (beat) setShowContract(true);
-        }}
-        style={style}
-      >
-        {children}
-      </button>
-      {showContract && beat && (
-        <div style={{ marginTop: 8 }}>
-          <button
-            onClick={function() { generateFreeLeaseContract(beat, user); setShowContract(false); }}
-            style={{ width: "100%", background: "transparent", border: "1px solid rgba(192,38,211,0.4)", borderRadius: 10, padding: "8px", color: "#C026D3", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            Download Free Licence Contract
-          </button>
-        </div>
-      )}
-    </>
+    <button
+      onClick={function() { downloadMp3(url, title, beatId); }}
+      style={style}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -4538,6 +4515,10 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
             Save MP3 to Device
           </DownloadButton>
+          <button onClick={function(){ generateFreeLeaseContract(beat, user); }} style={{ width: "100%", borderRadius: 14, padding: "10px", background: "transparent", border: "1px solid #222", color: "#555", fontWeight: 700, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 8 }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Download Free Licence Contract
+          </button>
           <div style={{ display: "flex", marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
             {[
               { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>, title: "100% FREE", sub: "No tags, just vibes." },
@@ -6649,13 +6630,19 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
       {isFree ? (
         <div style={{ padding: "0 16px 16px" }}>
           {currentUser ? (
-            <DownloadButton
-              url={beat.url} title={beat.title} beatId={beat.id} beat={beat} user={currentUser}
-              style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #C026D3", color: "#C026D3", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: "0 0 18px rgba(192,38,211,0.2), inset 0 0 18px rgba(192,38,211,0.04)" }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
-              Save MP3 to Device
-            </DownloadButton>
+            <>
+              <DownloadButton
+                url={beat.url} title={beat.title} beatId={beat.id} beat={beat} user={currentUser}
+                style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #C026D3", color: "#C026D3", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: "0 0 18px rgba(192,38,211,0.2), inset 0 0 18px rgba(192,38,211,0.04)" }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+                Save MP3 to Device
+              </DownloadButton>
+              <button onClick={function(){ generateFreeLeaseContract(beat, currentUser); }} style={{ width: "100%", borderRadius: 14, padding: "10px", background: "transparent", border: "1px solid #222", color: "#555", fontWeight: 700, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 8 }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Download Free Licence Contract
+              </button>
+            </>
           ) : (
             <button onClick={function(){ alert("Sign up for a free or paid plan to download beats!"); }} style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #444", color: "#555", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
