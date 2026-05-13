@@ -5008,7 +5008,15 @@ async function downloadBeatMp3(beat) {
 
   var endpoint;
   if (beatId) {
+    // Append the auth token as a query param so the backend can verify
+    // ownership (Stripe-confirmed lease). Some browsers strip Authorization
+    // headers from media downloads on iOS, so query param is the reliable path.
+    var bfToken = "";
+    try { bfToken = (typeof getToken === "function" && getToken()) || localStorage.getItem("bf_token") || ""; } catch (e) {}
     endpoint = API_BASE + "/api/producer/beats/" + beatId + "/file";
+    if (bfToken) {
+      endpoint += (endpoint.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(bfToken);
+    }
   } else if (beatUrl) {
     endpoint = beatUrl.replace("/upload/", "/upload/fl_attachment/");
   } else {
