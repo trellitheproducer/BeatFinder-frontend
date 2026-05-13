@@ -5992,8 +5992,13 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
     seekedRef.current = false;
     startGlobalPreview(previewId.current);
     setPreviewing(true); setPreviewTime(0);
-    // recordPlay handles 3s minimum + 30min cooldown + server sync
     recordPlay(beat.id);
+  }
+  function stopPreview() {
+    clearGlobalPreview(previewId.current);
+    setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
+    cancelPlayTimer(beat.id);
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
   }
   useGlobalPreviewStop(previewId.current, React.useCallback(function() {
     setPreviewing(false); setPreviewTime(0); clearInterval(timerRef.current);
