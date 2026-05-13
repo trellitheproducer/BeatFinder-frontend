@@ -6680,6 +6680,7 @@ function CompactBeatCard({ beat }) {
   }
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
 
+  var pct = previewing ? (previewTime / 45) * 100 : 0;
 
   return (
     <div style={{
