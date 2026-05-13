@@ -17514,7 +17514,9 @@ function StudioScreen({ user, onExit }) {
           node = split;
           liveNodes.ocean = { dryG, wetG, preDelay, lpf, conv };
         } else {
-        split.connect(dryG);
+          // Bypass: dry path only, no convolver/lpf allocated
+          const split = actx.createGain(); split.gain.value = 1;
+          split.connect(dryG);
           node = split;
           liveNodes.ocean = { dryG, wetG };
         }
@@ -18063,7 +18065,7 @@ function StudioScreen({ user, onExit }) {
     });
   };
 
-  const togglePlay = function () {
+  const togglePlay = async function () {
     if (isPlaying) {
       // Capture exact live position before tearing down audio graph
       const exactT = liveTimeRef.current > 0 ? liveTimeRef.current : currentTime;
@@ -18072,6 +18074,22 @@ function StudioScreen({ user, onExit }) {
       // Freeze everything — playhead stays exactly where audio stopped
       syncUItoTime(exactT);
     } else {
+      // CRITICAL: force AudioContext resume INSIDE the user-gesture click handler.
+      // Browsers (esp. iOS Safari, recent Chrome) require this on every play attempt
+      // and the silent `.catch()` inside getActx() was hiding failures, leading to a
+      // playing UI with no audio. Surface failures so they're visible in DevTools.
+      try {
+        const ctx = getActx();
+        if (ctx && ctx.state === "suspended") {
+          await ctx.resume();
+        }
+        // After resume, if it's STILL suspended, that's an autoplay-policy failure.
+        if (ctx && ctx.state !== "running") {
+          console.warn("[Studio] AudioContext failed to resume — state:", ctx.state);
+        }
+      } catch (resumeErr) {
+        console.error("[Studio] AudioContext.resume() threw:", resumeErr);
+      }
       // Resume from the synced position — playheadAtRef was written by syncUItoTime
       const startT = playheadAtRef.current;
       doPlay(startT);
