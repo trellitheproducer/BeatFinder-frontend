@@ -22625,6 +22625,167 @@ function SplashScreen({ onDone }) {
   );
 }
 
+// =============================================================================
+// INSTALL PROMPT — "Add to Home Screen" banner
+// Platform-aware:
+//   • Android Chrome/Edge/Samsung: native install prompt via beforeinstallprompt
+//   • iOS Safari: manual instructions (Apple doesn't allow programmatic install)
+//   • Already-installed PWA: hides itself entirely
+//   • Dismissed: snoozed for 7 days via localStorage flag
+// =============================================================================
+function InstallPrompt() {
+  const [show, setShow]               = React.useState(false);
+  const [platform, setPlatform]       = React.useState(null); // "android" | "ios" | null
+  const [deferredEvt, setDeferredEvt] = React.useState(null); // Android beforeinstallprompt event
+
+  React.useEffect(function() {
+    // Bail out if already installed (running in standalone mode)
+    try {
+      var isStandalone =
+        (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+        window.navigator.standalone === true;
+      if (isStandalone) return;
+    } catch(e) {}
+
+    // Bail out if user dismissed recently (within 7 days)
+    try {
+      var dismissedAt = parseInt(localStorage.getItem("bf_install_dismissed") || "0", 10);
+      if (dismissedAt && (Date.now() - dismissedAt) < 7 * 24 * 60 * 60 * 1000) return;
+    } catch(e) {}
+
+    // Detect platform
+    var ua = (navigator.userAgent || "").toLowerCase();
+    var isIOS = /iphone|ipad|ipod/.test(ua);
+    var isMacTouchpad = navigator.maxTouchPoints > 1 && /macintosh/.test(ua); // iPad in desktop mode
+    var isAndroid = /android/.test(ua);
+    var isSafari = /safari/.test(ua) && !/crios|fxios|chrome|edg/.test(ua);
+
+    if ((isIOS || isMacTouchpad) && isSafari) {
+      // iOS Safari → show manual-instructions banner immediately
+      setPlatform("ios");
+      setShow(true);
+    } else if (isAndroid) {
+      // Android → wait for beforeinstallprompt event before showing
+      var handler = function(e) {
+        e.preventDefault();
+        setDeferredEvt(e);
+        setPlatform("android");
+        setShow(true);
+      };
+      window.addEventListener("beforeinstallprompt", handler);
+      return function() { window.removeEventListener("beforeinstallprompt", handler); };
+    }
+    // Desktop browsers / other platforms: silent (no banner needed)
+  }, []);
+
+  function dismiss() {
+    try { localStorage.setItem("bf_install_dismissed", String(Date.now())); } catch(e) {}
+    setShow(false);
+  }
+
+  async function handleInstall() {
+    if (!deferredEvt) return;
+    try {
+      deferredEvt.prompt();
+      var choice = await deferredEvt.userChoice;
+      // Whether they accept or decline, hide the banner. If declined, snooze 7 days.
+      if (choice && choice.outcome !== "accepted") {
+        try { localStorage.setItem("bf_install_dismissed", String(Date.now())); } catch(e) {}
+      }
+      setShow(false);
+      setDeferredEvt(null);
+    } catch(e) {
+      console.warn("[Install] Prompt failed:", e);
+      setShow(false);
+    }
+  }
+
+  if (!show || !platform) return null;
+
+  return (
+    <div style={{
+      position: "fixed",
+      left: 12, right: 12,
+      bottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)",
+      zIndex: 30000,
+      background: "linear-gradient(135deg,#16101f 0%,#0d0d12 100%)",
+      border: "1.5px solid rgba(192,38,211,0.4)",
+      borderRadius: 18,
+      padding: 16,
+      boxShadow: "0 12px 36px rgba(0,0,0,0.7), 0 0 30px rgba(192,38,211,0.15)",
+      fontFamily: "'DM Sans',sans-serif",
+      pointerEvents: "auto",
+    }}>
+      <button onClick={dismiss} aria-label="Dismiss"
+        style={{
+          position: "absolute", top: 8, right: 8,
+          background: "transparent", border: "none",
+          color: "#666", fontSize: 18, cursor: "pointer",
+          padding: 6, lineHeight: 1,
+        }}>×</button>
+
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 12 }}>
+        {/* BeatFinder logo bubble */}
+        <div style={{
+          width: 44, height: 44, borderRadius: 11, flexShrink: 0,
+          background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          boxShadow: "0 0 14px rgba(192,38,211,0.5)",
+        }}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 18V5l12-2v13"/>
+            <circle cx="6" cy="18" r="3"/>
+            <circle cx="18" cy="16" r="3"/>
+          </svg>
+        </div>
+        <div style={{ flex: 1, minWidth: 0, paddingRight: 20 }}>
+          <div style={{ color: "white", fontWeight: 800, fontSize: 15, marginBottom: 2 }}>
+            Install BeatFinder
+          </div>
+          <div style={{ color: "#999", fontSize: 12, lineHeight: 1.4 }}>
+            {platform === "ios"
+              ? "Get the full app experience on your home screen — faster loading, fullscreen, no browser bar."
+              : "Add to your home screen for one-tap access and a native app feel."}
+          </div>
+        </div>
+      </div>
+
+      {platform === "android" ? (
+        <button onClick={handleInstall} style={{
+          width: "100%", border: "none", borderRadius: 12,
+          background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+          color: "white", fontWeight: 800, fontSize: 14,
+          padding: "12px", cursor: "pointer", letterSpacing: 0.3,
+          boxShadow: "0 4px 14px rgba(192,38,211,0.4)",
+        }}>
+          Install App
+        </button>
+      ) : (
+        <div style={{
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 12, padding: "10px 12px",
+          color: "#bbb", fontSize: 12, lineHeight: 1.6,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+            <span style={{ color: "#999", fontWeight: 700 }}>1.</span>
+            <span>Tap the</span>
+            <svg width="14" height="18" viewBox="0 0 14 18" fill="none" stroke="#3B82F6" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <path d="M7 11V1M3 5l4-4 4 4"/>
+              <path d="M1 9v6a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9"/>
+            </svg>
+            <span>Share button at the bottom of Safari</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ color: "#999", fontWeight: 700 }}>2.</span>
+            <span>Scroll down and tap <strong style={{ color: "white" }}>"Add to Home Screen"</strong></span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function BeatFinder() {
   // ── Install the global pop-up block detector once ────────────────────────
   // Runs on the very first user tap anywhere on the page (after this effect
@@ -23290,6 +23451,11 @@ export default function BeatFinder() {
           </div>
         </div>
       )}
+
+      {/* PWA install prompt — shows on first visit for Android Chrome (native)
+          and iOS Safari (manual instructions). Hidden if already installed
+          or dismissed within the last 7 days. */}
+      <InstallPrompt />
 
       {showAuthPrompt && (
         <div style={{
