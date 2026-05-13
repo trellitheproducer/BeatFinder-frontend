@@ -3901,6 +3901,14 @@ function LeaseContractButton({ lease }) {
 // ── In-app contract viewer — shows contract as scrollable overlay ─────────────
 function ContractViewer({ html, onClose, filename }) {
   function handleSave() {
+    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isIOS) {
+      // On iOS, blob: URL clicks navigate the PWA away and reset to home.
+      // Use a data URI opened in a new tab so the user gets Share > Save to Files
+      // without the app losing its state.
+      try { window.open("data:text/html;charset=utf-8," + encodeURIComponent(html), "_blank"); } catch(e) {}
+      return;
+    }
     try {
       var blob = new Blob([html], { type: "text/html" });
       var url  = URL.createObjectURL(blob);
@@ -3912,7 +3920,6 @@ function ContractViewer({ html, onClose, filename }) {
       a.click();
       setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
     } catch(e) {
-      // iOS Safari fallback — open in new tab so user can share/save
       var blob2 = new Blob([html], { type: "text/html" });
       var url2  = URL.createObjectURL(blob2);
       window.open(url2, "_blank");
@@ -4046,6 +4053,12 @@ function generateFreeLeaseContractHtml(beat, user) {
 }
 
 function generateFreeLeaseContract(beat, user) {
+  // iOS Safari navigates away from the page when clicking a blob: URL,
+  // which resets the app back to home. We detect iOS and skip the auto-download --
+  // the ContractViewer Save button handles saving on iOS instead.
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  if (isIOS) return;
+
   var html = generateFreeLeaseContractHtml(beat, user);
   var beatTitle = beat.title || "Beat";
   var blob = new Blob([html], { type: "text/html" });
@@ -4240,6 +4253,11 @@ function generateLeaseContractHtml(lease) {
 }
 
 function generateLeaseContract(lease) {
+  // iOS Safari navigates away when clicking blob: URLs -- skip on iOS,
+  // ContractViewer Save button handles it instead.
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  if (isIOS) return;
+
   var html = generateLeaseContractHtml(lease);
   var beatTitle = lease.beat_title || "Beat";
   var leaseId = lease.id || ("BF-" + Date.now());
