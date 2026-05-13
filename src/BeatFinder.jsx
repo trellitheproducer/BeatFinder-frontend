@@ -4413,14 +4413,87 @@ function generateLeaseContract(lease) {
   setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
 }
 
+// ── Download status toast (global) ─────────────────────────────────
+// Lightweight observable that the smart download helper signals into.
+// A `<DownloadToast />` mounted near the root renders the visual.
+var __downloadToastListeners = [];
+function __setDownloadToast(state) {
+  __downloadToastListeners.forEach(function(fn) { try { fn(state); } catch (e) {} });
+}
+function useDownloadToast() {
+  var [state, setState] = React.useState(null); // null | {status,title,progress}
+  React.useEffect(function() {
+    __downloadToastListeners.push(setState);
+    return function() {
+      __downloadToastListeners = __downloadToastListeners.filter(function(fn) { return fn !== setState; });
+    };
+  }, []);
+  return state;
+}
+
+function DownloadToast() {
+  var state = useDownloadToast();
+  if (!state) return null;
+  var status = state.status; // "downloading" | "success" | "error"
+  var bg, icon, text;
+  if (status === "downloading") {
+    bg = "linear-gradient(135deg,#C026D3,#9333EA)";
+    icon = (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"
+        style={{ animation: "bf-spin 1s linear infinite" }}>
+        <path d="M21 12a9 9 0 1 1-6.219-8.56" strokeLinecap="round"/>
+      </svg>
+    );
+    text = "Downloading " + (state.title || "beat") + "...";
+  } else if (status === "success") {
+    bg = "linear-gradient(135deg,#22C55E,#16A34A)";
+    icon = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>;
+    text = "Downloaded ✓";
+  } else {
+    bg = "linear-gradient(135deg,#EF4444,#B91C1C)";
+    icon = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>;
+    text = state.message || "Download failed";
+  }
+  var toast = (
+    <>
+      <style>{"@keyframes bf-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes bf-toast-in{from{transform:translateY(-20px);opacity:0}to{transform:translateY(0);opacity:1}}"}</style>
+      <div style={{
+        position: "fixed",
+        top: "max(env(safe-area-inset-top), 12px)",
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 2147483646,
+        background: bg,
+        color: "white",
+        padding: "12px 18px",
+        borderRadius: 28,
+        boxShadow: "0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08)",
+        display: "flex", alignItems: "center", gap: 10,
+        fontWeight: 700, fontSize: 13, letterSpacing: 0.2,
+        minWidth: 220, maxWidth: "calc(100vw - 32px)",
+        animation: "bf-toast-in 0.25s ease-out",
+        pointerEvents: "none",
+      }}>
+        {icon}
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>
+      </div>
+    </>
+  );
+  if (typeof document === "undefined" || !document.body || !ReactDOM.createPortal) {
+    return toast;
+  }
+  return ReactDOM.createPortal(toast, document.body);
+}
+
 // ── Smart MP3 download ────────────────────────────────────────────
-// Fetches the file as a blob first so we always know whether it succeeded
-// (no more silent blank pages on failure). Once we have the blob:
-//   - iOS: navigate same-tab to the blob URL → iOS shows its native
-//     download prompt ("Save to Files" / "View" overlay).
-//   - Android/desktop: trigger a real <a download> click.
-// Works for any beat in `producer_beats`, regardless of who uploaded it,
-// because the auth-free backend proxy serves all of them.
+// Always fetches via blob first (so we control the result, can show progress,
+// and surface real errors). After download:
+//   - iOS PWA: tries native Share Sheet with a File object (best UX, "Save
+//     to Files" appears as a primary action)
+//   - iOS Safari (browser tab): opens the blob in a NEW tab. This keeps the
+//     original tab — and our React app — exactly where it was. When the
+//     user taps Done they return to the same page they came from.
+//   - Android/desktop: real <a download> click.
 async function downloadBeatMp3(beat) {
   var beatId   = beat && (beat.id || beat.beat_id || beat._id);
   var beatUrl  = beat && (beat.url || beat.beat_url);
@@ -4431,10 +4504,10 @@ async function downloadBeatMp3(beat) {
   if (beatId) {
     endpoint = API_BASE + "/api/producer/beats/" + beatId + "/file";
   } else if (beatUrl) {
-    // Cloudinary fl_attachment makes the response a downloadable file
     endpoint = beatUrl.replace("/upload/", "/upload/fl_attachment/");
   } else {
-    alert("This beat has no file attached yet.");
+    __setDownloadToast({ status: "error", message: "No file attached to this beat" });
+    setTimeout(function() { __setDownloadToast(null); }, 2500);
     return;
   }
 
@@ -4442,50 +4515,84 @@ async function downloadBeatMp3(beat) {
               (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   var isStandalonePWA = window.matchMedia && window.matchMedia("(display-mode: standalone)").matches;
 
-  // STRATEGY A — iOS Safari (browser tab, not PWA):
-  // direct same-tab navigation shows the native "Do you want to download?"
-  // prompt. We don't need to pre-fetch; the browser handles it.
-  if (isIOS && !isStandalonePWA) {
-    window.location.href = endpoint;
-    return;
-  }
+  // Visual feedback — appears instantly so the user knows the tap registered
+  __setDownloadToast({ status: "downloading", title: rawTitle });
 
-  // STRATEGY B — everything else (incl. iOS PWA standalone, Android, desktop):
-  // Fetch as blob so we control the lifecycle and surface real errors.
   try {
     var res = await fetch(endpoint, { method: "GET" });
     if (!res.ok) {
       throw new Error("Server returned " + res.status);
     }
     var blob = await res.blob();
-    var blobUrl = URL.createObjectURL(blob);
+    // Force the correct MIME on the blob even if the response was generic
+    var typedBlob = blob.type === "audio/mpeg"
+      ? blob
+      : new Blob([blob], { type: "audio/mpeg" });
+    var blobUrl = URL.createObjectURL(typedBlob);
 
-    // Try the native Web Share API with a real File first — gives the iOS
-    // PWA user the same share sheet as Files.app would.
+    // STRATEGY 1 — iOS PWA: Web Share API with a real File. iOS will show
+    // the system share sheet with "Save to Files" as a primary action,
+    // plus AirDrop, Messages, Mail, etc.
     if (isStandalonePWA && navigator.canShare && typeof File === "function") {
       try {
-        var file = new File([blob], filename, { type: "audio/mpeg" });
+        var file = new File([typedBlob], filename, { type: "audio/mpeg" });
         if (navigator.canShare({ files: [file] })) {
           await navigator.share({ files: [file], title: rawTitle });
+          __setDownloadToast({ status: "success" });
+          setTimeout(function() { __setDownloadToast(null); }, 1800);
           setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 5000);
           return;
         }
-      } catch (e) { /* fall through to anchor download */ }
+      } catch (e) {
+        // User cancelled, or the platform refused — fall through to anchor flow.
+        // We keep going since cancellation isn't really an error.
+      }
     }
 
+    // STRATEGY 2 — iOS Safari (browser tab): open the blob in a NEW tab.
+    // The new tab renders the audio file with Content-Disposition: attachment
+    // which triggers iOS's native download prompt. Critically, our original
+    // tab keeps the React state, so "Done" returns the user to the same page.
+    if (isIOS && !isStandalonePWA) {
+      var win = window.open(blobUrl, "_blank");
+      if (!win) {
+        // Popup blocked — fall back to an in-page anchor click. iOS may then
+        // show the share sheet inline on the same tab; less ideal but works.
+        var aFallback = document.createElement("a");
+        aFallback.href   = blobUrl;
+        aFallback.target = "_blank";
+        aFallback.rel    = "noopener noreferrer";
+        aFallback.style.display = "none";
+        document.body.appendChild(aFallback);
+        aFallback.click();
+        setTimeout(function() { document.body.removeChild(aFallback); }, 1000);
+      }
+      __setDownloadToast({ status: "success" });
+      setTimeout(function() { __setDownloadToast(null); }, 1800);
+      // Hold the blob URL longer so the new tab can finish loading the file
+      setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 60000);
+      return;
+    }
+
+    // STRATEGY 3 — Android / desktop: real <a download> click
     var a = document.createElement("a");
     a.href     = blobUrl;
     a.download = filename;
     a.style.display = "none";
     document.body.appendChild(a);
     a.click();
+    __setDownloadToast({ status: "success" });
+    setTimeout(function() { __setDownloadToast(null); }, 1800);
     setTimeout(function() {
       document.body.removeChild(a);
       URL.revokeObjectURL(blobUrl);
     }, 1500);
   } catch (e) {
-    alert("Couldn't download the beat: " + (e.message || "unknown error") +
-          ". The producer may have removed it, or your connection dropped.");
+    __setDownloadToast({
+      status: "error",
+      message: "Download failed — " + (e.message || "please try again"),
+    });
+    setTimeout(function() { __setDownloadToast(null); }, 3500);
   }
 }
 
@@ -20754,6 +20861,7 @@ export default function BeatFinder() {
     return (
       <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", height: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
         <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
+        <DownloadToast />
         <PublicProfileScreen
           username={urlUsername}
           onBack={() => { window.history.replaceState({}, "", "/"); window.location.reload(); }}
@@ -20769,6 +20877,7 @@ export default function BeatFinder() {
   if (resetToken) {
     return (
       <div style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
+        <DownloadToast />
         <ResetPasswordScreen token={resetToken} onDone={() => { window.history.replaceState({}, "", "/"); window.location.reload(); }} />
       </div>
     );
@@ -20777,6 +20886,7 @@ export default function BeatFinder() {
   return (
     <div key="app-root" data-bf-app="1" id="bf-portrait-lock" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
+      <DownloadToast />
 
       {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
 
