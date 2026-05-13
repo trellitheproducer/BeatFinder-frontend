@@ -7177,7 +7177,13 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
       </div>
 
       {/* Beats tab — producers only, split into Free and Licensed */}
-      {tab === "beats" && <BeatsTabContent profile={profile} currentUser={currentUser} onViewProfile={onViewProfile} />}
+      {tab === "beats" && (function(){
+        try {
+          return <BeatsTabContent profile={profile} currentUser={currentUser} onViewProfile={onViewProfile} />;
+        } catch(e) {
+          return <div style={{ padding: 20, color: "#F87171", fontSize: 13 }}>Error loading beats: {String(e.message)}</div>;
+        }
+      })()}
 
       {/* Tracks tab — artists only */}
       {tab === "tracks" && (
