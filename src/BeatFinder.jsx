@@ -3901,12 +3901,34 @@ function LeaseContractButton({ lease }) {
 // ── In-app contract viewer — shows contract as scrollable overlay ─────────────
 function ContractViewer({ html, onClose, filename }) {
   function handleSave() {
+    var dlName = filename || "BeatFinder_Contract.html";
+    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     try {
       var blob = new Blob([html], { type: "text/html" });
       var url  = URL.createObjectURL(blob);
+
+      if (isIOS) {
+        // iOS: open in a new tab so the user can use the native share/save sheet
+        // without unmounting the React tree behind this modal.
+        var win = window.open(url, "_blank");
+        if (!win) {
+          var a0 = document.createElement("a");
+          a0.href = url;
+          a0.target = "_blank";
+          a0.rel = "noopener noreferrer";
+          a0.style.display = "none";
+          document.body.appendChild(a0);
+          a0.click();
+          setTimeout(function() { document.body.removeChild(a0); }, 1000);
+        }
+        setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+        return;
+      }
+
       var a    = document.createElement("a");
       a.href     = url;
-      a.download = filename || "BeatFinder_Contract.html";
+      a.download = dlName;
       a.style.display = "none";
       document.body.appendChild(a);
       a.click();
@@ -4048,15 +4070,51 @@ function generateFreeLeaseContractHtml(beat, user) {
 function generateFreeLeaseContract(beat, user) {
   var html = generateFreeLeaseContractHtml(beat, user);
   var beatTitle = beat.title || "Beat";
-  var blob = new Blob([html], { type: "text/html" });
-  var url  = URL.createObjectURL(blob);
-  var a    = document.createElement("a");
-  a.href     = url;
-  a.download = "BeatFinder_FreeLicence_" + beatTitle.replace(/[^\w]/g, "_") + ".html";
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  var dlName = "BeatFinder_FreeLicence_" + beatTitle.replace(/[^\w]/g, "_") + ".html";
+
+  // Detect iOS — Safari/standalone PWAs don't reliably honour <a download>
+  // and end up navigating away to a file viewer, which unmounts our card and
+  // hides the MP3 button. On iOS, open the contract in a new tab via a
+  // data URL so the user can use the native Share sheet to save it without
+  // leaving the current PWA context.
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+              (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  try {
+    var blob = new Blob([html], { type: "text/html" });
+    var url  = URL.createObjectURL(blob);
+
+    if (isIOS) {
+      // Open in a new tab — iOS will render and offer share/save without
+      // disturbing our React state in the original tab.
+      var win = window.open(url, "_blank");
+      if (!win) {
+        // popup blocked — fallback to anchor click
+        var a0 = document.createElement("a");
+        a0.href = url;
+        a0.target = "_blank";
+        a0.rel = "noopener noreferrer";
+        a0.style.display = "none";
+        document.body.appendChild(a0);
+        a0.click();
+        setTimeout(function() { document.body.removeChild(a0); }, 1000);
+      }
+      setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+      return;
+    }
+
+    var a    = document.createElement("a");
+    a.href     = url;
+    a.download = dlName;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  } catch (e) {
+    // Last-ditch fallback
+    var dataUrl = "data:text/html;charset=utf-8," + encodeURIComponent(html);
+    window.open(dataUrl, "_blank");
+  }
 }
 
 function generateLeaseContractHtml(lease) {
@@ -4407,8 +4465,40 @@ function BeatCardShell({ beat, accentColor, children, onViewProfile, extraStats 
 // =============================================================================
 // ── Free Beat CTA — contract must be accepted before MP3 unlocks ──────────────
 function FreeBeatCTA({ beat, user }) {
-  var [step, setStep] = React.useState("idle");
+  // Persist "signed" state per-beat in localStorage so iOS navigating away to
+  // view the downloaded HTML contract doesn't reset the UI back to "idle"
+  // (which was hiding the MP3 download button after coming back).
+  var signedKey = "bf_signed_free_" + (beat.id || beat.url || beat.title || "x");
+  var initialStep = "idle";
+  try {
+    if (typeof window !== "undefined" && window.localStorage && window.localStorage.getItem(signedKey)) {
+      initialStep = "done";
+    }
+  } catch (e) {}
+
+  var [step, setStep] = React.useState(initialStep);
   var [showContract, setShowContract] = React.useState(false);
+
+  // Re-check localStorage on mount (covers PWA resume after iOS leaves the page)
+  React.useEffect(function() {
+    try {
+      if (window.localStorage && window.localStorage.getItem(signedKey)) {
+        setStep("done");
+      }
+    } catch (e) {}
+    // also listen for visibility change — when user returns from the
+    // iOS "Open in Kodex / Done" screen, re-evaluate state
+    function onVis() {
+      try {
+        if (document.visibilityState === "visible" && window.localStorage.getItem(signedKey)) {
+          setStep("done");
+        }
+      } catch (e) {}
+    }
+    document.addEventListener("visibilitychange", onVis);
+    return function() { document.removeEventListener("visibilitychange", onVis); };
+  }, [signedKey]);
+
   // Always use the backend proxy for downloads — it sets Content-Disposition: attachment
   // so iOS Safari shows the native download dialog instead of a blank media page.
   var downloadUrl = beat.id
@@ -4418,6 +4508,11 @@ function FreeBeatCTA({ beat, user }) {
   var date      = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
   var artist    = (user && (user.name || user.username)) || "Artist";
   var producer  = beat.producer || beat.producer_username || "Producer";
+
+  function markSigned() {
+    try { window.localStorage.setItem(signedKey, "1"); } catch (e) {}
+    setStep("done");
+  }
 
   if (step === "contract") {
     return (
@@ -4442,7 +4537,7 @@ function FreeBeatCTA({ beat, user }) {
             <div style={{ color: "#555", fontSize: 10 }}>By tapping "I Agree" below you accept all terms of this licence. Reference: BF-FREE-{Date.now()}</div>
           </div>
         </div>
-        <button onClick={function() { generateFreeLeaseContract(beat, user); setStep("done"); }} style={{
+        <button onClick={function() { markSigned(); generateFreeLeaseContract(beat, user); }} style={{
           width: "100%", borderRadius: 14, padding: "14px",
           background: "linear-gradient(135deg,#C026D3,#9333EA)", border: "none",
           color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer",
@@ -7132,6 +7227,276 @@ function ArtistTrackCard({ track, isOwner, onDeleted, onViewProfile }) {
 // =============================================================================
 // CONTENT TABS — shown on every public profile (Beats / Tracks / Music / Videos)
 // =============================================================================
+
+// ── Reusable bottom-sheet modal: contract gate for compact cards ──────────────
+// Used by CompactBeatCard. Persists signed state in localStorage so iOS users
+// returning from the file viewer (after saving the HTML contract) still see
+// the MP3 download button. Mirrors FreeBeatCTA logic in a sheet UI.
+function CompactBeatActionSheet({ beat, user, onClose }) {
+  var isFreePrice = function(p) { return !p || p === "free" || p === "£0" || p === "0" || p === "£0.00" || p === "0.00"; };
+  var isFree   = isFreePrice(beat.price);
+  var accent   = isFree ? "#C026D3" : "#F59E0B";
+  var signedKey = (isFree ? "bf_signed_free_" : "bf_signed_lease_") + (beat.id || beat.url || beat.title || "x");
+
+  var initialStep = "preview";
+  try {
+    if (typeof window !== "undefined" && window.localStorage && window.localStorage.getItem(signedKey)) {
+      initialStep = "done";
+    }
+  } catch (e) {}
+
+  var [step, setStep]               = React.useState(initialStep);
+  var [showContract, setShowContract] = React.useState(false);
+  var [buyLoading, setBuyLoading]     = React.useState(false);
+
+  // Re-check localStorage on mount + on visibility change (iOS resume)
+  React.useEffect(function() {
+    try {
+      if (window.localStorage && window.localStorage.getItem(signedKey)) {
+        setStep("done");
+      }
+    } catch (e) {}
+    function onVis() {
+      try {
+        if (document.visibilityState === "visible" && window.localStorage.getItem(signedKey)) {
+          setStep("done");
+        }
+      } catch (e) {}
+    }
+    document.addEventListener("visibilitychange", onVis);
+    return function() { document.removeEventListener("visibilitychange", onVis); };
+  }, [signedKey]);
+
+  function markSigned() {
+    try { window.localStorage.setItem(signedKey, "1"); } catch (e) {}
+    setStep("done");
+  }
+
+  var downloadUrl = beat.id
+    ? API_BASE + "/api/producer/beats/" + beat.id + "/file"
+    : (beat.url ? beat.url.replace("/upload/", "/upload/fl_attachment/") : "#");
+  var producer = beat.producer || beat.producer_username || "Producer";
+  var artist   = (user && (user.name || user.username)) || "Artist";
+
+  // Stripe buy flow for LICENSED beats
+  async function handleBuy() {
+    if (!user) {
+      alert("Sign up and purchase a plan to buy beat leases!");
+      return;
+    }
+    setBuyLoading(true);
+    try {
+      // Mark accepted BEFORE leaving for Stripe so when they come back the
+      // download stays unlocked. The actual lease record is also persisted
+      // server-side via the Stripe webhook.
+      markSigned();
+      var r = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
+      try {
+        var ct = sessionStorage.getItem("bf_tab") || "exclusive";
+        sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, ts: Date.now() }));
+      } catch (e) {}
+      window.location.href = r.checkout_url;
+    } catch (e) {
+      setBuyLoading(false);
+    }
+  }
+
+  return (
+    <>
+      {showContract && (
+        <ContractViewer
+          html={isFree
+            ? generateFreeLeaseContractHtml(beat, user)
+            : generateLeaseContractHtml({
+                beat_title: beat.title, producer: producer,
+                buyer_name: artist, price: beat.price,
+                id: "BF-PREVIEW-" + Date.now(),
+              })
+          }
+          filename={(isFree ? "BeatFinder_FreeLicence_" : "BeatFinder_Lease_") +
+            (beat.title || "Beat").replace(/[^\w]/g, "_") + ".html"}
+          onClose={function() { setShowContract(false); }}
+        />
+      )}
+
+      <div onClick={onClose} style={{
+        position: "fixed", inset: 0, zIndex: 99998,
+        background: "rgba(0,0,0,0.75)",
+        display: "flex", alignItems: "flex-end", justifyContent: "center",
+      }}>
+        <div onClick={function(e) { e.stopPropagation(); }} style={{
+          width: "100%", maxWidth: 480,
+          background: "#0d0d0d", borderTop: "1px solid #222",
+          borderRadius: "20px 20px 0 0", padding: 18,
+          paddingBottom: "max(env(safe-area-inset-bottom), 18px)",
+          maxHeight: "85vh", overflowY: "auto", WebkitOverflowScrolling: "touch",
+        }}>
+          {/* Drag handle */}
+          <div style={{ width: 40, height: 4, background: "#333", borderRadius: 2, margin: "0 auto 14px" }} />
+
+          {/* Beat header */}
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
+            <div style={{ width: 48, height: 48, borderRadius: 10, overflow: "hidden", flexShrink: 0, background: "#111" }}>
+              <img src="https://i.ibb.co/v4wcZVJW/IMG-9119.jpg" alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: accent, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, marginBottom: 2 }}>{(beat.genre || "").toUpperCase()}</div>
+              <div style={{ color: "white", fontWeight: 800, fontSize: 14, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{beat.title}</div>
+              <div style={{ color: "#666", fontSize: 11, marginTop: 2 }}>by {producer}</div>
+            </div>
+            <button onClick={onClose} style={{
+              width: 30, height: 30, borderRadius: "50%",
+              background: "rgba(255,255,255,0.05)", border: "1px solid #222",
+              color: "#888", fontSize: 14, cursor: "pointer", flexShrink: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>✕</button>
+          </div>
+
+          {/* STEP: preview / contract terms */}
+          {step === "preview" && (
+            <div>
+              <div style={{
+                background: "#0a0a0a", border: "1px solid #1f1f1f", borderRadius: 14,
+                padding: 14, marginBottom: 12,
+                maxHeight: 260, overflowY: "auto", WebkitOverflowScrolling: "touch",
+              }}>
+                <div style={{ color: accent, fontWeight: 800, fontSize: 11, letterSpacing: 1, marginBottom: 10, textAlign: "center" }}>
+                  {isFree ? "FREE BEAT LICENCE AGREEMENT" : "BEAT LEASE AGREEMENT"}
+                </div>
+                <div style={{ color: "#888", fontSize: 11, lineHeight: 1.7 }}>
+                  <div style={{ marginBottom: 6 }}><span style={{ color: "#aaa", fontWeight: 700 }}>Beat:</span> "{beat.title}"</div>
+                  <div style={{ marginBottom: 6 }}><span style={{ color: "#aaa", fontWeight: 700 }}>Producer:</span> {producer}</div>
+                  <div style={{ marginBottom: 6 }}><span style={{ color: "#aaa", fontWeight: 700 }}>Artist:</span> {artist}</div>
+                  <div style={{ marginBottom: 6 }}><span style={{ color: "#aaa", fontWeight: 700 }}>{isFree ? "Type" : "Price"}:</span> {isFree ? "FREE Non-Commercial" : beat.price}</div>
+                  <div style={{ height: 1, background: "#222", margin: "10px 0" }} />
+                  {isFree ? (
+                    <>
+                      <div style={{ marginBottom: 6 }}><span style={{ color: accent, fontWeight: 700 }}>1. GRANT</span> — Free, non-exclusive licence for non-commercial use only.</div>
+                      <div style={{ marginBottom: 6 }}><span style={{ color: accent, fontWeight: 700 }}>2. PERMITTED</span> — Record one song, share on free platforms, perform at non-ticketed events.</div>
+                      <div style={{ marginBottom: 6 }}><span style={{ color: accent, fontWeight: 700 }}>3. CREDIT</span> — Must credit: <em>(Prod. by {producer})</em>.</div>
+                      <div style={{ marginBottom: 6 }}><span style={{ color: accent, fontWeight: 700 }}>4. RESTRICTIONS</span> — No monetisation, no resale, no copyright claim. 10k streams cap.</div>
+                      <div style={{ marginBottom: 6 }}><span style={{ color: accent, fontWeight: 700 }}>5. OWNERSHIP</span> — Producer keeps copyright. Artist owns vocals/lyrics only.</div>
+                      <div style={{ marginBottom: 6 }}><span style={{ color: accent, fontWeight: 700 }}>6. LAW</span> — Governed by England & Wales.</div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ marginBottom: 6 }}><span style={{ color: accent, fontWeight: 700 }}>Non-Exclusive MP3 Lease</span> — stream, perform, distribute commercially up to 100k streams.</div>
+                      <div style={{ marginBottom: 6 }}>Must credit: <em>(Prod. by {producer})</em> in all releases.</div>
+                      <div style={{ marginBottom: 6 }}>Producer retains copyright. 50% composition royalties to producer.</div>
+                      <div style={{ marginBottom: 6 }}>No resale, no sub-licensing, no copyright claim on the Beat.</div>
+                      <div style={{ marginBottom: 6 }}>Governed by England and Wales law.</div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {isFree ? (
+                <>
+                  <button onClick={function() {
+                    if (!user) { alert("Sign up for a free or paid plan to download beats!"); return; }
+                    markSigned();
+                    generateFreeLeaseContract(beat, user);
+                  }} style={{
+                    width: "100%", borderRadius: 14, padding: "13px",
+                    background: "linear-gradient(135deg,#C026D3,#9333EA)",
+                    border: "none", color: "white", fontWeight: 800, fontSize: 13,
+                    letterSpacing: 0.5, textTransform: "uppercase", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                    marginBottom: 8,
+                  }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    I Agree — Save Contract
+                  </button>
+                </>
+              ) : (
+                <button onClick={handleBuy} disabled={buyLoading} style={{
+                  width: "100%", borderRadius: 14, padding: "13px",
+                  background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
+                  border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"),
+                  color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 13,
+                  letterSpacing: 0.5, cursor: buyLoading ? "not-allowed" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  marginBottom: 8,
+                }}>
+                  {buyLoading ? "Loading..." : "Agree & Buy Lease — " + beat.price}
+                </button>
+              )}
+              <button onClick={onClose} style={{
+                width: "100%", borderRadius: 14, padding: "10px",
+                background: "transparent", border: "1px solid #222",
+                color: "#666", fontWeight: 700, fontSize: 12, cursor: "pointer",
+              }}>Cancel</button>
+            </div>
+          )}
+
+          {/* STEP: done — show downloads */}
+          {step === "done" && isFree && (
+            <div>
+              <div style={{
+                background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)",
+                borderRadius: 14, padding: "11px 14px", marginBottom: 10,
+                display: "flex", alignItems: "center", gap: 10,
+              }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#22C55E" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                <div>
+                  <div style={{ color: "#22C55E", fontWeight: 800, fontSize: 12 }}>Licence Agreed ✓</div>
+                  <div style={{ color: "#555", fontSize: 10 }}>Download your contract & MP3 below</div>
+                </div>
+              </div>
+              <button onClick={function() { setShowContract(true); }} style={{
+                width: "100%", borderRadius: 14, padding: "11px",
+                background: "transparent", border: "1px solid #333",
+                color: "#888", fontWeight: 700, fontSize: 12, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                marginBottom: 8,
+              }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                View Licence Contract
+              </button>
+              <a href={downloadUrl} target="_blank" rel="noopener noreferrer" style={{
+                width: "100%", borderRadius: 14, padding: "14px",
+                background: "linear-gradient(135deg,#C026D3,#9333EA)",
+                color: "white", fontWeight: 800, fontSize: 14,
+                letterSpacing: 0.5, textTransform: "uppercase",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                textDecoration: "none", boxShadow: "0 0 20px rgba(192,38,211,0.4)",
+              }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+                Save MP3 to Device
+              </a>
+            </div>
+          )}
+
+          {/* STEP: done for LICENSED — directs them to their purchases */}
+          {step === "done" && !isFree && (
+            <div>
+              <div style={{
+                background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)",
+                borderRadius: 14, padding: "11px 14px", marginBottom: 10,
+                display: "flex", alignItems: "center", gap: 10,
+              }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                <div>
+                  <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12 }}>Lease Already Purchased</div>
+                  <div style={{ color: "#555", fontSize: 10 }}>Find the contract & MP3 in your Profile → Purchases</div>
+                </div>
+              </div>
+              <button onClick={onClose} style={{
+                width: "100%", borderRadius: 14, padding: "12px",
+                background: "linear-gradient(135deg,#F59E0B,#D97706)",
+                border: "none", color: "white", fontWeight: 800, fontSize: 13,
+                letterSpacing: 0.5, cursor: "pointer",
+              }}>
+                Close
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ── Compact beat card for two-column profile layout ───────────────────────────
 function CompactBeatCard({ beat, currentUser }) {
   var isFreePrice = function(p) { return !p || p === "free" || p === "£0" || p === "0" || p === "£0.00" || p === "0.00"; };
@@ -7140,6 +7505,7 @@ function CompactBeatCard({ beat, currentUser }) {
   var [previewing, setPreviewing] = React.useState(false);
   var [previewTime, setPreviewTime] = React.useState(0);
   var [buyLoading, setBuyLoading] = React.useState(false);
+  var [sheetOpen, setSheetOpen] = React.useState(false);
   var audioRef  = React.useRef(null);
   var timerRef  = React.useRef(null);
   var seekedRef = React.useRef(false);
@@ -7243,51 +7609,44 @@ function CompactBeatCard({ beat, currentUser }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           {previewing && <div style={{ color: "#555", fontSize: 8 }}>{Math.floor(previewTime)}s / 45s</div>}
         </div>
-        {/* Action button */}
+        {/* Action button — both FREE and LICENSED open the contract sheet */}
         {isFree ? (
-          currentUser ? (
-            <DownloadButton url={beat.url} title={beat.title} beatId={beat.id} beat={beat} user={currentUser}
-              style={{ background: "transparent", border: "1.5px solid #C026D3", borderRadius: 20, padding: "5px 10px", color: "#C026D3", fontSize: 9, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/></svg>
-              FREE
-            </DownloadButton>
-          ) : (
-            <button onClick={function(){ alert("Sign up for a free or paid plan to download beats!"); }} style={{
-              background: "transparent", border: "1.5px solid #555", borderRadius: 20,
-              padding: "5px 10px", color: "#555", fontSize: 9, fontWeight: 800,
-              cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", gap: 4,
-            }}>
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              FREE
-            </button>
-          )
+          <button onClick={function() {
+            if (!currentUser) { alert("Sign up for a free or paid plan to download beats!"); return; }
+            setSheetOpen(true);
+          }} style={{
+            background: "transparent", border: "1.5px solid " + (currentUser ? "#C026D3" : "#555"),
+            borderRadius: 20, padding: "5px 10px",
+            color: currentUser ? "#C026D3" : "#555", fontSize: 9, fontWeight: 800,
+            cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", gap: 4,
+          }}>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={currentUser ? "#C026D3" : "#555"} strokeWidth="2.5" strokeLinecap="round">
+              {currentUser
+                ? <><path d="M12 3v13M6 11l6 6 6-6"/></>
+                : <><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>
+              }
+            </svg>
+            FREE
+          </button>
         ) : (
-          currentUser ? (
-            <button onClick={async function() {
-              setBuyLoading(true);
-              try {
-                var r = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
-                try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, ts: Date.now() })); } catch(e) {} window.location.href = r.checkout_url;
-              } catch(e) { setBuyLoading(false); }
-            }} disabled={buyLoading} style={{
-              background: "transparent", border: "1.5px solid #F59E0B", borderRadius: 20,
-              padding: "5px 10px", color: "#F59E0B", fontSize: 9, fontWeight: 800,
-              cursor: buyLoading ? "not-allowed" : "pointer", flexShrink: 0,
-            }}>
-              {buyLoading ? "..." : "BUY " + beat.price}
-            </button>
-          ) : (
-            <button onClick={function(){ alert("Sign up and purchase a plan to buy beat leases!"); }} style={{
-              background: "transparent", border: "1.5px solid #555", borderRadius: 20,
-              padding: "5px 10px", color: "#555", fontSize: 9, fontWeight: 800,
-              cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", gap: 4,
-            }}>
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              {beat.price}
-            </button>
-          )
+          <button onClick={function() {
+            if (!currentUser) { alert("Sign up and purchase a plan to buy beat leases!"); return; }
+            setSheetOpen(true);
+          }} disabled={buyLoading} style={{
+            background: "transparent", border: "1.5px solid " + (currentUser ? "#F59E0B" : "#555"),
+            borderRadius: 20, padding: "5px 10px",
+            color: currentUser ? "#F59E0B" : "#555", fontSize: 9, fontWeight: 800,
+            cursor: buyLoading ? "not-allowed" : "pointer", flexShrink: 0,
+            display: "flex", alignItems: "center", gap: 4,
+          }}>
+            {!currentUser && <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>}
+            {buyLoading ? "..." : "BUY " + beat.price}
+          </button>
         )}
       </div>
+      {sheetOpen && (
+        <CompactBeatActionSheet beat={beat} user={currentUser} onClose={function() { setSheetOpen(false); }} />
+      )}
       {previewing && beat.url && (
         <audio ref={audioRef} src={beat.url + ((beat.preview_start||0) > 0 ? "#t=" + (beat.preview_start||0) : "")} autoPlay data-start-time={String(beat.preview_start || 0)}
           onPlay={function(){ onAudioPlay(); if (audioRef.current && (beat.preview_start||0) > 0 && !seekedRef.current) { audioRef.current.currentTime = beat.preview_start; seekedRef.current = true; } }}
