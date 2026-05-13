@@ -6720,6 +6720,7 @@ function CompactBeatCard({ beat }) {
               {beat.title}
             </div>
             <div style={{ color: "#555", fontSize: 9, marginTop: 2 }}>{beat.genre}</div>
+            <div style={{ color: "red", fontSize: 9 }}>ps={String(beat.preview_start)}</div>
           </div>
         </div>
         {(beat.bpm > 0 || beat.key) && (
