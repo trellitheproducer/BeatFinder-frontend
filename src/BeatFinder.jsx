@@ -3885,7 +3885,7 @@ function LeaseContractButton({ lease }) {
   var html = generateLeaseContractHtml(lease);
   return (
     <>
-      {show && <ContractViewer html={html} filename={"BeatFinder_Lease_" + ((lease && (lease.beat_title || lease.id)) || "Contract").replace(/[^\w]/g, "_") + ".html"} onClose={function() { setShow(false); }} />}
+      {show && <ContractViewer html={html} filename={"BeatFinder_Lease_" + ((lease && (lease.beat_title || lease.id)) || "Contract").replace(/[^\w]/g, "_") + ".html"} onClose={function() { setShow(false); }} pdfDownloader={function() { return downloadLeaseContractPdf(lease); }} />}
       <button onClick={function() { setShow(true); }} style={{
         width: "100%", borderRadius: 12, padding: "11px", background: "transparent",
         border: "1px solid #2a2a2a", color: "#888", fontWeight: 700, fontSize: 13,
@@ -3899,8 +3899,24 @@ function LeaseContractButton({ lease }) {
 }
 
 // ── In-app contract viewer — shows contract as scrollable overlay ─────────────
-function ContractViewer({ html, onClose, filename }) {
-  function handleSave() {
+// `html` is the in-app preview (always HTML). `pdfDownloader`, when provided,
+// is an async function that fetches a polished PDF from the backend — the
+// Save button uses this in preference to saving the raw HTML. This is what
+// gets iOS to show "Save to Files" directly in the share sheet.
+function ContractViewer({ html, onClose, filename, pdfDownloader }) {
+  var [saving, setSaving] = React.useState(false);
+
+  async function handleSave() {
+    if (pdfDownloader) {
+      if (saving) return;
+      setSaving(true);
+      try { await pdfDownloader(); }
+      catch (e) { alert((e && e.message) || "Save failed — please try again."); }
+      finally { setSaving(false); }
+      return;
+    }
+
+    // Legacy fallback — save HTML blob (used only if no pdfDownloader passed)
     var dlName = filename || "BeatFinder_Contract.html";
     var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
                 (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -3909,8 +3925,6 @@ function ContractViewer({ html, onClose, filename }) {
       var url  = URL.createObjectURL(blob);
 
       if (isIOS) {
-        // iOS: open in a new tab so the user can use the native share/save sheet
-        // without unmounting the React tree behind this modal.
         var win = window.open(url, "_blank");
         if (!win) {
           var a0 = document.createElement("a");
@@ -3934,7 +3948,6 @@ function ContractViewer({ html, onClose, filename }) {
       a.click();
       setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
     } catch(e) {
-      // iOS Safari fallback — open in new tab so user can share/save
       var blob2 = new Blob([html], { type: "text/html" });
       var url2  = URL.createObjectURL(blob2);
       window.open(url2, "_blank");
@@ -3986,7 +3999,7 @@ function ContractViewer({ html, onClose, filename }) {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
             <path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/>
           </svg>
-          Save
+          {saving ? "..." : "Save PDF"}
         </button>
       </div>
 
@@ -4004,18 +4017,19 @@ function ContractViewer({ html, onClose, filename }) {
       }}>
         <button
           onClick={handleSave}
+          disabled={saving}
           style={{
             flex: 1, borderRadius: 14, padding: "13px",
-            background: "linear-gradient(135deg,#C026D3,#9333EA)",
+            background: saving ? "#333" : "linear-gradient(135deg,#C026D3,#9333EA)",
             border: "none", color: "white", fontWeight: 800, fontSize: 14,
-            cursor: "pointer", display: "flex", alignItems: "center",
+            cursor: saving ? "not-allowed" : "pointer", display: "flex", alignItems: "center",
             justifyContent: "center", gap: 8,
           }}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
             <path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/>
           </svg>
-          Save Contract to Device
+          {saving ? "Generating PDF..." : "Save PDF to Device"}
         </button>
         <button
           onClick={onClose}
@@ -4030,6 +4044,99 @@ function ContractViewer({ html, onClose, filename }) {
       </div>
     </div>
   );
+}
+
+// ── Backend-generated PDF contracts ───────────────────────────────────────────
+// Real application/pdf with Content-Disposition: attachment from the server —
+// iOS Safari treats this as a proper PDF file in the share sheet, so the user
+// sees "Save to Files" immediately without having to change Send As → PDF in
+// the Options submenu. Avoids the HTML/Web Archive trap.
+async function fetchContractPdf(endpoint, options) {
+  options = options || {};
+  var token = getToken();
+  var headers = Object.assign({}, options.headers || {});
+  if (token) headers.Authorization = "Bearer " + token;
+  if (options.method && options.method.toUpperCase() === "POST" && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  var res = await fetch(API_BASE + endpoint, {
+    method:  options.method || "GET",
+    headers: headers,
+    body:    options.body,
+  });
+  if (!res.ok) {
+    var msg = "Contract download failed";
+    try { var j = await res.json(); msg = j.detail || msg; } catch(e) {}
+    throw new Error(msg);
+  }
+  return await res.blob();
+}
+
+function triggerBlobDownload(blob, filename) {
+  // iOS Safari / standalone PWA doesn't reliably honour <a download> for blobs:
+  // it sometimes opens the file in a viewer and navigates away. With a real
+  // application/pdf blob the native share sheet appears, which is the goal —
+  // but we still open in a new tab so React state behind it stays intact.
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+              (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var url = URL.createObjectURL(blob);
+  try {
+    if (isIOS) {
+      var win = window.open(url, "_blank");
+      if (!win) {
+        var a0 = document.createElement("a");
+        a0.href = url;
+        a0.target = "_blank";
+        a0.rel = "noopener noreferrer";
+        a0.style.display = "none";
+        document.body.appendChild(a0);
+        a0.click();
+        setTimeout(function() { document.body.removeChild(a0); }, 1000);
+      }
+      setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+      return;
+    }
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename || "BeatFinder_Contract.pdf";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  } catch(e) {
+    window.open(url, "_blank");
+  }
+}
+
+async function downloadFreeContractPdf(beat, user) {
+  try {
+    var safeTitle = (beat.title || "Beat").replace(/[^\w]/g, "_");
+    var blob = await fetchContractPdf("/api/contracts/free", {
+      method: "POST",
+      body:   JSON.stringify({
+        beat_id:    beat.id || null,
+        beat_title: beat.title || "Beat",
+        producer:   beat.producer || beat.producer_username || "Producer",
+      }),
+    });
+    triggerBlobDownload(blob, "BeatFinder_FreeLicence_" + safeTitle + ".pdf");
+  } catch (e) {
+    alert(e.message || "Could not download contract — please try again.");
+  }
+}
+
+async function downloadLeaseContractPdf(lease) {
+  try {
+    if (!lease || !lease.id) {
+      alert("This lease is missing its server record — please refresh your purchases and try again.");
+      return;
+    }
+    var safeTitle = (lease.beat_title || "Beat").replace(/[^\w]/g, "_");
+    var blob = await fetchContractPdf("/api/contracts/lease/" + lease.id, { method: "GET" });
+    triggerBlobDownload(blob, "BeatFinder_Lease_" + safeTitle + ".pdf");
+  } catch (e) {
+    alert(e.message || "Could not download contract — please try again.");
+  }
 }
 
 function generateFreeLeaseContractHtml(beat, user) {
@@ -4068,53 +4175,10 @@ function generateFreeLeaseContractHtml(beat, user) {
 }
 
 function generateFreeLeaseContract(beat, user) {
-  var html = generateFreeLeaseContractHtml(beat, user);
-  var beatTitle = beat.title || "Beat";
-  var dlName = "BeatFinder_FreeLicence_" + beatTitle.replace(/[^\w]/g, "_") + ".html";
-
-  // Detect iOS — Safari/standalone PWAs don't reliably honour <a download>
-  // and end up navigating away to a file viewer, which unmounts our card and
-  // hides the MP3 button. On iOS, open the contract in a new tab via a
-  // data URL so the user can use the native Share sheet to save it without
-  // leaving the current PWA context.
-  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-              (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-
-  try {
-    var blob = new Blob([html], { type: "text/html" });
-    var url  = URL.createObjectURL(blob);
-
-    if (isIOS) {
-      // Open in a new tab — iOS will render and offer share/save without
-      // disturbing our React state in the original tab.
-      var win = window.open(url, "_blank");
-      if (!win) {
-        // popup blocked — fallback to anchor click
-        var a0 = document.createElement("a");
-        a0.href = url;
-        a0.target = "_blank";
-        a0.rel = "noopener noreferrer";
-        a0.style.display = "none";
-        document.body.appendChild(a0);
-        a0.click();
-        setTimeout(function() { document.body.removeChild(a0); }, 1000);
-      }
-      setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
-      return;
-    }
-
-    var a    = document.createElement("a");
-    a.href     = url;
-    a.download = dlName;
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
-  } catch (e) {
-    // Last-ditch fallback
-    var dataUrl = "data:text/html;charset=utf-8," + encodeURIComponent(html);
-    window.open(dataUrl, "_blank");
-  }
+  // Now delegates to the backend PDF endpoint. Returns the promise so callers
+  // can await it; existing call sites that don't await are fine because the
+  // function still triggers the download asynchronously.
+  return downloadFreeContractPdf(beat, user);
 }
 
 function generateLeaseContractHtml(lease) {
@@ -4566,6 +4630,7 @@ function FreeBeatCTA({ beat, user }) {
             html={generateFreeLeaseContractHtml(beat, user)}
             filename={"BeatFinder_FreeLicence_" + (beat.title || "Beat").replace(/[^\w]/g, "_") + ".html"}
             onClose={function() { setShowContract(false); }}
+            pdfDownloader={function() { return downloadFreeContractPdf(beat, user); }}
           />
         )}
         <div style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)", borderRadius: 14, padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
@@ -7316,6 +7381,10 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
           filename={(isFree ? "BeatFinder_FreeLicence_" : "BeatFinder_Lease_") +
             (beat.title || "Beat").replace(/[^\w]/g, "_") + ".html"}
           onClose={function() { setShowContract(false); }}
+          pdfDownloader={isFree
+            ? function() { return downloadFreeContractPdf(beat, user); }
+            : null /* lease PDF only issued after payment — preview is read-only */
+          }
         />
       )}
 
@@ -20783,7 +20852,7 @@ export default function BeatFinder() {
               return (
                 <>
                   {showLeaseContract && (
-                    <ContractViewer html={contractHtml} filename={"BeatFinder_Lease_" + (leaseBeat.beat_title || "Beat").replace(/[^\w]/g, "_") + "_" + (leaseBeat.id || Date.now()) + ".html"} onClose={function() { setShowLeaseContract(false); }} />
+                    <ContractViewer html={contractHtml} filename={"BeatFinder_Lease_" + (leaseBeat.beat_title || "Beat").replace(/[^\w]/g, "_") + "_" + (leaseBeat.id || Date.now()) + ".html"} onClose={function() { setShowLeaseContract(false); }} pdfDownloader={function() { return downloadLeaseContractPdf(leaseBeat); }} />
                   )}
                   {/* Contract summary */}
                   <div style={{ background: "#0d0d0d", border: "1px solid #222", borderRadius: 12, padding: 14, marginBottom: 12, maxHeight: 200, overflowY: "auto", WebkitOverflowScrolling: "touch", fontSize: 11, color: "#888", lineHeight: 1.6 }}>
