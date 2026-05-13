@@ -2201,7 +2201,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
           <div style={{ borderBottom: "1px solid #1a1a1a", background: "#000" }}>
             <iframe
               key={beat.videoId}
-              src={"https://www.youtube.com/embed/" + beat.videoId + "?autoplay=0&rel=0&modestbranding=1&disablekb=1&iv_load_policy=3&fs=0"}
+              src={"https://www.youtube.com/embed/" + beat.videoId + "?autoplay=0&rel=0&modestbranding=1&disablekb=1&iv_load_policy=3&fs=0&controls=1&playlist=" + beat.videoId}
               width="100%"
               height="160"
               style={{ display: "block", border: "none" }}
@@ -2332,30 +2332,11 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
             position: "absolute", top: 0, left: 0,
             width: "100%", height: "100%",
             objectFit: "cover",
-            opacity: 0.75,
             zIndex: 10,
             pointerEvents: "none",
             userSelect: "none",
           }}
         />
-        {/* Touch blocker — bottom-left: suggested video thumbnail */}
-        <div style={{
-          position: "absolute", bottom: 0, left: 0,
-          width: "45%", height: 90,
-          zIndex: 20,
-        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
-        {/* Touch blocker — bottom-right: channel icon / more videos */}
-        <div style={{
-          position: "absolute", bottom: 0, right: 0,
-          width: "45%", height: 90,
-          zIndex: 20,
-        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
-        {/* Touch blocker — top bar: title, settings, CC icons */}
-        <div style={{
-          position: "absolute", top: 0, left: 0, right: 0,
-          height: 50,
-          zIndex: 20,
-        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
       </div>
       <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
         <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4, lineHeight: 1.4 }}>
