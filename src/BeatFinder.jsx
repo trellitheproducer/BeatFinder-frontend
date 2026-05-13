@@ -8364,6 +8364,16 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
   var [verifyingLease, setVerifyingLease] = React.useState(!isFree);
   var [verifiedLease,  setVerifiedLease]  = React.useState(null); // { id, ... } once confirmed
   var [contractDownloaded, setContractDownloaded] = React.useState(false);
+  // Ref on the inner sheet panel so we can guarantee it opens at the top —
+  // prevents the bug where the modal appears scrolled mid-way (e.g. when
+  // opened from a profile/trending tab that the user had already scrolled
+  // down on the underlying page).
+  var sheetPanelRef = React.useRef(null);
+  React.useEffect(function() {
+    if (sheetPanelRef.current) {
+      try { sheetPanelRef.current.scrollTop = 0; } catch(e) {}
+    }
+  }, []);
 
   // For LICENSED beats, check the server to see if the user already owns this lease.
   // This is the ONLY way "step = done" is reached for paid beats.
@@ -8498,7 +8508,7 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
         background: "rgba(0,0,0,0.75)",
         display: "flex", alignItems: "flex-end", justifyContent: "center",
       }}>
-        <div onClick={function(e) { e.stopPropagation(); }} style={{
+        <div ref={sheetPanelRef} onClick={function(e) { e.stopPropagation(); }} style={{
           width: "100%", maxWidth: 480,
           background: "#0d0d0d", borderTop: "1px solid #222",
           borderRadius: "20px 20px 0 0", padding: 18,
@@ -8535,7 +8545,6 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
               <div style={{
                 background: "#0a0a0a", border: "1px solid #1f1f1f", borderRadius: 14,
                 padding: 14, marginBottom: 12,
-                maxHeight: 260, overflowY: "auto", WebkitOverflowScrolling: "touch",
               }}>
                 <div style={{ color: accent, fontWeight: 800, fontSize: 11, letterSpacing: 1, marginBottom: 10, textAlign: "center" }}>
                   {isFree ? "FREE BEAT LICENCE AGREEMENT" : "BEAT LEASE AGREEMENT"}
