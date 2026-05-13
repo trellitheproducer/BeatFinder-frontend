@@ -6008,11 +6008,19 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
     if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
   }, [beat.id]));
   function onAudioPlay() {
-    // Seek to preview_start immediately on play
     var ps = beat.preview_start || 0;
-    if (ps > 0 && audioRef.current && !seekedRef.current) {
-      try { audioRef.current.currentTime = ps; } catch(e) {}
-      seekedRef.current = true;
+    if (ps > 0 && !seekedRef.current) {
+      if (audioRef.current) { try { audioRef.current.currentTime = ps; } catch(e) {} }
+      setTimeout(function() {
+        if (audioRef.current && !seekedRef.current) {
+          try { audioRef.current.currentTime = ps; seekedRef.current = true; } catch(e) {}
+        }
+      }, 0);
+      setTimeout(function() {
+        if (audioRef.current && !seekedRef.current) {
+          try { audioRef.current.currentTime = ps; seekedRef.current = true; } catch(e) {}
+        }
+      }, 100);
     }
     clearInterval(timerRef.current);
     var start = Date.now() - (previewTime * 1000);
@@ -6661,9 +6669,20 @@ function CompactBeatCard({ beat }) {
   }, [beat.id]));
   function onAudioPlay() {
     var ps = beat.preview_start || 0;
-    if (ps > 0 && audioRef.current && !seekedRef.current) {
-      try { audioRef.current.currentTime = ps; } catch(e) {}
-      seekedRef.current = true;
+    if (ps > 0 && !seekedRef.current) {
+      // Try immediately
+      if (audioRef.current) { try { audioRef.current.currentTime = ps; } catch(e) {} }
+      // Also try after a tick for iOS
+      setTimeout(function() {
+        if (audioRef.current && !seekedRef.current) {
+          try { audioRef.current.currentTime = ps; seekedRef.current = true; } catch(e) {}
+        }
+      }, 0);
+      setTimeout(function() {
+        if (audioRef.current && !seekedRef.current) {
+          try { audioRef.current.currentTime = ps; seekedRef.current = true; } catch(e) {}
+        }
+      }, 100);
     }
     clearInterval(timerRef.current);
     var start = Date.now();
