@@ -5711,20 +5711,26 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
             var premiumPrice = Number(beat.premium_lease_price) || 0;
             var premiumSold  = !!beat.premium_sold;
             var premiumAvailable = (premiumPrice >= 100 && premiumPrice <= 500 && !premiumSold);
+            // BUSINESS RULE: once Premium is sold, the beat becomes exclusively
+            // owned by the Premium buyer. Basic Lease purchases are also locked.
+            // Any prior Basic leases on this beat are already voided server-side.
+            var basicLocked = premiumSold;
             return (
               <>
-                {/* Basic Lease button — always available unless beat is fully sold-out */}
-                <button onClick={function() { onBuy("basic"); }} disabled={buyLoading} style={{
+                {/* Basic Lease — disabled once Premium has been sold (beat retired) */}
+                <button onClick={function() { if (!basicLocked && !buyLoading) onBuy("basic"); }}
+                  disabled={buyLoading || basicLocked} style={{
                   width: "100%", borderRadius: 14, padding: "13px",
-                  background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
-                  border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"),
-                  color: buyLoading ? "#555" : "white",
-                  fontWeight: 800, fontSize: 14, cursor: buyLoading ? "not-allowed" : "pointer",
+                  background: (buyLoading || basicLocked) ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
+                  border: "2px solid " + ((buyLoading || basicLocked) ? "#333" : "#F59E0B"),
+                  color: (buyLoading || basicLocked) ? "#555" : "white",
+                  fontWeight: 800, fontSize: 14, cursor: (buyLoading || basicLocked) ? "not-allowed" : "pointer",
                   letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-                  boxShadow: buyLoading ? "none" : "0 0 18px rgba(245,158,11,0.25)",
+                  boxShadow: (buyLoading || basicLocked) ? "none" : "0 0 18px rgba(245,158,11,0.25)",
                   marginBottom: premiumPrice > 0 ? 8 : 0,
+                  opacity: basicLocked ? 0.55 : 1,
                 }}>
-                  {buyLoading ? "Loading..." : "Basic Lease — £" + basicPrice}
+                  {buyLoading ? "Loading..." : (basicLocked ? "Basic — UNAVAILABLE (Beat Sold Exclusive)" : "Basic Lease — £" + basicPrice)}
                 </button>
 
                 {/* Premium Lease button — only renders when producer set a premium price */}
@@ -5775,6 +5781,7 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
   const [err,         setErr]         = useState("");
   const [previewing,  setPreviewing]  = useState(false);
   const [previewTime, setPreviewTime] = useState(0);
+  const [sheetOpen,   setSheetOpen]   = useState(false); // opens contract preview before Stripe
   const audioRef = React.useRef(null);
   const timerRef = React.useRef(null);
   const seekedRef = React.useRef(false);
@@ -5815,29 +5822,21 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
   }
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
 
-  async function handleBuy(tier) {
+  // Contract-first flow: tapping Buy opens the preview sheet (CompactBeatActionSheet).
+  // Stripe is only invoked when the user picks a tier inside the sheet.
+  function handleBuy(tier) {
     if (!user) { setErr("Please log in to purchase a lease"); return; }
     if (!user.isArtistPro && !user.isPro) { requireUpgrade("buy"); return; }
-    var safeTier = (tier === "premium") ? "premium" : "basic";
-    setLoading(true); setErr("");
-    try {
-      const result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tier: safeTier }),
-      });
-      const resetOnReturn = () => {
-        if (document.visibilityState === "visible") {
-          document.removeEventListener("visibilitychange", resetOnReturn);
-          setLoading(false);
-        }
-      };
-      document.addEventListener("visibilitychange", resetOnReturn);
-      try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, path: window.location.pathname + window.location.search, ts: Date.now() })); } catch(e) {} window.location.href = result.checkout_url;
-    } catch (e) { setErr(e.message); setLoading(false); }
+    if (beat.premium_sold) {
+      setErr("This beat has been bought exclusively and is no longer available.");
+      return;
+    }
+    setErr("");
+    setSheetOpen(true);
   }
 
   return (
+    <>
     <NewBeatCardShell
       beat={beat}
       previewing={previewing}
@@ -5856,6 +5855,10 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
           onTimeUpdate={onTimeUpdate} onEnded={stopPreview} />
       ) : null}
     />
+    {sheetOpen && (
+      <CompactBeatActionSheet beat={beat} user={user} onClose={function(){ setSheetOpen(false); }} />
+    )}
+    </>
   );
 }
 
@@ -6067,6 +6070,7 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
     const [pTime,      setPTime]      = React.useState(0);
     const [buyLoading, setBuyLoading] = React.useState(false);
     const [buyErr,     setBuyErr]     = React.useState("");
+    const [sheetOpen,  setSheetOpen]  = React.useState(false); // contract preview before Stripe
     const aRef = React.useRef(null);
     const tRef = React.useRef(null);
     const seekedRef = React.useRef(false);
@@ -6105,26 +6109,16 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
       if (el.currentTime >= st + 45) { el.pause(); stopPrev(); }
       if (el.currentTime < st) el.currentTime = st;
     }
-    async function handleBuy(tier) {
+    // Contract-first flow: tapping Buy opens the preview sheet (CompactBeatActionSheet).
+    function handleBuy(tier) {
       if (!user) { setBuyErr("Log in to purchase"); return; }
       if (!user.isArtistPro && !user.isPro) { requireUpgrade("buy"); return; }
-      var safeTier = (tier === "premium") ? "premium" : "basic";
-      setBuyLoading(true); setBuyErr("");
-      try {
-        var result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tier: safeTier }),
-        });
-        var resetOnReturn = function() {
-          if (document.visibilityState === "visible") {
-            document.removeEventListener("visibilitychange", resetOnReturn);
-            setBuyLoading(false);
-          }
-        };
-        document.addEventListener("visibilitychange", resetOnReturn);
-        try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, path: window.location.pathname + window.location.search, ts: Date.now() })); } catch(e) {} window.location.href = result.checkout_url;
-      } catch(e) { setBuyErr(e.message); setBuyLoading(false); }
+      if (beat.premium_sold) {
+        setBuyErr("This beat has been bought exclusively and is no longer available.");
+        return;
+      }
+      setBuyErr("");
+      setSheetOpen(true);
     }
     React.useEffect(function() { return function() { clearInterval(tRef.current); }; }, []);
 
@@ -6148,6 +6142,9 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
               onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
           ) : null}
         />
+        {sheetOpen && (
+          <CompactBeatActionSheet beat={beat} user={user} onClose={function(){ setSheetOpen(false); }} />
+        )}
       </div>
     );
   };
@@ -7597,6 +7594,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   var [buyLoading,  setBuyLoading]  = React.useState(false);
   var [buyErr,      setBuyErr]      = React.useState("");
   var [deleted,     setDeleted]     = React.useState(false);
+  var [sheetOpen,   setSheetOpen]   = React.useState(false); // opens contract preview before Stripe
   var playCount = usePlayCount(beat.id, beat.playCount);
   var audioRef  = React.useRef(null);
   var timerRef  = React.useRef(null);
@@ -7657,26 +7655,17 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
     // Hard enforce: stop at 45s from start
     if (el.currentTime >= startT + 45) { el.pause(); stopPreview(); }
   }
-  async function handleBuy(tier) {
+  // Contract-first flow: tapping Buy opens the preview sheet (CompactBeatActionSheet).
+  // Stripe is only invoked when the user picks a tier inside the sheet.
+  function handleBuy(tier) {
     if (!currentUser) { setBuyErr("Please log in to purchase"); return; }
     if (!currentUser.isArtistPro && !currentUser.isPro) { requireUpgrade("buy"); return; }
-    var safeTier = (tier === "premium") ? "premium" : "basic";
-    setBuyLoading(true); setBuyErr("");
-    try {
-      var result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tier: safeTier }),
-      });
-      var resetOnReturn = function() {
-        if (document.visibilityState === "visible") {
-          document.removeEventListener("visibilitychange", resetOnReturn);
-          setBuyLoading(false);
-        }
-      };
-      document.addEventListener("visibilitychange", resetOnReturn);
-      try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, path: window.location.pathname + window.location.search, ts: Date.now() })); } catch(e) {} window.location.href = result.checkout_url;
-    } catch(e) { setBuyErr(e.message); setBuyLoading(false); }
+    if (beat.premium_sold) {
+      setBuyErr("This beat has been bought exclusively and is no longer available.");
+      return;
+    }
+    setBuyErr("");
+    setSheetOpen(true);
   }
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
 
@@ -7694,6 +7683,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   var prodPlan = beat.producer_plan || null; // passed through if available
 
   return (
+    <>
     <div className="bf-card" style={{
       background: "linear-gradient(160deg,#151515 0%,#0f0f0f 100%)",
       borderRadius: 20, marginBottom: 16, overflow: "hidden",
@@ -7900,19 +7890,24 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
               var premiumPrice = Number(beat.premium_lease_price) || 0;
               var premiumSold  = !!beat.premium_sold;
               var premiumAvailable = (premiumPrice >= 100 && premiumPrice <= 500 && !premiumSold);
+              // BUSINESS RULE: Premium sale retires the beat from sale entirely.
+              // Both Basic and Premium buttons become disabled.
+              var basicLocked = premiumSold;
               return (
                 <>
-                  <button onClick={function() { handleBuy("basic"); }} disabled={buyLoading} style={{
+                  <button onClick={function() { if (!basicLocked && !buyLoading) handleBuy("basic"); }}
+                    disabled={buyLoading || basicLocked} style={{
                     width: "100%", borderRadius: 14, padding: "13px",
-                    background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
-                    border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"),
-                    color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 14,
-                    cursor: buyLoading ? "not-allowed" : "pointer", letterSpacing: 0.5,
+                    background: (buyLoading || basicLocked) ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
+                    border: "2px solid " + ((buyLoading || basicLocked) ? "#333" : "#F59E0B"),
+                    color: (buyLoading || basicLocked) ? "#555" : "white", fontWeight: 800, fontSize: 14,
+                    cursor: (buyLoading || basicLocked) ? "not-allowed" : "pointer", letterSpacing: 0.5,
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-                    boxShadow: buyLoading ? "none" : "0 0 18px rgba(245,158,11,0.25)",
+                    boxShadow: (buyLoading || basicLocked) ? "none" : "0 0 18px rgba(245,158,11,0.25)",
                     marginBottom: premiumPrice > 0 ? 8 : 0,
+                    opacity: basicLocked ? 0.55 : 1,
                   }}>
-                    {buyLoading ? "Loading..." : "Basic Lease — £" + basicPrice}
+                    {buyLoading ? "Loading..." : (basicLocked ? "Basic — UNAVAILABLE (Beat Sold Exclusive)" : "Basic Lease — £" + basicPrice)}
                   </button>
                   {premiumPrice > 0 && (
                     <button
@@ -7967,6 +7962,10 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
         </div>
       )}
     </div>
+    {sheetOpen && (
+      <CompactBeatActionSheet beat={beat} user={currentUser} onClose={function(){ setSheetOpen(false); }} />
+    )}
+    </>
   );
 }
 
@@ -8402,6 +8401,10 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
       return;
     }
     if (!user.isArtistPro && !user.isPro) { requireUpgrade("buy"); return; }
+    if (beat.premium_sold) {
+      alert("This beat has been bought exclusively and is no longer available.");
+      return;
+    }
     var safeTier = (tier === "premium") ? "premium" : "basic";
     setBuyLoading(true);
     try {
@@ -8508,27 +8511,85 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
                       <div style={{ marginBottom: 6 }}><span style={{ color: accent, fontWeight: 700 }}>5. OWNERSHIP</span> — Producer keeps copyright. Artist owns vocals/lyrics only.</div>
                       <div style={{ marginBottom: 6 }}><span style={{ color: accent, fontWeight: 700 }}>6. LAW</span> — Governed by England & Wales.</div>
                     </>
-                  ) : (
-                    <>
-                      <div style={{ marginBottom: 8 }}>
-                        <span style={{ color: "#F59E0B", fontWeight: 700 }}>BASIC LEASE (£{Number(beat.basic_lease_price) || 50})</span> — non-exclusive · 100k stream cap · resaleable record · <strong>75%</strong> composition royalties to producer.
-                      </div>
-                      {(Number(beat.premium_lease_price) > 0) && (
-                        <div style={{ marginBottom: 8 }}>
-                          <span style={{ color: "#A855F7", fontWeight: 700 }}>PREMIUM LEASE (£{Number(beat.premium_lease_price)})</span> — EXCLUSIVE · unlimited streams · beat retired from sale · no resale · <strong>50%</strong> composition royalties to producer.
+                  ) : (function() {
+                    var basicPrice    = Number(beat.basic_lease_price)   || 50;
+                    var premiumPrice  = Number(beat.premium_lease_price) || 0;
+                    var hasPremium    = premiumPrice > 0;
+                    var premiumSold   = !!beat.premium_sold;
+                    return (
+                      <>
+                        {/* ── BASIC LEASE TIER CARD ─────────────────────────── */}
+                        <div style={{
+                          background: "rgba(245,158,11,0.06)",
+                          border: "1px solid rgba(245,158,11,0.30)",
+                          borderRadius: 10, padding: 10, marginBottom: 10,
+                          opacity: premiumSold ? 0.5 : 1,
+                        }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                            <span style={{ color: "#F59E0B", fontWeight: 800, fontSize: 11, letterSpacing: 0.5 }}>
+                              BASIC LEASE{premiumSold ? " — LOCKED" : ""}
+                            </span>
+                            <span style={{ color: "#F59E0B", fontWeight: 800, fontSize: 13 }}>£{basicPrice}</span>
+                          </div>
+                          <div style={{ color: "#aaa", fontSize: 10, lineHeight: 1.55 }}>
+                            • Non-exclusive — beat stays available to other buyers<br/>
+                            • 100,000 stream cap across all platforms<br/>
+                            • Resaleable as part of your finished record<br/>
+                            • <strong>75%</strong> composition royalties to producer<br/>
+                            • Must credit <em>(Prod. by {producer})</em> in all releases
+                          </div>
                         </div>
-                      )}
-                      <div style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 8, padding: 8, marginBottom: 8 }}>
-                        <span style={{ color: "#F59E0B", fontWeight: 800, fontSize: 10, letterSpacing: 0.5 }}>⚠ IMPORTANT — Basic Lease buyers:</span>
-                        <div style={{ color: "#aaa", fontSize: 10, marginTop: 4, lineHeight: 1.5 }}>
-                          Your Basic Lease is <strong>automatically revoked</strong> if another buyer purchases the Premium (Exclusive) Lease for this beat. On revocation you must cease distribution of the New Work. <strong>No refund</strong> is issued. By buying Basic you accept this risk (Clause 6 of the Basic contract).
-                        </div>
-                      </div>
-                      <div style={{ marginBottom: 6 }}>Must credit: <em>(Prod. by {producer})</em> in all releases.</div>
-                      <div style={{ marginBottom: 6 }}>Producer retains copyright on the Beat. Buyer owns vocals & finished record.</div>
-                      <div style={{ marginBottom: 6 }}>Governed by England and Wales law.</div>
-                    </>
-                  )}
+
+                        {/* ── PREMIUM LEASE TIER CARD ───────────────────────── */}
+                        {hasPremium && (
+                          <div style={{
+                            background: "rgba(168,85,247,0.07)",
+                            border: "1px solid rgba(168,85,247,0.35)",
+                            borderRadius: 10, padding: 10, marginBottom: 10,
+                            opacity: premiumSold ? 0.5 : 1,
+                          }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                              <span style={{ color: "#A855F7", fontWeight: 800, fontSize: 11, letterSpacing: 0.5 }}>
+                                PREMIUM LEASE (EXCLUSIVE){premiumSold ? " — SOLD" : ""}
+                              </span>
+                              <span style={{ color: "#A855F7", fontWeight: 800, fontSize: 13 }}>£{premiumPrice}</span>
+                            </div>
+                            <div style={{ color: "#aaa", fontSize: 10, lineHeight: 1.55 }}>
+                              • <strong>EXCLUSIVE</strong> — beat retired from sale permanently<br/>
+                              • Unlimited streams — no cap, no expiry<br/>
+                              • All prior Basic leases on this beat are voided<br/>
+                              • <strong>50%</strong> composition royalties to producer<br/>
+                              • No resale or sub-licensing of the Beat itself<br/>
+                              • Must credit <em>(Prod. by {producer})</em> in all releases
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── BASIC BUYERS RISK NOTICE (only if Premium exists) ── */}
+                        {hasPremium && !premiumSold && (
+                          <div style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 8, padding: 8, marginBottom: 8 }}>
+                            <span style={{ color: "#F59E0B", fontWeight: 800, fontSize: 10, letterSpacing: 0.5 }}>⚠ IMPORTANT — Basic Lease buyers:</span>
+                            <div style={{ color: "#aaa", fontSize: 10, marginTop: 4, lineHeight: 1.5 }}>
+                              Your Basic Lease is <strong>automatically revoked</strong> if another buyer purchases the Premium (Exclusive) Lease for this beat. On revocation you must cease distribution of the New Work. <strong>No refund</strong> is issued. By buying Basic you accept this risk (Clause 6 of the Basic contract).
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── PREMIUM SOLD NOTICE (when applicable) ─────────── */}
+                        {premiumSold && (
+                          <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.30)", borderRadius: 8, padding: 8, marginBottom: 8 }}>
+                            <span style={{ color: "#EF4444", fontWeight: 800, fontSize: 10, letterSpacing: 0.5 }}>BEAT NO LONGER AVAILABLE</span>
+                            <div style={{ color: "#aaa", fontSize: 10, marginTop: 4, lineHeight: 1.5 }}>
+                              This beat has been purchased exclusively. No further sales (Basic or Premium) can be made.
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{ marginBottom: 6, fontSize: 10, color: "#777" }}>Producer retains copyright on the Beat. Buyer owns vocals &amp; finished record.</div>
+                        <div style={{ marginBottom: 6, fontSize: 10, color: "#777" }}>Governed by England and Wales law.</div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -8558,23 +8619,33 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
                     var premiumSold  = !!beat.premium_sold;
                     var premiumAvailable = (premiumPrice >= 100 && premiumPrice <= 500 && !premiumSold);
                     var disabled = buyLoading || verifyingLease;
+                    // BUSINESS RULE: Premium sale retires beat from sale. Basic
+                    // also locked (matches backend enforcement in producer.py line 387).
+                    var basicLocked = premiumSold;
+                    var basicDisabled = disabled || basicLocked;
                     return (
                       <>
-                        {/* Basic Lease card */}
-                        <button onClick={function() { handleBuy("basic"); }} disabled={disabled} style={{
+                        {/* Basic Lease card — locked once Premium has been sold */}
+                        <button onClick={function() { if (!basicLocked) handleBuy("basic"); }}
+                          disabled={basicDisabled} style={{
                           width: "100%", borderRadius: 12, padding: "12px 14px",
-                          background: disabled ? "transparent" : "rgba(245,158,11,0.08)",
-                          border: "2px solid " + (disabled ? "#333" : "#F59E0B"),
-                          color: disabled ? "#555" : "white",
-                          cursor: disabled ? "not-allowed" : "pointer",
+                          background: basicDisabled ? "transparent" : "rgba(245,158,11,0.08)",
+                          border: "2px solid " + (basicDisabled ? "#333" : "#F59E0B"),
+                          color: basicDisabled ? "#555" : "white",
+                          cursor: basicDisabled ? "not-allowed" : "pointer",
                           marginBottom: 8, textAlign: "left",
+                          opacity: basicLocked ? 0.55 : 1,
                         }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                            <div style={{ color: disabled ? "#555" : "#F59E0B", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>BASIC LEASE</div>
-                            <div style={{ color: disabled ? "#555" : "#F59E0B", fontWeight: 800, fontSize: 16 }}>£{basicPrice}</div>
+                            <div style={{ color: basicDisabled ? "#555" : "#F59E0B", fontWeight: 800, fontSize: 13, letterSpacing: 0.5 }}>
+                              BASIC LEASE{basicLocked ? " — UNAVAILABLE" : ""}
+                            </div>
+                            <div style={{ color: basicDisabled ? "#555" : "#F59E0B", fontWeight: 800, fontSize: 16 }}>£{basicPrice}</div>
                           </div>
-                          <div style={{ color: disabled ? "#333" : "#888", fontSize: 10, lineHeight: 1.4 }}>
-                            Non-exclusive · 100k stream cap · Resaleable record
+                          <div style={{ color: basicDisabled ? "#333" : "#888", fontSize: 10, lineHeight: 1.4 }}>
+                            {basicLocked
+                              ? "This beat has been bought exclusively and is no longer available."
+                              : "Non-exclusive · 100k stream cap · Resaleable record"}
                           </div>
                         </button>
 
@@ -8883,21 +8954,83 @@ function CompactBeatCard({ beat, currentUser }) {
             </svg>
             FREE
           </button>
-        ) : (
-          <button onClick={function() {
-            if (!currentUser) { alert("Sign up and purchase a plan to buy beat leases!"); return; }
-            setSheetOpen(true);
-          }} disabled={buyLoading} style={{
-            background: "transparent", border: "1.5px solid " + (currentUser ? "#F59E0B" : "#555"),
-            borderRadius: 20, padding: "5px 10px",
-            color: currentUser ? "#F59E0B" : "#555", fontSize: 9, fontWeight: 800,
-            cursor: buyLoading ? "not-allowed" : "pointer", flexShrink: 0,
-            display: "flex", alignItems: "center", gap: 4,
-          }}>
-            {!currentUser && <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>}
-            {buyLoading ? "..." : "BUY " + beat.price}
-          </button>
-        )}
+        ) : (function() {
+          // Render tier buttons on the compact card.
+          // BUSINESS RULE: once Premium is sold, beat is retired. Both buttons disabled.
+          var basicP   = Number(beat.basic_lease_price)   || 0;
+          var premiumP = Number(beat.premium_lease_price) || 0;
+          var premiumSold = !!beat.premium_sold;
+          var showPremium = premiumP > 0 && !premiumSold;
+          // Fully-sold-out state: Premium has been sold → no more sales of anything
+          if (premiumSold) {
+            return (
+              <button disabled style={{
+                background: "transparent", border: "1.5px solid #555",
+                borderRadius: 20, padding: "5px 10px",
+                color: "#555", fontSize: 9, fontWeight: 800,
+                cursor: "not-allowed", flexShrink: 0,
+                display: "flex", alignItems: "center", gap: 4,
+                opacity: 0.7,
+              }}>
+                SOLD OUT
+              </button>
+            );
+          }
+          // Fallback to legacy single price label if neither tier is set
+          if (basicP === 0 && premiumP === 0) {
+            return (
+              <button onClick={function() {
+                if (!currentUser) { alert("Sign up and purchase a plan to buy beat leases!"); return; }
+                setSheetOpen(true);
+              }} disabled={buyLoading} style={{
+                background: "transparent", border: "1.5px solid " + (currentUser ? "#F59E0B" : "#555"),
+                borderRadius: 20, padding: "5px 10px",
+                color: currentUser ? "#F59E0B" : "#555", fontSize: 9, fontWeight: 800,
+                cursor: buyLoading ? "not-allowed" : "pointer", flexShrink: 0,
+                display: "flex", alignItems: "center", gap: 4,
+              }}>
+                {!currentUser && <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>}
+                {buyLoading ? "..." : "BUY " + (beat.price || "£50")}
+              </button>
+            );
+          }
+          // Two-tier (Premium still available): stacked Basic + Premium buttons
+          var basicLabel = "BUY £" + (basicP || 50);
+          var premiumLabel = "PREMIUM £" + premiumP;
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
+              <button onClick={function() {
+                if (!currentUser) { alert("Sign up and purchase a plan to buy beat leases!"); return; }
+                setSheetOpen(true);
+              }} disabled={buyLoading} style={{
+                background: "transparent", border: "1.5px solid " + (currentUser ? "#F59E0B" : "#555"),
+                borderRadius: 20, padding: "5px 10px",
+                color: currentUser ? "#F59E0B" : "#555", fontSize: 9, fontWeight: 800,
+                cursor: buyLoading ? "not-allowed" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                minWidth: 78,
+              }}>
+                {!currentUser && <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>}
+                {buyLoading ? "..." : basicLabel}
+              </button>
+              {showPremium && (
+                <button onClick={function() {
+                  if (!currentUser) { alert("Sign up and purchase a plan to buy beat leases!"); return; }
+                  setSheetOpen(true);
+                }} disabled={buyLoading} style={{
+                  background: "transparent", border: "1.5px solid " + (currentUser ? "#A855F7" : "#555"),
+                  borderRadius: 20, padding: "5px 10px",
+                  color: currentUser ? "#A855F7" : "#555", fontSize: 9, fontWeight: 800,
+                  cursor: buyLoading ? "not-allowed" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                  minWidth: 78,
+                }}>
+                  {buyLoading ? "..." : premiumLabel}
+                </button>
+              )}
+            </div>
+          );
+        })()}
       </div>
       {sheetOpen && (
         <CompactBeatActionSheet beat={beat} user={currentUser} onClose={function() { setSheetOpen(false); }} />
