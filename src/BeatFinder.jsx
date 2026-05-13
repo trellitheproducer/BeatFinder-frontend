@@ -8538,7 +8538,14 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
     }
   }
 
-  return (
+  // ── Render via React portal to document.body ─────────────────────────────
+  // The card invoking this sheet may live inside parent containers that have
+  // their own stacking context (horizontal-scroll carousels on Trending,
+  // Members area card on Members tab). When that happens, the sheet's
+  // zIndex:99998 only applies WITHIN the local stacking context — from
+  // outside, the entire context sits below the bottom nav at z-index 1000.
+  // Portal escapes all parent stacking contexts by mounting under <body>.
+  var sheetJsx = (
     <>
       {showContract && (
         <ContractViewer
@@ -8931,6 +8938,11 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
       </div>
     </>
   );
+
+  if (typeof document === "undefined" || !document.body || !ReactDOM.createPortal) {
+    return sheetJsx;
+  }
+  return ReactDOM.createPortal(sheetJsx, document.body);
 }
 
 // ── Compact beat card for two-column profile layout ───────────────────────────
