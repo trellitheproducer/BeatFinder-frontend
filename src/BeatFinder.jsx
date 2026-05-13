@@ -1046,6 +1046,13 @@ function useBeatUpdatedListener(callback) {
   }, [callback]);
 }
 
+// Dispatched anywhere in the tree when a Free user tries a Pro action.
+// The top-level BeatFinder component listens and shows the upgrade modal.
+// reason ∈ "save" | "buy" | "download" | "rhymefinder" | "studio" | "producer"
+function requireUpgrade(reason) {
+  window.dispatchEvent(new CustomEvent("bf:requireUpgrade", { detail: { reason: reason } }));
+}
+
 // -- In-memory cache (10 minutes TTL) -----------------------------------------
 const cache = {};
 const CACHE_TTL = 10 * 60 * 1000;
@@ -2262,7 +2269,12 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
           {text.length} chars • {text.split(" ").filter(function(w){return w.length > 0;}).length} words
         </div>
         {user ? (
-          <button onClick={function(e){ e.stopPropagation(); setAiOpen(aiOpen === "rhymes" ? null : "rhymes"); }} style={{
+          <button onClick={function(e){
+            e.stopPropagation();
+            // RhymeFinder is a paid feature — block free users
+            if (!user.isArtistPro && !user.isPro) { requireUpgrade("rhymefinder"); return; }
+            setAiOpen(aiOpen === "rhymes" ? null : "rhymes");
+          }} style={{
             background: aiOpen === "rhymes" ? "rgba(6,182,212,0.2)" : "rgba(6,182,212,0.15)",
             border: "1px solid " + (aiOpen === "rhymes" ? "#06B6D4" : "rgba(6,182,212,0.4)"),
             borderRadius: 20, color: "#06B6D4", fontWeight: 800,
@@ -2560,6 +2572,17 @@ function PlanPicker({ onSelectPlan, compact }) {
 
   var plans = [
     {
+      id: "free",
+      label: "Free",
+      color: "#6B7280",
+      monthlyPrice: 0,
+      yearlyPrice:  0,
+      monthlyStr: "£0",
+      yearlyStr:  "£0",
+      saving:     "",
+      perks: ["Browse all beats", "Preview 45 seconds", "Follow producers", "Write & save lyrics"],
+    },
+    {
       id: "artist",
       label: "Artist Pro",
       color: "#F59E0B",
@@ -2613,17 +2636,18 @@ function PlanPicker({ onSelectPlan, compact }) {
       </div>
 
       {/* Plan cards */}
-      <div style={{ display: "flex", gap: 10 }}>
+      <div style={{ display: "flex", gap: compact ? 6 : 8 }}>
         {plans.map(function(p) {
-          var priceStr  = billing === "yearly" ? p.yearlyStr  : p.monthlyStr;
-          var priceId   = PLAN_PRICES[p.id][billing];
+          var isFree    = (p.id === "free");
+          var priceStr  = isFree ? p.monthlyStr : (billing === "yearly" ? p.yearlyStr : p.monthlyStr);
+          var priceId   = isFree ? null : (PLAN_PRICES[p.id] ? PLAN_PRICES[p.id][billing] : null);
           return (
             <div key={p.id} style={{
               flex: 1, background: "#111", border: "1.5px solid " + p.color,
-              borderRadius: 14, padding: compact ? "12px 10px" : "14px 12px", textAlign: "left",
+              borderRadius: 14, padding: compact ? "10px 8px" : "14px 12px", textAlign: "left",
               position: "relative", overflow: "hidden",
             }}>
-              {billing === "yearly" && (
+              {!isFree && billing === "yearly" && (
                 <div style={{
                   position: "absolute", top: 0, right: 0,
                   background: "linear-gradient(135deg,#22C55E,#16A34A)",
@@ -2631,9 +2655,9 @@ function PlanPicker({ onSelectPlan, compact }) {
                   padding: "3px 8px", borderBottomLeftRadius: 8,
                 }}>{p.saving}</div>
               )}
-              <div style={{ color: "white", fontWeight: 800, fontSize: compact ? 12 : 13, marginBottom: 2 }}>{p.label}</div>
-              <div style={{ color: p.color, fontWeight: 800, fontSize: compact ? 14 : 16, marginBottom: billing === "yearly" ? 2 : 10 }}>{priceStr}</div>
-              {billing === "yearly" && (
+              <div style={{ color: "white", fontWeight: 800, fontSize: compact ? 11 : 13, marginBottom: 2 }}>{p.label}</div>
+              <div style={{ color: p.color, fontWeight: 800, fontSize: compact ? 13 : 16, marginBottom: (!isFree && billing === "yearly") ? 2 : 10 }}>{priceStr}</div>
+              {!isFree && billing === "yearly" && (
                 <div style={{ color: "#555", fontSize: 10, marginBottom: 10 }}>≈ £{(p.yearlyPrice / 12).toFixed(2)}/mo</div>
               )}
               {!compact && p.perks.map(function(perk) {
@@ -2648,13 +2672,17 @@ function PlanPicker({ onSelectPlan, compact }) {
                 <button onClick={function() { onSelectPlan(p.id, priceId, billing); }}
                   style={{
                     width: "100%", marginTop: compact ? 8 : 12,
-                    background: "linear-gradient(135deg," + p.color + ",#7C3AED)",
-                    border: "none", borderRadius: 10, color: "white",
-                    fontWeight: 800, fontSize: compact ? 12 : 13,
-                    padding: compact ? "8px" : "11px",
+                    background: isFree
+                      ? "transparent"
+                      : "linear-gradient(135deg," + p.color + ",#7C3AED)",
+                    border: isFree ? ("1.5px solid " + p.color) : "none",
+                    borderRadius: 10,
+                    color: isFree ? p.color : "white",
+                    fontWeight: 800, fontSize: compact ? 11 : 13,
+                    padding: compact ? "7px 4px" : "11px",
                     cursor: "pointer",
                   }}>
-                  Subscribe
+                  {isFree ? "Start Free" : "Subscribe"}
                 </button>
               )}
             </div>
@@ -5435,7 +5463,19 @@ function FreeBeatCTA({ beat, user }) {
   // idle state
   return (
     <div style={{ padding: "0 0 16px" }}>
-      <button onClick={function() { setStep("contract"); }} style={{
+      <button onClick={function() {
+        // Free (signed-in unpaid) users can't download — show upgrade prompt
+        if (user && !user.isArtistPro && !user.isPro) {
+          requireUpgrade("download");
+          return;
+        }
+        // Guests get the upgrade prompt too, but they can sign in from there
+        if (!user) {
+          alert("Sign up for a free or paid plan to download beats!");
+          return;
+        }
+        setStep("contract");
+      }} style={{
         width: "100%", borderRadius: 14, padding: "15px",
         background: "transparent", border: "2px solid #C026D3",
         color: "#C026D3", fontWeight: 800, fontSize: 14, cursor: "pointer",
@@ -5711,6 +5751,7 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
 
   async function handleBuy(tier) {
     if (!user) { setErr("Please log in to purchase a lease"); return; }
+    if (!user.isArtistPro && !user.isPro) { requireUpgrade("buy"); return; }
     var safeTier = (tier === "premium") ? "premium" : "basic";
     setLoading(true); setErr("");
     try {
@@ -6000,6 +6041,7 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
     }
     async function handleBuy(tier) {
       if (!user) { setBuyErr("Log in to purchase"); return; }
+      if (!user.isArtistPro && !user.isPro) { requireUpgrade("buy"); return; }
       var safeTier = (tier === "premium") ? "premium" : "basic";
       setBuyLoading(true); setBuyErr("");
       try {
@@ -7551,6 +7593,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   }
   async function handleBuy(tier) {
     if (!currentUser) { setBuyErr("Please log in to purchase"); return; }
+    if (!currentUser.isArtistPro && !currentUser.isPro) { requireUpgrade("buy"); return; }
     var safeTier = (tier === "premium") ? "premium" : "basic";
     setBuyLoading(true); setBuyErr("");
     try {
@@ -8292,6 +8335,7 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
       alert("Sign up and purchase a plan to buy beat leases!");
       return;
     }
+    if (!user.isArtistPro && !user.isPro) { requireUpgrade("buy"); return; }
     var safeTier = (tier === "premium") ? "premium" : "basic";
     setBuyLoading(true);
     try {
@@ -10929,7 +10973,9 @@ function RootAuthScreen({ onLogin, startMode }) {
             setSelectedPriceId(priceId);
           }} />
           <div style={{ color: "#444", fontSize: 11, marginTop: 8, textAlign: "center" }}>
-            You'll be taken to Stripe to complete payment after creating your account.
+            {selectedPlan === "free"
+              ? "You can browse + preview beats and save lyrics. Upgrade any time from your Profile."
+              : "You'll be taken to Stripe to complete payment after creating your account."}
           </div>
         </div>
       )}
@@ -10948,9 +10994,13 @@ function RootAuthScreen({ onLogin, startMode }) {
             } else {
               try { localStorage.removeItem("bf_saved_email"); } catch {}
             }
-            // After signup, redirect to Stripe checkout for selected plan
+            // After signup, redirect to Stripe checkout (unless Free plan)
             if (mode === "signup") {
               onLogin(u);
+              // Free plan — skip Stripe and finish immediately
+              if (selectedPlan === "free" || !selectedPriceId) {
+                return;
+              }
               try {
                 const r = await apiFetch("/api/stripe/create-checkout", {
                   method: "POST",
@@ -10971,7 +11021,11 @@ function RootAuthScreen({ onLogin, startMode }) {
           }
         }}
         style={{ width: "100%", background: authLoading ? "#555" : "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: "pointer", opacity: authLoading ? 0.6 : 1 }}>
-        {authLoading ? "Please wait..." : mode === "signup" ? "Create Account & Subscribe" : "Log In"}
+        {authLoading
+          ? "Please wait..."
+          : mode === "signup"
+            ? (selectedPlan === "free" ? "Create Free Account" : "Create Account & Subscribe")
+            : "Log In"}
       </button>
       {authErr && <div style={{ color: "#F87171", fontSize: 13, textAlign: "center", marginTop: 12 }}>{authErr}</div>}
       <div style={{ textAlign: "center", marginTop: 20 }}>
@@ -22181,9 +22235,37 @@ export default function BeatFinder() {
   }, [user]);
 
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
-  const [promptReason,   setPromptReason]   = useState("studio"); // "studio" | "profile"
+  const [showGuestWarning, setShowGuestWarning] = useState(false);
+  const [promptReason,   setPromptReason]   = useState("studio"); // "studio" | "profile" | "save" | "buy" | "download" | "rhymefinder" | "producer" | "expired"
+
+  // Listen for global upgrade-required events from anywhere in the tree
+  React.useEffect(function() {
+    function handler(e) {
+      var r = (e.detail && e.detail.reason) || "save";
+      setPromptReason(r);
+      setShowAuthPrompt(true);
+    }
+    window.addEventListener("bf:requireUpgrade", handler);
+    return function() { window.removeEventListener("bf:requireUpgrade", handler); };
+  }, []);
 
   const toggleSave = useCallback(beat => {
+    // GATE: Free (signed-in but unpaid) users cannot save beats — show upgrade prompt.
+    // Guests (not signed in) keep using localStorage for now, with a one-off warning
+    // shown elsewhere. Paid users save to backend.
+    if (user && !user.isArtistPro && !user.isPro) {
+      setPromptReason("save");
+      setShowAuthPrompt(true);
+      return;
+    }
+    // Guest first-save warning — show once, dismissable forever
+    if (!user) {
+      try {
+        if (!localStorage.getItem("bf_guest_warning_shown")) {
+          setShowGuestWarning(true);
+        }
+      } catch (e) {}
+    }
     setSavedMap(prev => {
       const next = { ...prev };
       if (next[beat.videoId]) {
@@ -22201,6 +22283,14 @@ export default function BeatFinder() {
 
 
   const handleSaveLyric = useCallback((lyric, editIndex) => {
+    // Guest first-save warning — show once, dismissable forever
+    if (!user) {
+      try {
+        if (!localStorage.getItem("bf_guest_warning_shown")) {
+          setShowGuestWarning(true);
+        }
+      } catch (e) {}
+    }
     setSavedLyrics(prev => {
       let next;
       if (editIndex !== null && editIndex !== undefined) {
@@ -22254,9 +22344,17 @@ export default function BeatFinder() {
       setShowAuthPrompt(true);
       return;
     }
-    // Expired subscribers cannot access Studio or Exclusive
-    if (user && !user.subscriptionActive && (id === "studio" || id === "exclusive")) {
-      setPromptReason("expired");
+    // Studio is paid-only — free signed-in users get the "Pro Plan Required" prompt.
+    // Expired paid users get a different "Subscription Expired" prompt.
+    if (user && id === "studio" && !user.isArtistPro && !user.isPro) {
+      // Distinguish "never paid" (plan === "free") from "expired paid"
+      setPromptReason(user.plan === "free" ? "studio" : "expired");
+      setShowAuthPrompt(true);
+      return;
+    }
+    // Exclusive (Members Area) requires an active paid subscription
+    if (user && id === "exclusive" && !user.subscriptionActive) {
+      setPromptReason(user.plan === "free" ? "studio" : "expired");
       setShowAuthPrompt(true);
       return;
     }
@@ -22389,6 +22487,51 @@ export default function BeatFinder() {
         </div>
       )}
 
+      {showGuestWarning && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 20001,
+          background: "rgba(0,0,0,0.85)", display: "flex",
+          alignItems: "center", justifyContent: "center",
+          padding: 24, fontFamily: "'DM Sans',sans-serif",
+        }} onClick={() => setShowGuestWarning(false)}>
+          <div style={{
+            background: "#111", border: "1.5px solid #F59E0B",
+            borderRadius: 20, padding: 28, width: "100%", maxWidth: 340,
+            textAlign: "center",
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ marginBottom: 12 }}>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 8 }}>
+              Saves Stored on This Device
+            </div>
+            <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 24 }}>
+              You're using BeatFinder as a guest. Your saves are kept on this device only and can be lost if you clear your browser data or switch devices. Create a free account to access them anywhere.
+            </div>
+            <button onClick={() => {
+              try { localStorage.setItem("bf_guest_warning_shown", "1"); } catch(e) {}
+              setShowGuestWarning(false);
+              setShowAuthWall(true);
+              setWelcomeDone(false);
+            }}
+              style={{ width: "100%", background: "linear-gradient(135deg,#F59E0B,#D97706)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, fontSize: 16, padding: "14px", cursor: "pointer", marginBottom: 12 }}>
+              Create Free Account
+            </button>
+            <button onClick={() => {
+              try { localStorage.setItem("bf_guest_warning_shown", "1"); } catch(e) {}
+              setShowGuestWarning(false);
+            }}
+              style={{ background: "none", border: "none", color: "#555", fontSize: 14, cursor: "pointer" }}>
+              Continue as Guest
+            </button>
+          </div>
+        </div>
+      )}
+
       {showAuthPrompt && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 20000,
@@ -22404,10 +22547,16 @@ export default function BeatFinder() {
             <div style={{ fontSize: 40, marginBottom: 12, color: promptReason === "expired" ? "#F59E0B" : "#C026D3" }}>
               {promptReason === "expired"
                 ? <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                : <AppIcon id={promptReason === "studio" ? "studio" : promptReason === "producer" ? "money" : "profile"} size={36} />}
+                : <AppIcon id={promptReason === "studio" ? "studio" : promptReason === "producer" ? "money" : promptReason === "save" ? "heart" : promptReason === "buy" ? "stripe" : promptReason === "download" ? "upload" : promptReason === "rhymefinder" ? "edit" : "profile"} size={36} />}
             </div>
             <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 8 }}>
-              {promptReason === "expired" ? "Subscription Expired" : promptReason === "studio" || promptReason === "producer" ? "Pro Plan Required" : "Sign In Required"}
+              {promptReason === "expired" ? "Subscription Expired"
+               : promptReason === "studio" || promptReason === "producer" ? "Pro Plan Required"
+               : promptReason === "save" ? "Upgrade to Save Beats"
+               : promptReason === "buy" ? "Upgrade to Buy Leases"
+               : promptReason === "download" ? "Upgrade to Download"
+               : promptReason === "rhymefinder" ? "Upgrade for Rhyme Finder"
+               : "Sign In Required"}
             </div>
             <div style={{ color: "#888", fontSize: 14, lineHeight: 1.7, marginBottom: 24 }}>
               {promptReason === "expired"
@@ -22416,11 +22565,20 @@ export default function BeatFinder() {
                 ? "Purchase a Pro plan to unlock Studio mode and start recording."
                 : promptReason === "producer"
                 ? "Purchase Producer Pro to upload beats, sell leases and get paid instantly."
+                : promptReason === "save"
+                ? "Saving beats requires Artist Pro or Producer Pro. Upgrade to build your library and access them anywhere."
+                : promptReason === "buy"
+                ? "Buying beat leases requires Artist Pro or Producer Pro. Upgrade to license tracks and get the MP3 + contract instantly."
+                : promptReason === "download"
+                ? "Downloading MP3s requires Artist Pro or Producer Pro. Free accounts can preview only."
+                : promptReason === "rhymefinder"
+                ? "Rhyme Finder AI is part of Artist Pro and Producer Pro. Upgrade to unlock the lyric-writing assistant."
                 : "Sign in to access your profile, save beats and more."}
             </div>
-            <button onClick={() => { setShowAuthPrompt(false); if (promptReason === "expired" || promptReason === "studio" || promptReason === "producer") { goTab("exclusive"); } else { setShowAuthWall(true); setWelcomeDone(false); } }}
+            <button onClick={() => { setShowAuthPrompt(false); if (user) { goTab("exclusive"); } else if (promptReason === "expired" || promptReason === "studio" || promptReason === "producer") { goTab("exclusive"); } else { setShowAuthWall(true); setWelcomeDone(false); } }}
               style={{ width: "100%", background: promptReason === "expired" ? "linear-gradient(135deg,#F59E0B,#EF4444)" : "linear-gradient(135deg,#C026D3,#7C3AED)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, fontSize: 16, padding: "14px", cursor: "pointer", marginBottom: 12 }}>
-              {promptReason === "expired" ? "Renew Subscription" : promptReason === "studio" || promptReason === "producer" ? "View Pro Plans" : "Sign In / Create Account"}
+              {promptReason === "expired" ? "Renew Subscription"
+               : (user ? "View Pro Plans" : "Sign In / Create Account")}
             </button>
             <button onClick={() => setShowAuthPrompt(false)}
               style={{ background: "none", border: "none", color: "#555", fontSize: 14, cursor: "pointer" }}>
