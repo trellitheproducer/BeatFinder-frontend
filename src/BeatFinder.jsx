@@ -5600,9 +5600,49 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
         <FreeBeatCTA beat={beat} user={user} />
       ) : (
         <div style={{ padding: "0 16px 16px" }}>
-          <button onClick={function() { onBuy(); }} disabled={buyLoading} style={{ width: "100%", borderRadius: 14, padding: "15px", background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)", border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"), color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 15, cursor: buyLoading ? "not-allowed" : "pointer", letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: buyLoading ? "none" : "0 0 18px rgba(245,158,11,0.25)" }}>
-            {buyLoading ? "Loading..." : "Buy Lease — " + beat.price}
-          </button>
+          {(function() {
+            var basicPrice   = Number(beat.basic_lease_price)   || 50;
+            var premiumPrice = Number(beat.premium_lease_price) || 0;
+            var premiumSold  = !!beat.premium_sold;
+            var premiumAvailable = (premiumPrice >= 100 && premiumPrice <= 500 && !premiumSold);
+            return (
+              <>
+                {/* Basic Lease button — always available unless beat is fully sold-out */}
+                <button onClick={function() { onBuy("basic"); }} disabled={buyLoading} style={{
+                  width: "100%", borderRadius: 14, padding: "13px",
+                  background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
+                  border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"),
+                  color: buyLoading ? "#555" : "white",
+                  fontWeight: 800, fontSize: 14, cursor: buyLoading ? "not-allowed" : "pointer",
+                  letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                  boxShadow: buyLoading ? "none" : "0 0 18px rgba(245,158,11,0.25)",
+                  marginBottom: premiumPrice > 0 ? 8 : 0,
+                }}>
+                  {buyLoading ? "Loading..." : "Basic Lease — £" + basicPrice}
+                </button>
+
+                {/* Premium Lease button — only renders when producer set a premium price */}
+                {premiumPrice > 0 && (
+                  <button
+                    onClick={function() { if (premiumAvailable && !buyLoading) onBuy("premium"); }}
+                    disabled={buyLoading || !premiumAvailable}
+                    style={{
+                      width: "100%", borderRadius: 14, padding: "13px",
+                      background: (buyLoading || !premiumAvailable) ? "transparent" : "linear-gradient(135deg,#A855F7,#7C3AED)",
+                      border: "2px solid " + ((buyLoading || !premiumAvailable) ? "#333" : "#A855F7"),
+                      color: (buyLoading || !premiumAvailable) ? "#555" : "white",
+                      fontWeight: 800, fontSize: 14,
+                      cursor: (buyLoading || !premiumAvailable) ? "not-allowed" : "pointer",
+                      letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                      boxShadow: (buyLoading || !premiumAvailable) ? "none" : "0 0 18px rgba(168,85,247,0.3)",
+                      opacity: premiumSold ? 0.55 : 1,
+                    }}>
+                    {premiumSold ? "Premium — SOLD" : ("Premium Exclusive — £" + premiumPrice)}
+                  </button>
+                )}
+              </>
+            );
+          })()}
           <div style={{ display: "flex", marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
             {[
               { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>, title: "MP3 LEASE", sub: "Instant delivery." },
@@ -5686,7 +5726,7 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
         }
       };
       document.addEventListener("visibilitychange", resetOnReturn);
-      try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, ts: Date.now() })); } catch(e) {} window.location.href = result.checkout_url;
+      try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, path: window.location.pathname + window.location.search, ts: Date.now() })); } catch(e) {} window.location.href = result.checkout_url;
     } catch (e) { setErr(e.message); setLoading(false); }
   }
 
@@ -5958,14 +5998,15 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
       if (el.currentTime >= st + 45) { el.pause(); stopPrev(); }
       if (el.currentTime < st) el.currentTime = st;
     }
-    async function handleBuy() {
+    async function handleBuy(tier) {
       if (!user) { setBuyErr("Log in to purchase"); return; }
+      var safeTier = (tier === "premium") ? "premium" : "basic";
       setBuyLoading(true); setBuyErr("");
       try {
         var result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tier: "basic" }),
+          body: JSON.stringify({ tier: safeTier }),
         });
         var resetOnReturn = function() {
           if (document.visibilityState === "visible") {
@@ -5974,7 +6015,7 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
           }
         };
         document.addEventListener("visibilitychange", resetOnReturn);
-        try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, ts: Date.now() })); } catch(e) {} window.location.href = result.checkout_url;
+        try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, path: window.location.pathname + window.location.search, ts: Date.now() })); } catch(e) {} window.location.href = result.checkout_url;
       } catch(e) { setBuyErr(e.message); setBuyLoading(false); }
     }
     React.useEffect(function() { return function() { clearInterval(tRef.current); }; }, []);
@@ -6803,7 +6844,7 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave, onSignUp
           <PlanPicker onSelectPlan={function(planId, priceId, billing) {
             if (user) {
               apiFetch("/api/stripe/create-checkout", { method: "POST", body: JSON.stringify({ price_id: priceId }) })
-                .then(function(r) { try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, ts: Date.now() })); } catch(e) {} window.location.href = r.checkout_url; })
+                .then(function(r) { try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, path: window.location.pathname + window.location.search, ts: Date.now() })); } catch(e) {} window.location.href = r.checkout_url; })
                 .catch(function(e) { alert("Error: " + e.message); });
             } else {
               onSignUp && onSignUp();
@@ -7508,14 +7549,15 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
     // Hard enforce: stop at 45s from start
     if (el.currentTime >= startT + 45) { el.pause(); stopPreview(); }
   }
-  async function handleBuy() {
+  async function handleBuy(tier) {
     if (!currentUser) { setBuyErr("Please log in to purchase"); return; }
+    var safeTier = (tier === "premium") ? "premium" : "basic";
     setBuyLoading(true); setBuyErr("");
     try {
       var result = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tier: "basic" }),
+        body: JSON.stringify({ tier: safeTier }),
       });
       var resetOnReturn = function() {
         if (document.visibilityState === "visible") {
@@ -7524,7 +7566,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
         }
       };
       document.addEventListener("visibilitychange", resetOnReturn);
-      try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, ts: Date.now() })); } catch(e) {} window.location.href = result.checkout_url;
+      try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, path: window.location.pathname + window.location.search, ts: Date.now() })); } catch(e) {} window.location.href = result.checkout_url;
     } catch(e) { setBuyErr(e.message); setBuyLoading(false); }
   }
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
@@ -7744,17 +7786,46 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
       ) : (
         <div style={{ padding: "0 16px 16px" }}>
           {currentUser ? (
-            <button onClick={function() { handleBuy(); }} disabled={buyLoading} style={{
-              width: "100%", borderRadius: 14, padding: "15px",
-              background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
-              border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"),
-              color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 15,
-              cursor: buyLoading ? "not-allowed" : "pointer", letterSpacing: 0.5,
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-              boxShadow: buyLoading ? "none" : "0 0 18px rgba(245,158,11,0.25)",
-            }}>
-              {buyLoading ? "Loading..." : "Buy Lease — " + beat.price}
-            </button>
+            (function() {
+              var basicPrice   = Number(beat.basic_lease_price)   || 50;
+              var premiumPrice = Number(beat.premium_lease_price) || 0;
+              var premiumSold  = !!beat.premium_sold;
+              var premiumAvailable = (premiumPrice >= 100 && premiumPrice <= 500 && !premiumSold);
+              return (
+                <>
+                  <button onClick={function() { handleBuy("basic"); }} disabled={buyLoading} style={{
+                    width: "100%", borderRadius: 14, padding: "13px",
+                    background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
+                    border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"),
+                    color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 14,
+                    cursor: buyLoading ? "not-allowed" : "pointer", letterSpacing: 0.5,
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                    boxShadow: buyLoading ? "none" : "0 0 18px rgba(245,158,11,0.25)",
+                    marginBottom: premiumPrice > 0 ? 8 : 0,
+                  }}>
+                    {buyLoading ? "Loading..." : "Basic Lease — £" + basicPrice}
+                  </button>
+                  {premiumPrice > 0 && (
+                    <button
+                      onClick={function() { if (premiumAvailable && !buyLoading) handleBuy("premium"); }}
+                      disabled={buyLoading || !premiumAvailable}
+                      style={{
+                        width: "100%", borderRadius: 14, padding: "13px",
+                        background: (buyLoading || !premiumAvailable) ? "transparent" : "linear-gradient(135deg,#A855F7,#7C3AED)",
+                        border: "2px solid " + ((buyLoading || !premiumAvailable) ? "#333" : "#A855F7"),
+                        color: (buyLoading || !premiumAvailable) ? "#555" : "white",
+                        fontWeight: 800, fontSize: 14,
+                        cursor: (buyLoading || !premiumAvailable) ? "not-allowed" : "pointer",
+                        letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                        boxShadow: (buyLoading || !premiumAvailable) ? "none" : "0 0 18px rgba(168,85,247,0.3)",
+                        opacity: premiumSold ? 0.55 : 1,
+                      }}>
+                      {premiumSold ? "Premium — SOLD" : ("Premium Exclusive — £" + premiumPrice)}
+                    </button>
+                  )}
+                </>
+              );
+            })()
           ) : (
             <button onClick={function(){ alert("Sign up and purchase a plan to buy beat leases!"); }} style={{
               width: "100%", borderRadius: 14, padding: "15px",
@@ -7763,7 +7834,7 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
               display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
             }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              Sign Up to Buy Lease — {beat.price}
+              Sign Up to Buy Lease
             </button>
           )}
           <div style={{ display: "flex", gap: 0, marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
@@ -8234,7 +8305,7 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
       });
       try {
         var ct = sessionStorage.getItem("bf_tab") || "exclusive";
-        sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, ts: Date.now() }));
+        sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, path: window.location.pathname + window.location.search, ts: Date.now() }));
       } catch (e) {}
       window.location.href = r.checkout_url;
     } catch (e) {
@@ -10885,7 +10956,7 @@ function RootAuthScreen({ onLogin, startMode }) {
                   method: "POST",
                   body: JSON.stringify({ price_id: selectedPriceId }),
                 });
-                try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, ts: Date.now() })); } catch(e) {} window.location.href = r.checkout_url;
+                try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, path: window.location.pathname + window.location.search, ts: Date.now() })); } catch(e) {} window.location.href = r.checkout_url;
               } catch(e) {
                 // Checkout failed — user still has account, they can subscribe from profile
                 setAuthErr("Account created! To subscribe, go to your Profile.");
@@ -12411,7 +12482,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
           <PlanPicker onSelectPlan={async function(planId, priceId) {
             try {
               const r = await apiFetch("/api/stripe/create-checkout", { method: "POST", body: JSON.stringify({ price_id: priceId }) });
-              try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, ts: Date.now() })); } catch(e) {} window.location.href = r.checkout_url;
+              try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, path: window.location.pathname + window.location.search, ts: Date.now() })); } catch(e) {} window.location.href = r.checkout_url;
             } catch (e) { alert("Error: " + e.message); }
           }} />
         </div>
@@ -21957,11 +22028,35 @@ export default function BeatFinder() {
 
   // Handle URL routing — reset_token and /u/:username public profiles
   const resetToken = new URLSearchParams(window.location.search).get("reset_token");
-  const leaseSuccess = new URLSearchParams(window.location.search).get("lease") === "success";
+  const leaseSuccess   = new URLSearchParams(window.location.search).get("lease") === "success";
+  const leaseCancelled = new URLSearchParams(window.location.search).get("lease") === "cancelled";
   const leaseBeatId  = new URLSearchParams(window.location.search).get("beat_id");
   const [leaseModal, setLeaseModal] = React.useState(leaseSuccess);
   const [leaseBeat,  setLeaseBeat]  = React.useState(null);
   const [showLeaseContract, setShowLeaseContract] = React.useState(false);
+
+  // When returning from Stripe AFTER CANCEL — restore the tab the user was on
+  // before they tapped Buy. Stripe's cancel_url puts us at /?lease=cancelled
+  // which would otherwise dump them back to the default home tab.
+  React.useEffect(function() {
+    if (!leaseCancelled) return;
+    // Restore the tab they were on before checkout AND, if the user was on a
+    // sub-route like /u/somebody (a profile page), restore that URL too so
+    // they don't get bounced to the home feed.
+    var savedPath = null;
+    try {
+      var saved = JSON.parse(sessionStorage.getItem("bf_return_tab") || "{}");
+      sessionStorage.removeItem("bf_return_tab");
+      if (saved && saved.tab) setTab(saved.tab);
+      if (saved && saved.path && saved.path !== "/" && saved.path.indexOf("lease=") === -1) {
+        savedPath = saved.path;
+      }
+    } catch(e) {}
+    try {
+      // Replace history entry — either to the original path or just "/"
+      window.history.replaceState({}, "", savedPath || "/");
+    } catch(e) {}
+  }, []);
 
   // When returning from Stripe, fetch the purchased beat details and restore page
   React.useEffect(function() {
