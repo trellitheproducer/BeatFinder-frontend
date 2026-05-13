@@ -2337,15 +2337,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
             userSelect: "none",
           }}
         />
-        {/* Touch blocker — full-width bottom strip covering "More videos" label,
-            suggested-video thumbnail, share button, and YouTube logo. Anything
-            below the progress bar gets blocked so the user can only play/pause
-            via the center of the video. */}
-        <div style={{
-          position: "absolute", bottom: 0, left: 0, right: 0,
-          height: 60,
-          zIndex: 20,
-        }} onTouchStart={function(e){ e.preventDefault(); e.stopPropagation(); }} onClick={function(e){ e.preventDefault(); e.stopPropagation(); }} />
+      </div>
       </div>
       <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
         <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4, lineHeight: 1.4 }}>
@@ -21190,14 +21182,53 @@ export default function BeatFinder() {
   // restore BeatFinder as a blank white page when the user comes back via
   // the back button. The bfcache restoration isn't reliable for SPAs.
   //
+  // Additionally, tapping a "suggested video" inside the YouTube iframe can
+  // cause iOS to navigate the parent tab (not just the iframe) and the back
+  // gesture leaves BeatFinder in a broken state.
+  //
   // We use multiple signals to detect and recover from blank state:
   //   1. pageshow with e.persisted = true (definitive bfcache restore)
   //   2. visibilitychange becoming visible — if app root is missing or
   //      body background is white, the React tree died and we reload
   //   3. pagehide with persisted=true means the page WAS bfcached, so the
   //      next pageshow needs special handling
+  //   4. focus event — iOS sometimes fires focus before visibilitychange
   React.useEffect(function() {
     var wasBFCached = false;
+    var reloadInProgress = false;
+
+    function safeReload() {
+      if (reloadInProgress) return;
+      reloadInProgress = true;
+      try {
+        // Use replace so the broken state doesn't sit in history
+        window.location.replace(window.location.pathname + window.location.search);
+      } catch(e) {
+        window.location.reload();
+      }
+    }
+
+    function isAppBlank() {
+      try {
+        var appEl = document.querySelector("[data-bf-app]");
+        if (!appEl) return true;
+        var root = document.getElementById("root") || appEl;
+        if (root && root.children.length === 0) return true;
+        // Detect a white/transparent body background which signals dead React tree
+        var bg = window.getComputedStyle(document.body).backgroundColor;
+        if (bg === "rgb(255, 255, 255)" || bg === "rgba(0, 0, 0, 0)") return true;
+        // Check if the app element has zero rendered area
+        var rect = appEl.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return true;
+        return false;
+      } catch(e) {
+        return true;
+      }
+    }
+
+    function checkAndRecover() {
+      if (isAppBlank()) safeReload();
+    }
 
     function onPageShow(e) {
       // e.persisted = true means page was restored from back-forward cache.
@@ -21205,14 +21236,11 @@ export default function BeatFinder() {
       // be visually blank. A reload guarantees a clean state.
       if (e.persisted || wasBFCached) {
         wasBFCached = false;
-        window.location.reload();
+        safeReload();
         return;
       }
       // Even if not bfcached, check immediately if the app root is missing
-      var appEl = document.querySelector("[data-bf-app]");
-      if (!appEl) {
-        window.location.reload();
-      }
+      checkAndRecover();
     }
 
     function onPageHide(e) {
@@ -21226,37 +21254,29 @@ export default function BeatFinder() {
     function onVisibilityChange() {
       if (document.visibilityState === "visible") {
         // Multiple checks at different delays to catch slow restorations
-        function checkBlank() {
-          var appEl = document.querySelector("[data-bf-app]");
-          if (!appEl) {
-            window.location.reload();
-            return;
-          }
-          // Check if the app root has any rendered content
-          var root = document.getElementById("root") || appEl;
-          if (root && root.children.length === 0) {
-            window.location.reload();
-            return;
-          }
-          // Detect a white/transparent background which signals dead React tree
-          var bg = window.getComputedStyle(document.body).backgroundColor;
-          if (bg === "rgb(255, 255, 255)" || bg === "rgba(0, 0, 0, 0)") {
-            window.location.reload();
-          }
-        }
-        // Run checks at 100ms, 400ms, and 800ms to catch slow renders
-        setTimeout(checkBlank, 100);
-        setTimeout(checkBlank, 400);
-        setTimeout(checkBlank, 800);
+        setTimeout(checkAndRecover, 50);
+        setTimeout(checkAndRecover, 200);
+        setTimeout(checkAndRecover, 500);
+        setTimeout(checkAndRecover, 1000);
+        setTimeout(checkAndRecover, 1500);
       }
+    }
+
+    function onFocus() {
+      // iOS sometimes fires focus before visibilitychange when returning
+      // from an external link / YouTube suggested video tap
+      setTimeout(checkAndRecover, 100);
+      setTimeout(checkAndRecover, 400);
     }
 
     window.addEventListener("pageshow",      onPageShow);
     window.addEventListener("pagehide",      onPageHide);
+    window.addEventListener("focus",         onFocus);
     document.addEventListener("visibilitychange", onVisibilityChange);
     return function() {
       window.removeEventListener("pageshow",      onPageShow);
       window.removeEventListener("pagehide",      onPageHide);
+      window.removeEventListener("focus",         onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
@@ -21298,7 +21318,27 @@ export default function BeatFinder() {
   const [searchQuery, setSearchQuery] = useState("");
   const [artist,  setArtist]  = useState(null); // kept for compatibility
   const [user,    setUser]    = useState(null);
-  const [playing, setPlaying] = useState(null);
+  const [playing, setPlaying] = useState(function() {
+    // Restore the beat being viewed if the page was reloaded mid-view
+    // (e.g. after iOS bfcache recovery from a YouTube suggested-video tap)
+    try {
+      const raw = sessionStorage.getItem("bf_playing");
+      if (raw) return JSON.parse(raw);
+    } catch(e) {}
+    return null;
+  });
+
+  // Whenever the currently-viewed beat changes, persist it so we can restore
+  // after iOS reloads the page from bfcache or external link return
+  React.useEffect(function() {
+    try {
+      if (playing) {
+        sessionStorage.setItem("bf_playing", JSON.stringify(playing));
+      } else {
+        sessionStorage.removeItem("bf_playing");
+      }
+    } catch(e) {}
+  }, [playing]);
 
   // savedMap: { [videoId]: beat } - localStorage for guests, backend for logged-in users
   const [savedMap, setSavedMap] = useState(loadSaved);
