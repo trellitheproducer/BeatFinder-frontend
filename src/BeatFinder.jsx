@@ -1260,7 +1260,12 @@ const AuthAPI = {
     });
     saveToken(data.access_token);
     const u = data.user;
-    return { ...u, isPro: u.plan === "producer", isArtistPro: u.plan === "artist" || u.plan === "producer" };
+    // Pro features require subscriptionActive=true. A fresh signup hasn't paid
+    // yet, so subscriptionActive will be false until the Stripe webhook fires
+    // after successful checkout. Without this gate, users who close the Stripe
+    // tab mid-checkout would have Pro access for the rest of their session.
+    const active = !!u.subscriptionActive;
+    return { ...u, isPro: active && u.plan === "producer", isArtistPro: active && (u.plan === "artist" || u.plan === "producer") };
   },
 
   async login(email, password) {
@@ -1270,7 +1275,9 @@ const AuthAPI = {
     });
     saveToken(data.access_token);
     const u = data.user;
-    return { ...u, isPro: u.plan === "producer", isArtistPro: u.plan === "artist" || u.plan === "producer" };
+    // Same gate as register — Pro features require an active subscription.
+    const active = !!u.subscriptionActive;
+    return { ...u, isPro: active && u.plan === "producer", isArtistPro: active && (u.plan === "artist" || u.plan === "producer") };
   },
 
   async me() {
@@ -11519,6 +11526,117 @@ function PostVideoSection({ user, onBack }) {
 }
 
 
+// =============================================================================
+// CONTACT SUPPORT FORM — embedded inside Settings dropdown
+// Sends a message to support@beatfinder.co.uk via /api/contact
+// Includes a "or email directly" mailto fallback in case the API is down
+// =============================================================================
+function ContactSupportForm({ currentUser }) {
+  const [name,    setName]    = useState(currentUser?.name || currentUser?.username || "");
+  const [email,   setEmail]   = useState(currentUser?.email || "");
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [msg,     setMsg]     = useState("");
+  const [sent,    setSent]    = useState(false);
+
+  const handleSubmit = async () => {
+    if (!name.trim() || !email.trim() || !subject.trim() || !message.trim()) {
+      setMsg("Error: All fields are required.");
+      return;
+    }
+    if (message.trim().length < 10) {
+      setMsg("Error: Message must be at least 10 characters.");
+      return;
+    }
+    setSending(true);
+    setMsg("");
+    try {
+      await apiFetch("/api/contact", {
+        method: "POST",
+        body: JSON.stringify({
+          name:    name.trim(),
+          email:   email.trim(),
+          subject: subject.trim(),
+          message: message.trim(),
+        }),
+      });
+      setSent(true);
+      setSubject("");
+      setMessage("");
+      setMsg("Message sent. We'll reply by email as soon as we can.");
+    } catch (e) {
+      setMsg("Error: " + e.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const inputStyle = {
+    width: "100%", background: "#111", border: "1px solid #333", borderRadius: 10,
+    padding: "10px 14px", color: "white", fontSize: 14, outline: "none",
+    boxSizing: "border-box", marginBottom: 8,
+  };
+
+  if (sent) {
+    return (
+      <div style={{ padding: "16px 14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
+        <div style={{
+          background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)",
+          borderRadius: 10, padding: 14, textAlign: "center",
+        }}>
+          <div style={{ color: "#22C55E", fontWeight: 800, fontSize: 14, marginBottom: 6 }}>Message Sent!</div>
+          <div style={{ color: "#888", fontSize: 12, lineHeight: 1.6 }}>
+            We'll reply to <span style={{ color: "white" }}>{email}</span> as soon as we can.
+          </div>
+        </div>
+        <button onClick={() => { setSent(false); setMsg(""); }}
+          style={{ width: "100%", background: "#1e1e1e", border: "1px solid #333", borderRadius: 10,
+            color: "#aaa", fontWeight: 700, padding: 10, fontSize: 13, cursor: "pointer", marginTop: 10 }}>
+          Send another message
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: "12px 14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
+      <div style={{ color: "#888", fontSize: 11, lineHeight: 1.5, marginBottom: 10 }}>
+        Have a question, issue, or feedback? Send us a message and we'll get back to you by email.
+      </div>
+      <input value={name}    onChange={e => setName(e.target.value)}    placeholder="Your name"   style={inputStyle} />
+      <input value={email}   onChange={e => setEmail(e.target.value)}   placeholder="Your email"  type="email" style={inputStyle} />
+      <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="Subject"     style={inputStyle} />
+      <textarea value={message} onChange={e => setMessage(e.target.value)} placeholder="How can we help?"
+        rows={5}
+        style={{ ...inputStyle, resize: "vertical", minHeight: 80, fontFamily: "inherit", marginBottom: 10 }} />
+      <button onClick={handleSubmit} disabled={sending}
+        style={{
+          width: "100%", background: sending ? "#333" : "#C026D3", border: "none", borderRadius: 10,
+          color: "white", fontWeight: 800, padding: 10, fontSize: 14,
+          cursor: sending ? "not-allowed" : "pointer",
+        }}>
+        {sending ? "Sending..." : "Send Message"}
+      </button>
+      {msg && (
+        <div style={{
+          color: msg.startsWith("Error") ? "#F87171" : "#22C55E",
+          fontSize: 12, textAlign: "center", marginTop: 8, fontWeight: 600,
+        }}>{msg}</div>
+      )}
+      {/* Mailto fallback — always visible so users can email directly if the form fails */}
+      <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #2a2a2a", textAlign: "center" }}>
+        <div style={{ color: "#666", fontSize: 11, marginBottom: 4 }}>Or email us directly:</div>
+        <a href="mailto:support@beatfinder.co.uk"
+          style={{ color: "#06B6D4", fontSize: 12, fontWeight: 700, textDecoration: "none" }}>
+          support@beatfinder.co.uk
+        </a>
+      </div>
+    </div>
+  );
+}
+
+
 function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric, onOpenMessages }) {
   const [mode,          setMode]          = useState("landing");
   const [ownBadgePopup, setOwnBadgePopup] = useState(null);
@@ -11809,6 +11927,21 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                       Change Password
                     </button>
                   </div>
+                )}
+              </div>
+
+              {/* ── Contact Support ─────────────────────────────────────── */}
+              <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                <button onClick={() => setOpenSettingsSection(openSettingsSection === "support" ? null : "support")}
+                  style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "12px 14px", background: openSettingsSection === "support" ? "#1a1a1a" : "#141414",
+                    border: "none", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                  <span>Contact Support</span>
+                  <span style={{ color: "#666", fontSize: 12, transition: "transform 0.2s",
+                    transform: openSettingsSection === "support" ? "rotate(180deg)" : "none" }}>▼</span>
+                </button>
+                {openSettingsSection === "support" && (
+                  <ContactSupportForm currentUser={user} />
                 )}
               </div>
 
@@ -15355,8 +15488,9 @@ function _HDelayPlugin({ fx, upd, Knob }) {
 // here because this is a real component, not an IIFE or callback.
 // Re-renders ONLY when fx data, fxTrackId, trackName, or trackColor change.
 // =============================================================================
-const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackColor, onClose, onUpd, analyserNode, isPlaying }) {
+const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackColor, onClose, onUpd, onApplyPreset, analyserNode, isPlaying }) {
   const upd = onUpd; // stable ref-backed callback passed from StudioScreen
+  const [presetMenuOpen, setPresetMenuOpen] = React.useState(false);
 
   // ── Rotary Knob ──
   const Knob = function({ label, value, min, max, step, unit, onChange, color }) {
@@ -15654,7 +15788,65 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
     <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto", paddingTop:"env(safe-area-inset-top)" }} onClick={function(e){ e.stopPropagation(); }} onTouchMove={function(e){ e.stopPropagation(); }}>
       <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0, position:"sticky", top:0, zIndex:10 }}>
         <div style={{ width:8, height:8, borderRadius:"50%", background:trackColor, marginRight:8 }} />
-        <span style={{ color:"white", fontWeight:800, fontSize:14, flex:1 }}>{trackName} — Effects</span>
+        <span style={{ color:"white", fontWeight:800, fontSize:14, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{trackName} — Effects</span>
+        {/* Presets dropdown */}
+        {onApplyPreset && (
+          <div style={{ position:"relative", marginRight:8 }}>
+            <button onClick={function(e){ e.stopPropagation(); setPresetMenuOpen(function(v){return !v;}); }}
+              style={{
+                background:"linear-gradient(180deg,#1e1b3a,#15132d)",
+                border:"1px solid #4c3a7a", borderRadius:8,
+                color:"#c4b5fd", fontSize:11, fontWeight:800, letterSpacing:0.5,
+                padding:"5px 10px", cursor:"pointer",
+                display:"flex", alignItems:"center", gap:5,
+              }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+              </svg>
+              PRESETS
+            </button>
+            {presetMenuOpen && (
+              <>
+                <div onClick={function(){ setPresetMenuOpen(false); }}
+                  style={{ position:"fixed", inset:0, zIndex:200 }} />
+                <div style={{
+                  position:"absolute", top:32, right:0, zIndex:201,
+                  background:"#0f0f15", border:"1px solid #2a2a40",
+                  borderRadius:10, boxShadow:"0 8px 24px rgba(0,0,0,0.7)",
+                  minWidth:260, maxWidth:300, overflow:"hidden",
+                }}>
+                  <div style={{ padding:"10px 14px", borderBottom:"1px solid #1f1f30", background:"#15132d" }}>
+                    <div style={{ color:"#c4b5fd", fontSize:11, fontWeight:800, letterSpacing:1 }}>FX PRESETS</div>
+                    <div style={{ color:"#6b6486", fontSize:10, marginTop:2 }}>Replaces all current FX</div>
+                  </div>
+                  <div style={{ maxHeight:360, overflowY:"auto" }}>
+                    {FX_PRESETS.map(function(p){
+                      return (
+                        <button key={p.id} onClick={function(e){
+                          e.stopPropagation();
+                          setPresetMenuOpen(false);
+                          onApplyPreset(p);
+                        }}
+                          style={{
+                            width:"100%", background:"none", border:"none",
+                            color:"#d0d0d0", padding:"10px 14px", textAlign:"left",
+                            cursor:"pointer", borderBottom:"1px solid #15152a",
+                            display:"block",
+                          }}
+                          onPointerEnter={function(e){ e.currentTarget.style.background="#181830"; }}
+                          onPointerLeave={function(e){ e.currentTarget.style.background="transparent"; }}
+                        >
+                          <div style={{ color:"white", fontSize:12, fontWeight:800, marginBottom:2 }}>{p.name}</div>
+                          <div style={{ color:"#6b6486", fontSize:10, lineHeight:1.4 }}>{p.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
         {/* FX panel master VU meter */}
         <div style={{ marginRight:10 }}>
           <VUMeter analyserNode={analyserNode} isActive={isPlaying} compact={true} showLabel={false} />
@@ -15670,7 +15862,8 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
          prev.fx === next.fx &&
          prev.trackName === next.trackName &&
          prev.trackColor === next.trackColor &&
-         prev.isPlaying === next.isPlaying;
+         prev.isPlaying === next.isPlaying &&
+         prev.onApplyPreset === next.onApplyPreset;
 });
 
 // =============================================================================
@@ -16099,6 +16292,94 @@ function VerifiedBadge({ size = 20 }) {
 }
 
 
+// =============================================================================
+// FX PRESETS — one-tap chains for common production scenarios.
+// Each preset describes a target effects state. Applying replaces the track's
+// effects object entirely (clean apply, not additive) and the FX chain rebuilds
+// on next Play press. Cost is the same as turning the same plugins on manually.
+// =============================================================================
+const FX_PRESETS = [
+  {
+    id: "clean",
+    name: "Vocal — Clean",
+    desc: "Light compression + air. Good for natural vocals.",
+    fx: {
+      compressor:   { on:true, threshold:-22, ratio:3, attack:0.005, release:0.18, makeupGain:2 },
+      eq:           { on:true, low:0, mid:0, high:2.5, hpfFreq:90 },
+      noiseremover: { on:true, threshold:-45, release:0.18, hold:0.08, hiss:0.1, lookahead:true },
+    },
+  },
+  {
+    id: "polished",
+    name: "Vocal — Polished",
+    desc: "Compressor + EQ + plate reverb + subtle doubler.",
+    fx: {
+      compressor:   { on:true, threshold:-20, ratio:4, attack:0.003, release:0.2, makeupGain:3 },
+      eq:           { on:true, low:-1, mid:0.5, high:3, hpfFreq:100 },
+      reverb:       { on:true, wet:0.18, roomSize:0.7, preDelay:25 },
+      doubler:      { on:true, wet:0.25, width:0.6, detune:8 },
+      noiseremover: { on:true, threshold:-45, release:0.15, hold:0.08, hiss:0.15, lookahead:true },
+    },
+  },
+  {
+    id: "hard_tune",
+    name: "Hard Autotune",
+    desc: "T-Pain style hard pitch correction + tight compression + slap delay.",
+    fx: {
+      autotune:     { on:true, key:"C", scale:"chromatic", speed:100, humanize:0, wet:1, vibrato:0 },
+      compressor:   { on:true, threshold:-18, ratio:6, attack:0.001, release:0.12, makeupGain:3 },
+      eq:           { on:true, low:0, mid:1, high:4, hpfFreq:120 },
+      hdelay:       { on:true, mode:"digital", subdivision:"1/16", sync:true, feedback:0.2, wet:0.18, hiCut:8000, loCut:200 },
+      noiseremover: { on:true, threshold:-42, release:0.15, hold:0.05, hiss:0.1, lookahead:true },
+    },
+  },
+  {
+    id: "melodic_tune",
+    name: "Melodic Tune",
+    desc: "Smooth pitch correction + warm plate + chorus doubler.",
+    fx: {
+      autotune:     { on:true, key:"C", scale:"major", speed:30, humanize:20, wet:0.9, vibrato:0.1 },
+      compressor:   { on:true, threshold:-20, ratio:3, attack:0.005, release:0.2, makeupGain:2 },
+      eq:           { on:true, low:0, mid:0, high:2, hpfFreq:100 },
+      reverb:       { on:true, wet:0.25, roomSize:0.85, preDelay:30 },
+      doubler:      { on:true, wet:0.3, width:0.7, detune:12 },
+      noiseremover: { on:true, threshold:-45, release:0.18, hold:0.08, hiss:0.15, lookahead:true },
+    },
+  },
+  {
+    id: "lofi",
+    name: "Lo-Fi",
+    desc: "Bandpass filter + tape saturation. Vintage radio character.",
+    fx: {
+      bandpass:     { on:true, center:1400, width:2.5, res:1, mix:0.85 },
+      trotten:      { on:true, eqLow:-2, eqMid:1, eqHigh:-3, compThr:-18, compAmt:60, compMode:"auto", tapeDrv:30, tapeSat:25, tapeMode:"vintage", limCeil:-1, limRel:0.3, inputGain:0, outputGain:0 },
+      noiseremover: { on:false },
+    },
+  },
+  {
+    id: "stadium",
+    name: "Stadium",
+    desc: "Long ocean reverb + tape glue. Huge, distant vocal.",
+    fx: {
+      compressor:   { on:true, threshold:-22, ratio:3, attack:0.005, release:0.25, makeupGain:2 },
+      eq:           { on:true, low:0, mid:0, high:1.5, hpfFreq:110 },
+      ocean:        { on:true, wet:0.5, roomSize:1.3, damp:0.5, preDelay:40 },
+      hdelay:       { on:true, mode:"tape", subdivision:"1/4", sync:true, feedback:0.3, wet:0.18, hiCut:6500, loCut:180, modDepth:0.2, modRate:0.5 },
+      noiseremover: { on:true, threshold:-45, release:0.2, hold:0.1, hiss:0.1, lookahead:true },
+    },
+  },
+  {
+    id: "master",
+    name: "Master / Beat Bus",
+    desc: "T-Rotten master chain for beats. Use on instrumental track.",
+    fx: {
+      trotten:      { on:true, eqLow:1, eqMid:0, eqHigh:1.5, compThr:-12, compAmt:40, compMode:"auto", tapeDrv:8, tapeSat:10, tapeMode:"modern", limCeil:-0.5, limRel:0.4, limMode:"truepeak", inputGain:0, outputGain:0 },
+      eq:           { on:true, low:1, mid:0, high:1, hpfFreq:30 },
+    },
+  },
+];
+
+
 function StudioScreen({ user, onExit }) {
 
   // ── Constants ─────────────────────────────────────────────────
@@ -16180,6 +16461,7 @@ function StudioScreen({ user, onExit }) {
   const [fxTrackId,    setFxTrackId]     = useState(null);
   const [masterVolume, setMasterVolume]  = useState(1); // independent master fader 0..1.5
   const fxUpdRef = useRef(null); // stable ref so memoized FX panel always calls latest upd
+  const applyPresetRef = useRef(null); // stable ref so memoized FX panel always calls latest preset applier
   const [showTakes,    setShowTakes]     = useState(null);
   const [trimmingClip, setTrimmingClip]  = useState(null);
   const [monitoringOn, setMonitoringOn] = useState(false);
@@ -16284,6 +16566,7 @@ function StudioScreen({ user, onExit }) {
       gainNodesRef.current = {};
       masterGainRef.current = null;
       fxNodesRef.current = {};
+      chainsRef.current = {}; // cached chains are tied to the old context — drop them
       scheduledRef.current = [];
       // Worklets are scoped to their AudioContext — when we recreate, they're gone
       noiseGateWorkletReady.current = false;
@@ -16331,6 +16614,16 @@ function StudioScreen({ user, onExit }) {
   const masterAnalyserRef  = useRef(null); // master output analyser
   const masterGainRef      = useRef(null); // single master output
   const fxNodesRef    = useRef({});   // trackId → live audio node references
+
+  // ── Persistent FX chain cache ────────────────────────────────────────────
+  // Each entry: { entry: AudioNode, fxSig: string }
+  // entry = the upstream gain node that clips connect into for this track
+  // fxSig = a fingerprint of which plugins are ON; when it changes, we rebuild
+  //         that track's chain (turning a plugin on/off requires re-graph; just
+  //         tweaking a knob does NOT — that's handled live by applyFxLive)
+  // Invalidated when: AudioContext is recreated, track is deleted, plugin
+  //                   on/off state changes for that track.
+  const chainsRef     = useRef({});   // trackId → { entry, fxSig }
 
   // ── Ruler drag ref ───────────────────────────────────────────────────────
   const rulerDragRef = useRef(null); // { mode: "in"|"out"|"new", startX, startT }
@@ -16617,6 +16910,12 @@ function StudioScreen({ user, onExit }) {
       actxRef.current = new (window.AudioContext || window.webkitAudioContext)({
         latencyHint: "interactive",
       });
+      // A fresh context invalidates every cached chain (they reference nodes
+      // from the closed/old context). Drop them so doPlay rebuilds.
+      chainsRef.current = {};
+      fxNodesRef.current = {};
+      masterGainRef.current = null;
+      noiseGateWorkletReady.current = false;
       // Connect silent audio through the new AudioContext — must happen after creation
       // and inside a user gesture (getActx is always called from one)
       silentSrcNodeRef.current = null; // reset so ensureSilentAudio reconnects
@@ -17186,6 +17485,26 @@ function StudioScreen({ user, onExit }) {
 
   // ── Real-time FX update — called by upd() whenever FX params change while playing ──
   // Directly mutates live Web Audio nodes so changes are heard immediately with no restart.
+  // Note: ONLY parameter changes go through here. Toggling a plugin ON/OFF requires
+  //       a chain rebuild (see fxSignature + chainsRef in doPlay).
+  const fxSignature = function(effects) {
+    // Compact fingerprint of which plugins are ON. Used to detect when the chain
+    // topology needs rebuilding vs when we can just tweak params live.
+    const e = effects || {};
+    return [
+      (e.reverb && e.reverb.on)        ? "r"  : "-",
+      (e.ocean && e.ocean.on)          ? "o"  : "-",
+      (e.eq && e.eq.on)                ? "eq" : "--",
+      (e.compressor && e.compressor.on)? "c"  : "-",
+      (e.doubler && e.doubler.on)      ? "d"  : "-",
+      (e.hdelay && e.hdelay.on)        ? "h"  : "-",
+      (e.noiseremover && e.noiseremover.on) ? "n" : "-",
+      (e.trotten && e.trotten.on)      ? "t"  : "-",
+      (e.bandpass && e.bandpass.on)    ? "b"  : "-",
+      (e.autotune && e.autotune.on)    ? "a"  : "-",
+    ].join("|");
+  };
+
   const applyFxLive = function (trackId, effects) {
     const actx = actxRef.current;
     if (!actx || actx.state === "closed") return;
@@ -17457,25 +17776,24 @@ function StudioScreen({ user, onExit }) {
     cancelAnimationFrame(animRef.current);
     if (scrollSeekTimer.current) { clearTimeout(scrollSeekTimer.current); scrollSeekTimer.current = null; }
     userScrolledAt.current = null;
-    // Stop and disconnect every scheduled source node immediately
+    // Stop and disconnect every scheduled source node immediately.
+    // BufferSources are single-use — they're created fresh on each doPlay.
     scheduledRef.current.forEach(function (s) {
       try { s.stop(0); } catch (e) {} // stop(0) = immediate
       try { s.disconnect(); } catch (e) {}
     });
     scheduledRef.current = [];
-    // Disconnect gain nodes so nothing bleeds through on next play
-    Object.values(gainNodesRef.current).forEach(function (g) {
-      try { g.disconnect(); } catch (e) {}
-    });
-    gainNodesRef.current = {};
-    // Reset per-track analyser refs
-    trackAnalysersRef.current = {};
-    // Clear live FX node refs
-    fxNodesRef.current = {};
-    // Ramp master gain to 0 instantly to cut any tail
+    // PERF: do NOT tear down FX chains, gain nodes, or the master gain.
+    // Rebuilding them every Play press costs 50-200ms per track and is the
+    // root cause of the "press play, audio starts a second later" lag with
+    // multiple FX loaded. The cached chains in chainsRef survive across
+    // play/stop cycles; only BufferSources are disposable.
+    // Ramp master gain to 0 momentarily so any reverb/delay tails are cut.
     if (masterGainRef.current) {
-      try { masterGainRef.current.gain.cancelScheduledValues(0); masterGainRef.current.gain.value = 0; } catch (e) {}
-      masterGainRef.current = null; // force recreate on next play
+      try {
+        masterGainRef.current.gain.cancelScheduledValues(0);
+        masterGainRef.current.gain.value = 0;
+      } catch (e) {}
     }
   };
 
@@ -17486,6 +17804,11 @@ function StudioScreen({ user, onExit }) {
     liveTimeRef.current = fromTime;
     const actx   = getActx();
     const master = getOrCreateMaster();
+    // Restore master gain — stopAll ramps it to 0 to cut tails
+    try {
+      master.gain.cancelScheduledValues(0);
+      master.gain.value = masterVolume;
+    } catch (e) {}
     // Register pitch worklet if not done yet (async, required before AudioWorkletNode)
     // Register RNNoise worklet if not done yet
     const gateOk = await registerRNNoiseWorklet(actx);
@@ -18144,6 +18467,41 @@ function StudioScreen({ user, onExit }) {
       } catch(e) {}
     };
 
+    // ── Cached-chain helper ────────────────────────────────────────────────
+    // Returns the cached entry node for this track if the FX signature still
+    // matches; otherwise rebuilds the chain. Rebuilds also fire when the
+    // AudioContext has been recreated (cache invalidated externally).
+    const tearDownChain = function(trackId) {
+      // Disconnect the volume gain (terminal, connects to master) and entry
+      // (upstream, where clips feed in) so the old chain is fully detached.
+      const vg = gainNodesRef.current[trackId];
+      if (vg) { try { vg.disconnect(); } catch(e) {} }
+      const cached = chainsRef.current[trackId];
+      if (cached && cached.entry) {
+        try { cached.entry.disconnect(); } catch(e) {}
+      }
+      delete chainsRef.current[trackId];
+      delete fxNodesRef.current[trackId];
+      delete gainNodesRef.current[trackId];
+      delete trackAnalysersRef.current[trackId];
+    };
+    const getOrBuildChain = function(track) {
+      const cached = chainsRef.current[track.id];
+      const currentSig = fxSignature(track.effects);
+      // Reuse cached chain if it exists, points to the same AudioContext, and
+      // the plugin on/off topology hasn't changed since it was built.
+      if (cached && cached.entry && cached.entry.context === actx && cached.fxSig === currentSig) {
+        // Live param state (volume/pan/mute/solo/FX knobs) gets applied separately
+        // via applyFxLive / applyGains — no rebuild needed.
+        return cached.entry;
+      }
+      // Tear down old chain fully before building a new one
+      tearDownChain(track.id);
+      const entry = buildChain(track);
+      chainsRef.current[track.id] = { entry: entry, fxSig: currentSig };
+      return entry;
+    };
+
     tracksRef.current.forEach(function(track) {
       try {
         const clips = track.clips && track.clips.length > 0
@@ -18152,7 +18510,7 @@ function StudioScreen({ user, onExit }) {
             ? [{ id:"lg", audioBuffer:track.audioBuffer, url:track.url, startTime:track.startTime||0, duration:track.audioBuffer.duration, trimStart:0, trimEnd:track.audioBuffer.duration, active:true }]
             : [];
         if (clips.length === 0) return;
-        const entryNode = buildChain(track);
+        const entryNode = getOrBuildChain(track);
         clips.forEach(function(clip){
           try { scheduleClip(track, clip, entryNode); } catch(clipErr) {
             console.warn("[Studio] clip schedule error on track", track.name, clipErr);
@@ -18389,6 +18747,42 @@ function StudioScreen({ user, onExit }) {
     };
   };
 
+  // Apply an FX preset to a track. Clean apply — starts from defaultEffects so
+  // any plugin not mentioned in the preset is turned OFF. Triggers the FX chain
+  // cache to rebuild on next Play (handled automatically by fxSignature change).
+  const applyPreset = function (trackId, preset) {
+    if (!preset || !preset.fx) return;
+    setTracks(function (prev) {
+      return prev.map(function(t) {
+        if (t.id !== trackId) return t;
+        // Start from defaults so unmentioned plugins go OFF (clean apply, not additive)
+        const base = defaultEffects();
+        // Deep-merge preset on top
+        const merged = { ...base };
+        Object.keys(preset.fx).forEach(function(key) {
+          merged[key] = { ...(base[key] || {}), ...preset.fx[key] };
+        });
+        return { ...t, effects: merged };
+      });
+    });
+    setIsSaved(false);
+    // If playback is active, sync the new effects state into the live nodes
+    // immediately. (Chain rebuild for newly-ON plugins happens on next Play.)
+    const newEffectsForLive = (function() {
+      const base = defaultEffects();
+      const merged = { ...base };
+      Object.keys(preset.fx).forEach(function(key) {
+        merged[key] = { ...(base[key] || {}), ...preset.fx[key] };
+      });
+      return merged;
+    })();
+    applyFxLive(trackId, newEffectsForLive);
+    // Sync autotune to monitoring state for live tune during recording
+    if (newEffectsForLive.autotune) {
+      setAutoPitch(function(prev) { return Object.assign({}, prev, newEffectsForLive.autotune); });
+    }
+  };
+
   const addTrackObj = function (obj) {
     // Ensure every track has a color — vocals get VOCAL_COLORS, others get COLORS
     const fallbackColor = (obj.type === "vocal") ? VOCAL_COLORS[0] : COLORS[0];
@@ -18527,6 +18921,15 @@ function StudioScreen({ user, onExit }) {
 
   const removeTrack = function (id) {
     setTracks(function (prev) { return prev.filter(function(t){ return t.id!==id; }); });
+    // Tear down the cached FX chain for this track so it doesn't leak audio nodes
+    const cached = chainsRef.current[id];
+    if (cached && cached.entry) {
+      try { cached.entry.disconnect(); } catch(e) {}
+    }
+    delete chainsRef.current[id];
+    delete fxNodesRef.current[id];
+    delete gainNodesRef.current[id];
+    delete trackAnalysersRef.current[id];
     setContextMenu(null); setIsSaved(false);
   };
 
@@ -21615,6 +22018,9 @@ userPickedMicRef.current = true;
             setAutoPitch(function(prev) { return Object.assign({}, prev, newEffects.autotune); });
           }
         };
+        // Stable preset applier — same pattern as fxUpdRef so FxPanel's memo
+        // comparator sees the same function reference across re-renders
+        applyPresetRef.current = function(preset){ applyPreset(t.id, preset); };
         return (
           <FxPanel
             key={fxTrackId}
@@ -21624,6 +22030,7 @@ userPickedMicRef.current = true;
             trackColor={t.color}
             onClose={function(){ setFxTrackId(null); }}
             onUpd={fxUpdRef.current}
+            onApplyPreset={applyPresetRef.current}
             analyserNode={trackAnalysersRef.current[fxTrackId] || null}
             isPlaying={isPlaying}
           />
@@ -22695,10 +23102,11 @@ export default function BeatFinder() {
             ←
           </button>
           <RootAuthScreen startMode={authStartMode} onLogin={function(u) {
+            const active = !!u.subscriptionActive;
             setUser({
               ...u,
-              isPro:       u.plan === "producer",
-              isArtistPro: u.plan === "artist" || u.plan === "producer",
+              isPro:       active && u.plan === "producer",
+              isArtistPro: active && (u.plan === "artist" || u.plan === "producer"),
             });
             doWelcome();
           }} />
