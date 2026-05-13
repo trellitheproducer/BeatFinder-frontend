@@ -8521,14 +8521,19 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
       <div onClick={onClose} style={{
         position: "fixed", inset: 0, zIndex: 99998,
         background: "rgba(0,0,0,0.75)",
-        display: "flex", alignItems: "flex-end", justifyContent: "center",
       }}>
         <div ref={sheetPanelRef} onClick={function(e) { e.stopPropagation(); }} style={{
+          position: "fixed",
+          left: 0, right: 0, bottom: 0,
+          margin: "0 auto",
           width: "100%", maxWidth: 480,
           background: "#0d0d0d", borderTop: "1px solid #222",
           borderRadius: "20px 20px 0 0", padding: 18,
           paddingBottom: "max(env(safe-area-inset-bottom), 18px)",
-          maxHeight: "85vh", overflowY: "auto", WebkitOverflowScrolling: "touch",
+          maxHeight: "85vh",
+          overflowY: "auto",
+          WebkitOverflowScrolling: "touch",
+          overscrollBehavior: "contain",
         }}>
           {/* Drag handle */}
           <div style={{ width: 40, height: 4, background: "#333", borderRadius: 2, margin: "0 auto 14px" }} />
