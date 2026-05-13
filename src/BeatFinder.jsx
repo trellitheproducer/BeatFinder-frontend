@@ -6048,25 +6048,6 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   }
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
 
-  // Poll until audio is seekable then jump to preview_start — works on iOS where autoPlay blocks onPlay
-  React.useEffect(function() {
-    if (!previewing) return;
-    var ps = beat.preview_start || 0;
-    if (ps <= 0) return;
-    seekedRef.current = false;
-    var attempts = 0;
-    var poll = setInterval(function() {
-      var el = audioRef.current;
-      attempts++;
-      if (el && el.readyState >= 1 && !seekedRef.current) {
-        try { el.currentTime = ps; seekedRef.current = true; } catch(e) {}
-        clearInterval(poll);
-      } else if (attempts > 60) {
-        clearInterval(poll);
-      }
-    }, 50);
-    return function() { clearInterval(poll); };
-  }, [previewing]);
   useContentDeletedListener(React.useCallback(function(detail) {
     if (detail.kind === "beat" && detail.id === beat.id) setDeleted(true);
   }, [beat.id]));
@@ -6697,25 +6678,6 @@ function CompactBeatCard({ beat }) {
   }
   React.useEffect(function() { return function() { clearInterval(timerRef.current); }; }, []);
 
-  // Poll until audio is seekable then jump to preview_start — works on iOS where autoPlay blocks onPlay
-  React.useEffect(function() {
-    if (!previewing) return;
-    var ps = beat.preview_start || 0;
-    if (ps <= 0) return;
-    seekedRef.current = false;
-    var attempts = 0;
-    var poll = setInterval(function() {
-      var el = audioRef.current;
-      attempts++;
-      if (el && el.readyState >= 1 && !seekedRef.current) {
-        try { el.currentTime = ps; seekedRef.current = true; } catch(e) {}
-        clearInterval(poll);
-      } else if (attempts > 60) {
-        clearInterval(poll);
-      }
-    }, 50);
-    return function() { clearInterval(poll); };
-  }, [previewing]);
 
   return (
     <div style={{
