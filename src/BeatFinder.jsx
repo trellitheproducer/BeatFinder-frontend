@@ -8514,7 +8514,15 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
     }
   }
 
-  return (
+  // ── Render via React portal to document.body ─────────────────────────────
+  // CRITICAL: On Trending and Members tabs, the card lives inside a
+  // horizontally-scrolling carousel (overflow-x:auto + -webkit-overflow-
+  // scrolling:touch). iOS Safari has a long-standing bug where position:fixed
+  // children of such a container get TRAPPED inside it — they render but
+  // can't scroll themselves, ignore touch events, or behave erratically.
+  // The fix is to mount the modal at the root of document.body, escaping
+  // all parent overflow contexts so it behaves identically on every tab.
+  var sheetJsx = (
     <>
       {showContract && (
         <ContractViewer
@@ -8907,6 +8915,11 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
       </div>
     </>
   );
+
+  if (typeof document === "undefined" || !document.body || !ReactDOM.createPortal) {
+    return sheetJsx;
+  }
+  return ReactDOM.createPortal(sheetJsx, document.body);
 }
 
 // ── Compact beat card for two-column profile layout ───────────────────────────
