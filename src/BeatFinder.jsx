@@ -6262,13 +6262,20 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
       {/* ── CTA button ── */}
       {isFree ? (
         <div style={{ padding: "0 16px 16px" }}>
-          <DownloadButton
-            url={beat.url} title={beat.title} beatId={beat.id}
-            style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #C026D3", color: "#C026D3", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: "0 0 18px rgba(192,38,211,0.2), inset 0 0 18px rgba(192,38,211,0.04)" }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
-            Save MP3 to Device
-          </DownloadButton>
+          {currentUser ? (
+            <DownloadButton
+              url={beat.url} title={beat.title} beatId={beat.id}
+              style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #C026D3", color: "#C026D3", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: "0 0 18px rgba(192,38,211,0.2), inset 0 0 18px rgba(192,38,211,0.04)" }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+              Save MP3 to Device
+            </DownloadButton>
+          ) : (
+            <button onClick={function(){ alert("Sign up for a free or paid plan to download beats!"); }} style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #444", color: "#555", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Sign Up to Download
+            </button>
+          )}
 
           {/* ── Footer info pills ── */}
           <div style={{ display: "flex", gap: 0, marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
@@ -6292,17 +6299,29 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
         </div>
       ) : (
         <div style={{ padding: "0 16px 16px" }}>
-          <button onClick={handleBuy} disabled={buyLoading} style={{
-            width: "100%", borderRadius: 14, padding: "15px",
-            background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
-            border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"),
-            color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 15,
-            cursor: buyLoading ? "not-allowed" : "pointer", letterSpacing: 0.5,
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-            boxShadow: buyLoading ? "none" : "0 0 18px rgba(245,158,11,0.25)",
-          }}>
-            {buyLoading ? "Loading..." : "Buy Lease — " + beat.price}
-          </button>
+          {currentUser ? (
+            <button onClick={handleBuy} disabled={buyLoading} style={{
+              width: "100%", borderRadius: 14, padding: "15px",
+              background: buyLoading ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
+              border: "2px solid " + (buyLoading ? "#333" : "#F59E0B"),
+              color: buyLoading ? "#555" : "white", fontWeight: 800, fontSize: 15,
+              cursor: buyLoading ? "not-allowed" : "pointer", letterSpacing: 0.5,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              boxShadow: buyLoading ? "none" : "0 0 18px rgba(245,158,11,0.25)",
+            }}>
+              {buyLoading ? "Loading..." : "Buy Lease — " + beat.price}
+            </button>
+          ) : (
+            <button onClick={function(){ alert("Sign up and purchase a plan to buy beat leases!"); }} style={{
+              width: "100%", borderRadius: 14, padding: "15px",
+              background: "transparent", border: "2px solid #444",
+              color: "#555", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Sign Up to Buy Lease — {beat.price}
+            </button>
+          )}
           <div style={{ display: "flex", gap: 0, marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
             {[
               { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>, title: "MP3 LEASE", sub: "Instant delivery." },
@@ -6750,26 +6769,47 @@ function CompactBeatCard({ beat, currentUser }) {
         </div>
         {/* Action button */}
         {isFree ? (
-          <DownloadButton url={beat.url} title={beat.title} beatId={beat.id}
-            style={{ background: "transparent", border: "1.5px solid #C026D3", borderRadius: 20, padding: "5px 10px", color: "#C026D3", fontSize: 9, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/></svg>
-            FREE
-          </DownloadButton>
+          currentUser ? (
+            <DownloadButton url={beat.url} title={beat.title} beatId={beat.id}
+              style={{ background: "transparent", border: "1.5px solid #C026D3", borderRadius: 20, padding: "5px 10px", color: "#C026D3", fontSize: 9, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/></svg>
+              FREE
+            </DownloadButton>
+          ) : (
+            <button onClick={function(){ alert("Sign up for a free or paid plan to download beats!"); }} style={{
+              background: "transparent", border: "1.5px solid #555", borderRadius: 20,
+              padding: "5px 10px", color: "#555", fontSize: 9, fontWeight: 800,
+              cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", gap: 4,
+            }}>
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              FREE
+            </button>
+          )
         ) : (
-          <button onClick={async function() {
-            if (!currentUser) return;
-            setBuyLoading(true);
-            try {
-              var r = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
-              window.location.href = r.checkout_url;
-            } catch(e) { setBuyLoading(false); }
-          }} disabled={buyLoading} style={{
-            background: "transparent", border: "1.5px solid #F59E0B", borderRadius: 20,
-            padding: "5px 10px", color: "#F59E0B", fontSize: 9, fontWeight: 800,
-            cursor: buyLoading ? "not-allowed" : "pointer", flexShrink: 0,
-          }}>
-            {buyLoading ? "..." : "BUY " + beat.price}
-          </button>
+          currentUser ? (
+            <button onClick={async function() {
+              setBuyLoading(true);
+              try {
+                var r = await apiFetch("/api/producer/beats/" + beat.id + "/buy-lease", { method: "POST" });
+                window.location.href = r.checkout_url;
+              } catch(e) { setBuyLoading(false); }
+            }} disabled={buyLoading} style={{
+              background: "transparent", border: "1.5px solid #F59E0B", borderRadius: 20,
+              padding: "5px 10px", color: "#F59E0B", fontSize: 9, fontWeight: 800,
+              cursor: buyLoading ? "not-allowed" : "pointer", flexShrink: 0,
+            }}>
+              {buyLoading ? "..." : "BUY " + beat.price}
+            </button>
+          ) : (
+            <button onClick={function(){ alert("Sign up and purchase a plan to buy beat leases!"); }} style={{
+              background: "transparent", border: "1.5px solid #555", borderRadius: 20,
+              padding: "5px 10px", color: "#555", fontSize: 9, fontWeight: 800,
+              cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", gap: 4,
+            }}>
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              {beat.price}
+            </button>
+          )
         )}
       </div>
       {previewing && beat.url && (
@@ -7618,7 +7658,9 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
   const [nestedProfile,setNestedProfile]= useState(null);
 
   useEffect(() => {
-    const endpoint = currentUser
+    // Always use unauthenticated route — works for everyone including guests
+    // profile-auth is only used when we know user is logged in (has id)
+    const endpoint = (currentUser && currentUser.id)
       ? "/api/auth/profile-auth/" + encodeURIComponent(username)
       : "/api/auth/profile/" + encodeURIComponent(username);
     apiFetch(endpoint)
