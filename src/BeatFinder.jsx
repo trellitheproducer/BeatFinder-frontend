@@ -2338,7 +2338,6 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
           }}
         />
       </div>
-      </div>
       <div style={{ padding: "16px", borderBottom: "1px solid #1a1a1a", background: "#0a0a0a" }}>
         <div style={{ color: "white", fontWeight: 700, fontSize: 14, marginBottom: 4, lineHeight: 1.4 }}>
           {beat.title}
