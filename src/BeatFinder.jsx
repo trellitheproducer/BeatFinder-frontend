@@ -6739,6 +6739,18 @@ function CompactBeatCard({ beat }) {
   );
 }
 
+class BeatsBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(e) { return { err: e }; }
+  render() {
+    if (this.state.err) {
+      return React.createElement('div', { style: { padding: 20, color: '#F87171', fontSize: 13 } },
+        'Error: ' + (this.state.err.message || 'Unknown error loading beats'));
+    }
+    return this.props.children;
+  }
+}
+
 function BeatsTabContent({ profile, currentUser, onViewProfile }) {
   var beats = (profile && profile.beats) || [];
   function isFreePrice(p) { return !p || p === "free" || p === "£0" || p === "0" || p === "£0.00" || p === "0.00"; }
@@ -7177,13 +7189,11 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
       </div>
 
       {/* Beats tab — producers only, split into Free and Licensed */}
-      {tab === "beats" && (function(){
-        try {
-          return <BeatsTabContent profile={profile} currentUser={currentUser} onViewProfile={onViewProfile} />;
-        } catch(e) {
-          return <div style={{ padding: 20, color: "#F87171", fontSize: 13 }}>Error loading beats: {String(e.message)}</div>;
-        }
-      })()}
+      {tab === "beats" && (
+        React.createElement(BeatsBoundary, null,
+          React.createElement(BeatsTabContent, { profile: profile, currentUser: currentUser, onViewProfile: onViewProfile })
+        )
+      )}
 
       {/* Tracks tab — artists only */}
       {tab === "tracks" && (
