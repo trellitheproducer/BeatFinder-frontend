@@ -1,5 +1,6 @@
 /* eslint-disable */
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import ReactDOM from "react-dom";
 // =============================================================================
 // PREMIUM LOADER COMPONENT
 // =============================================================================
@@ -3954,10 +3955,20 @@ function ContractViewer({ html, onClose, filename, pdfDownloader }) {
     }
   }
 
-  return (
+  // Portal to document.body so we escape any ancestor with `transform`,
+  // `filter`, or `perspective` (the Trending carousel is one such case).
+  // Without this, position:fixed gets trapped inside the carousel column
+  // and the contract appears clipped on both sides.
+  var viewer = (
     <div style={{
-      position: "fixed", inset: 0, zIndex: 999999,
+      position: "fixed",
+      top: 0, left: 0,
+      width: "100vw", height: "100vh",
+      // Use dvh on supported devices so iOS Safari's URL bar doesn't clip
+      maxHeight: "100dvh",
+      zIndex: 2147483647, // top of i32 — beats any modal/carousel
       background: "#fff", display: "flex", flexDirection: "column",
+      overflow: "hidden",
     }}>
       {/* Header bar */}
       <div style={{
@@ -4003,10 +4014,28 @@ function ContractViewer({ html, onClose, filename, pdfDownloader }) {
         </button>
       </div>
 
-      {/* Scrollable contract content */}
-      <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      {/* Scrollable contract content
+         - iframe gives the contract HTML its own document/CSS context, so its
+           internal styles (font, max-width, etc) can't leak into our app and
+           the contract can't horizontally overflow the viewer.
+         - The iframe itself fills the available space; we render the full
+           HTML via srcDoc which is identical to opening the file. */}
+      <div style={{
+        flex: 1, width: "100%",
+        background: "#fff",
+        boxSizing: "border-box",
+      }}>
+        <iframe
+          title="Licence Contract"
+          srcDoc={html}
+          sandbox="allow-same-origin"
+          style={{
+            width: "100%", height: "100%",
+            border: "none", display: "block",
+            background: "#fff",
+          }}
+        />
+      </div>
 
       {/* Bottom action bar */}
       <div style={{
@@ -4044,6 +4073,14 @@ function ContractViewer({ html, onClose, filename, pdfDownloader }) {
       </div>
     </div>
   );
+
+  // Render via portal to document.body so the viewer is laid out against the
+  // real viewport, never a transformed/clipped ancestor. Falls back to inline
+  // render on the (unlikely) SSR pass where document is undefined.
+  if (typeof document === "undefined" || !document.body || !ReactDOM.createPortal) {
+    return viewer;
+  }
+  return ReactDOM.createPortal(viewer, document.body);
 }
 
 // ── Backend-generated PDF contracts ───────────────────────────────────────────
