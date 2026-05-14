@@ -3798,6 +3798,13 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
               </div>
             )}
           </button>
+          {/* Profile / settings icon — opens the Profile tab (settings, logout etc) */}
+          <button onClick={onGoProfile} style={{ background: "none", border: "none", padding: 8, cursor: "pointer", position: "relative" }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#aaa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -3927,10 +3934,6 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
 
 
 
-      {/* "From people you follow" — recent uploads from followed producers.
-          Only shows for logged-in users with at least 1 follow. */}
-      {user && <FollowingFeed user={user} onPlay={onPlay} savedIds={savedIds} onSave={onSave} />}
-
       {/* Pro personalised workspace */}
       {user?.isArtistPro && (
         <WorkspaceSection
@@ -3954,21 +3957,122 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
 // posts (status, music, video). Hidden when the user follows nobody.
 // Carousel for beat uploads, Twitter-style cards for posts, sorted by date.
 // =============================================================================
-function FollowingFeed({ user, onPlay, savedIds, onSave }) {
+// =============================================================================
+// FEED SCREEN — own tab — new uploads + posts from people the user follows
+// Hits /api/auth/feed which returns a merged stream of beat uploads AND
+// posts (status, music, video). Has proper loading / error / empty states
+// so the user always sees feedback when the tab is opened.
+// =============================================================================
+function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onGoArtists }) {
   var [items, setItems]     = React.useState([]);
   var [loading, setLoading] = React.useState(true);
   var [error, setError]     = React.useState(null);
   var [lightbox, setLightbox] = React.useState(null); // { images, index }
+  var [refreshing, setRefreshing] = React.useState(false);
 
-  React.useEffect(function() {
+  function load(showSpinner) {
     if (!user) { setItems([]); setLoading(false); return; }
-    setLoading(true);
+    if (showSpinner) setRefreshing(true); else setLoading(true);
     apiFetch("/api/auth/feed?limit=30")
-      .then(function(list) { setItems(list || []); setLoading(false); })
-      .catch(function(err) { setError(err && err.message); setLoading(false); });
-  }, [user && user.id]);
+      .then(function(list) {
+        setItems(list || []);
+        setLoading(false); setRefreshing(false); setError(null);
+      })
+      .catch(function(err) {
+        setError(err && err.message);
+        setLoading(false); setRefreshing(false);
+      });
+  }
 
-  if (loading || error || !items || items.length === 0) return null;
+  React.useEffect(function() { load(false); }, [user && user.id]);
+
+  // Logged-out state — prompt to sign in
+  if (!user) {
+    return (
+      <div style={{ padding: "60px 24px", textAlign: "center" }}>
+        <div style={{ marginBottom: 16, color: "#A78BFA" }}>
+          <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+            style={{ filter: "drop-shadow(0 0 12px rgba(124,58,237,0.5))" }}>
+            <path d="M5 12.55a11 11 0 0114.08 0"/>
+            <path d="M1.42 9a16 16 0 0121.16 0"/>
+            <path d="M8.53 16.11a6 6 0 016.95 0"/>
+            <path d="M12 20h.01"/>
+          </svg>
+        </div>
+        <div style={{ color: "white", fontSize: 18, fontWeight: 800, marginBottom: 8 }}>
+          Sign in to see your feed
+        </div>
+        <div style={{ color: "#888", fontSize: 13, lineHeight: 1.6, maxWidth: 280, margin: "0 auto" }}>
+          Follow producers and artists to see their latest beats and posts here.
+        </div>
+      </div>
+    );
+  }
+
+  // Loading state — spinner
+  if (loading) {
+    return (
+      <div style={{ padding: "80px 24px", textAlign: "center", color: "#555" }}>
+        <BFLoader type="bars" text="Loading your feed..." />
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div style={{ padding: "60px 24px", textAlign: "center" }}>
+        <div style={{ color: "#F87171", fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
+          Couldn't load your feed
+        </div>
+        <div style={{ color: "#888", fontSize: 12, marginBottom: 18 }}>{error}</div>
+        <button onClick={function() { load(false); }}
+          style={{
+            padding: "10px 24px", borderRadius: 20,
+            background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+            border: "none", color: "white", fontWeight: 800, fontSize: 13,
+            cursor: "pointer",
+          }}>
+          Try Again
+        </button>
+      </div>
+    );
+  }
+
+  // Empty state — user follows nobody OR nobody they follow has posted
+  if (!items || items.length === 0) {
+    return (
+      <div style={{ padding: "60px 24px", textAlign: "center" }}>
+        <div style={{ marginBottom: 16, color: "#A78BFA" }}>
+          <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+            style={{ filter: "drop-shadow(0 0 12px rgba(124,58,237,0.5))" }}>
+            <path d="M5 12.55a11 11 0 0114.08 0"/>
+            <path d="M1.42 9a16 16 0 0121.16 0"/>
+            <path d="M8.53 16.11a6 6 0 016.95 0"/>
+            <path d="M12 20h.01"/>
+          </svg>
+        </div>
+        <div style={{ color: "white", fontSize: 18, fontWeight: 800, marginBottom: 8 }}>
+          Your feed is empty
+        </div>
+        <div style={{ color: "#888", fontSize: 13, lineHeight: 1.6, maxWidth: 280, margin: "0 auto 20px" }}>
+          Follow producers and artists you love. Their new beats and posts will appear here.
+        </div>
+        {onGoArtists && (
+          <button onClick={onGoArtists}
+            style={{
+              padding: "11px 26px", borderRadius: 20,
+              background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+              border: "none", color: "white", fontWeight: 800, fontSize: 13,
+              cursor: "pointer",
+              boxShadow: "0 4px 14px rgba(124,58,237,0.4)",
+            }}>
+            Discover Artists
+          </button>
+        )}
+      </div>
+    );
+  }
 
   // Split into beats (for carousel) and posts (for stacked feed below).
   // Beats are typically more important visually + clickable to play,
@@ -4008,25 +4112,66 @@ function FollowingFeed({ user, onPlay, savedIds, onSave }) {
   }
 
   return (
-    <div style={{ paddingTop: 8, paddingBottom: 12 }}>
-      {/* Section header */}
-      <div style={{
-        padding: "0 16px", marginBottom: 12,
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-      }}>
-        <div>
-          <div style={{
-            color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 1.5,
-            textShadow: "0 0 6px rgba(124,58,237,0.55)", marginBottom: 2,
-          }}>FROM PEOPLE YOU FOLLOW</div>
-          <div style={{ color: "#888", fontSize: 11 }}>Latest from your network</div>
-        </div>
+    <div style={{ paddingTop: 16, paddingBottom: 80 }}>
+      {/* Big screen header (dedicated tab) */}
+      <div style={{ padding: "0 16px 14px" }}>
         <div style={{
+          display: "flex", alignItems: "flex-end", justifyContent: "space-between",
+          gap: 12, marginBottom: 6,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
+            <div style={{
+              width: 38, height: 38, borderRadius: 12,
+              background: "linear-gradient(135deg,#C026D3,#7C3AED,#3B82F6)",
+              boxShadow: "0 0 16px rgba(124,58,237,0.5)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0,
+            }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12.55a11 11 0 0114.08 0"/>
+                <path d="M1.42 9a16 16 0 0121.16 0"/>
+                <path d="M8.53 16.11a6 6 0 016.95 0"/>
+                <path d="M12 20h.01"/>
+              </svg>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{
+                color: "white", fontSize: 26, fontWeight: 800,
+                fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, lineHeight: 1,
+              }}>FEED</div>
+              <div style={{ color: "#888", fontSize: 12, marginTop: 4 }}>
+                Latest from people you follow
+              </div>
+            </div>
+          </div>
+          <button onClick={function() { load(true); }} disabled={refreshing}
+            style={{
+              width: 36, height: 36, borderRadius: "50%",
+              background: "rgba(124,58,237,0.1)",
+              border: "1px solid rgba(124,58,237,0.3)",
+              color: "#A78BFA",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: refreshing ? "wait" : "pointer", flexShrink: 0,
+            }}
+            title="Refresh">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              style={{
+                animation: refreshing ? "bf-spin 0.8s linear infinite" : "none",
+              }}>
+              <polyline points="23 4 23 10 17 10"/>
+              <polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+            </svg>
+          </button>
+        </div>
+        {/* Count pill */}
+        <div style={{
+          display: "inline-block",
           background: "linear-gradient(135deg,#C026D3,#7C3AED,#3B82F6)",
           color: "white", fontSize: 10, fontWeight: 900,
-          padding: "3px 8px", borderRadius: 20, letterSpacing: 0.5,
+          padding: "4px 10px", borderRadius: 20, letterSpacing: 0.5,
           boxShadow: "0 0 10px rgba(124,58,237,0.4)",
-        }}>{items.length} NEW</div>
+        }}>{items.length} {items.length === 1 ? "ITEM" : "ITEMS"}</div>
       </div>
 
       {/* New beats carousel */}
@@ -24636,11 +24781,11 @@ userPickedMicRef.current = true;
 const NAV = [
   { id: "home",      label: "Home",    icon: "home" },
   { id: "artists",   label: "Artists", icon: "artists" },
+  { id: "feed",      label: "Feed",    icon: "feed" },
   { id: "trending",  label: "Trending",icon: "trending" },
   { id: "search",    label: "Search",  icon: "search" },
   { id: "saved",     label: "Saved",   icon: "saved" },
   { id: "exclusive", label: "Members", icon: "members" },
-  { id: "profile",   label: "Profile", icon: "profile" },
   { id: "studio",    label: "Studio",  icon: "studio" },
 ];
 
@@ -24652,6 +24797,7 @@ const LucideIcons = {
   // Nav
   home:       "M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z M9 22V12h6v10",
   artists:    "M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z",
+  feed:       "M5 12.55a11 11 0 0114.08 0 M1.42 9a16 16 0 0121.16 0 M8.53 16.11a6 6 0 016.95 0 M12 20h.01",
   trending:   "M13 2c0 0-7 6-7 12a7 7 0 0014 0c0-3.5-2-7-3-9 0 2.5-1.5 4-2.5 5.5C14.5 8.5 13 5 13 2z",
   search:     "M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z",
   saved:      "M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z",
@@ -26450,7 +26596,7 @@ export default function BeatFinder() {
       )}
 
       <div style={{ position: "relative" }}>
-        {["home","artists","trending","search","saved","studio","exclusive"].map(t => (
+        {["home","artists","feed","trending","search","saved","studio","exclusive"].map(t => (
           <div key={t} style={{
             display: tab === t ? "block" : "none",
             ...(t === "studio" ? {
@@ -26469,6 +26615,7 @@ export default function BeatFinder() {
           >
             {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => openMessages(null)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} onOpenPost={() => setShowPost(true)} onOpenNotifications={openNotifications} unreadMessages={unreadMessages} unreadNotifications={unreadNotifications} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
+            {t === "feed"      && <FollowingFeed user={user} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onViewProfile={function(u) { setPublicProfile(u); }} onGoArtists={() => goTab("artists")} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} onViewProfile={function(u) { setPublicProfile(u); }} user={user} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} currentUser={user} onViewProfile={function(u) { setSearchProfile(u); }} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
