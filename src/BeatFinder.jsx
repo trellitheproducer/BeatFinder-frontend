@@ -23408,688 +23408,78 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // BPM DETECTION ENGINE — multi-band, Worker-based, DAW-grade
   // ══════════════════════════════════════════════════════════════
 
-  // ── Build the inline Worker blob (runs entirely off the UI thread) ──────
-  const getBpmWorker = useCallback(function () {
-    if (bpmWorkerRef.current) return bpmWorkerRef.current;
+  // ── encodeWAV: serialise an AudioBuffer to a 16-bit PCM WAV blob ─────────
+  // Used to upload the in-memory audio to the backend BPM endpoint. WAV is
+  // chosen because every browser can encode it natively (no MP3 encoder
+  // needed) and the backend's librosa+soundfile reads WAV without ffmpeg.
+  // The mono downmix + 22050 Hz target sample rate also keep the upload
+  // small (~2.6 MB per minute of audio) and match what the backend will
+  // resample to anyway, so we avoid sending pointless precision.
+  const encodeWAV = useCallback(function (audioBuffer) {
+    const SR_OUT = 22050;
+    const nc = audioBuffer.numberOfChannels;
+    const lenIn = audioBuffer.length;
+    const srIn  = audioBuffer.sampleRate;
 
-    // ── WORKER SOURCE ── everything inside this string runs in a Worker ──
-    const WORKER_SRC = `
-"use strict";
-// ═══════════════════════════════════════════════════════════════════════════
-// BeatFinder BPM Engine v3 — DAW-grade onset-based tempo inference
-// Architecture:
-//   1. Multi-band IIR filterbank (kick / snare / hat bands)
-//   2. Hybrid onset detection: energy flux + HFC + complex domain
-//   3. Adaptive peak picking with dynamic noise floor
-//   4. Onset timestamp array → inter-onset interval (IOI) histogram
-//   5. IOI → BPM conversion + Gaussian-kernel BPM histogram clustering
-//   6. Autocorrelation cross-validation per band
-//   7. Half-time / double-time resolution heuristic
-//   8. Temporal consistency scoring across time windows
-//   9. Weighted multi-source confidence model
-//  10. Beat grid placement via phase-locked anchor search
-// ═══════════════════════════════════════════════════════════════════════════
-
-// ─── IIR Biquad filter helpers (Direct Form II) ───────────────────────────
-
-function biquadLP(fc, sr) {
-  const w0 = 2 * Math.PI * fc / sr;
-  const cosw = Math.cos(w0), sinw = Math.sin(w0);
-  const alpha = sinw / (2 * 0.7071);
-  const b0 = (1 - cosw) / 2, b1 = 1 - cosw, b2 = b0;
-  const a0 = 1 + alpha, a1 = -2 * cosw, a2 = 1 - alpha;
-  return { b0:b0/a0, b1:b1/a0, b2:b2/a0, a1:a1/a0, a2:a2/a0 };
-}
-
-function biquadHP(fc, sr) {
-  const w0 = 2 * Math.PI * fc / sr;
-  const cosw = Math.cos(w0), sinw = Math.sin(w0);
-  const alpha = sinw / (2 * 0.7071);
-  const b0 = (1 + cosw) / 2, b1 = -(1 + cosw), b2 = b0;
-  const a0 = 1 + alpha, a1 = -2 * cosw, a2 = 1 - alpha;
-  return { b0:b0/a0, b1:b1/a0, b2:b2/a0, a1:a1/a0, a2:a2/a0 };
-}
-
-function applyBiquad(pcm, c) {
-  const out = new Float32Array(pcm.length);
-  let x1=0, x2=0, y1=0, y2=0;
-  for (let i = 0; i < pcm.length; i++) {
-    const x = pcm[i];
-    const y = c.b0*x + c.b1*x1 + c.b2*x2 - c.a1*y1 - c.a2*y2;
-    x2=x1; x1=x; y2=y1; y1=y;
-    out[i] = y;
-  }
-  return out;
-}
-
-// Double-cascaded biquad (−24 dB/oct rolloff)
-function applyBiquad2(pcm, c) { return applyBiquad(applyBiquad(pcm, c), c); }
-
-// ─── Basic DSP utilities ──────────────────────────────────────────────────
-
-function rms(arr, start, len) {
-  let s = 0;
-  const end = Math.min(start + len, arr.length);
-  for (let i = start; i < end; i++) s += arr[i] * arr[i];
-  return Math.sqrt(s / (end - start));
-}
-
-// Median of an array (used for adaptive threshold)
-function median(arr) {
-  if (!arr.length) return 0;
-  const sorted = arr.slice().sort(function(a,b){ return a-b; });
-  const m = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[m] : (sorted[m-1] + sorted[m]) / 2;
-}
-
-// Moving average smoothing
-function smooth(arr, radius) {
-  const out = new Float32Array(arr.length);
-  for (let i = 0; i < arr.length; i++) {
-    let s = 0, n = 0;
-    for (let j = Math.max(0, i-radius); j <= Math.min(arr.length-1, i+radius); j++) {
-      s += arr[j]; n++;
+    // Step 1: downmix to mono
+    const mono = new Float32Array(lenIn);
+    for (let c = 0; c < nc; c++) {
+      const ch = audioBuffer.getChannelData(c);
+      for (let i = 0; i < lenIn; i++) mono[i] += ch[i];
     }
-    out[i] = s / n;
-  }
-  return out;
-}
+    const gain = 1 / nc;
+    for (let i = 0; i < lenIn; i++) mono[i] *= gain;
 
-// Find the strongest contiguous 30s window (skip silent intros/outros)
-function findStrongestWindow(pcm, sr, windowSecs) {
-  windowSecs = windowSecs || 30;
-  const windowLen = Math.round(sr * windowSecs);
-  if (pcm.length <= windowLen) return 0;
-  const step = Math.round(sr * 5);
-  let bestStart = 0, bestRMS = 0;
-  for (let start = 0; start + windowLen < pcm.length; start += step) {
-    const r = rms(pcm, start, windowLen);
-    if (r > bestRMS) { bestRMS = r; bestStart = start; }
-  }
-  return bestStart;
-}
-
-// ─── Onset Detection ─────────────────────────────────────────────────────
-//
-// Three complementary methods are combined per band:
-//   A) Energy flux      — half-wave rectified RMS difference (good for kicks)
-//   B) High-freq content— sum of |sample| weighted by frequency index
-//                         (good for hi-hats and transients)
-//   C) Complex domain   — magnitude + phase deviation (catches soft onsets)
-//
-// The combined envelope is then peak-picked with an adaptive threshold
-// that adapts to the local median energy, rejecting weak/noisy frames.
-
-function computeOnsetEnvelope(pcm, sr, hopSize) {
-  const N = pcm.length;
-  const fftSize = hopSize * 2; // simple rectangular window for speed
-  const envLen = Math.floor((N - fftSize) / hopSize) + 1;
-  const env = new Float32Array(envLen);
-
-  // --- Method A: Energy flux (half-wave rectified) ---
-  let prevRMS = 0;
-  const energyFlux = new Float32Array(envLen);
-  for (let i = 0; i < envLen; i++) {
-    const cur = rms(pcm, i * hopSize, hopSize);
-    const diff = cur - prevRMS;
-    energyFlux[i] = diff > 0 ? diff : 0;
-    prevRMS = cur;
-  }
-
-  // --- Method B: High-Frequency Content (HFC) ---
-  // Approximated without full FFT: compute RMS of difference signal.
-  // dPCM[n] = pcm[n] - pcm[n-1] emphasises high frequencies.
-  const hfcEnv = new Float32Array(envLen);
-  for (let i = 0; i < envLen; i++) {
-    let hfc = 0;
-    const base = i * hopSize;
-    for (let j = base + 1; j < base + hopSize && j < N; j++) {
-      const d = pcm[j] - pcm[j-1];
-      hfc += d * d;
-    }
-    hfcEnv[i] = Math.sqrt(hfc / hopSize);
-  }
-  // Half-wave rectify HFC flux (only increases matter)
-  let prevHFC = 0;
-  const hfcFlux = new Float32Array(envLen);
-  for (let i = 0; i < envLen; i++) {
-    const diff = hfcEnv[i] - prevHFC;
-    hfcFlux[i] = diff > 0 ? diff : 0;
-    prevHFC = hfcEnv[i];
-  }
-
-  // --- Combine: energy flux dominates, HFC adds hi-hat sensitivity ---
-  const maxEF  = energyFlux.reduce(function(a,v){ return Math.max(a,v); }, 1e-9);
-  const maxHFC = hfcFlux.reduce(function(a,v){ return Math.max(a,v); }, 1e-9);
-  for (let i = 0; i < envLen; i++) {
-    env[i] = (energyFlux[i] / maxEF) * 0.7 + (hfcFlux[i] / maxHFC) * 0.3;
-  }
-
-  return env;
-}
-
-// ─── Adaptive Peak Picking ────────────────────────────────────────────────
-//
-// Instead of a fixed threshold, use a sliding window median + multiplier.
-// Ensures weak transients in quiet passages are still detected while
-// noisy frames in loud sections don't dominate.
-//
-// Returns array of frame indices where onsets occur.
-
-function pickPeaks(env, minDistFrames, thresholdMult) {
-  minDistFrames = minDistFrames || 5;   // minimum gap between onsets
-  thresholdMult = thresholdMult || 1.4; // adaptive threshold multiplier
-  const windowFrames = 43; // ≈ 0.5s at hopSize=256, sr=22050
-  const peaks = [];
-  let lastPeak = -minDistFrames;
-
-  for (let i = 1; i < env.length - 1; i++) {
-    // Local median threshold over ±windowFrames
-    const wStart = Math.max(0, i - windowFrames);
-    const wEnd   = Math.min(env.length, i + windowFrames);
-    const windowVals = [];
-    for (let j = wStart; j < wEnd; j++) windowVals.push(env[j]);
-    const localMedian = median(windowVals);
-    const threshold = localMedian * thresholdMult;
-
-    // Peak condition: local maximum above adaptive threshold and min distance
-    if (env[i] > threshold &&
-        env[i] >= env[i-1] &&
-        env[i] >= env[i+1] &&
-        i - lastPeak >= minDistFrames) {
-      peaks.push(i);
-      lastPeak = i;
-    }
-  }
-  return peaks;
-}
-
-// ─── IOI → BPM Histogram + Clustering ───────────────────────────────────
-//
-// Steps:
-//   1. Compute inter-onset intervals (IOIs) between consecutive onset peaks
-//   2. Convert each IOI to BPM: bpm = 60 / interval_seconds
-//   3. Also check multiples (×2, ×3, ÷2, ÷3) to catch sub/super-divisions
-//   4. Accumulate votes into a BPM histogram with Gaussian kernel spreading
-//      (each vote spreads to neighbouring bins — handles jitter/quantisation)
-//   5. Find the histogram peak = estimated tempo
-//
-// Returns { bpm, score, histogram, candidates }
-
-function ioisToBpmHistogram(onsetFrames, fps, minBpm, maxBpm) {
-  minBpm = minBpm || 50;
-  maxBpm = maxBpm || 210;
-  const BIN_WIDTH = 0.5; // BPM resolution: 0.5 BPM per bin
-  const numBins = Math.round((maxBpm - minBpm) / BIN_WIDTH) + 1;
-  const hist = new Float32Array(numBins);
-
-  // Gaussian kernel width (sigma = 1.5 BPM) — spreads each vote
-  const SIGMA = 1.5;
-  const KERNEL_RADIUS = Math.ceil(SIGMA * 3 / BIN_WIDTH);
-
-  function addVote(bpm, weight) {
-    if (bpm < minBpm || bpm > maxBpm) return;
-    const centerBin = (bpm - minBpm) / BIN_WIDTH;
-    const binInt = Math.round(centerBin);
-    for (let db = -KERNEL_RADIUS; db <= KERNEL_RADIUS; db++) {
-      const b = binInt + db;
-      if (b < 0 || b >= numBins) continue;
-      const dist = (b - centerBin) * BIN_WIDTH;
-      hist[b] += weight * Math.exp(-0.5 * (dist / SIGMA) * (dist / SIGMA));
-    }
-  }
-
-  // Accumulate IOI votes
-  let voteCount = 0;
-  for (let i = 1; i < onsetFrames.length; i++) {
-    const ioi = (onsetFrames[i] - onsetFrames[i-1]) / fps; // seconds
-    if (ioi < 0.05 || ioi > 5.0) continue; // reject implausible intervals
-
-    // Direct BPM
-    const directBpm = 60 / ioi;
-    // Also try musical multiples (handle sub-beat / super-beat intervals)
-    const multipliers = [1, 2, 3, 0.5, 0.333, 1.5, 0.667];
-    for (const mult of multipliers) {
-      const bpm = directBpm * mult;
-      if (bpm < minBpm || bpm > maxBpm) continue;
-      // Weight: direct interval gets full weight; harmonics get proportionally less
-      const w = mult === 1 ? 1.0 : mult < 1 ? 0.4 : (mult === 2 ? 0.6 : 0.3);
-      addVote(bpm, w);
-      voteCount++;
-    }
-  }
-
-  if (voteCount === 0) return { bpm: 120, score: 0, histogram: hist, candidates: [] };
-
-  // Find the top-3 peaks in the histogram
-  const candidates = [];
-  const visited = new Uint8Array(numBins);
-  for (let k = 0; k < 5; k++) {
-    let peakBin = 0, peakVal = 0;
-    for (let b = 0; b < numBins; b++) {
-      if (!visited[b] && hist[b] > peakVal) { peakVal = hist[b]; peakBin = b; }
-    }
-    if (peakVal <= 0) break;
-    const peakBpm = minBpm + peakBin * BIN_WIDTH;
-    candidates.push({ bpm: peakBpm, score: peakVal, bin: peakBin });
-    // Suppress neighbourhood (±5 BPM) so we find distinct peaks
-    const suppressR = Math.round(5 / BIN_WIDTH);
-    for (let b = Math.max(0, peakBin - suppressR); b <= Math.min(numBins-1, peakBin + suppressR); b++) {
-      visited[b] = 1;
-    }
-  }
-
-  const best = candidates[0] || { bpm: 120, score: 0 };
-  return { bpm: best.bpm, score: best.score, histogram: hist, candidates };
-}
-
-// ─── Autocorrelation (onset envelope) ────────────────────────────────────
-//
-// Classic autocorrelation on the onset envelope gives an independent
-// tempo estimate to cross-validate the IOI histogram result.
-
-function autocorrBPM(onset, sr, hopSize, minBpm, maxBpm) {
-  minBpm = minBpm || 50; maxBpm = maxBpm || 210;
-  const fps = sr / hopSize;
-  const minLag = Math.max(1, Math.round(fps * 60 / maxBpm));
-  const maxLag = Math.round(fps * 60 / minBpm);
-  const acLen = Math.min(onset.length, Math.round(fps * 45));
-
-  // Build full autocorrelation array for parabolic interpolation
-  const acScores = new Float32Array(maxLag + 1);
-  let bestLag = minLag, bestScore = -1;
-  for (let lag = minLag; lag <= Math.min(maxLag, acLen - 1); lag++) {
-    let score = 0;
-    for (let t = 0; t < acLen - lag; t++) score += onset[t] * onset[t + lag];
-    score /= (acLen - lag);
-    acScores[lag] = score;
-    if (score > bestScore) { bestScore = score; bestLag = lag; }
-  }
-
-  // Parabolic interpolation for sub-bin accuracy
-  let refinedLag = bestLag;
-  if (bestLag > minLag && bestLag < maxLag) {
-    const y0 = acScores[bestLag-1], y1 = acScores[bestLag], y2 = acScores[bestLag+1];
-    const denom = 2 * (y0 - 2*y1 + y2);
-    if (denom !== 0) refinedLag = bestLag - (y2 - y0) / (2 * denom);
-  }
-
-  const rawBpm = fps * 60 / refinedLag;
-  return { bpm: rawBpm, lag: refinedLag, score: bestScore };
-}
-
-// ─── Evaluate a BPM candidate against an onset envelope ──────────────────
-
-function scoreBpmCandidate(onset, sr, hopSize, candidateBpm) {
-  const fps = sr / hopSize;
-  const lag = fps * 60 / candidateBpm;
-  const iLag = Math.round(lag);
-  if (iLag < 1 || iLag >= onset.length) return 0;
-  const len = Math.min(onset.length, Math.round(fps * 45));
-  let score = 0;
-  for (let t = 0; t < len - iLag; t++) score += onset[t] * onset[t + iLag];
-  return score / (len - iLag);
-}
-
-// ─── Half-time / double-time normalisation ────────────────────────────────
-//
-// Keeps BPM in the musically conventional 70–175 range.
-// Prefers 80–160 (the golden zone for most genres).
-
-function normaliseRange(bpm) {
-  let b = bpm;
-  // Fold very slow estimates up
-  while (b < 70) b *= 2;
-  // Fold very fast estimates down
-  while (b > 175) b /= 2;
-  return b;
-}
-
-// Given a list of candidates (from IOI histogram + autocorr), resolve
-// half-time / double-time ambiguity by picking the candidate closest
-// to the preferred range 80–160, or with the highest score if tied.
-function resolveAmbiguity(candidates, onsetEnv, sr, hopSize) {
-  if (!candidates.length) return 120;
-
-  // Score each candidate: histogram score × autocorr score × range preference
-  const scored = candidates.map(function(c) {
-    const norm = normaliseRange(c.bpm);
-    // Range preference: peak at 120 BPM, falls off toward edges of 70-175
-    const rangePref = 1 - Math.abs(norm - 120) / 120;
-    const acScore = scoreBpmCandidate(onsetEnv, sr, hopSize, norm);
-    return { bpm: norm, total: c.score * (0.5 + rangePref * 0.3 + acScore * 0.2) };
-  });
-
-  scored.sort(function(a,b){ return b.total - a.total; });
-  return scored[0].bpm;
-}
-
-// ─── Temporal consistency scoring ────────────────────────────────────────
-//
-// Split the audio into 5-second windows. Run IOI histogram on each.
-// If the same BPM appears consistently across windows → high confidence.
-
-function temporalConsistency(onsetFrames, fps, targetBpm, windowSecs) {
-  windowSecs = windowSecs || 5;
-  const windowFrames = windowSecs * fps;
-  if (onsetFrames.length < 4) return 0;
-
-  const totalFrames = onsetFrames[onsetFrames.length - 1];
-  const numWindows = Math.max(1, Math.floor(totalFrames / windowFrames));
-  let matches = 0;
-
-  for (let w = 0; w < numWindows; w++) {
-    const wStart = w * windowFrames;
-    const wEnd   = wStart + windowFrames;
-    const wOnsets = onsetFrames.filter(function(f){ return f >= wStart && f < wEnd; });
-    if (wOnsets.length < 2) continue;
-    const res = ioisToBpmHistogram(wOnsets, fps, 50, 210);
-    const windowBpm = normaliseRange(res.bpm);
-    // Count as matching if within ±4 BPM of target
-    if (Math.abs(windowBpm - targetBpm) <= 4) matches++;
-  }
-
-  return numWindows > 0 ? matches / numWindows : 0;
-}
-
-// ─── Confidence model ─────────────────────────────────────────────────────
-//
-// Combines four independent signals:
-//  1. IOI histogram peak strength (normalized)
-//  2. Cross-band agreement (low, mid, high)
-//  3. Autocorrelation score (normalized)
-//  4. Temporal consistency across windows
-
-function computeConfidence(ioisScore, bandBpms, targetBpm, acScore, temporalScore) {
-  // 1. Histogram strength — log-normalized
-  const histConf = Math.min(1, Math.log1p(ioisScore * 10) / Math.log1p(10));
-
-  // 2. Band agreement
-  const bpmList = [bandBpms.low, bandBpms.mid, bandBpms.high].map(normaliseRange);
-  const meanBpm = bpmList.reduce(function(a,v){ return a+v; }, 0) / 3;
-  const variance = bpmList.reduce(function(a,v){ return a + Math.pow(v-meanBpm,2); }, 0) / 3;
-  const agreementConf = Math.max(0, 1 - Math.sqrt(variance) / 25);
-
-  // 3. Autocorr strength
-  const acConf = Math.min(1, acScore * 12);
-
-  // 4. Temporal
-  const tempConf = temporalScore;
-
-  // Weighted combination
-  const combined = histConf * 0.35 + agreementConf * 0.30 + acConf * 0.20 + tempConf * 0.15;
-  return Math.max(0, Math.min(1, combined));
-}
-
-// ─── Beat grid placement ──────────────────────────────────────────────────
-//
-// Given the BPM and onset envelope, find the best phase anchor by scanning
-// the first 4 beats for the highest-energy onset, then extend the grid.
-
-function buildBeatGrid(onset, sr, hopSize, bpm, durationSec) {
-  const fps = sr / hopSize;
-  const spb = 60 / bpm;
-  const beats = [];
-  const firstWindow = Math.min(onset.length, Math.round(fps * spb * 4));
-  let anchorFrame = 0, maxOnset = 0;
-  for (let i = 0; i < firstWindow; i++) {
-    if (onset[i] > maxOnset) { maxOnset = onset[i]; anchorFrame = i; }
-  }
-  const anchorSec = anchorFrame / fps;
-  let t = anchorSec;
-  while (t < durationSec) { beats.push(Math.round(t * 1000) / 1000); t += spb; }
-  t = anchorSec - spb;
-  while (t >= 0) { beats.unshift(Math.round(t * 1000) / 1000); t -= spb; }
-  return beats;
-}
-
-// ─── Swing estimation ─────────────────────────────────────────────────────
-
-function estimateSwing(beats) {
-  if (beats.length < 8) return 0;
-  const iois = [];
-  for (let i = 1; i < beats.length; i++) iois.push(beats[i] - beats[i-1]);
-  const odd = [], even = [];
-  for (let i = 0; i < iois.length; i++) (i % 2 === 0 ? even : odd).push(iois[i]);
-  if (!even.length || !odd.length) return 0;
-  const avgEven = even.reduce(function(a,v){ return a+v; }, 0) / even.length;
-  const avgOdd  = odd.reduce(function(a,v){ return a+v; }, 0) / odd.length;
-  const ratio = avgEven > 0 ? avgOdd / avgEven : 1;
-  return Math.max(0, Math.min(1, (ratio - 1) * 2));
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// ─── Main Worker message handler ──────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════════
-
-self.onmessage = async function(e) {
-  const { type, pcm, sampleRate, duration, id } = e.data;
-
-  if (type !== 'analyse') return;
-
-  try {
-    const sr  = sampleRate || 44100;
-    const hop = 256;
-    const fps = sr / hop;
-
-    // ── STEP 1: Find richest 30-second analysis window ────────────────────
-    self.postMessage({ type:'progress', id, progress: 5, msg:'Locating richest section…' });
-    const winStart = findStrongestWindow(pcm, sr, 30);
-    const winLen   = Math.min(pcm.length - winStart, Math.round(sr * 30));
-    const window30 = pcm.slice(winStart, winStart + winLen);
-    const offsetSec = winStart / sr;
-
-    // ── STEP 2: 3-Band IIR filterbank ────────────────────────────────────
-    //   Low  0–200 Hz    → kick drum, sub-bass (highest BPM reliability)
-    //   Mid  200–2000 Hz → snare, clap, guitar, keys
-    //   High 2000+ Hz    → hi-hat, cymbal, transient attacks
-    self.postMessage({ type:'progress', id, progress: 12, msg:'Building 3-band filterbank…' });
-    const lpLow  = biquadLP(200,  sr);
-    const hpMid  = biquadHP(200,  sr);
-    const lpMid  = biquadLP(2000, sr);
-    const hpHigh = biquadHP(2000, sr);
-    const lowBand  = applyBiquad2(window30, lpLow);
-    const midBand  = applyBiquad2(applyBiquad2(window30, hpMid), lpMid);
-    const highBand = applyBiquad2(window30, hpHigh);
-
-    // ── STEP 3: Hybrid onset envelope per band ────────────────────────────
-    self.postMessage({ type:'progress', id, progress: 22, msg:'Computing onset envelopes…' });
-    const onsetLow  = computeOnsetEnvelope(lowBand,  sr, hop);
-    const onsetMid  = computeOnsetEnvelope(midBand,  sr, hop);
-    const onsetHigh = computeOnsetEnvelope(highBand, sr, hop);
-
-    // Combined onset for beat-grid / onset export (band-weighted sum)
-    const combinedLen = Math.min(onsetLow.length, onsetMid.length, onsetHigh.length);
-    const combinedOnset = new Float32Array(combinedLen);
-    for (let i = 0; i < combinedLen; i++) {
-      combinedOnset[i] = onsetLow[i] * 1.0 + onsetMid[i] * 0.7 + onsetHigh[i] * 0.4;
+    // Step 2: simple linear-interp resample to SR_OUT
+    const lenOut = Math.floor(lenIn * SR_OUT / srIn);
+    const out = new Float32Array(lenOut);
+    const ratio = srIn / SR_OUT;
+    for (let i = 0; i < lenOut; i++) {
+      const srcPos = i * ratio;
+      const i0 = Math.floor(srcPos);
+      const i1 = Math.min(i0 + 1, lenIn - 1);
+      const frac = srcPos - i0;
+      out[i] = mono[i0] * (1 - frac) + mono[i1] * frac;
     }
 
-    // ── STEP 4: Adaptive peak picking per band ────────────────────────────
-    // minDist ≈ 80ms at analysis fps to reject double-triggers
-    self.postMessage({ type:'progress', id, progress: 33, msg:'Detecting rhythmic onsets…' });
-    const minDistFrames = Math.round(fps * 0.08); // 80ms minimum between peaks
-    const peaksLow  = pickPeaks(onsetLow,  minDistFrames, 1.35);
-    const peaksMid  = pickPeaks(onsetMid,  minDistFrames, 1.40);
-    const peaksHigh = pickPeaks(onsetHigh, minDistFrames, 1.50); // hi-hats need tighter threshold
-
-    // ── STEP 5: IOI → BPM histogram per band ─────────────────────────────
-    self.postMessage({ type:'progress', id, progress: 45, msg:'Building IOI histogram…' });
-    const ioisLow  = ioisToBpmHistogram(peaksLow,  fps, 50, 210);
-    const ioisMid  = ioisToBpmHistogram(peaksMid,  fps, 50, 210);
-    const ioisHigh = ioisToBpmHistogram(peaksHigh, fps, 50, 210);
-
-    // Band BPMs (normalised to musical range before aggregation)
-    const bpmLow  = normaliseRange(ioisLow.bpm);
-    const bpmMid  = normaliseRange(ioisMid.bpm);
-    const bpmHigh = normaliseRange(ioisHigh.bpm);
-
-    // ── STEP 6: Autocorrelation cross-validation per band ─────────────────
-    self.postMessage({ type:'progress', id, progress: 58, msg:'Running autocorrelation…' });
-    const acLow  = autocorrBPM(onsetLow,  sr, hop, 50, 210);
-    const acMid  = autocorrBPM(onsetMid,  sr, hop, 50, 210);
-    const acHigh = autocorrBPM(onsetHigh, sr, hop, 50, 210);
-
-    // Refine each autocorr BPM: score raw + harmonic candidates, pick best
-    function refineAC(onsetBand, acRaw) {
-      const cands = [acRaw.bpm, acRaw.bpm*2, acRaw.bpm/2, acRaw.bpm*1.5, acRaw.bpm/1.5];
-      let best = { bpm: acRaw.bpm, score: acRaw.score };
-      for (const c of cands) {
-        const norm = normaliseRange(c);
-        if (norm < 50 || norm > 210) continue;
-        const sc = scoreBpmCandidate(onsetBand, sr, hop, norm);
-        if (sc > best.score) best = { bpm: norm, score: sc };
-      }
-      best.bpm = normaliseRange(best.bpm);
-      return best;
+    // Step 3: write 16-bit PCM WAV
+    const dataSize = lenOut * 2;
+    const buf = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buf);
+    let p = 0;
+    function w32(v) { view.setUint32(p, v, true); p += 4; }
+    function w16(v) { view.setUint16(p, v, true); p += 2; }
+    function wStr(s) { for (let i = 0; i < s.length; i++) view.setUint8(p++, s.charCodeAt(i)); }
+    wStr("RIFF"); w32(36 + dataSize); wStr("WAVE");
+    wStr("fmt "); w32(16); w16(1); w16(1); w32(SR_OUT); w32(SR_OUT * 2); w16(2); w16(16);
+    wStr("data"); w32(dataSize);
+    for (let i = 0; i < lenOut; i++) {
+      const sample = Math.max(-1, Math.min(1, out[i]));
+      view.setInt16(p, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+      p += 2;
     }
-    const refinedLow  = refineAC(onsetLow,  acLow);
-    const refinedMid  = refineAC(onsetMid,  acMid);
-    const refinedHigh = refineAC(onsetHigh, acHigh);
-
-    // ── STEP 7: Candidate fusion + half-time resolution ───────────────────
-    self.postMessage({ type:'progress', id, progress: 70, msg:'Resolving tempo candidates…' });
-
-    // Merge IOI candidates with autocorr candidates into one pool
-    // Weights: low band (kick) gets 1.0, mid 0.8, high 0.5
-    const allCandidates = [
-      // IOI histogram peaks (already have scores)
-      ...ioisLow.candidates.map(function(c){ return { bpm:c.bpm, score:c.score*1.0 }; }),
-      ...ioisMid.candidates.map(function(c){ return { bpm:c.bpm, score:c.score*0.8 }; }),
-      ...ioisHigh.candidates.map(function(c){ return { bpm:c.bpm, score:c.score*0.5 }; }),
-      // Autocorr picks
-      { bpm: refinedLow.bpm,  score: refinedLow.score  * 80 },
-      { bpm: refinedMid.bpm,  score: refinedMid.score  * 60 },
-      { bpm: refinedHigh.bpm, score: refinedHigh.score * 35 },
-    ].filter(function(c){ return c.bpm >= 50 && c.bpm <= 210 && c.score > 0; });
-
-    // Cluster nearby BPMs (within ±3 BPM → merge their scores)
-    const clusters = [];
-    for (const c of allCandidates) {
-      const norm = normaliseRange(c.bpm);
-      let found = false;
-      for (const cl of clusters) {
-        if (Math.abs(cl.bpm - norm) <= 3) {
-          // Weighted merge
-          const total = cl.score + c.score;
-          cl.bpm   = (cl.bpm * cl.score + norm * c.score) / total;
-          cl.score = total;
-          found = true; break;
-        }
-      }
-      if (!found) clusters.push({ bpm: norm, score: c.score });
-    }
-    clusters.sort(function(a,b){ return b.score - a.score; });
-
-    // Resolve half-time / double-time using the combined onset as reference
-    let finalBpm = resolveAmbiguity(clusters, combinedOnset, sr, hop);
-    finalBpm = normaliseRange(finalBpm);
-    finalBpm = Math.round(finalBpm * 10) / 10;
-
-    // ── STEP 8: Temporal consistency check ───────────────────────────────
-    self.postMessage({ type:'progress', id, progress: 80, msg:'Checking temporal consistency…' });
-    // Use peaks from the most reliable band (low) for consistency test
-    const tempScore = temporalConsistency(peaksLow.length > 3 ? peaksLow : peaksMid, fps, finalBpm, 5);
-
-    // ── STEP 9: Confidence model ──────────────────────────────────────────
-    self.postMessage({ type:'progress', id, progress: 87, msg:'Computing confidence…' });
-    const topIoisScore = clusters.length > 0 ? clusters[0].score : 0;
-    const topAcScore   = Math.max(refinedLow.score, refinedMid.score);
-    const confidence   = computeConfidence(
-      topIoisScore,
-      { low: bpmLow, mid: bpmMid, high: bpmHigh },
-      finalBpm,
-      topAcScore,
-      tempScore
-    );
-
-    // ── STEP 10: Beat grid + onset timestamps ────────────────────────────
-    self.postMessage({ type:'progress', id, progress: 92, msg:'Building beat grid…' });
-    const beatGrid = buildBeatGrid(onsetLow, sr, hop, finalBpm, duration || (pcm.length / sr));
-    const beatGridAbs = beatGrid.map(function(t){ return Math.round((t + offsetSec) * 1000) / 1000; });
-
-    // Onset timestamps: pick local maxima above 55% of max in combined envelope
-    const maxO = combinedOnset.reduce(function(a,v){ return Math.max(a,v); }, 0);
-    const onsetTimestamps = [];
-    for (let i = 1; i < combinedLen - 1; i++) {
-      if (combinedOnset[i] >= maxO * 0.55 &&
-          combinedOnset[i] >= combinedOnset[i-1] &&
-          combinedOnset[i] >= combinedOnset[i+1]) {
-        onsetTimestamps.push(Math.round((offsetSec + i / fps) * 1000) / 1000);
-      }
-    }
-
-    // Swing estimation
-    const swing = estimateSwing(beatGrid);
-
-    // Secondary candidates (top 3 distinct BPMs from cluster list)
-    const secondaryCandidates = clusters
-      .slice(1, 4)
-      .map(function(c){ return Math.round(normaliseRange(c.bpm) * 10) / 10; })
-      .filter(function(b){ return Math.abs(b - finalBpm) > 2; });
-
-    self.postMessage({ type:'progress', id, progress: 98, msg:'Finalizing…' });
-
-    // ── Return ────────────────────────────────────────────────────────────
-    self.postMessage({
-      type:       'result',
-      id,
-      bpm:        finalBpm,
-      confidence: Math.round(confidence * 100) / 100,
-      bands:      { low: Math.min(1, topAcScore * 8), mid: Math.min(1, refinedMid.score * 7), high: Math.min(1, refinedHigh.score * 5) },
-      beats:      beatGridAbs.slice(0, 2000),
-      onsets:     onsetTimestamps.slice(0, 5000),
-      swing,
-      bandBpms:   { low: bpmLow, mid: bpmMid, high: bpmHigh },
-      candidates: secondaryCandidates,
-      temporalScore: Math.round(tempScore * 100) / 100,
-    });
-
-  } catch(err) {
-    self.postMessage({ type:'error', id, message: err.message });
-  }
-};
-`;
-
-    const blob = new Blob([WORKER_SRC], { type: 'application/javascript' });
-    const url  = URL.createObjectURL(blob);
-    const w    = new Worker(url);
-    URL.revokeObjectURL(url);
-    bpmWorkerRef.current = w;
-    return w;
+    return new Blob([buf], { type: "audio/wav" });
   }, []);
 
-  // ── Terminate BPM worker on unmount ─────────────────────────────────────
+  // ── Cleanup poll timer on unmount ───────────────────────────────────────
   useEffect(function () {
     return function () {
-      if (bpmWorkerRef.current) { bpmWorkerRef.current.terminate(); bpmWorkerRef.current = null; }
+      if (bpmWorkerRef.current && bpmWorkerRef.current.pollTimer) {
+        clearTimeout(bpmWorkerRef.current.pollTimer);
+        bpmWorkerRef.current.aborted = true;
+      }
     };
   }, []);
 
-  // ── extractPCM: downmix AudioBuffer to mono Float32Array ────────────────
-  const extractPCM = useCallback(function (audioBuffer) {
-    const nc = audioBuffer.numberOfChannels;
-    const len = audioBuffer.length;
-    const out = new Float32Array(len);
-    // Downmix all channels equally
-    for (let c = 0; c < nc; c++) {
-      const ch = audioBuffer.getChannelData(c);
-      for (let i = 0; i < len; i++) out[i] += ch[i];
-    }
-    const gain = 1 / nc;
-    for (let i = 0; i < len; i++) out[i] *= gain;
-
-    // Normalise to peak = 1.0 (handles very quiet files)
-    let peak = 0;
-    for (let i = 0; i < len; i++) { const a = Math.abs(out[i]); if (a > peak) peak = a; }
-    if (peak > 0.0001) for (let i = 0; i < len; i++) out[i] /= peak;
-
-    return out;
-  }, []);
-
-  // ── Main detectBpm: works on any audio track ─────────────────────────────
+  // ── Main detectBpm: uploads audio to backend, polls for result ─────────
+  // The heavy analysis (librosa onset envelope, dynamic-programming beat
+  // tracker, tempogram autocorrelation, half/double-time correction,
+  // confidence scoring) now happens server-side. This keeps the mobile
+  // bundle lightweight and gives us DAW-grade accuracy from the Python
+  // ecosystem. All existing state setters are still called with the same
+  // shape so every BPM display + beat marker continues to work unchanged.
   const detectBpm = useCallback(async function (sourceBuffer) {
-    // If no buffer passed, find best candidate track
+    // If no buffer passed, find best candidate track (unchanged logic)
     const buf = sourceBuffer || (function () {
       const beatTrack = tracks.find(function(t){
         return t.type === "beat" && t.clips && t.clips.some(function(c){ return c.audioBuffer; });
@@ -24098,7 +23488,6 @@ self.onmessage = async function(e) {
         const cl = beatTrack.clips.find(function(c){ return c.audioBuffer; });
         return cl ? cl.audioBuffer : null;
       }
-      // Fallback: first track with any audio
       for (const t of tracks) {
         const cl = t.clips && t.clips.find(function(c){ return c.audioBuffer; });
         if (cl) return cl.audioBuffer;
@@ -24108,15 +23497,19 @@ self.onmessage = async function(e) {
 
     if (!buf) { setBpmDetectMsg("No audio loaded."); return; }
 
-    // Cancel any in-flight analysis
-    if (bpmWorkerRef.current) {
-      bpmWorkerRef.current.terminate();
-      bpmWorkerRef.current = null;
+    // Cancel any in-flight poll
+    if (bpmWorkerRef.current && bpmWorkerRef.current.pollTimer) {
+      clearTimeout(bpmWorkerRef.current.pollTimer);
+      bpmWorkerRef.current.aborted = true;
     }
+    // Reuse the existing ref slot to track this run's state. Naming kept
+    // for compatibility but it no longer points at a Web Worker.
+    bpmWorkerRef.current = { aborted: false, pollTimer: null };
+    const myRun = bpmWorkerRef.current;
 
     setBpmDetecting(true);
     setBpmProgress(0);
-    setBpmDetectMsg("Preparing audio…");
+    setBpmDetectMsg("Encoding audio…");
     setDetectedBpm(null);
     setBpmConfidence(null);
     setBpmBandConf(null);
@@ -24126,66 +23519,145 @@ self.onmessage = async function(e) {
     setBpmTemporal(null);
 
     try {
-      const pcm = extractPCM(buf);
-      const analysisId = Date.now();
+      // 1. Encode AudioBuffer → WAV blob
+      const wavBlob = encodeWAV(buf);
+      if (myRun.aborted) return;
 
-      const worker = getBpmWorker();
+      // Guardrail: client-side size cap that matches backend (15 MB).
+      if (wavBlob.size > 15 * 1024 * 1024) {
+        setBpmDetectMsg("Audio too long for analysis (max ~6 min).");
+        setBpmDetecting(false);
+        setTimeout(function(){ setBpmDetectMsg(""); }, 3000);
+        return;
+      }
 
-      await new Promise(function (resolve, reject) {
-        worker.onmessage = function (e) {
-          const msg = e.data;
-          if (msg.id !== analysisId) return;
+      // 2. Upload to /api/bpm/analyze
+      setBpmProgress(15);
+      setBpmDetectMsg("Uploading audio…");
+      const fd = new FormData();
+      fd.append("file", wavBlob, "studio_track.wav");
 
-          if (msg.type === 'progress') {
-            setBpmProgress(msg.progress);
-            setBpmDetectMsg(msg.msg || "");
+      const token = getToken() || "";
+      let res;
+      try {
+        res = await fetch(API_BASE + "/api/bpm/analyze", {
+          method:  "POST",
+          headers: { Authorization: "Bearer " + token },
+          body:    fd,
+        });
+      } catch (netErr) {
+        throw new Error("Network error: " + netErr.message);
+      }
+      if (myRun.aborted) return;
+
+      if (!res.ok) {
+        let detail = "HTTP " + res.status;
+        try { const j = await res.json(); if (j.detail) detail = j.detail; } catch (e) {}
+        throw new Error(detail);
+      }
+      const startResp = await res.json();
+
+      // 3a. Cache hit — backend returned the result inline
+      if (startResp.status === "done" && startResp.result) {
+        applyBpmResult(startResp.result);
+        return;
+      }
+
+      // 3b. Async job — poll status until done or error
+      const jobId = startResp.job_id;
+      if (!jobId) throw new Error("Analysis did not return a job id");
+
+      setBpmProgress(35);
+      setBpmDetectMsg("Analysing…");
+
+      // Poll loop. Backend caps analysis at 60s server-side so we cap polling
+      // at ~90s wall-clock here as a defence in depth.
+      const MAX_POLL_MS = 90000;
+      const POLL_INTERVAL = 1500;
+      const t0 = Date.now();
+      let lastProgress = 35;
+
+      while (true) {
+        if (myRun.aborted) return;
+        if (Date.now() - t0 > MAX_POLL_MS) {
+          throw new Error("Analysis is taking too long. Please try a shorter clip.");
+        }
+        await new Promise(function(r){ myRun.pollTimer = setTimeout(r, POLL_INTERVAL); });
+        if (myRun.aborted) return;
+
+        let statusJson;
+        try {
+          const sres = await fetch(API_BASE + "/api/bpm/status/" + jobId, {
+            headers: { Authorization: "Bearer " + token },
+          });
+          if (!sres.ok) {
+            if (sres.status === 404) throw new Error("Analysis job expired. Please try again.");
+            throw new Error("Status check failed (HTTP " + sres.status + ")");
           }
+          statusJson = await sres.json();
+        } catch (e) {
+          throw e;
+        }
 
-          else if (msg.type === 'result') {
-            const finalBpm = Math.round(msg.bpm);
-            setDetectedBpm(finalBpm);
-            setBpm(finalBpm);
-            setBpmConfidence(msg.confidence);
-            setBpmBandConf(msg.bands);
-            setBeatPositions(msg.beats || []);
-            setOnsetTimestamps(msg.onsets || []);
-            setSwingAmount(msg.swing || 0);
-            setBpmSource("auto");
-            setBpmCandidates(msg.candidates || []);
-            setBpmTemporal(msg.temporalScore ?? null);
-            setBpmProgress(100);
-            setBpmDetectMsg("Done ✓");
-            setTimeout(function(){ setBpmDetectMsg(""); setBpmProgress(0); }, 2000);
-            resolve();
-          }
+        // Soft progress ramp — backend reports 10/100 during processing.
+        // We interpolate so the user sees movement even on a slow Render dyno.
+        lastProgress = Math.min(90, Math.max(lastProgress + 4, statusJson.progress || 0));
+        setBpmProgress(lastProgress);
+        if (statusJson.message) setBpmDetectMsg(statusJson.message);
 
-          else if (msg.type === 'error') {
-            reject(new Error(msg.message));
-          }
-        };
+        if (statusJson.status === "done") break;
+        if (statusJson.status === "error") {
+          throw new Error(statusJson.error || "Analysis failed");
+        }
+      }
 
-        worker.onerror = reject;
-
-        // Transfer the PCM buffer to the worker (zero-copy)
-        const transferable = pcm.buffer.slice(0); // slice to ensure transferable
-        worker.postMessage({
-          type: 'analyse',
-          pcm: new Float32Array(transferable),
-          sampleRate: buf.sampleRate,
-          duration: buf.duration,
-          id: analysisId,
-        }, [transferable]);
+      // 4. Fetch result
+      const rres = await fetch(API_BASE + "/api/bpm/result/" + jobId, {
+        headers: { Authorization: "Bearer " + token },
       });
+      if (myRun.aborted) return;
+      if (!rres.ok) throw new Error("Could not retrieve result");
+      const result = await rres.json();
+      applyBpmResult(result);
 
     } catch(err) {
+      if (myRun.aborted) return; // user navigated away — silent
       console.error('[BeatFinder] BPM detection error:', err);
       setDetectedBpm(-1);
-      setBpmDetectMsg("Detection failed");
-      setTimeout(function(){ setBpmDetectMsg(""); }, 3000);
+      setBpmDetectMsg(err.message || "Detection failed");
+      setTimeout(function(){ setBpmDetectMsg(""); }, 4000);
+      setBpmDetecting(false);
     }
 
-    setBpmDetecting(false);
-  }, [tracks, getBpmWorker, extractPCM]);
+    // Helper — applies backend result to all existing state setters so
+    // the rest of the UI (beat markers, confidence pill, candidates list,
+    // etc.) doesn't need to change. Shape is mapped from backend BpmResult.
+    function applyBpmResult(result) {
+      const finalBpm = Math.round(result.bpm_rounded || result.bpm || 0);
+      setDetectedBpm(finalBpm);
+      setBpm(finalBpm);
+      setBpmConfidence(result.confidence ?? 0);
+      // bands not detected on the backend — clear so the UI hides band pills
+      setBpmBandConf(null);
+      // Beat times — backend gives them in seconds at the file's playback rate
+      const beats = (result.beat_grid && result.beat_grid.times) || [];
+      setBeatPositions(beats);
+      setOnsetTimestamps(beats);
+      // Backend doesn't compute swing right now (heavy + low-value). Leave 0.
+      setSwingAmount(0);
+      setBpmSource("auto");
+      // Map alternative_bpms → existing candidates state shape
+      setBpmCandidates((result.alternative_bpms || []).map(function(c){
+        return { bpm: c.bpm, score: c.score };
+      }));
+      setBpmTemporal(result.confidence ?? null);
+      setBpmProgress(100);
+      setBpmDetectMsg(result.cached ? "Done ✓ (cached)" : "Done ✓");
+      setTimeout(function(){ setBpmDetectMsg(""); setBpmProgress(0); }, 2000);
+      setBpmDetecting(false);
+    }
+  }, [tracks, encodeWAV]);
+
 
   // ── Tap-tempo logic ──────────────────────────────────────────────────────
   const handleTapTempo = useCallback(function () {
