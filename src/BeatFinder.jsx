@@ -4598,42 +4598,112 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
 
                 {/* Link preview card — rendered when the backend stored OG
                     metadata for a URL in this post. Tapping opens in a new
-                    tab. Defensive about missing fields. */}
-                {post.linkUrl && (
-                  <div onClick={function(e) {
-                      e.stopPropagation();
-                      try { window.open(post.linkUrl, "_blank", "noopener,noreferrer"); } catch(_) {}
-                    }}
-                    style={{
-                      margin: "0 14px 10px", borderRadius: 12, overflow: "hidden",
-                      background: "linear-gradient(165deg,#120b22 0%,#0a0a14 60%,#080812 100%)",
-                      border: "1px solid rgba(124,58,237,0.25)",
-                      cursor: "pointer",
-                    }}>
-                    {post.linkImage && (
-                      <img src={post.linkImage} alt=""
-                        style={{ width: "100%", maxHeight: 200, objectFit: "cover", display: "block", background: "#000" }}
-                        onError={function(e) { e.target.style.display = "none"; }} />
-                    )}
-                    <div style={{ padding: "10px 12px" }}>
-                      {post.linkSiteName && (
-                        <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 3 }}>
-                          {post.linkSiteName}
-                        </div>
-                      )}
-                      <div style={{ color: "white", fontWeight: 800, fontSize: 13, lineHeight: 1.3, marginBottom: 3,
-                        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                        {post.linkTitle || post.linkUrl}
+                    tab. We ALWAYS show a visual: either the fetched image,
+                    or a gradient placeholder seeded by the hostname so
+                    different sites get visually distinct cards. */}
+                {post.linkUrl && (() => {
+                  // Pick a gradient based on the hostname so the same site
+                  // always renders the same colour and different sites are
+                  // distinguishable at a glance. Six palettes total — all
+                  // on-brand purples/blues/cyans/magentas.
+                  var host = "";
+                  try { host = (new URL(post.linkUrl)).hostname.replace(/^www\./, ""); } catch(_) { host = post.linkUrl; }
+                  var displayLabel = (post.linkSiteName || host || "LINK").toUpperCase();
+                  var palettes = [
+                    { a: "#C026D3", b: "#7C3AED", c: "#3B82F6" },
+                    { a: "#3B82F6", b: "#06B6D4", c: "#0EA5E9" },
+                    { a: "#7C3AED", b: "#C026D3", c: "#EC4899" },
+                    { a: "#06B6D4", b: "#3B82F6", c: "#7C3AED" },
+                    { a: "#A855F7", b: "#6366F1", c: "#3B82F6" },
+                    { a: "#EC4899", b: "#A855F7", c: "#6366F1" },
+                  ];
+                  // Cheap deterministic hash of host → palette index
+                  var h = 0;
+                  for (var i = 0; i < host.length; i++) { h = ((h << 5) - h + host.charCodeAt(i)) | 0; }
+                  var pal = palettes[Math.abs(h) % palettes.length];
+                  // Big initial letter shown on the placeholder, e.g. "Y"
+                  // for youtube.com, "G" for github.com.
+                  var initial = (host.replace(/[^a-z0-9]/gi, "")[0] || "?").toUpperCase();
+                  // Show a real <img> if backend gave us one, otherwise
+                  // render the gradient placeholder.
+                  var hasRealImage = !!post.linkImage;
+                  return (
+                    <div onClick={function(e) {
+                        e.stopPropagation();
+                        try { window.open(post.linkUrl, "_blank", "noopener,noreferrer"); } catch(_) {}
+                      }}
+                      style={{
+                        margin: "0 14px 10px", borderRadius: 12, overflow: "hidden",
+                        background: "linear-gradient(165deg,#120b22 0%,#0a0a14 60%,#080812 100%)",
+                        border: "1px solid rgba(124,58,237,0.25)",
+                        cursor: "pointer",
+                      }}>
+                      {hasRealImage ? (
+                        <img src={post.linkImage} alt=""
+                          style={{ width: "100%", maxHeight: 200, objectFit: "cover", display: "block", background: "#000" }}
+                          onError={function(e) {
+                            // If the image fails to load (broken link,
+                            // CORS, etc.) swap in the placeholder so the
+                            // card still has something visual.
+                            var img = e.target;
+                            var ph = img.parentNode.querySelector(".bf-linkph");
+                            if (ph) { img.style.display = "none"; ph.style.display = "flex"; }
+                          }} />
+                      ) : null}
+                      {/* Gradient placeholder — hidden when there's a real
+                          image that loaded successfully, shown otherwise. */}
+                      <div className="bf-linkph"
+                        style={{
+                          display: hasRealImage ? "none" : "flex",
+                          width: "100%", aspectRatio: "16/9", maxHeight: 200,
+                          alignItems: "center", justifyContent: "center",
+                          position: "relative", overflow: "hidden",
+                          background: "linear-gradient(135deg," + pal.a + " 0%," + pal.b + " 55%," + pal.c + " 100%)",
+                        }}>
+                        {/* Subtle texture / depth */}
+                        <div style={{
+                          position: "absolute", inset: 0,
+                          background: "radial-gradient(circle at 20% 30%, rgba(255,255,255,0.18), transparent 50%), radial-gradient(circle at 80% 70%, rgba(0,0,0,0.25), transparent 60%)",
+                        }} />
+                        {/* Big initial */}
+                        <div style={{
+                          position: "relative", zIndex: 1,
+                          fontSize: 56, fontWeight: 900, color: "white",
+                          fontFamily: "'Bebas Neue',sans-serif",
+                          textShadow: "0 4px 14px rgba(0,0,0,0.4)",
+                          letterSpacing: 1,
+                        }}>{initial}</div>
+                        {/* Hostname strip across the bottom */}
+                        <div style={{
+                          position: "absolute", bottom: 0, left: 0, right: 0,
+                          padding: "6px 12px",
+                          background: "linear-gradient(180deg,transparent,rgba(0,0,0,0.55))",
+                          color: "white", fontSize: 11, fontWeight: 800,
+                          letterSpacing: 0.6, textTransform: "uppercase",
+                          textAlign: "center",
+                          textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+                        }}>{displayLabel}</div>
                       </div>
-                      {post.linkDescription && (
-                        <div style={{ color: "#8b8b9a", fontSize: 12, lineHeight: 1.4,
+                      <div style={{ padding: "10px 12px" }}>
+                        {post.linkSiteName && (
+                          <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 3 }}>
+                            {post.linkSiteName}
+                          </div>
+                        )}
+                        <div style={{ color: "white", fontWeight: 800, fontSize: 13, lineHeight: 1.3, marginBottom: 3,
                           display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                          {post.linkDescription}
+                          {post.linkTitle || post.linkUrl}
                         </div>
-                      )}
+                        {post.linkDescription && (
+                          <div style={{ color: "#8b8b9a", fontSize: 12, lineHeight: 1.4,
+                            display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                            {post.linkDescription}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Images */}
                 {post.images && post.images.length > 0 && (
