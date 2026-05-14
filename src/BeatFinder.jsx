@@ -3617,7 +3617,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
 // =============================================================================
 // NOTIFICATIONS PANEL
 // =============================================================================
-function NotificationsPanel({ user, onClose, onJumpToFeed }) {
+function NotificationsPanel({ user, onClose, onJumpToFeed, onOpenPost }) {
   var [notifs,  setNotifs]  = React.useState([]);
   var [loading, setLoading] = React.useState(true);
 
@@ -3665,10 +3665,21 @@ function NotificationsPanel({ user, onClose, onJumpToFeed }) {
     return Math.floor(diff / 86400) + "d ago";
   }
 
-  // Tap behaviour: "post" type notifications jump to the Feed tab.
-  // Other types are display-only for now (likes/comments could open the
-  // post detail later — out of scope for this feature).
+  // Tap behaviour: if the notification carries a post id, jump straight
+  // to that post in the Feed (the Feed will scroll-to + flash-highlight
+  // it). Otherwise — older notifs that pre-date the postId field —
+  // fall back to jumping to the Feed tab generically.
   function handleNotifTap(n) {
+    // Backend stores it as `postId` (camelCase), but be defensive about
+    // alternate spellings just in case.
+    var pid = n.postId || n.post_id || n.targetId || "";
+    if (pid && onOpenPost) {
+      onOpenPost(pid);
+      return;
+    }
+    // No post id — fall back. For post-type notifs at minimum we can
+    // still take the user to the Feed; for like/comment without a
+    // postId we sadly can't do much better.
     if (n.type === "post" && onJumpToFeed) {
       onJumpToFeed();
       onClose();
@@ -3725,7 +3736,11 @@ function NotificationsPanel({ user, onClose, onJumpToFeed }) {
             </div>
           )}
           {!loading && notifs.map(function(n) {
-            var clickable = n.type === "post";
+            // Clickable when we have something to navigate to: either
+            // an explicit postId on the notif, or a post-type notif we
+            // can take to the Feed.
+            var hasPostId = !!(n.postId || n.post_id || n.targetId);
+            var clickable = hasPostId || n.type === "post";
             return (
               <div key={n.id} onClick={function(){ handleNotifTap(n); }}
                 style={{
@@ -4091,12 +4106,21 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
 // posts (status, music, video). Has proper loading / error / empty states
 // so the user always sees feedback when the tab is opened.
 // =============================================================================
-function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearchPeople, onOpenPost, refreshKey }) {
+function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearchPeople, onOpenPost, refreshKey, highlightPostId, onHighlightConsumed }) {
   var [items, setItems]     = React.useState([]);
   var [loading, setLoading] = React.useState(true);
   var [error, setError]     = React.useState(null);
   var [lightbox, setLightbox] = React.useState(null); // { images, index }
   var [refreshing, setRefreshing] = React.useState(false);
+  // Pull-to-refresh state. `pullDistance` is how far the user has dragged
+  // down (clamped to 0..PULL_MAX). When they release past PULL_TRIGGER we
+  // fire load(true). The indicator rotates proportionally to pullDistance
+  // so the user sees the gesture acknowledged in realtime.
+  var PULL_TRIGGER = 70;   // px before refresh fires on release
+  var PULL_MAX     = 110;  // visual cap so over-pulling doesn't push everything down forever
+  var [pullDistance, setPullDistance] = React.useState(0);
+  var pullStartY     = React.useRef(null);
+  var pullCancelled  = React.useRef(false);   // becomes true if user scrolled before pulling down
   // Tick state — bumps every 10s to force re-render of the timeAgo labels
   // so they update live ("5s ago" → "15s ago" → "25s ago"…) without needing
   // a server fetch.
@@ -4252,6 +4276,118 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
   }
 
   React.useEffect(function() { load(false); }, [user && user.id]);
+
+  // When a notification deep-links to a post, scroll to it and clear
+  // the highlight after a few seconds. We retry briefly because the
+  // post may not yet be in the DOM if the feed is still loading.
+  React.useEffect(function() {
+    if (!highlightPostId) return;
+    var tries = 0;
+    function tryScroll() {
+      // Match either the wrapper id (data-postid) or the underlying
+      // original id (data-original-postid), since notifications carry
+      // the original's id.
+      var el = document.querySelector('[data-postid="' + highlightPostId + '"]')
+            || document.querySelector('[data-original-postid="' + highlightPostId + '"]');
+      if (el && el.scrollIntoView) {
+        try { el.scrollIntoView({ behavior: "smooth", block: "center" }); }
+        catch(_) { try { el.scrollIntoView(); } catch(__) {} }
+        return true;
+      }
+      return false;
+    }
+    function attempt() {
+      tries++;
+      if (tryScroll()) return;
+      if (tries < 10) setTimeout(attempt, 200);  // wait up to ~2s
+    }
+    attempt();
+    // Clear the highlight after the user has had a moment to see it.
+    var clearAt = setTimeout(function() {
+      if (onHighlightConsumed) onHighlightConsumed();
+    }, 2800);
+    return function() { clearTimeout(clearAt); };
+  }, [highlightPostId, items.length]);
+
+  // Pull-to-refresh — attach passive touch listeners to the document so
+  // we can detect a downward drag at the very top of the page and use
+  // it to fire load(true). Logic:
+  //   touchstart: if window scrolled to top, capture starting Y, otherwise
+  //               disable for this gesture (so a normal scroll-up doesn't
+  //               accidentally trigger refresh as the user reaches the top)
+  //   touchmove:  if user dragged down past 4px, update pullDistance, and
+  //               preventDefault so iOS rubber-band doesn't fight us
+  //   touchend:   if pullDistance > PULL_TRIGGER, fire refresh; reset
+  React.useEffect(function() {
+    function atTop() {
+      var top = (window.pageYOffset || document.documentElement.scrollTop || 0);
+      return top <= 0;
+    }
+    function onTouchStart(e) {
+      if (refreshing || loading) { pullStartY.current = null; return; }
+      if (!atTop()) { pullStartY.current = null; pullCancelled.current = true; return; }
+      pullCancelled.current = false;
+      pullStartY.current = (e.touches && e.touches[0]) ? e.touches[0].clientY : null;
+    }
+    function onTouchMove(e) {
+      if (pullCancelled.current || pullStartY.current == null) return;
+      // If user scrolled the page during the gesture (e.g. content was
+      // taller than viewport and they swiped up first), abort.
+      if (!atTop()) { pullCancelled.current = true; setPullDistance(0); return; }
+      var y  = (e.touches && e.touches[0]) ? e.touches[0].clientY : pullStartY.current;
+      var dy = y - pullStartY.current;
+      if (dy <= 0) { setPullDistance(0); return; }
+      // Apply a damping factor so the indicator slows down past trigger
+      // — feels like iOS, not a 1:1 stretch
+      var damped = dy < PULL_TRIGGER ? dy : PULL_TRIGGER + (dy - PULL_TRIGGER) * 0.35;
+      var clamped = Math.min(PULL_MAX, damped);
+      setPullDistance(clamped);
+      // Need to call preventDefault to suppress iOS rubber-banding. This
+      // ONLY works if the listener is non-passive — see addEventListener
+      // options below.
+      if (dy > 6 && e.cancelable) e.preventDefault();
+    }
+    function onTouchEnd() {
+      if (pullCancelled.current || pullStartY.current == null) {
+        pullStartY.current = null;
+        setPullDistance(0);
+        return;
+      }
+      var d = pullDistance;
+      pullStartY.current = null;
+      if (d >= PULL_TRIGGER) {
+        // Hold the indicator at the trigger position while the request
+        // is in flight, then it disappears via the load()-driven
+        // setRefreshing(false).
+        setPullDistance(PULL_TRIGGER);
+        load(true);
+      } else {
+        setPullDistance(0);
+      }
+    }
+    // touchmove must be non-passive so we can preventDefault on iOS
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchmove",  onTouchMove,  { passive: false });
+    document.addEventListener("touchend",   onTouchEnd,   { passive: true });
+    document.addEventListener("touchcancel", onTouchEnd,  { passive: true });
+    return function() {
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove",  onTouchMove);
+      document.removeEventListener("touchend",   onTouchEnd);
+      document.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [refreshing, loading, pullDistance]);
+
+  // When a refresh fires the load() callback will eventually flip
+  // refreshing → false. At that point we want to retract the indicator
+  // back to zero (it was being held at PULL_TRIGGER during the request).
+  React.useEffect(function() {
+    if (!refreshing && pullDistance > 0) {
+      // small delay so the user sees the spinner finish its rotation
+      var t = setTimeout(function() { setPullDistance(0); }, 200);
+      return function() { clearTimeout(t); };
+    }
+  }, [refreshing]);
 
   // Live refresh on demand — when the user posts (refreshKey bumps from
   // the App level), re-fetch immediately so their own post appears at
@@ -4413,8 +4549,48 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
   }
 
   return (
-    <div style={{ paddingTop: 16, paddingBottom: 80 }}
+    <div style={{
+      paddingTop: 16, paddingBottom: 80,
+      position: "relative",
+      // Push the whole feed down by pullDistance so users see content
+      // being "pulled". When pullDistance returns to 0 the transform
+      // animates back via the transition below.
+      transform: "translateY(" + pullDistance + "px)",
+      transition: pullStartY.current == null ? "transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)" : "none",
+    }}
       onClick={function() { if (openMenuFor) setOpenMenuFor(null); }}>
+      {/* Pull-to-refresh indicator — sits above the content, becomes
+          visible as the user pulls down. Rotates proportionally to pull
+          progress; once refreshing is true the spinner spins on its own. */}
+      <div style={{
+        position: "absolute", top: -50, left: 0, right: 0,
+        display: "flex", justifyContent: "center",
+        pointerEvents: "none",
+        opacity: Math.min(1, pullDistance / 40),
+      }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: "50%",
+          background: "rgba(124,58,237,0.12)",
+          border: "1px solid rgba(124,58,237,0.35)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          color: "#A78BFA",
+          boxShadow: "0 4px 14px rgba(124,58,237,0.25)",
+        }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            style={{
+              // While refreshing, spin continuously. Before that, rotate
+              // proportionally to how far the user has pulled — gives an
+              // unmistakable "we're getting ready" feel.
+              animation: refreshing ? "bf-spin 0.8s linear infinite" : "none",
+              transform: refreshing ? undefined : "rotate(" + (pullDistance * 4) + "deg)",
+              transition: refreshing ? "none" : "transform 0.05s linear",
+            }}>
+            <polyline points="23 4 23 10 17 10"/>
+            <polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+          </svg>
+        </div>
+      </div>
       {/* Big screen header (dedicated tab) */}
       <div style={{ padding: "0 16px 14px" }}>
         <div style={{
@@ -4446,25 +4622,6 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
               </div>
             </div>
           </div>
-          <button onClick={function() { load(true); }} disabled={refreshing}
-            style={{
-              width: 36, height: 36, borderRadius: "50%",
-              background: "rgba(124,58,237,0.1)",
-              border: "1px solid rgba(124,58,237,0.3)",
-              color: "#A78BFA",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              cursor: refreshing ? "wait" : "pointer", flexShrink: 0,
-            }}
-            title="Refresh">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-              style={{
-                animation: refreshing ? "bf-spin 0.8s linear infinite" : "none",
-              }}>
-              <polyline points="23 4 23 10 17 10"/>
-              <polyline points="1 20 1 14 7 14"/>
-              <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
-            </svg>
-          </button>
           {/* + Compose Post button — Pro users only. Moved here from Home header. */}
           {user && (user.isPro || user.isArtistPro) && onOpenPost && (
             <button onClick={onOpenPost}
@@ -4506,12 +4663,29 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
             var liked     = !!postLikes[actionId];
             var reposted  = !!postReposts[actionId];
 
+            // Is this card the target of a notification deep-link? We
+            // match on either the wrapper id OR the underlying original
+            // id (for reposts), since notifications carry the original's
+            // id but the user might encounter it via someone's repost.
+            var isHighlighted = highlightPostId && (
+              item.id === highlightPostId ||
+              (isRepost && item.repost_of === highlightPostId)
+            );
+
             return (
-              <div key={item.id} style={{
+              <div key={item.id}
+                data-postid={item.id}
+                data-original-postid={isRepost ? (item.repost_of || "") : item.id}
+                style={{
                 background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
                 borderRadius: 14, overflow: "hidden",
-                border: "1px solid rgba(124,58,237,0.18)",
-                boxShadow: "0 4px 14px rgba(0,0,0,0.45)",
+                border: isHighlighted
+                  ? "2px solid rgba(192,38,211,0.85)"
+                  : "1px solid rgba(124,58,237,0.18)",
+                boxShadow: isHighlighted
+                  ? "0 4px 24px rgba(192,38,211,0.6), 0 0 32px rgba(192,38,211,0.35)"
+                  : "0 4px 14px rgba(0,0,0,0.45)",
+                transition: "border-color 0.4s, box-shadow 0.4s",
               }}>
                 {/* "Reposted by …" chip — only shown for reposts */}
                 {isRepost && (
@@ -4627,16 +4801,35 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
                   // Show a real <img> if backend gave us one, otherwise
                   // render the gradient placeholder.
                   var hasRealImage = !!post.linkImage;
+                  // Decide how to open the link. On iOS PWA, target="_blank"
+                  // pops an in-app webview that often misbehaves (the blank
+                  // "Done" screen). Navigating the current tab instead lets
+                  // iOS's universal-link system hand off to the real app
+                  // (YouTube, Spotify, etc) while leaving the PWA running
+                  // in the background — so swiping back to BeatFinder
+                  // returns the user exactly where they were. On every
+                  // other platform we keep target="_blank" so users don't
+                  // lose the page they were reading.
+                  var isPWAiOS = false;
+                  try {
+                    var ua = navigator.userAgent || "";
+                    var isStandalone =
+                      (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+                      window.navigator.standalone === true;
+                    isPWAiOS = isStandalone && /iPad|iPhone|iPod/.test(ua);
+                  } catch(_) {}
                   return (
-                    <div onClick={function(e) {
-                        e.stopPropagation();
-                        try { window.open(post.linkUrl, "_blank", "noopener,noreferrer"); } catch(_) {}
-                      }}
+                    <a href={post.linkUrl}
+                      target={isPWAiOS ? undefined : "_blank"}
+                      rel="noopener noreferrer"
+                      onClick={function(e) { e.stopPropagation(); }}
                       style={{
+                        display: "block", textDecoration: "none",
                         margin: "0 14px 10px", borderRadius: 12, overflow: "hidden",
                         background: "linear-gradient(165deg,#120b22 0%,#0a0a14 60%,#080812 100%)",
                         border: "1px solid rgba(124,58,237,0.25)",
-                        cursor: "pointer",
+                        cursor: "pointer", color: "inherit",
+                        WebkitTapHighlightColor: "transparent",
                       }}>
                       {hasRealImage ? (
                         <img src={post.linkImage} alt=""
@@ -4701,7 +4894,7 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
                           </div>
                         )}
                       </div>
-                    </div>
+                    </a>
                   );
                 })()}
 
@@ -28067,6 +28260,10 @@ export default function BeatFinder() {
   // Bumped each time the user successfully posts, so the FollowingFeed
   // re-fetches and shows their own post immediately at the top.
   const [feedRefreshKey,     setFeedRefreshKey]     = useState(0);
+  // When a user taps a notification, we stash the post id here, jump to
+  // the Feed, and the Feed component scrolls to + highlights that post.
+  // Cleared back to null once the highlight animation finishes.
+  const [highlightPostId,    setHighlightPostId]    = useState(null);
   const [messageThread,      setMessageThread]      = useState(null);
   const [showNotifications,  setShowNotifications]  = useState(false);
   const [unreadMessages,     setUnreadMessages]     = useState(0);
@@ -28346,7 +28543,7 @@ export default function BeatFinder() {
           >
             {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => openMessages(null)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} onOpenPost={() => setShowPost(true)} onOpenNotifications={openNotifications} unreadMessages={unreadMessages} unreadNotifications={unreadNotifications} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} resetKey={artistsResetKey} />}
-            {t === "feed"      && <FollowingFeed user={user} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onViewProfile={function(u) { setPublicProfile(u); }} onSearchPeople={function() { setSearchInitialTab("people"); goTab("search"); }} onOpenPost={() => setShowPost(true)} refreshKey={feedRefreshKey} />}
+            {t === "feed"      && <FollowingFeed user={user} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onViewProfile={function(u) { setPublicProfile(u); }} onSearchPeople={function() { setSearchInitialTab("people"); goTab("search"); }} onOpenPost={() => setShowPost(true)} refreshKey={feedRefreshKey} highlightPostId={highlightPostId} onHighlightConsumed={() => setHighlightPostId(null)} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} onViewProfile={function(u) { setPublicProfile(u); }} user={user} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} initialTab={searchInitialTab} onClearInitialTab={() => setSearchInitialTab(null)} currentUser={user} onViewProfile={function(u) { setSearchProfile(u); }} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
@@ -28400,7 +28597,19 @@ export default function BeatFinder() {
       )}
 
       {showNotifications && (
-        <NotificationsPanel user={user} onClose={() => setShowNotifications(false)} onJumpToFeed={() => goTab("feed")} />
+        <NotificationsPanel
+          user={user}
+          onClose={() => setShowNotifications(false)}
+          onJumpToFeed={() => goTab("feed")}
+          onOpenPost={function(postId) {
+            // Stash the post id, switch to Feed; the FollowingFeed will
+            // pick it up via its highlightPostId prop, scroll to it,
+            // briefly flash a border, then call onHighlightConsumed
+            // which clears the state above.
+            setHighlightPostId(postId);
+            goTab("feed");
+            setShowNotifications(false);
+          }} />
       )}
 
       {searchProfile && (
