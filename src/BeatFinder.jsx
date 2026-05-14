@@ -4121,6 +4121,17 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
   var [pullDistance, setPullDistance] = React.useState(0);
   var pullStartY     = React.useRef(null);
   var pullCancelled  = React.useRef(false);   // becomes true if user scrolled before pulling down
+  // Mirror of pullDistance in a ref so the touchend handler can read
+  // the latest value without forcing the effect to re-subscribe on every
+  // touchmove (which would tear down and re-add listeners constantly).
+  var pullDistanceRef = React.useRef(0);
+  // Ref to the Feed's outer div. We walk UP from here at mount time to
+  // find the actual scrolling ancestor (the tab container has
+  // overflowY:auto + a fixed height). We attach the pull-to-refresh
+  // touch listeners to THAT element, since touch events bubble up from
+  // it and its scrollTop is what we need to read.
+  var feedRootRef = React.useRef(null);
+  var scrollParentRef = React.useRef(null);
   // Tick state — bumps every 10s to force re-render of the timeAgo labels
   // so they update live ("5s ago" → "15s ago" → "25s ago"…) without needing
   // a server fetch.
@@ -4309,20 +4320,57 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
     return function() { clearTimeout(clearAt); };
   }, [highlightPostId, items.length]);
 
-  // Pull-to-refresh — attach passive touch listeners to the document so
-  // we can detect a downward drag at the very top of the page and use
-  // it to fire load(true). Logic:
-  //   touchstart: if window scrolled to top, capture starting Y, otherwise
-  //               disable for this gesture (so a normal scroll-up doesn't
-  //               accidentally trigger refresh as the user reaches the top)
-  //   touchmove:  if user dragged down past 4px, update pullDistance, and
-  //               preventDefault so iOS rubber-band doesn't fight us
+  // Pull-to-refresh — find the scrolling ancestor of the Feed (the tab
+  // container has overflowY:auto + height:calc(100dvh-...), so it scrolls
+  // independently from window). Attach touch listeners directly to that
+  // element so we read the right scrollTop and stay scoped to the Feed
+  // tab. Logic:
+  //   touchstart: if container scrolled to top, capture starting Y;
+  //               otherwise mark the gesture cancelled
+  //   touchmove:  if user dragged down past 4px, update pullDistance,
+  //               and preventDefault so iOS rubber-band doesn't fight us
   //   touchend:   if pullDistance > PULL_TRIGGER, fire refresh; reset
   React.useEffect(function() {
-    function atTop() {
-      var top = (window.pageYOffset || document.documentElement.scrollTop || 0);
-      return top <= 0;
+    // Helper that updates both the state (drives the UI) and the ref
+    // (so touchend can read the latest value without the effect having
+    // to re-subscribe whenever pullDistance changes).
+    function setPull(v) { pullDistanceRef.current = v; setPullDistance(v); }
+    // Find the closest scrolling ancestor by walking up from our root.
+    function findScrollParent() {
+      if (scrollParentRef.current) return scrollParentRef.current;
+      var el = feedRootRef.current;
+      if (!el) return null;
+      var node = el.parentElement;
+      while (node && node !== document.body) {
+        try {
+          var cs = window.getComputedStyle(node);
+          var oy = cs && cs.overflowY;
+          // The tab container is `overflow-y: auto`; the contract
+          // viewer uses `scroll`. Either counts.
+          if (oy === "auto" || oy === "scroll") {
+            // Don't require scrollHeight > clientHeight here — when the
+            // feed is empty or short, the container can have equal
+            // dimensions but we still want to attach to it so the
+            // gesture works.
+            scrollParentRef.current = node;
+            return node;
+          }
+        } catch(_) {}
+        node = node.parentElement;
+      }
+      // Fallback to window/document if we couldn't find a div
+      scrollParentRef.current = window;
+      return window;
     }
+    var target = findScrollParent();
+    if (!target) return;
+    function scrollTopOf() {
+      if (target === window) {
+        return window.pageYOffset || document.documentElement.scrollTop || 0;
+      }
+      return target.scrollTop || 0;
+    }
+    function atTop() { return scrollTopOf() <= 0; }
     function onTouchStart(e) {
       if (refreshing || loading) { pullStartY.current = null; return; }
       if (!atTop()) { pullStartY.current = null; pullCancelled.current = true; return; }
@@ -4333,15 +4381,15 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
       if (pullCancelled.current || pullStartY.current == null) return;
       // If user scrolled the page during the gesture (e.g. content was
       // taller than viewport and they swiped up first), abort.
-      if (!atTop()) { pullCancelled.current = true; setPullDistance(0); return; }
+      if (!atTop()) { pullCancelled.current = true; setPull(0); return; }
       var y  = (e.touches && e.touches[0]) ? e.touches[0].clientY : pullStartY.current;
       var dy = y - pullStartY.current;
-      if (dy <= 0) { setPullDistance(0); return; }
+      if (dy <= 0) { setPull(0); return; }
       // Apply a damping factor so the indicator slows down past trigger
       // — feels like iOS, not a 1:1 stretch
       var damped = dy < PULL_TRIGGER ? dy : PULL_TRIGGER + (dy - PULL_TRIGGER) * 0.35;
       var clamped = Math.min(PULL_MAX, damped);
-      setPullDistance(clamped);
+      setPull(clamped);
       // Need to call preventDefault to suppress iOS rubber-banding. This
       // ONLY works if the listener is non-passive — see addEventListener
       // options below.
@@ -4350,33 +4398,33 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
     function onTouchEnd() {
       if (pullCancelled.current || pullStartY.current == null) {
         pullStartY.current = null;
-        setPullDistance(0);
+        setPull(0);
         return;
       }
-      var d = pullDistance;
+      var d = pullDistanceRef.current;
       pullStartY.current = null;
       if (d >= PULL_TRIGGER) {
         // Hold the indicator at the trigger position while the request
         // is in flight, then it disappears via the load()-driven
         // setRefreshing(false).
-        setPullDistance(PULL_TRIGGER);
+        setPull(PULL_TRIGGER);
         load(true);
       } else {
-        setPullDistance(0);
+        setPull(0);
       }
     }
     // touchmove must be non-passive so we can preventDefault on iOS
-    document.addEventListener("touchstart", onTouchStart, { passive: true });
-    document.addEventListener("touchmove",  onTouchMove,  { passive: false });
-    document.addEventListener("touchend",   onTouchEnd,   { passive: true });
-    document.addEventListener("touchcancel", onTouchEnd,  { passive: true });
+    target.addEventListener("touchstart", onTouchStart, { passive: true });
+    target.addEventListener("touchmove",  onTouchMove,  { passive: false });
+    target.addEventListener("touchend",   onTouchEnd,   { passive: true });
+    target.addEventListener("touchcancel", onTouchEnd,  { passive: true });
     return function() {
-      document.removeEventListener("touchstart", onTouchStart);
-      document.removeEventListener("touchmove",  onTouchMove);
-      document.removeEventListener("touchend",   onTouchEnd);
-      document.removeEventListener("touchcancel", onTouchEnd);
+      target.removeEventListener("touchstart", onTouchStart);
+      target.removeEventListener("touchmove",  onTouchMove);
+      target.removeEventListener("touchend",   onTouchEnd);
+      target.removeEventListener("touchcancel", onTouchEnd);
     };
-  }, [refreshing, loading, pullDistance]);
+  }, [refreshing, loading]);
 
   // When a refresh fires the load() callback will eventually flip
   // refreshing → false. At that point we want to retract the indicator
@@ -4384,7 +4432,10 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
   React.useEffect(function() {
     if (!refreshing && pullDistance > 0) {
       // small delay so the user sees the spinner finish its rotation
-      var t = setTimeout(function() { setPullDistance(0); }, 200);
+      var t = setTimeout(function() {
+        pullDistanceRef.current = 0;
+        setPullDistance(0);
+      }, 200);
       return function() { clearTimeout(t); };
     }
   }, [refreshing]);
@@ -4549,7 +4600,7 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
   }
 
   return (
-    <div style={{
+    <div ref={feedRootRef} style={{
       paddingTop: 16, paddingBottom: 80,
       position: "relative",
       // Push the whole feed down by pullDistance so users see content
