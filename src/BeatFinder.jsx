@@ -22037,13 +22037,14 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }
     };
     const onUp = function (ue) {
-      // Tap-to-seek: if user released without dragging (no commit happened
-      // and movement was minimal) AND loop is disabled, jump the playhead
-      // to the tapped position. If playing, continue playback from there.
+      // Tap-to-seek: fires when the press never committed to a drag AND
+      // it landed in "new" mode (not on a handle, not inside the loop
+      // region). Works regardless of whether LOOP is enabled — only the
+      // mode of the original press matters.
       const drag = rulerDragRef.current;
       const movedFar = drag && Math.abs((ue && ue.clientX) - drag.startX) > 4;
-      const wasTap = drag && !drag.committed && !movedFar;
-      if (wasTap && !loopEnabled) {
+      const wasTap = drag && !drag.committed && !movedFar && drag.mode === "new";
+      if (wasTap) {
         const wasPlaying = isPlayingRef.current;
         const seekT = drag.startT;
         syncUItoTime(seekT);
@@ -22126,7 +22127,14 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // not a tap.
   const handleRulerTouchEnd = function (e) {
     const drag = rulerDragRef.current;
-    if (drag && !drag.committed && !loopEnabled) {
+    // Tap-to-seek fires when:
+    //   - The press never committed to a drag (no movement), AND
+    //   - The press landed in "new" mode (i.e. NOT on a loop handle and
+    //     NOT inside the loop region — those modes have their own
+    //     behaviours: resize / move).
+    // We no longer gate this on !loopEnabled, so users can still seek
+    // by tapping the ruler in empty space even when the loop is on.
+    if (drag && !drag.committed && drag.mode === "new") {
       // Defensive end-distance check — handles iOS quirks where a vertical
       // drift accumulates without firing enough touchmove events.
       let movedFar = false;
