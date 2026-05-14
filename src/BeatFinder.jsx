@@ -21999,7 +21999,18 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     let mode = "new";
     if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
     else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
-    rulerDragRef.current = { mode, startX: e.clientX, startT: t, committed: mode !== "new" };
+    // Move-region: pressed inside the loop bar (not on its edges) → drag whole region
+    else if (loopOut > loopIn && raw > loopIn + grabThresh && raw < loopOut - grabThresh) {
+      mode = "moveLoop";
+    }
+    rulerDragRef.current = {
+      mode,
+      startX: e.clientX,
+      startT: t,
+      startIn: loopIn,
+      duration: loopOut - loopIn,
+      committed: mode !== "new",
+    };
 
     // Do NOT auto-create loop region on mousedown for empty areas — wait for drag
     const onMove = function (me) {
@@ -22012,7 +22023,13 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         if (rulerDragRef.current.mode === "new") { setLoopIn(rulerDragRef.current.startT); setLoopOut(snapToBar(rulerDragRef.current.startT + spb)); }
       }
       if (!rulerDragRef.current.committed) return;
-      if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
+      if (rulerDragRef.current.mode === "moveLoop") {
+        // Shift the entire region left/right by the drag delta, snapped to bars.
+        const dtMove = (me.clientX - rulerDragRef.current.startX) / effectivePPS;
+        const newIn  = Math.max(0, snapToBar(rulerDragRef.current.startIn + dtMove));
+        setLoopIn(newIn);
+        setLoopOut(newIn + rulerDragRef.current.duration);
+      } else if (rulerDragRef.current.mode === "in")  { setLoopIn(Math.min(nt, loopOut - spb)); }
       else if (rulerDragRef.current.mode === "out") { setLoopOut(Math.max(nt, loopIn + spb)); }
       else {
         if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spb));
@@ -22052,9 +22069,25 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     let mode = "new";
     if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
     else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
-    rulerDragRef.current = { mode, startT: t, startX: e.touches[0].clientX, startY: e.touches[0].clientY, committed: mode !== "new" };
-
-    // Do NOT auto-create loop region on touch — wait for drag movement
+    // ── Move-region: touch landed strictly between the handles ──
+    // (and there IS a region to move, i.e. loopOut > loopIn).
+    // Drags the entire loop bar left/right, preserving its length.
+    else if (loopOut > loopIn && raw > loopIn + grabThresh && raw < loopOut - grabThresh) {
+      mode = "moveLoop";
+    }
+    rulerDragRef.current = {
+      mode,
+      startT: t,
+      startX: e.touches[0].clientX,
+      startY: e.touches[0].clientY,
+      // For moveLoop we need to remember the original region so we can
+      // shift it by exactly the drag delta.
+      startIn:   loopIn,
+      duration:  loopOut - loopIn,
+      // Edge grabs + moveLoop both commit immediately — only "new" waits
+      // for ≥4px movement.
+      committed: mode !== "new",
+    };
   };
 
   const handleRulerTouchMove = function (e) {
@@ -23181,10 +23214,13 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   const handleRegionTouchEnd  = function () {};
 
   // ── Pinch zoom ────────────────────────────────────────────────
-  // Logic Pro / BandLab behaviour:
-  //   • Horizontal pinch (fingers moving apart/together left-right) → H-zoom (timeline)
-  //   • Vertical pinch   (fingers moving apart/together up-down)    → V-zoom (track heights)
-  //   • Diagonal pinch applies both axes proportionally
+  // Logic Pro / BandLab behaviour — but strictly axis-locked:
+  //   • Horizontal pinch (fingers moving apart/together left-right) → H-zoom only
+  //   • Vertical pinch   (fingers moving apart/together up-down)    → V-zoom only
+  //   • Diagonal pinches: lock to whichever axis is moving MORE during the
+  //     gesture (not which axis is wider at start). Once an axis is locked
+  //     it never switches. This prevents the timeline jittering both
+  //     horizontally and vertically at the same time.
   useEffect(function () {
     const el = scrollRef.current;
     if (!el) return;
@@ -23193,14 +23229,15 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-      const adx = Math.abs(dx);
-      const ady = Math.abs(dy);
       pinchRef.current = {
-        dist: Math.sqrt(dx * dx + dy * dy),
-        distX: adx,
-        distY: ady,
-        // Lock axis at gesture start — whichever span is larger wins
-        axis: adx >= ady ? "H" : "V",
+        startDx: dx,
+        startDy: dy,
+        distX: Math.abs(dx),
+        distY: Math.abs(dy),
+        // axis stays null until the user's pinch *movement* clearly favours
+        // one direction (see onMove). This avoids mislocking on diagonal
+        // gestures.
+        axis: null,
         zoom:  zoomRef.current,
         vZoom: vZoom,
         midX,
@@ -23215,16 +23252,34 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       const absDx = Math.abs(dx);
       const absDy = Math.abs(dy);
 
-      // ── Lock to dominant axis — H and V never zoom simultaneously ──
-      const axis = pinchRef.current.axis;
-      if (axis === "H" && pinchRef.current.distX > 4) {
+      // ── Determine axis from how much the pinch has CHANGED in each axis ──
+      // (not from initial span — that biases against perfectly horizontal/
+      // vertical finger placements).
+      if (pinchRef.current.axis === null) {
+        const movedX = Math.abs(absDx - pinchRef.current.distX);
+        const movedY = Math.abs(absDy - pinchRef.current.distY);
+        // Require at least 8px of movement before committing AND a clear
+        // 1.5× dominance to avoid wobbly axis switches on diagonal pinches.
+        if (movedX < 8 && movedY < 8) return;
+        if (movedX >= movedY * 1.5) {
+          pinchRef.current.axis = "H";
+        } else if (movedY >= movedX * 1.5) {
+          pinchRef.current.axis = "V";
+        } else {
+          // Still ambiguous — wait for more decisive movement.
+          return;
+        }
+      }
+
+      // ── Apply zoom on the LOCKED axis only ──
+      if (pinchRef.current.axis === "H" && pinchRef.current.distX > 4) {
         const newZoom = Math.min(1, Math.max(0.1,
           +(pinchRef.current.zoom * absDx / pinchRef.current.distX).toFixed(3)));
         const ratio  = newZoom / pinchRef.current.zoom;
         const pivotX = pinchRef.current.midX - el.getBoundingClientRect().left + pinchRef.current.scrollLeft;
         el.scrollLeft = Math.max(0, pivotX * ratio - (pinchRef.current.midX - el.getBoundingClientRect().left));
         setZoom(newZoom);
-      } else if (axis === "V" && pinchRef.current.distY > 4) {
+      } else if (pinchRef.current.axis === "V" && pinchRef.current.distY > 4) {
         const newVZoom = Math.min(0.99, Math.max(0.46,
           +(pinchRef.current.vZoom * absDy / pinchRef.current.distY).toFixed(3)));
         setVZoom(newVZoom);
@@ -24478,13 +24533,14 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         <button onClick={function(){
           setLoopEnabled(function(v){
             const enabling = !v;
-            // On first enable (no region yet), default to a single bar starting
-            // at bar 1 (t=0). Users can then drag the handles to resize/move it
-            // anywhere on the timeline. Preserves any existing region the user
-            // has already set.
-            if (enabling && (loopOut <= loopIn || loopOut === 0)) {
+            // On enable: always reset to a 2-bar region spanning bar 1 to bar 3.
+            // We do NOT preserve any saved/previous region — long-audio sessions
+            // would otherwise restore a giant loopOut from earlier work and the
+            // loop bar would span the whole track. The user can always drag the
+            // handles or middle of the region to resize/move it afterwards.
+            if (enabling) {
               setLoopIn(0);
-              setLoopOut(spBar);
+              setLoopOut(spBar * 2);
             }
             return enabling;
           });
