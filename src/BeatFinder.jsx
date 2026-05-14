@@ -13938,29 +13938,126 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
     return (
     <div style={{ padding: "0 16px 100px" }}>
       
-      <div style={{ padding: "20px 0 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ color: "white", fontSize: 28, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, display:"flex", alignItems:"center", gap:10 }}><AppIcon id="profile" size={26} />My Profile</div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", position: "relative" }}>
+      {/* My Profile header — redesigned with LED accent + icon buttons */}
+      <div style={{ padding: "20px 0 18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 11,
+            background: "linear-gradient(135deg,#C026D3,#7C3AED,#3B82F6)",
+            boxShadow: "0 0 14px rgba(124,58,237,0.5), inset 0 1px 0 rgba(255,255,255,0.2)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+          }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+          </div>
+          <div style={{
+            color: "white", fontSize: 26, fontWeight: 800,
+            fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1.2, lineHeight: 1,
+          }}>MY PROFILE</div>
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", position: "relative" }}>
+          {/* Tools — icon button with neon ring when active */}
           <button onClick={() => { setToolsOpen(!toolsOpen); setSettingsOpen(false); }}
-            style={{ background: toolsOpen ? "rgba(192,38,211,0.15)" : "#1a1a1a", border: "1px solid " + (toolsOpen ? "#C026D3" : "#333"), color: toolsOpen ? "#C026D3" : "#aaa", borderRadius: 10, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
-            <AppIcon id="knobs" size={14} /> Tools
+            title="Tools"
+            style={{
+              width: 38, height: 38, borderRadius: 11,
+              background: toolsOpen
+                ? "linear-gradient(135deg,rgba(192,38,211,0.25),rgba(124,58,237,0.18))"
+                : "rgba(124,58,237,0.06)",
+              border: "1px solid " + (toolsOpen ? "rgba(192,38,211,0.6)" : "rgba(124,58,237,0.2)"),
+              color: toolsOpen ? "#C026D3" : "#A78BFA",
+              cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              boxShadow: toolsOpen ? "0 0 12px rgba(192,38,211,0.4)" : "none",
+              transition: "all 0.15s ease",
+            }}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
+            </svg>
           </button>
+          {/* Settings — icon button */}
           <button onClick={() => { setSettingsOpen(!settingsOpen); setToolsOpen(false); }}
-            style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 10, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
-            ⚙️ Settings
+            title="Settings"
+            style={{
+              width: 38, height: 38, borderRadius: 11,
+              background: settingsOpen
+                ? "linear-gradient(135deg,rgba(192,38,211,0.25),rgba(124,58,237,0.18))"
+                : "rgba(124,58,237,0.06)",
+              border: "1px solid " + (settingsOpen ? "rgba(192,38,211,0.6)" : "rgba(124,58,237,0.2)"),
+              color: settingsOpen ? "#C026D3" : "#A78BFA",
+              cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              boxShadow: settingsOpen ? "0 0 12px rgba(192,38,211,0.4)" : "none",
+              transition: "all 0.15s ease",
+            }}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51h0a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+            </svg>
           </button>
+          {/* Logout — icon button in red */}
           <button onClick={() => { onLogout(); }}
-            style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 10, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
-            Log out
+            title="Log out"
+            style={{
+              width: 38, height: 38, borderRadius: 11,
+              background: "rgba(239,68,68,0.06)",
+              border: "1px solid rgba(239,68,68,0.25)",
+              color: "#F87171",
+              cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              transition: "all 0.15s ease",
+            }}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
           </button>
           {settingsOpen && (
-            <div style={{ position: "absolute", top: 44, right: 0, zIndex: 100, background: "#111", border: "1px solid #333", borderRadius: 14, padding: 20, width: 300, boxShadow: "0 8px 32px rgba(0,0,0,0.6)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <div style={{ color: "white", fontWeight: 800, fontSize: 16 }}>⚙️ Settings</div>
-                <button onClick={() => setSettingsOpen(false)} style={{ background: "none", border: "none", color: "#555", fontSize: 20, cursor: "pointer" }}>✕</button>
-              </div>
-              {/* ── Username accordion ── */}
-              <div style={{ borderRadius: 10, border: "1px solid #222", marginBottom: 8, overflow: "hidden" }}>
+            <>
+              {/* Click-outside backdrop */}
+              <div onClick={() => setSettingsOpen(false)}
+                style={{ position: "fixed", inset: 0, zIndex: 99, background: "transparent" }} />
+              <div style={{
+                position: "absolute", top: 46, right: 0, zIndex: 100,
+                background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+                border: "1px solid rgba(124,58,237,0.3)",
+                borderRadius: 16, padding: 16, width: 300,
+                boxShadow: "0 12px 40px rgba(0,0,0,0.7), 0 0 24px rgba(124,58,237,0.15)",
+                maxHeight: "75vh", overflowY: "auto",
+              }}>
+                {/* LED top edge */}
+                <div style={{
+                  position: "absolute", top: 0, left: 16, right: 16, height: 2,
+                  background: "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)",
+                  boxShadow: "0 0 8px rgba(124,58,237,0.7)",
+                }} />
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="3"/>
+                      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51h0a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+                    </svg>
+                    <div style={{
+                      color: "#A78BFA", fontSize: 11, fontWeight: 900, letterSpacing: 1.5,
+                      textShadow: "0 0 6px rgba(124,58,237,0.5)",
+                    }}>SETTINGS</div>
+                  </div>
+                  <button onClick={() => setSettingsOpen(false)} style={{
+                    background: "rgba(255,255,255,0.04)", border: "1px solid #2a2a2a",
+                    borderRadius: "50%", width: 26, height: 26, color: "#888",
+                    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                  </button>
+                </div>
+                {/* ── Username accordion ── */}
+                <div style={{ borderRadius: 10, border: "1px solid rgba(124,58,237,0.15)", marginBottom: 8, overflow: "hidden", background: "rgba(0,0,0,0.3)" }}>
                 <button onClick={() => setOpenSettingsSection(openSettingsSection === "username" ? null : "username")}
                   style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
                     padding: "12px 14px", background: openSettingsSection === "username" ? "#1a1a1a" : "#141414",
@@ -14207,20 +14304,53 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
               {settingsMsg && <div style={{ color: settingsMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, textAlign: "center", fontWeight: 600, marginTop: 8 }}>{settingsMsg}</div>}
             </div>
+            </>
           )}
 
           {/* ── Tools panel ── */}
           {toolsOpen && (
-            <div style={{ position: "absolute", top: 44, right: 0, zIndex: 100, background: "#111", border: "1px solid #333", borderRadius: 14, padding: 20, width: 320, boxShadow: "0 8px 32px rgba(0,0,0,0.6)", maxHeight: "80vh", overflowY: "auto" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <div style={{ color: "white", fontWeight: 800, fontSize: 16, display: "flex", alignItems: "center", gap: 8 }}><AppIcon id="knobs" size={18} /> Tools</div>
-                <button onClick={() => setToolsOpen(false)} style={{ background: "none", border: "none", color: "#555", fontSize: 20, cursor: "pointer" }}>✕</button>
+            <>
+              <div onClick={() => setToolsOpen(false)}
+                style={{ position: "fixed", inset: 0, zIndex: 99, background: "transparent" }} />
+            <div style={{
+              position: "absolute", top: 46, right: 0, zIndex: 100,
+              background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+              border: "1px solid rgba(124,58,237,0.3)",
+              borderRadius: 16, padding: 16, width: 320,
+              boxShadow: "0 12px 40px rgba(0,0,0,0.7), 0 0 24px rgba(124,58,237,0.15)",
+              maxHeight: "75vh", overflowY: "auto",
+            }}>
+              {/* LED top edge */}
+              <div style={{
+                position: "absolute", top: 0, left: 16, right: 16, height: 2,
+                background: "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)",
+                boxShadow: "0 0 8px rgba(124,58,237,0.7)",
+              }} />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
+                  </svg>
+                  <div style={{
+                    color: "#A78BFA", fontSize: 11, fontWeight: 900, letterSpacing: 1.5,
+                    textShadow: "0 0 6px rgba(124,58,237,0.5)",
+                  }}>TOOLS</div>
+                </div>
+                <button onClick={() => setToolsOpen(false)} style={{
+                  background: "rgba(255,255,255,0.04)", border: "1px solid #2a2a2a",
+                  borderRadius: "50%", width: 26, height: 26, color: "#888",
+                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
               </div>
 
               {/* Artist Pro only (not Producer Pro) — artist tools */}
               {user.isArtistPro && !user.isPro && (
                 <div style={{ marginBottom: 16 }}>
-                  <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>ARTIST TOOLS</div>
+                  <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 10, textShadow: "0 0 6px rgba(124,58,237,0.5)" }}>ARTIST TOOLS</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     {[
                       { id: "lyrics",    icon: "edit",     label: "My Lyrics",    desc: savedLyrics.length + " saved", color: "#C026D3" },
@@ -14230,19 +14360,31 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                       { id: "postvideo", icon: "vocalmic", label: "Post Video",   desc: "Upload from phone",            color: "#3B82F6" },
                     ].map(item => (
                       <button key={item.id} onClick={() => { setToolsOpen(false); goSection(item.id); }}
-                        style={{ background: "#0f0f0f", borderRadius: 12, padding: "12px 10px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
-                        <div style={{ marginBottom: 6 }}><AppIcon id={item.icon} size={20} /></div>
+                        style={{
+                          background: "linear-gradient(165deg,rgba(15,10,31,0.9) 0%,rgba(10,10,20,0.95) 100%)",
+                          borderRadius: 12, padding: "12px 10px",
+                          border: "1px solid rgba(124,58,237,0.18)",
+                          cursor: "pointer", textAlign: "left",
+                          position: "relative", overflow: "hidden",
+                          boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+                        }}>
+                        {/* Subtle LED top edge */}
+                        <div style={{
+                          position: "absolute", top: 0, left: 0, right: 0, height: 1,
+                          background: "linear-gradient(90deg,transparent," + item.color + "55,transparent)",
+                        }} />
+                        <div style={{ marginBottom: 6, color: item.color, filter: "drop-shadow(0 0 4px " + item.color + "44)" }}><AppIcon id={item.icon} size={20} /></div>
                         <div style={{ color: "white", fontWeight: 700, fontSize: 13 }}>{item.label}</div>
-                        <div style={{ color: item.color, fontSize: 11, marginTop: 2 }}>{item.desc}</div>
+                        <div style={{ color: item.color, fontSize: 10, marginTop: 2, fontWeight: 600, opacity: 0.8 }}>{item.desc}</div>
                       </button>
                     ))}
                   </div>
                   {savedLyrics.length > 0 && (
                     <div style={{ marginTop: 10 }}>
-                      <div style={{ color: "#444", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>RECENT LYRICS</div>
+                      <div style={{ color: "#666", fontSize: 9, fontWeight: 800, letterSpacing: 1.5, marginBottom: 6 }}>RECENT LYRICS</div>
                       {savedLyrics.slice(0, 2).map((lyric, i) => (
                         <div key={i} onClick={() => { setToolsOpen(false); onEditLyric(lyric, i); }}
-                          style={{ background: "#0f0f0f", borderRadius: 8, padding: "8px 12px", marginBottom: 4, border: "1px solid #1e1e1e", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          style={{ background: "rgba(0,0,0,0.4)", borderRadius: 8, padding: "8px 12px", marginBottom: 4, border: "1px solid rgba(124,58,237,0.18)", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <div style={{ flex: 1, overflow: "hidden" }}>
                             <div style={{ color: "white", fontWeight: 600, fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lyric.title || "Untitled"}</div>
                             <div style={{ color: "#555", fontSize: 11, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lyric.beatTitle}</div>
@@ -14258,7 +14400,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               {/* Producer Pro — all tools in one section (includes artist tools) */}
               {user.isPro && (
                 <div>
-                  <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>PRODUCER TOOLS</div>
+                  <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 1.5, marginBottom: 10, textShadow: "0 0 6px rgba(124,58,237,0.5)" }}>PRODUCER TOOLS</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     {[
                       { id: "upload",    icon: "upload",   label: "Upload Beat",    desc: "Add new beat",                                                              color: "#C026D3" },
@@ -14272,10 +14414,22 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                       { id: "stats",     icon: "grid",     label: "Analytics",      desc: producerStats ? producerStats.totalDownloads + " downloads" : "Loading...", color: "#818CF8" },
                     ].map(item => (
                       <button key={item.id} onClick={() => { setToolsOpen(false); goSection(item.id); }}
-                        style={{ background: "#0f0f0f", borderRadius: 12, padding: "12px 10px", border: "1.5px solid #1e1e1e", cursor: "pointer", textAlign: "left" }}>
-                        <div style={{ marginBottom: 6 }}><AppIcon id={item.icon} size={20} /></div>
+                        style={{
+                          background: "linear-gradient(165deg,rgba(15,10,31,0.9) 0%,rgba(10,10,20,0.95) 100%)",
+                          borderRadius: 12, padding: "12px 10px",
+                          border: "1px solid rgba(124,58,237,0.18)",
+                          cursor: "pointer", textAlign: "left",
+                          position: "relative", overflow: "hidden",
+                          boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+                        }}>
+                        {/* Subtle LED top edge */}
+                        <div style={{
+                          position: "absolute", top: 0, left: 0, right: 0, height: 1,
+                          background: "linear-gradient(90deg,transparent," + item.color + "55,transparent)",
+                        }} />
+                        <div style={{ marginBottom: 6, color: item.color, filter: "drop-shadow(0 0 4px " + item.color + "44)" }}><AppIcon id={item.icon} size={20} /></div>
                         <div style={{ color: "white", fontWeight: 700, fontSize: 13 }}>{item.label}</div>
-                        <div style={{ color: item.color, fontSize: 11, marginTop: 2 }}>{item.desc}</div>
+                        <div style={{ color: item.color, fontSize: 10, marginTop: 2, fontWeight: 600, opacity: 0.8 }}>{item.desc}</div>
                       </button>
                     ))}
                   </div>
@@ -14292,6 +14446,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 </div>
               )}
             </div>
+            </>
           )}
         </div>
       </div>
@@ -14517,9 +14672,6 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   }}>
                     {avatarUploading ? "Uploading..." : (user.username || user.name || "Your profile")}
-                  </div>
-                  <div style={{ color: "#666", fontSize: 11, marginTop: 2 }}>
-                    Tap photo to change
                   </div>
                   {(user.isPro || user.isArtistPro) && (
                     <div style={{ marginTop: 6 }}>
