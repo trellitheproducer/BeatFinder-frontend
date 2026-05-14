@@ -23074,6 +23074,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       mode,
       startX: e.clientX,
       startT: t,
+      rawT: raw,  // unsnapped — used by tap-to-seek for precise click positioning
       startIn: loopIn,
       duration: loopOut - loopIn,
       committed: mode !== "new",
@@ -23113,8 +23114,18 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       const wasTap = drag && !drag.committed && !movedFar && drag.mode === "new";
       if (wasTap) {
         const wasPlaying = isPlayingRef.current;
-        const seekT = drag.startT;
-        syncUItoTime(seekT);
+        // Use raw (unsnapped) position so the playhead lands exactly
+        // where the user clicked, not at the nearest beat.
+        const seekT = (typeof drag.rawT === "number") ? drag.rawT : drag.startT;
+        // Move the playhead via direct DOM mutation first — instant
+        // visual response — then defer the React state update one
+        // frame so the heavy Studio re-render doesn't block the
+        // click handler and cause perceptible lag.
+        playheadAtRef.current = seekT;
+        liveTimeRef.current   = seekT;
+        const el = scrollRef.current;
+        if (el) updatePlayheadDOM(seekT, el.scrollLeft);
+        requestAnimationFrame(function() { syncUItoTime(seekT); });
         if (wasPlaying) {
           setIsPlaying(false);
           doPlay(seekT).then(function() { setIsPlaying(true); });
@@ -23146,6 +23157,11 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     rulerDragRef.current = {
       mode,
       startT: t,
+      // rawT is the UNSNAPPED position — used by tap-to-seek so the
+      // playhead lands exactly where you tapped, not at the nearest
+      // beat. Loop-region operations still use the snapped startT
+      // because beat-aligned loops are the right default for those.
+      rawT: raw,
       startX: e.touches[0].clientX,
       startY: e.touches[0].clientY,
       // For moveLoop we need to remember the original region so we can
@@ -23199,25 +23215,40 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     //   - The press landed in "new" mode (i.e. NOT on a loop handle and
     //     NOT inside the loop region — those modes have their own
     //     behaviours: resize / move).
-    // We no longer gate this on !loopEnabled, so users can still seek
-    // by tapping the ruler in empty space even when the loop is on.
     if (drag && !drag.committed && drag.mode === "new") {
-      // Defensive end-distance check — handles iOS quirks where a vertical
-      // drift accumulates without firing enough touchmove events.
+      // Widened deadband — finger jitter on iOS regularly registers
+      // 5–9px of drift even on a clean tap, which was killing taps.
+      // 10px in both axes is a much more forgiving threshold and
+      // matches what UIKit uses for cancelsTouchesInView.
       let movedFar = false;
       try {
         const tch = (e.changedTouches && e.changedTouches[0]) || null;
         if (tch && drag.startX !== undefined && drag.startY !== undefined) {
           const dx = Math.abs(tch.clientX - drag.startX);
           const dy = Math.abs(tch.clientY - drag.startY);
-          movedFar = dx > 6 || dy > 6;
+          movedFar = dx > 10 || dy > 10;
         }
       } catch (err) { /* fall through with movedFar=false */ }
 
       if (!movedFar) {
         const wasPlaying = isPlayingRef.current;
-        const seekT = drag.startT;
-        syncUItoTime(seekT);
+        // Use the RAW (unsnapped) position so the playhead lands
+        // exactly where the user tapped. Beat-snapping is correct for
+        // loop regions but wrong for the playhead — for a seek the
+        // user expects precise positioning. Falls back to startT for
+        // legacy state objects without rawT.
+        const seekT = (typeof drag.rawT === "number") ? drag.rawT : drag.startT;
+        // Update playhead position via direct DOM mutation FIRST so
+        // the user sees the playhead jump immediately, without waiting
+        // for React to re-render the entire Studio component (which
+        // is heavy enough to cause perceptible lag). The React state
+        // update for currentTime still happens — but inside
+        // requestAnimationFrame so it doesn't block the touch handler.
+        playheadAtRef.current = seekT;
+        liveTimeRef.current   = seekT;
+        const el = scrollRef.current;
+        if (el) updatePlayheadDOM(seekT, el.scrollLeft);
+        requestAnimationFrame(function() { syncUItoTime(seekT); });
         if (wasPlaying) {
           setIsPlaying(false);
           doPlay(seekT).then(function() { setIsPlaying(true); });
@@ -25829,20 +25860,13 @@ userPickedMicRef.current = true;
               >
                 {Array.from({length:numBars}, function(_,bi){
                   const bx = bi * spBar * effectivePPS;
-                  // pointerEvents:"none" on the bar marker wrapper AND its
-                  // tick lines + label span. Without this, tapping on or
-                  // near a bar number lands on the span/div instead of
-                  // bubbling cleanly to the ruler's tap-to-seek handler,
-                  // which made taps near "1", "2", "3", "4" feel
-                  // temperamental — sometimes nothing happens, sometimes
-                  // the playhead jumped to a stale position.
                   return (
-                    <div key={bi} style={{ position:"absolute", left:bx, top:0, bottom:0, pointerEvents:"none" }}>
-                      <div style={{ position:"absolute", left:0, top:0, bottom:0, width:1, background:bi===0?"#555":"#1e1e1e", pointerEvents:"none" }} />
-                      <span style={{ position:"absolute", top:5, left:4, color:"#555", fontSize:9, fontFamily:"monospace", fontWeight:700, userSelect:"none", pointerEvents:"none" }}>{bi+1}</span>
+                    <div key={bi} style={{ position:"absolute", left:bx, top:0, bottom:0 }}>
+                      <div style={{ position:"absolute", left:0, top:0, bottom:0, width:1, background:bi===0?"#555":"#1e1e1e" }} />
+                      <span style={{ position:"absolute", top:5, left:4, color:"#555", fontSize:9, fontFamily:"monospace", fontWeight:700, userSelect:"none" }}>{bi+1}</span>
                       {Array.from({length:timeSigNum}, function(_,di){
                         if (di===0) return null;
-                        return <div key={di} style={{ position:"absolute", left:di*spb*effectivePPS, top:Math.round(RULER_H*0.55), bottom:0, width:1, background:"#181818", pointerEvents:"none" }} />;
+                        return <div key={di} style={{ position:"absolute", left:di*spb*effectivePPS, top:Math.round(RULER_H*0.55), bottom:0, width:1, background:"#181818" }} />;
                       })}
                     </div>
                   );
