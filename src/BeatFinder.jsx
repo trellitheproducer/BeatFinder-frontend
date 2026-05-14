@@ -964,6 +964,51 @@ var _playCountStore = {};        // { [beatId]: number }
 var _playedThisSession = {};     // { [beatId]: timestamp } — client-side cooldown
 var _playTimers = {};            // { [beatId]: timeoutId } — 3s minimum play timer
 
+// =============================================================================
+// IN-APP DEBUG LOG BUFFER
+// Captures all console.log/warn/error calls whose first argument starts with
+// "[BF " so we can view them from a settings screen on iPhone without
+// needing Safari DevTools. Keeps last 200 entries with timestamps. Used to
+// diagnose cross-context sync issues (free licences, paid leases, etc).
+// =============================================================================
+var _bfDebugLogs = [];
+var _bfDebugListeners = [];
+
+function _bfPushLog(level, args) {
+  try {
+    var first = args && args[0];
+    if (typeof first !== "string" || first.indexOf("[BF") !== 0) return;
+    var msg = Array.prototype.slice.call(args).map(function(a) {
+      try {
+        return typeof a === "string" ? a : JSON.stringify(a, null, 2);
+      } catch(e) { return String(a); }
+    }).join(" ");
+    _bfDebugLogs.push({ level: level, msg: msg, ts: Date.now() });
+    if (_bfDebugLogs.length > 200) _bfDebugLogs.shift();
+    _bfDebugListeners.forEach(function(fn) { try { fn(); } catch(e) {} });
+  } catch(e) {}
+}
+
+(function patchConsole() {
+  if (typeof console === "undefined") return;
+  if (console.__bf_patched) return;
+  console.__bf_patched = true;
+  ["log", "warn", "error", "info"].forEach(function(lvl) {
+    var orig = console[lvl];
+    console[lvl] = function() {
+      _bfPushLog(lvl, arguments);
+      try { return orig.apply(console, arguments); } catch(e) {}
+    };
+  });
+})();
+
+function getBfDebugLogs() { return _bfDebugLogs.slice(); }
+function clearBfDebugLogs() { _bfDebugLogs.length = 0; _bfDebugListeners.forEach(function(fn) { try { fn(); } catch(e) {} }); }
+function subscribeBfDebugLogs(fn) {
+  _bfDebugListeners.push(fn);
+  return function() { _bfDebugListeners = _bfDebugListeners.filter(function(x) { return x !== fn; }); };
+}
+
 function getStoredPlayCount(beatId) {
   return _playCountStore[beatId] || 0;
 }
@@ -5625,14 +5670,15 @@ function FreeBeatCTA({ beat, user }) {
     try { window.localStorage.setItem(signedKey, "1"); } catch (e) {}
     setStep("done");
     // Also record on the server so the agreed-licence state persists across
-    // PWA, Safari, and other devices for this logged-in user. Fire-and-forget
-    // — if the request fails, localStorage still works as a fallback.
+    // PWA, Safari, and other devices for this logged-in user.
     if (user && beat && beat.id) {
-      try {
-        apiFetch("/api/producer/beats/" + beat.id + "/agree-licence", {
-          method: "POST",
-        }).catch(function() {});
-      } catch (e) {}
+      apiFetch("/api/producer/beats/" + beat.id + "/agree-licence", {
+        method: "POST",
+      })
+        .then(function(r) { console.log("[BF agree-licence] OK", beat.id, r); })
+        .catch(function(err) { console.error("[BF agree-licence] FAILED", beat.id, err && err.message); });
+    } else {
+      console.warn("[BF agree-licence] skipped — no beat.id or no user", { hasUser: !!user, hasBeatId: !!(beat && beat.id) });
     }
   }
 
@@ -8979,14 +9025,16 @@ function CompactBeatActionSheet({ beat, user, onClose, compact }) {
     try { window.localStorage.setItem(signedKey, "1"); } catch (e) {}
     setStep("done");
     // Also record on the server so the agreed-licence state persists across
-    // PWA, Safari, and other devices for this logged-in user. Fire-and-forget
-    // — only fires for free beats; licensed beats use server-confirmed lease.
+    // PWA, Safari, and other devices. Only fires for free beats; licensed
+    // beats use server-confirmed lease.
     if (isFree && user && beat && beat.id) {
-      try {
-        apiFetch("/api/producer/beats/" + beat.id + "/agree-licence", {
-          method: "POST",
-        }).catch(function() {});
-      } catch (e) {}
+      apiFetch("/api/producer/beats/" + beat.id + "/agree-licence", {
+        method: "POST",
+      })
+        .then(function(r) { console.log("[BF agree-licence/sheet] OK", beat.id, r); })
+        .catch(function(err) { console.error("[BF agree-licence/sheet] FAILED", beat.id, err && err.message); });
+    } else if (isFree) {
+      console.warn("[BF agree-licence/sheet] skipped — no beat.id or no user", { hasUser: !!user, hasBeatId: !!(beat && beat.id) });
     }
   }
 
@@ -12831,6 +12879,23 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                       color: "#aaa", fontWeight: 800, padding: "10px", fontSize: 14, cursor: "pointer" }}>
                       Change Password
                     </button>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Debug Logs (diagnostics) ────────────────────────────── */}
+              <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                <button onClick={() => setOpenSettingsSection(openSettingsSection === "debug" ? null : "debug")}
+                  style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "12px 14px", background: openSettingsSection === "debug" ? "#1a1a1a" : "#141414",
+                    border: "none", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                  <span>🔬 Debug Logs</span>
+                  <span style={{ color: "#666", fontSize: 12, transition: "transform 0.2s",
+                    transform: openSettingsSection === "debug" ? "rotate(180deg)" : "none" }}>▼</span>
+                </button>
+                {openSettingsSection === "debug" && (
+                  <div style={{ padding: "14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
+                    <DebugLogViewer />
                   </div>
                 )}
               </div>
@@ -23854,6 +23919,84 @@ function TermsModal({ user, onAccepted }) {
   );
 }
 
+function DebugLogViewer() {
+  var [, force] = React.useReducer(function(x){ return x + 1; }, 0);
+  React.useEffect(function() {
+    var unsub = subscribeBfDebugLogs(function(){ force(); });
+    return unsub;
+  }, []);
+  var logs = getBfDebugLogs();
+  var [filter, setFilter] = React.useState("");
+  var filtered = filter ? logs.filter(function(l){ return l.msg.toLowerCase().indexOf(filter.toLowerCase()) !== -1; }) : logs;
+  function copyAll() {
+    var text = logs.map(function(l) {
+      var t = new Date(l.ts).toISOString().slice(11, 23);
+      return "[" + t + "] [" + l.level.toUpperCase() + "] " + l.msg;
+    }).join("\n");
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function(){ alert("Copied " + logs.length + " log entries to clipboard"); });
+      } else {
+        // Fallback for older iOS
+        var ta = document.createElement("textarea");
+        ta.value = text; document.body.appendChild(ta);
+        ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
+        alert("Copied " + logs.length + " log entries");
+      }
+    } catch(e) {
+      alert("Copy failed — long-press the log area to select manually.");
+    }
+  }
+  return (
+    <div>
+      <div style={{ color: "#888", fontSize: 11, marginBottom: 10, lineHeight: 1.5 }}>
+        Captures all [BF *] console messages. Used to diagnose sync issues. {logs.length} of 200 entries captured.
+      </div>
+      <input
+        value={filter} onChange={function(e){ setFilter(e.target.value); }}
+        placeholder="Filter (e.g. agree-licence)"
+        style={{
+          width: "100%", boxSizing: "border-box",
+          background: "#0a0a0a", border: "1px solid #333",
+          borderRadius: 8, padding: "8px 12px",
+          color: "white", fontSize: 12, outline: "none", marginBottom: 8,
+        }}
+      />
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        <button onClick={copyAll} style={{
+          flex: 1, background: "linear-gradient(135deg,#3B82F6,#7C3AED)",
+          border: "1.5px solid rgba(124,58,237,0.6)", borderRadius: 8,
+          padding: "8px", color: "white", fontWeight: 900, fontSize: 11, cursor: "pointer",
+          letterSpacing: 0.3, boxShadow: "0 2px 8px rgba(124,58,237,0.4)",
+        }}>📋 Copy All</button>
+        <button onClick={clearBfDebugLogs} style={{
+          flex: 1, background: "transparent",
+          border: "1.5px solid #444", borderRadius: 8,
+          padding: "8px", color: "#aaa", fontWeight: 800, fontSize: 11, cursor: "pointer",
+        }}>Clear</button>
+      </div>
+      <div style={{
+        background: "#000", border: "1px solid #2a2a2a", borderRadius: 8,
+        padding: 10, fontFamily: "ui-monospace, monospace", fontSize: 10,
+        maxHeight: 280, overflowY: "auto", WebkitOverflowScrolling: "touch",
+        userSelect: "text", WebkitUserSelect: "text",
+      }}>
+        {filtered.length === 0
+          ? <div style={{ color: "#555", textAlign: "center", padding: 20 }}>No logs yet — tap "I Agree" on a free beat to capture activity.</div>
+          : filtered.map(function(l, i) {
+              var color = l.level === "error" ? "#F87171" : l.level === "warn" ? "#FBBF24" : "#A78BFA";
+              var time = new Date(l.ts).toLocaleTimeString();
+              return (
+                <div key={i} style={{ marginBottom: 6, color: color, wordBreak: "break-all", whiteSpace: "pre-wrap" }}>
+                  <span style={{ color: "#444" }}>{time}</span>{" "}{l.msg}
+                </div>
+              );
+            })}
+      </div>
+    </div>
+  );
+}
+
 function CookieBanner() {
   // PECR (UK cookie law) requires opt-in for non-essential cookies.
   // We show this banner once; choice is persisted in localStorage.
@@ -24511,6 +24654,7 @@ export default function BeatFinder() {
         apiFetch("/api/producer/my-free-licences")
           .then(function(res) {
             var ids = (res && res.beat_ids) || [];
+            console.log("[BF hydrate/boot] /my-free-licences returned", ids.length, "ids:", ids);
             ids.forEach(function(id) {
               try { localStorage.setItem("bf_signed_free_" + id, "1"); } catch(e) {}
             });
@@ -24521,7 +24665,7 @@ export default function BeatFinder() {
             // the user refreshes the page.
             try { window.dispatchEvent(new CustomEvent("bf-free-licences-hydrated")); } catch(e) {}
           })
-          .catch(function() { /* non-fatal */ });
+          .catch(function(err) { console.error("[BF hydrate/boot] /my-free-licences FAILED", err && err.message); });
         // Also hydrate the paid-lease cache so beat sheets that need to check
         // ownership can do so instantly without their own API call.
         refreshUserLeases();
