@@ -12883,22 +12883,35 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 )}
               </div>
 
-              {/* ── Debug Logs (diagnostics) ────────────────────────────── */}
-              <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
-                <button onClick={() => setOpenSettingsSection(openSettingsSection === "debug" ? null : "debug")}
-                  style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
-                    padding: "12px 14px", background: openSettingsSection === "debug" ? "#1a1a1a" : "#141414",
-                    border: "none", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
-                  <span>🔬 Debug Logs</span>
-                  <span style={{ color: "#666", fontSize: 12, transition: "transform 0.2s",
-                    transform: openSettingsSection === "debug" ? "rotate(180deg)" : "none" }}>▼</span>
-                </button>
-                {openSettingsSection === "debug" && (
-                  <div style={{ padding: "14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
-                    <DebugLogViewer />
-                  </div>
-                )}
-              </div>
+              {/* ── Debug Logs (admin only — Trelli) ──────────────────── */}
+              {(user.is_admin === true || user.username === "Trelli") && (
+                <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                  <button onClick={() => setOpenSettingsSection(openSettingsSection === "debug" ? null : "debug")}
+                    style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "12px 14px", background: openSettingsSection === "debug" ? "#1a1a1a" : "#141414",
+                      border: "none", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ filter: "drop-shadow(0 0 4px rgba(124,58,237,0.6))" }}>
+                        <path d="M6 18h8"/>
+                        <path d="M3 22h18"/>
+                        <path d="M14 22a7 7 0 1 0 0-14h-1"/>
+                        <path d="M9 14h2"/>
+                        <path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z"/>
+                        <path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/>
+                      </svg>
+                      Debug Logs
+                      <span style={{ color: "#A78BFA", fontSize: 9, fontWeight: 800, letterSpacing: 0.5, marginLeft: 2 }}>ADMIN</span>
+                    </span>
+                    <span style={{ color: "#666", fontSize: 12, transition: "transform 0.2s",
+                      transform: openSettingsSection === "debug" ? "rotate(180deg)" : "none" }}>▼</span>
+                  </button>
+                  {openSettingsSection === "debug" && (
+                    <div style={{ padding: "14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
+                      <DebugLogViewer />
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* ── Your Data (GDPR) ───────────────────────────────────── */}
               <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
@@ -13826,7 +13839,18 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               background: "linear-gradient(90deg,transparent,#EF4444,transparent)",
               boxShadow: "0 0 12px #EF4444cc",
             }} />
-            <div style={{ color: "#F87171", fontSize: 11, fontWeight: 900, letterSpacing: 2, marginBottom: 6, textShadow: "0 0 6px rgba(220,38,38,0.5)" }}>⚠ PERMANENT ACTION</div>
+            <div style={{
+              color: "#F87171", fontSize: 11, fontWeight: 900, letterSpacing: 2, marginBottom: 6,
+              textShadow: "0 0 6px rgba(220,38,38,0.5)",
+              display: "inline-flex", alignItems: "center", gap: 6,
+            }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#F87171" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ filter: "drop-shadow(0 0 4px rgba(220,38,38,0.6))" }}>
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              PERMANENT ACTION
+            </div>
             <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 24, letterSpacing: 1, marginBottom: 10 }}>DELETE YOUR ACCOUNT</div>
             <div style={{ color: "#bbb", fontSize: 13, lineHeight: 1.55, marginBottom: 16 }}>
               This will anonymise your account, remove your uploaded beats from public display, and delete your saved lyrics and free-licence records. Lease contracts (sold or purchased) and tax records are retained for 6 years as required by UK law.
@@ -23754,26 +23778,34 @@ function PrivacyContent({ compact }) {
 }
 
 function TermsModal({ user, onAccepted }) {
-  // Decide whether the user needs to see this modal.
-  // - Logged-in users: check the server-recorded version against TERMS_VERSION
-  // - Guests: check sessionStorage so they re-accept each new session
-  var [open, setOpen] = React.useState(false);
+  // Three-state logic to prevent the modal flashing for logged-in users
+  // while their session is being restored:
+  //   null  = still deciding (don't render anything)
+  //   true  = show the modal
+  //   false = hide the modal (already accepted, or guest with consent)
+  var [open, setOpen] = React.useState(null);
   var [scrolledToEnd, setScrolledToEnd] = React.useState(false);
   var [accepting, setAccepting] = React.useState(false);
   var contentRef = React.useRef(null);
 
   React.useEffect(function() {
     function check() {
+      // If a JWT exists but user hasn't loaded yet, hold off the decision.
+      // Otherwise we'd flash the guest-state modal (because user is null)
+      // before /me returns and reveals the accepted_version.
+      var hasToken = false;
+      try { hasToken = !!localStorage.getItem("bf_token"); } catch(e) {}
+      if (hasToken && !user) {
+        // Still loading session — stay in "deciding" state
+        setOpen(null);
+        return;
+      }
       if (user) {
-        // Logged-in: hit the server (or read from user object if available)
+        // Logged-in: check server-recorded version against TERMS_VERSION
         var accepted = user.terms_accepted_version;
-        if (accepted === TERMS_VERSION) {
-          setOpen(false);
-        } else {
-          setOpen(true);
-        }
+        setOpen(accepted !== TERMS_VERSION);
       } else {
-        // Guest: sessionStorage so they accept every new session
+        // Guest (no token, no user): sessionStorage gate
         try {
           var sessVal = sessionStorage.getItem("bf_terms_accepted_v" + TERMS_VERSION);
           setOpen(sessVal !== "1");
@@ -23968,12 +24000,109 @@ function DebugLogViewer() {
           border: "1.5px solid rgba(124,58,237,0.6)", borderRadius: 8,
           padding: "8px", color: "white", fontWeight: 900, fontSize: 11, cursor: "pointer",
           letterSpacing: 0.3, boxShadow: "0 2px 8px rgba(124,58,237,0.4)",
-        }}>📋 Copy All</button>
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+        }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          Copy All
+        </button>
         <button onClick={clearBfDebugLogs} style={{
           flex: 1, background: "transparent",
           border: "1.5px solid #444", borderRadius: 8,
           padding: "8px", color: "#aaa", fontWeight: 800, fontSize: 11, cursor: "pointer",
         }}>Clear</button>
+      </div>
+
+      {/* ── Reset client-side prompt state ── */}
+      <div style={{
+        marginBottom: 10, padding: 10,
+        background: "rgba(192,38,211,0.06)",
+        border: "1px solid rgba(192,38,211,0.2)",
+        borderRadius: 8,
+      }}>
+        <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 800, letterSpacing: 0.5, marginBottom: 6 }}>
+          RESET CLIENT PROMPTS (FOR TESTING)
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button onClick={function() {
+            try { localStorage.removeItem("bf_cookie_choice_v1"); localStorage.removeItem("bf_cookie_choice_at"); } catch(e) {}
+            alert("Cookie banner reset. Reload to see it again.");
+          }} style={{
+            flex: "1 1 0", minWidth: 110,
+            background: "transparent", border: "1px solid #444", borderRadius: 8,
+            padding: "7px 6px", color: "#bbb", fontSize: 10, fontWeight: 700, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+          }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#bbb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"/>
+              <path d="M8.5 8.5v.01"/>
+              <path d="M16 15.5v.01"/>
+              <path d="M12 12v.01"/>
+              <path d="M11 17v.01"/>
+              <path d="M7 14v.01"/>
+            </svg>
+            Cookie Banner
+          </button>
+          <button onClick={function() {
+            try { localStorage.removeItem("bf_install_dismissed"); } catch(e) {}
+            alert("Install prompt reset. Reload to see it again (iOS Safari / Android Chrome only).");
+          }} style={{
+            flex: "1 1 0", minWidth: 110,
+            background: "transparent", border: "1px solid #444", borderRadius: 8,
+            padding: "7px 6px", color: "#bbb", fontSize: 10, fontWeight: 700, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+          }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#bbb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="6" y="2" width="12" height="20" rx="2" ry="2"/>
+              <line x1="12" y1="18" x2="12" y2="18"/>
+            </svg>
+            Install Prompt
+          </button>
+          <button onClick={function() {
+            try { sessionStorage.removeItem("bf_terms_accepted_v" + TERMS_VERSION); } catch(e) {}
+            alert("Guest T&C acceptance reset. Reload to re-test (logged-out users only).");
+          }} style={{
+            flex: "1 1 0", minWidth: 110,
+            background: "transparent", border: "1px solid #444", borderRadius: 8,
+            padding: "7px 6px", color: "#bbb", fontSize: 10, fontWeight: 700, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+          }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#bbb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="9" y1="13" x2="15" y2="13"/>
+              <line x1="9" y1="17" x2="15" y2="17"/>
+            </svg>
+            Guest T&amp;C
+          </button>
+          <button onClick={function() {
+            if (!confirm("Reset ALL prompts (cookie banner, install prompt, guest T&C)? Reload page to see them again.")) return;
+            try {
+              localStorage.removeItem("bf_cookie_choice_v1");
+              localStorage.removeItem("bf_cookie_choice_at");
+              localStorage.removeItem("bf_install_dismissed");
+              sessionStorage.removeItem("bf_terms_accepted_v" + TERMS_VERSION);
+            } catch(e) {}
+            alert("All prompts reset. Reload now.");
+          }} style={{
+            flex: "1 1 100%", marginTop: 4,
+            background: "linear-gradient(135deg,#C026D3 0%,#A855F7 50%,#3B82F6 100%)",
+            border: "1.5px solid rgba(192,38,211,0.6)", borderRadius: 8,
+            padding: "8px", color: "white", fontWeight: 900, fontSize: 11, cursor: "pointer",
+            boxShadow: "0 2px 10px rgba(192,38,211,0.4)",
+            textShadow: "0 1px 2px rgba(0,0,0,0.3)", letterSpacing: 0.5,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+          }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="23 4 23 10 17 10"/>
+              <polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            Reset All Prompts
+          </button>
+        </div>
       </div>
       <div style={{
         background: "#000", border: "1px solid #2a2a2a", borderRadius: 8,
@@ -24030,7 +24159,18 @@ function CookieBanner() {
         <div style={{
           color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 1.5,
           marginBottom: 6, textShadow: "0 0 6px rgba(124,58,237,0.55)",
-        }}>🍪 COOKIE NOTICE</div>
+          display: "flex", alignItems: "center", gap: 6,
+        }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ filter: "drop-shadow(0 0 4px rgba(124,58,237,0.5))" }}>
+            <path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"/>
+            <path d="M8.5 8.5v.01"/>
+            <path d="M16 15.5v.01"/>
+            <path d="M12 12v.01"/>
+            <path d="M11 17v.01"/>
+            <path d="M7 14v.01"/>
+          </svg>
+          COOKIE NOTICE
+        </div>
         <div style={{ color: "#ddd", fontSize: 12, lineHeight: 1.5, marginBottom: 10 }}>
           We use strictly-necessary cookies to keep you logged in and process payments. We'd also like to use functional cookies (saved preferences) and aggregate analytics to improve BeatFinder. You can change this later in Settings → Privacy Policy.
         </div>
@@ -24644,6 +24784,55 @@ export default function BeatFinder() {
         // Auto-skip welcome — user already has a valid session
         try { localStorage.setItem("bf_welcomed", "1"); } catch(e) {}
         setWelcomeDone(true);
+        // BACKFILL: any free-licence agreements that exist in localStorage
+        // but have never been sent to the server. This covers users who
+        // agreed BEFORE the /agree-licence endpoint shipped (their
+        // agreements only live in this context's localStorage). After the
+        // backfill completes, the GET below will see them and they'll
+        // sync to all other contexts.
+        try {
+          var backfillKeys = [];
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i);
+            if (k && k.indexOf("bf_signed_free_") === 0) {
+              var beatId = k.slice("bf_signed_free_".length);
+              // Skip non-Mongo-style ids (YouTube urls/titles can't be saved server-side)
+              if (beatId && /^[a-f0-9]{24}$/.test(beatId)) {
+                // Skip ones we've already backfilled this device (avoid hammering on every boot)
+                if (localStorage.getItem("bf_backfilled_" + beatId) !== "1") {
+                  backfillKeys.push(beatId);
+                }
+              }
+            }
+          }
+          if (backfillKeys.length > 0) {
+            console.log("[BF backfill] sending", backfillKeys.length, "local-only agreements to server");
+            Promise.all(backfillKeys.map(function(id) {
+              return apiFetch("/api/producer/beats/" + id + "/agree-licence", { method: "POST" })
+                .then(function() { try { localStorage.setItem("bf_backfilled_" + id, "1"); } catch(e) {} return true; })
+                .catch(function(err) {
+                  // 404 means beat was deleted — mark as backfilled so we don't retry
+                  if (err && /404|not found/i.test(err.message || "")) {
+                    try { localStorage.setItem("bf_backfilled_" + id, "1"); } catch(e) {}
+                  }
+                  return false;
+                });
+            })).then(function() {
+              console.log("[BF backfill] complete — re-fetching server list");
+              // Re-fetch and re-hydrate now that the server has the full picture
+              apiFetch("/api/producer/my-free-licences")
+                .then(function(res) {
+                  var ids = (res && res.beat_ids) || [];
+                  ids.forEach(function(id) {
+                    try { localStorage.setItem("bf_signed_free_" + id, "1"); } catch(e) {}
+                  });
+                  try { window.dispatchEvent(new CustomEvent("bf-free-licences-hydrated")); } catch(e) {}
+                  console.log("[BF backfill] post-fetch ids:", ids.length);
+                }).catch(function(){});
+            });
+          }
+        } catch(e) { console.warn("[BF backfill] error", e && e.message); }
+
         // Hydrate free-licence agreements from server into localStorage.
         // The agreed-licence state was previously localStorage-only, which is
         // sandboxed per-browser-context on iOS (Safari tab vs home-screen PWA
