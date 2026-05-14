@@ -2469,7 +2469,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
       <textarea
         value={text}
         onChange={e => setText(e.target.value)}
-        placeholder="Start writing your lyrics here... Writer's block? Tap the AI Lyric Assistant button below!"
+        placeholder="Start writing your lyrics here... Stuck for rhymes? Tap the RhymeFinder button below! (Pro members only)"
         style={{
           flex: 1, background: "#0d0d0d", border: "none", outline: "none",
           color: "white", fontSize: 15, lineHeight: 1.8, padding: "16px",
@@ -2818,7 +2818,7 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
       monthlyStr: "£4.99/mo",
       yearlyStr:  "£49.99/yr",
       saving:     "Save £9.89",
-      perks: ["Rhyme Finder AI tool", "Studio recording mode", "Your own profile", "Write lyrics to beats", "Save unlimited beats", "Exclusive member beats", "Download MP3s", "Purchase leases"],
+      perks: ["Rhyme Finder tool", "Studio recording mode", "Your own profile", "Write lyrics to beats", "Save unlimited beats", "Exclusive member beats", "Download MP3s", "Purchase leases"],
     },
     {
       id: "producer",
@@ -5638,7 +5638,10 @@ function FreeBeatCTA({ beat, user }) {
   var signedKey = "bf_signed_free_" + (beat.id || beat.url || beat.title || "x");
   var initialStep = "idle";
   try {
-    if (typeof window !== "undefined" && window.localStorage && window.localStorage.getItem(signedKey)) {
+    // Only honour the saved "signed" state for LOGGED-IN users — guests
+    // must never see the download UI, regardless of what's in localStorage
+    // (stale data left by a previous user on this device).
+    if (user && typeof window !== "undefined" && window.localStorage && window.localStorage.getItem(signedKey)) {
       initialStep = "done";
     }
   } catch (e) {}
@@ -5646,8 +5649,15 @@ function FreeBeatCTA({ beat, user }) {
   var [step, setStep] = React.useState(initialStep);
   var [showContract, setShowContract] = React.useState(false);
 
+  // Force back to idle whenever the user logs out (or the component mounts
+  // for a guest with stale localStorage state).
+  React.useEffect(function() {
+    if (!user) setStep("idle");
+  }, [user]);
+
   // Re-check localStorage on mount (covers PWA resume after iOS leaves the page)
   React.useEffect(function() {
+    if (!user) return; // guests never get the "done" state
     try {
       if (window.localStorage && window.localStorage.getItem(signedKey)) {
         setStep("done");
@@ -5657,7 +5667,7 @@ function FreeBeatCTA({ beat, user }) {
     // iOS "Open in Kodex / Done" screen, re-evaluate state
     function onVis() {
       try {
-        if (document.visibilityState === "visible" && window.localStorage.getItem(signedKey)) {
+        if (document.visibilityState === "visible" && user && window.localStorage.getItem(signedKey)) {
           setStep("done");
         }
       } catch (e) {}
@@ -5669,8 +5679,12 @@ function FreeBeatCTA({ beat, user }) {
     // hydrated IDs to localStorage, this re-reads and updates UI state.
     function onHydrated() {
       try {
+        if (!user) { setStep("idle"); return; }
         if (window.localStorage && window.localStorage.getItem(signedKey)) {
           setStep("done");
+        } else {
+          // Key was removed (e.g. on logout) — reset
+          setStep("idle");
         }
       } catch (e) {}
     }
@@ -5680,7 +5694,7 @@ function FreeBeatCTA({ beat, user }) {
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("bf-free-licences-hydrated", onHydrated);
     };
-  }, [signedKey]);
+  }, [signedKey, user]);
 
   // Always use the backend proxy for downloads — it sets Content-Disposition: attachment
   // so iOS Safari shows the native download dialog instead of a blank media page.
@@ -8933,11 +8947,14 @@ function CompactBeatActionSheet({ beat, user, onClose, compact }) {
   var accent   = isFree ? "#C026D3" : "#F59E0B";
   var signedKey = (isFree ? "bf_signed_free_" : "bf_signed_lease_") + (beat.id || beat.url || beat.title || "x");
 
-  // For FREE beats: the signed flag is the gate. For LICENSED beats: ignore
-  // any stored flag (it's stale from old flow) and require server confirmation.
+  // For FREE beats: the signed flag is the gate, BUT only honour it for
+  // logged-in users — guests must never bypass the gate even if localStorage
+  // is dirty from a previous session on this device.
+  // For LICENSED beats: ignore any stored flag (stale legacy) and require
+  // server confirmation.
   var initialStep = "preview";
   try {
-    if (isFree && typeof window !== "undefined" && window.localStorage && window.localStorage.getItem(signedKey)) {
+    if (isFree && user && typeof window !== "undefined" && window.localStorage && window.localStorage.getItem(signedKey)) {
       initialStep = "done";
     }
     // Clean up any old/stale licensed signedKey that might unlock the download
@@ -9031,6 +9048,8 @@ function CompactBeatActionSheet({ beat, user, onClose, compact }) {
   // FREE-only: re-check localStorage on visibility change (iOS resume)
   React.useEffect(function() {
     if (!isFree) return;
+    // Guests must never see "done" state — clear stale localStorage state
+    if (!user) { setStep("idle"); return; }
     try {
       if (window.localStorage && window.localStorage.getItem(signedKey)) {
         setStep("done");
@@ -9038,14 +9057,28 @@ function CompactBeatActionSheet({ beat, user, onClose, compact }) {
     } catch (e) {}
     function onVis() {
       try {
-        if (document.visibilityState === "visible" && window.localStorage.getItem(signedKey)) {
+        if (document.visibilityState === "visible" && user && window.localStorage.getItem(signedKey)) {
           setStep("done");
         }
       } catch (e) {}
     }
+    function onHydrated() {
+      try {
+        if (!user) { setStep("idle"); return; }
+        if (window.localStorage && window.localStorage.getItem(signedKey)) {
+          setStep("done");
+        } else {
+          setStep("idle");
+        }
+      } catch (e) {}
+    }
     document.addEventListener("visibilitychange", onVis);
-    return function() { document.removeEventListener("visibilitychange", onVis); };
-  }, [signedKey, isFree]);
+    window.addEventListener("bf-free-licences-hydrated", onHydrated);
+    return function() {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("bf-free-licences-hydrated", onHydrated);
+    };
+  }, [signedKey, isFree, user]);
 
   function markSigned() {
     try { window.localStorage.setItem(signedKey, "1"); } catch (e) {}
@@ -10906,7 +10939,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
         {(isProd || isArtist) && (
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
             {isProd && <span onClick={() => setBadgePopup({ icon:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
-            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Verified Chief Executive Officer" })} />}
+            {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Verified Chief Executive Officer of BeatFinder" })} />}
             {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
             {profile.username === "Mikez" && <BrandAmbassadorBadge onClick={() => setBadgePopup({ icon:"brand_ambassador", text:"Verified Brand Ambassador of BeatFinder" })} />}
           </div>
@@ -24555,12 +24588,7 @@ export default function BeatFinder() {
     };
   }, []);
 
-  const [splashDone, setSplashDone] = useState(function() {
-    // On iOS, backgrounding the app causes a full page reload.
-    // If sessionStorage shows a session was already started, skip the splash.
-    try { if (sessionStorage.getItem("bf_session_started")) return true; } catch(e) {}
-    return false;
-  });
+  const [splashDone, setSplashDone] = useState(false);
   // welcomeDone: true once user has passed the welcome gate this session
   // Uses sessionStorage so it resets every time the tab is opened
   const [welcomeDone, setWelcomeDone] = useState(function() {
@@ -25352,7 +25380,7 @@ export default function BeatFinder() {
                 : promptReason === "download"
                 ? "Downloading MP3s requires Artist Pro or Producer Pro. Free accounts can preview only."
                 : promptReason === "rhymefinder"
-                ? "Rhyme Finder AI is part of Artist Pro and Producer Pro. Upgrade to unlock the lyric-writing assistant."
+                ? "Rhyme Finder is part of Artist Pro and Producer Pro. Upgrade to unlock the lyric-writing assistant."
                 : "Sign in to access your profile, save beats and more."}
             </div>
             <button onClick={() => { setShowAuthPrompt(false); if (user) { goTab("exclusive"); } else if (promptReason === "expired" || promptReason === "studio" || promptReason === "producer") { goTab("exclusive"); } else { setShowAuthWall(true); setWelcomeDone(false); } }}
@@ -25412,6 +25440,26 @@ export default function BeatFinder() {
             <ProfileScreen key={user ? user.id : "guest"} user={user} setUser={setUser} onLogout={() => {
               AuthAPI.logout();
               setUser(null);
+              // Clear per-user licence cache from localStorage so the next
+              // session (or a guest sharing this device) doesn't inherit
+              // the previous user's "Licence Agreed ✓" state.
+              try {
+                var rm = [];
+                for (var i = 0; i < localStorage.length; i++) {
+                  var k = localStorage.key(i);
+                  if (k && (
+                    k.indexOf("bf_signed_free_") === 0 ||
+                    k.indexOf("bf_signed_lease_") === 0 ||
+                    k.indexOf("bf_backfilled_") === 0
+                  )) rm.push(k);
+                }
+                rm.forEach(function(k) { try { localStorage.removeItem(k); } catch(e) {} });
+              } catch(e) {}
+              // Also clear cached paid-lease list
+              try { window.__bf_leases__ = []; } catch(e) {}
+              try { window.dispatchEvent(new CustomEvent("bf-leases-updated")); } catch(e) {}
+              // Notify FreeBeatCTA components to re-check state (they'll see no agreement and reset)
+              try { window.dispatchEvent(new CustomEvent("bf-free-licences-hydrated")); } catch(e) {}
               // Reset welcome gate so the welcome screen shows again
               try { localStorage.removeItem("bf_welcomed"); } catch(e) {}
               setWelcomeDone(false);
