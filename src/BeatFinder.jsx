@@ -24025,22 +24025,42 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
               <span style={{ color:"white",fontWeight:800,fontSize:16 }}>Project Settings</span>
               <button onClick={function(){ setShowSettings(false); }} style={{ background:"none",border:"none",color:"#555",fontSize:20,cursor:"pointer" }}>✕</button>
             </div>
-            <div style={{ margin:"0 16px 16px",background:"#1a1a1a",borderRadius:14,overflow:"hidden" }}>
-              <div style={{ padding:"14px 16px 6px",color:"white",fontWeight:700,fontSize:13 }}>Tempo</div>
+            <div style={{
+              margin:"0 16px 16px",
+              background:"linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+              border:"1px solid rgba(124,58,237,0.25)",
+              borderRadius:14,overflow:"hidden",
+              boxShadow:"0 0 24px rgba(124,58,237,0.08), inset 0 0 0 1px rgba(192,38,211,0.05)",
+              position:"relative",
+            }}>
+              {/* LED top edge */}
+              <div style={{
+                position:"absolute", top:0, left:0, right:0, height:1,
+                background:"linear-gradient(90deg,transparent,rgba(192,38,211,0.5),rgba(124,58,237,0.5),rgba(59,130,246,0.5),transparent)",
+              }} />
+              <div style={{
+                padding:"14px 16px 8px",
+                fontFamily:"'Bebas Neue',sans-serif",
+                fontSize:16, letterSpacing:2,
+                background:"linear-gradient(90deg,#C026D3,#7C3AED,#3B82F6)",
+                WebkitBackgroundClip:"text", backgroundClip:"text",
+                color:"transparent",
+                fontWeight:700,
+              }}>TEMPO</div>
 
               {/* ── BPM progress bar (shows during analysis) ── */}
               {bpmDetecting && (
                 <div style={{ padding:"0 16px 10px" }}>
-                  <div style={{ background:"#111",borderRadius:6,overflow:"hidden",height:4,marginBottom:6 }}>
-                    <div style={{ height:"100%",background:"linear-gradient(90deg,#C026D3,#7C3AED)",width:bpmProgress+"%",transition:"width 0.3s ease",borderRadius:6 }} />
+                  <div style={{ background:"rgba(124,58,237,0.08)",borderRadius:6,overflow:"hidden",height:4,marginBottom:6,border:"1px solid rgba(124,58,237,0.15)" }}>
+                    <div style={{ height:"100%",background:"linear-gradient(90deg,#C026D3,#7C3AED,#3B82F6)",width:bpmProgress+"%",transition:"width 0.3s ease",borderRadius:6,boxShadow:"0 0 8px rgba(192,38,211,0.5)" }} />
                   </div>
-                  <div style={{ color:"#888",fontSize:10,letterSpacing:1 }}>{bpmDetectMsg || "Analyzing…"}</div>
+                  <div style={{ color:"#A78BFA",fontSize:10,letterSpacing:1.5,fontWeight:600 }}>{bpmDetectMsg || "Analyzing…"}</div>
                 </div>
               )}
 
               {/* ── BPM display row ── */}
-              <div style={{ display:"flex",alignItems:"stretch",borderTop:"1px solid #222" }}>
-                <button onClick={function(){ setBpm(function(b){ return Math.max(40,b-1); }); setBpmSource("manual"); }} style={{ flex:1,background:"none",border:"none",borderRight:"1px solid #222",color:"white",fontSize:28,cursor:"pointer",padding:"14px 0" }}>−</button>
+              <div style={{ display:"flex",alignItems:"stretch",borderTop:"1px solid rgba(124,58,237,0.18)" }}>
+                <button onClick={function(){ setBpm(function(b){ return Math.max(40,b-1); }); setBpmSource("manual"); }} style={{ flex:1,background:"none",border:"none",borderRight:"1px solid rgba(124,58,237,0.18)",color:"#A78BFA",fontSize:28,cursor:"pointer",padding:"14px 0",fontWeight:300 }}>−</button>
 
                 {/* Tap tempo centre */}
                 <div onClick={handleTapTempo} style={{ flex:2,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"12px 0",cursor:"pointer",position:"relative" }}>
@@ -24054,18 +24074,30 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                       pointerEvents:"none",
                     }} />
                   )}
-                  <div style={{ color:"white",fontWeight:900,fontSize:40,lineHeight:1,fontFamily:"monospace",letterSpacing:-1 }}>
-                    {bpm}<span style={{ fontSize:14,color:"#555",fontWeight:600,letterSpacing:0 }}> BPM</span>
+                  <div style={{
+                    fontWeight:900,fontSize:40,lineHeight:1,fontFamily:"monospace",letterSpacing:-1,
+                    background:"linear-gradient(135deg,#C026D3 0%,#7C3AED 50%,#3B82F6 100%)",
+                    WebkitBackgroundClip:"text", backgroundClip:"text",
+                    color:"transparent",
+                    filter:"drop-shadow(0 0 12px rgba(124,58,237,0.4))",
+                  }}>
+                    {bpm}<span style={{ fontSize:14,color:"#6b6685",fontWeight:600,letterSpacing:0,background:"none",WebkitTextFillColor:"#6b6685" }}> BPM</span>
                   </div>
-                  <div style={{ color:"#444",fontSize:10,marginTop:4,letterSpacing:1.5 }}>TAP TEMPO</div>
+                  <div style={{ color:"#6b6685",fontSize:10,marginTop:4,letterSpacing:1.5,fontWeight:600 }}>TAP TEMPO</div>
                   {bpmSource && (
-                    <div style={{ color:bpmSource==="auto"?"#22C55E":bpmSource==="tap"?"#F59E0B":"#555",fontSize:9,fontWeight:700,letterSpacing:1,marginTop:2 }}>
+                    <div style={{
+                      fontSize:9,fontWeight:800,letterSpacing:1.5,marginTop:3,
+                      padding:"2px 8px", borderRadius:8,
+                      background: bpmSource==="auto" ? "rgba(34,197,94,0.12)" : bpmSource==="tap" ? "rgba(192,38,211,0.15)" : "rgba(124,58,237,0.12)",
+                      border: "1px solid "+(bpmSource==="auto" ? "rgba(34,197,94,0.35)" : bpmSource==="tap" ? "rgba(192,38,211,0.4)" : "rgba(124,58,237,0.3)"),
+                      color: bpmSource==="auto"?"#4ADE80":bpmSource==="tap"?"#C026D3":"#A78BFA",
+                    }}>
                       {bpmSource==="auto"?"AUTO-DETECTED":bpmSource==="tap"?"TAP":"MANUAL"}
                     </div>
                   )}
                 </div>
 
-                <button onClick={function(){ setBpm(function(b){ return Math.min(220,b+1); }); setBpmSource("manual"); }} style={{ flex:1,background:"none",border:"none",borderLeft:"1px solid #222",color:"white",fontSize:28,cursor:"pointer",padding:"14px 0" }}>+</button>
+                <button onClick={function(){ setBpm(function(b){ return Math.min(220,b+1); }); setBpmSource("manual"); }} style={{ flex:1,background:"none",border:"none",borderLeft:"1px solid rgba(124,58,237,0.18)",color:"#A78BFA",fontSize:28,cursor:"pointer",padding:"14px 0",fontWeight:300 }}>+</button>
               </div>
 
               {/* ── BPM range slider ── */}
@@ -24079,14 +24111,22 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
               {bpmConfidence !== null && (
                 <div style={{ padding:"0 16px 14px" }}>
                   <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8 }}>
-                    <div style={{ color:"#555",fontSize:10,fontWeight:700,letterSpacing:1,width:68 }}>CONFIDENCE</div>
-                    <div style={{ flex:1,background:"#111",borderRadius:4,overflow:"hidden",height:6 }}>
+                    <div style={{ color:"#A78BFA",fontSize:10,fontWeight:800,letterSpacing:1.5,width:78 }}>CONFIDENCE</div>
+                    <div style={{ flex:1,background:"rgba(124,58,237,0.08)",border:"1px solid rgba(124,58,237,0.2)",borderRadius:4,overflow:"hidden",height:6 }}>
                       <div style={{ height:"100%",borderRadius:4,transition:"width 0.5s ease",
-                        background: bpmConfidence > 0.7 ? "#22C55E" : bpmConfidence > 0.4 ? "#F59E0B" : "#EF4444",
+                        background: bpmConfidence > 0.7
+                          ? "linear-gradient(90deg,#C026D3,#7C3AED,#3B82F6)"
+                          : bpmConfidence > 0.4
+                          ? "linear-gradient(90deg,#7C3AED,#A78BFA)"
+                          : "linear-gradient(90deg,#4c1d95,#7C3AED)",
+                        boxShadow: bpmConfidence > 0.7 ? "0 0 8px rgba(124,58,237,0.5)" : "none",
                         width: Math.round(bpmConfidence*100)+"%" }} />
                     </div>
-                    <div style={{ color: bpmConfidence > 0.7 ? "#22C55E" : bpmConfidence > 0.4 ? "#F59E0B" : "#EF4444",
-                      fontSize:11,fontWeight:800,width:36,textAlign:"right" }}>
+                    <div style={{
+                      color: bpmConfidence > 0.7 ? "#C026D3" : bpmConfidence > 0.4 ? "#A78BFA" : "#7C3AED",
+                      fontSize:11,fontWeight:800,width:36,textAlign:"right",
+                      textShadow: bpmConfidence > 0.7 ? "0 0 8px rgba(192,38,211,0.4)" : "none",
+                    }}>
                       {Math.round(bpmConfidence*100)}%
                     </div>
                   </div>
@@ -24146,14 +24186,20 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                   {/* ── Secondary BPM candidates ── */}
                   {bpmCandidates && bpmCandidates.length > 0 && (
                     <div style={{ marginTop:10 }}>
-                      <div style={{ color:"#444",fontSize:9,fontWeight:700,letterSpacing:1.5,marginBottom:6 }}>ALT CANDIDATES</div>
+                      <div style={{ color:"#A78BFA",fontSize:9,fontWeight:800,letterSpacing:1.5,marginBottom:6 }}>ALT CANDIDATES</div>
                       <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
                         {bpmCandidates.map(function(b, i) {
+                          // Handle both shapes: number or {bpm, score}
+                          var bpmVal = (b && typeof b === "object") ? b.bpm : b;
                           return (
-                            <button key={i} onClick={function(){ setBpm(Math.round(b)); setDetectedBpm(Math.round(b)); setBpmSource("auto"); }}
-                              style={{ background:"rgba(124,58,237,0.12)",border:"1px solid rgba(124,58,237,0.3)",
-                                borderRadius:6,color:"#7C3AED",fontSize:11,fontWeight:700,padding:"5px 10px",cursor:"pointer" }}>
-                              {Math.round(b)} BPM
+                            <button key={i} onClick={function(){ setBpm(Math.round(bpmVal)); setDetectedBpm(Math.round(bpmVal)); setBpmSource("auto"); }}
+                              style={{
+                                background:"linear-gradient(135deg,rgba(192,38,211,0.12),rgba(124,58,237,0.12),rgba(59,130,246,0.12))",
+                                border:"1px solid rgba(124,58,237,0.35)",
+                                borderRadius:8,color:"#A78BFA",fontSize:11,fontWeight:800,padding:"6px 11px",cursor:"pointer",
+                                boxShadow:"0 0 8px rgba(124,58,237,0.1)",
+                              }}>
+                              {Math.round(bpmVal)} BPM
                             </button>
                           );
                         })}
@@ -24170,14 +24216,20 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                   <button onClick={function(){ detectBpm(); }}
                     disabled={bpmDetecting}
                     style={{
-                      background:"rgba(192,38,211,0.15)",border:"1px solid rgba(192,38,211,0.35)",
-                      borderRadius:8,color:bpmDetecting?"#666":"#C026D3",fontSize:11,fontWeight:700,
-                      padding:"7px 12px",cursor:bpmDetecting?"not-allowed":"pointer",
-                      opacity:bpmDetecting?0.6:1,display:"flex",alignItems:"center",gap:5
+                      background: bpmDetecting
+                        ? "rgba(124,58,237,0.08)"
+                        : "linear-gradient(135deg,rgba(192,38,211,0.18),rgba(124,58,237,0.18),rgba(59,130,246,0.18))",
+                      border:"1px solid "+(bpmDetecting ? "rgba(124,58,237,0.2)" : "rgba(192,38,211,0.45)"),
+                      borderRadius:8,
+                      color:bpmDetecting?"#6b6685":"#E9D5FF",
+                      fontSize:11,fontWeight:800,letterSpacing:0.5,
+                      padding:"7px 14px",cursor:bpmDetecting?"not-allowed":"pointer",
+                      opacity:bpmDetecting?0.7:1,display:"flex",alignItems:"center",gap:6,
+                      boxShadow: bpmDetecting ? "none" : "0 0 12px rgba(192,38,211,0.15)",
                     }}>
                     {bpmDetecting
-                      ? <><span style={{ width:10,height:10,borderRadius:"50%",border:"2px solid rgba(192,38,211,0.3)",borderTop:"2px solid #C026D3",animation:"bf-spin 0.7s linear infinite",display:"inline-block" }} /></>
-                      : "⚡"}
+                      ? <span style={{ width:10,height:10,borderRadius:"50%",border:"2px solid rgba(192,38,211,0.25)",borderTop:"2px solid #C026D3",animation:"bf-spin 0.7s linear infinite",display:"inline-block" }} />
+                      : <span style={{ filter:"drop-shadow(0 0 4px rgba(192,38,211,0.6))" }}>⚡</span>}
                     {bpmDetecting ? "Analyzing…" : "Auto-Detect"}
                   </button>
                 )}
@@ -24185,20 +24237,30 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                 {/* Beat grid overlay toggle */}
                 <button onClick={function(){ setShowBeatGrid(function(v){ return !v; }); }}
                   style={{
-                    background:showBeatGrid?"rgba(59,130,246,0.15)":"#141414",
-                    border:"1px solid "+(showBeatGrid?"rgba(59,130,246,0.4)":"#2a2a2a"),
-                    borderRadius:8,color:showBeatGrid?"#3B82F6":"#555",fontSize:11,fontWeight:700,
-                    padding:"7px 12px",cursor:"pointer"
+                    background: showBeatGrid
+                      ? "linear-gradient(135deg,rgba(59,130,246,0.18),rgba(124,58,237,0.18))"
+                      : "rgba(124,58,237,0.05)",
+                    border:"1px solid "+(showBeatGrid?"rgba(59,130,246,0.5)":"rgba(124,58,237,0.18)"),
+                    borderRadius:8,
+                    color: showBeatGrid?"#93C5FD":"#6b6685",
+                    fontSize:11,fontWeight:800,letterSpacing:0.5,
+                    padding:"7px 12px",cursor:"pointer",
+                    boxShadow: showBeatGrid ? "0 0 12px rgba(59,130,246,0.15)" : "none",
                   }}>
                   {showBeatGrid ? "▦ Grid ON" : "▦ Grid OFF"}
                 </button>
 
                 {/* Result display */}
                 {detectedBpm > 0 && !bpmDetecting && (
-                  <span style={{ color:"#22C55E",fontSize:12,fontWeight:700,marginLeft:"auto" }}>✓ {detectedBpm} BPM</span>
+                  <span style={{
+                    fontSize:12,fontWeight:800,marginLeft:"auto",letterSpacing:0.5,
+                    background:"linear-gradient(135deg,#C026D3,#7C3AED,#3B82F6)",
+                    WebkitBackgroundClip:"text", backgroundClip:"text", color:"transparent",
+                    filter:"drop-shadow(0 0 6px rgba(124,58,237,0.4))",
+                  }}>✓ {detectedBpm} BPM</span>
                 )}
                 {detectedBpm === -1 && !bpmDetecting && (
-                  <span style={{ color:"#F87171",fontSize:11 }}>Could not detect</span>
+                  <span style={{ color:"#A78BFA",fontSize:11,fontWeight:600,marginLeft:"auto",opacity:0.7 }}>Could not detect</span>
                 )}
               </div>
             </div>
