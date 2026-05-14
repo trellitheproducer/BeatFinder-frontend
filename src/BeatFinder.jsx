@@ -6404,15 +6404,23 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
     <div style={{ paddingTop: 20, paddingBottom: 100 }}>
       
       <div style={{ padding: "0 16px", marginBottom: 28 }}>
-        <div style={{ background: "linear-gradient(135deg,#1a1a2e,#6B21A8)", borderRadius: 16, padding: "20px" }}>
-          <div style={{ color: "#F59E0B", fontSize: 13, fontWeight: 800, marginBottom: 4 }}>DISCOVER</div>
+        <div style={{
+          background: "linear-gradient(135deg,#0f0a1f,#6B21A8,#1E40AF)",
+          borderRadius: 16, padding: "20px",
+          border: "1.5px solid rgba(124,58,237,0.4)",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.5), 0 0 24px rgba(124,58,237,0.25), inset 0 1px 0 rgba(255,255,255,0.06)",
+        }}>
+          <div style={{
+            color: "#A78BFA", fontSize: 13, fontWeight: 900, marginBottom: 4, letterSpacing: 1.5,
+            textShadow: "0 0 8px rgba(124,58,237,0.6)",
+          }}>DISCOVER</div>
           <div style={{ color: "white", fontSize: 26, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, display:"flex", alignItems:"center", gap:8 }}><AppIcon id="trending" size={26} />&nbsp;Trending & Rising</div>
-          <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>Viral beats + emerging producers</div>
+          <div style={{ color: "#bbb", fontSize: 12, marginTop: 4 }}>Viral beats + emerging producers</div>
         </div>
       </div>
 
       
-      <SectionHeader emoji="flame" title="TRENDING ON YOUTUBE" subtitle="1M+ views, sorted by most viewed" color="#F59E0B" />
+      <SectionHeader emoji="flame" title="TRENDING ON YOUTUBE" subtitle="1M+ views, sorted by most viewed" color="#A78BFA" />
       {tLoading ? <LoadingRow /> : (
         <div className="bf-carousel" style={{ overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch", paddingLeft: 16, paddingBottom: 4, marginBottom: 32 }}>
           <div style={{ display: "flex", gap: 12, paddingRight: 16 }}>
@@ -7122,7 +7130,11 @@ function MembersBeatsTab({ user, priced, onViewProfile }) {
     // Exclusive Beats — full BeatLeaseCard with 30s preview + buy
     return (
       <div>
-        <div style={{ color: "#F59E0B", fontWeight: 700, fontSize: 12, letterSpacing: 1, marginBottom: 14 }}>
+        <div style={{
+          color: "#A78BFA", fontWeight: 900, fontSize: 12, letterSpacing: 1.5,
+          marginBottom: 14,
+          textShadow: "0 0 8px rgba(124,58,237,0.55)",
+        }}>
           {beats.length} BEAT{beats.length !== 1 ? "S" : ""} AVAILABLE
         </div>
         {beats.map(function(beat) {
@@ -7135,7 +7147,11 @@ function MembersBeatsTab({ user, priced, onViewProfile }) {
   // MP3 Downloads — free beats with preview + save-to-device
   return (
     <div>
-      <div style={{ color: "#C026D3", fontWeight: 700, fontSize: 12, letterSpacing: 1, marginBottom: 14 }}>
+      <div style={{
+        color: "#E9D5FF", fontWeight: 900, fontSize: 12, letterSpacing: 1.5,
+        marginBottom: 14,
+        textShadow: "0 0 8px rgba(192,38,211,0.55)",
+      }}>
         {beats.length} FREE DOWNLOAD{beats.length !== 1 ? "S" : ""} AVAILABLE
       </div>
       {beats.map(function(beat) {
@@ -24471,7 +24487,7 @@ export default function BeatFinder() {
           const isPro    = user?.isPro || user?.isArtistPro;
           const locked   = (n.id === "exclusive" && (!user || !isPro)) || (n.id === "studio" && (!user || (user && !user.subscriptionActive && user.username !== "Trelli")));
           const isActive = tab === n.id;
-          const activeColor = n.id === "exclusive" ? "#F59E0B" : n.id === "studio" ? "#22C55E" : "#C026D3";
+          const activeColor = n.id === "exclusive" ? "#A78BFA" : n.id === "studio" ? "#22C55E" : "#C026D3";
           const isStudio = n.id === "studio";
           return (
             <React.Fragment key={n.id}>
@@ -24487,7 +24503,7 @@ export default function BeatFinder() {
                   flex: 1, background: isStudio && isActive ? "rgba(34,197,94,0.08)" : "none",
                   border: "none", cursor: "pointer",
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
-                  color: isActive ? activeColor : locked ? "#F59E0B44" : "#444",
+                  color: isActive ? activeColor : locked ? "#A78BFA44" : "#444",
                   position: "relative", paddingTop: 6, paddingBottom: 6,
                   transition: "color 0.2s ease",
                   borderRadius: isStudio ? 0 : 0,
@@ -24518,8 +24534,9 @@ export default function BeatFinder() {
                 }}>{n.label}</span>
                 {locked && <div style={{
                   position: "absolute", top: 6, right: "calc(50% - 14px)",
-                  background: "#F59E0B", borderRadius: "50%",
+                  background: "#A78BFA", borderRadius: "50%",
                   width: 7, height: 7,
+                  boxShadow: "0 0 6px rgba(124,58,237,0.6)",
                 }} />}
                 {n.id === "saved" && savedIds.size > 0 && (
                   <div style={{
