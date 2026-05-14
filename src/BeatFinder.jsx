@@ -895,6 +895,66 @@ const TERMS_CONTENT = [
 ];
 
 // =============================================================================
+// PRIVACY POLICY
+// Required by UK GDPR Article 13. Tells users what we collect, why, who we
+// share it with, how long we keep it, and what rights they have. Unlike the
+// T&C, the Privacy Policy doesn't require explicit acceptance — it just
+// needs to be readily available before/at the point of data collection.
+// =============================================================================
+const PRIVACY_VERSION = "1.0";
+const PRIVACY_EFFECTIVE_DATE = "14 May 2026";
+const PRIVACY_CONTENT = [
+  {
+    heading: "1. Who We Are",
+    body: "BeatFinder is a music marketplace and creative platform operated from the United Kingdom. We are the \"data controller\" for the personal data described in this policy, which means we decide what data is collected and how it is used. For any data-protection question or to exercise your rights under UK GDPR, you can email us at support@beatfinder.co.uk and we will respond within one calendar month (extendable to three months in complex cases, as permitted by Article 12)."
+  },
+  {
+    heading: "2. What Data We Collect",
+    body: "Account data: name, username, email address, hashed password, profile bio, location (if you choose to provide it), social media handles, avatar/header images. Payment metadata: Stripe customer ID, subscription plan, billing period, last 4 digits of card and brand (Stripe sends us this — we never see full card numbers or CVVs). Uploaded content: beats, instrumentals, tracks, videos, artwork, audio files, contract signatures, written lyrics. Usage data: pages visited, beats played, leases purchased, search queries, device type, approximate location derived from IP, timestamps of activity. Communications: messages between users, support requests sent to us. Technical data: IP address, browser type, operating system, time zone, cookies (see Section 8)."
+  },
+  {
+    heading: "3. Why We Process Your Data (Lawful Bases)",
+    body: "We rely on the following lawful bases under Article 6 UK GDPR: (a) PERFORMANCE OF A CONTRACT — operating your account, processing your purchases, delivering downloads and leases, fulfilling subscriptions; (b) LEGITIMATE INTERESTS — keeping the Platform secure, preventing fraud and abuse, improving features, analysing aggregate usage; (c) LEGAL OBLIGATION — retaining records of transactions for HMRC tax law (six years), responding to lawful information requests, anti-money-laundering compliance; (d) CONSENT — non-essential cookies, marketing emails (you can withdraw consent at any time without affecting processing already carried out)."
+  },
+  {
+    heading: "4. Who We Share Data With (Sub-processors)",
+    body: "We share the minimum necessary data with the following service providers, each bound by a written Data Processing Agreement: STRIPE (payments — receives email, name, billing data; based in Ireland/USA with UK-adequate safeguards); RENDER (backend hosting — stores all account and content data; USA-hosted with Standard Contractual Clauses); VERCEL (frontend hosting — receives no personal data directly, only serves static assets); MONGODB ATLAS (database — UK/EU regions with encryption at rest); CLOUDINARY (media storage — stores beat audio files and images; EU region available); RESEND (transactional emails — receives email address and message content); GOOGLE (YouTube API for trending data — no user data shared, only public search queries). We do NOT sell personal data, share it for cross-context behavioural advertising, or pass it to data brokers under any circumstances."
+  },
+  {
+    heading: "5. International Transfers",
+    body: "Some sub-processors store or process data outside the UK (primarily the USA). For each such transfer we rely on UK-approved transfer mechanisms: the UK International Data Transfer Agreement, the EU Standard Contractual Clauses with UK Addendum, or adequacy decisions where they apply. You can request a copy of the relevant transfer safeguard documents by emailing support@beatfinder.co.uk."
+  },
+  {
+    heading: "6. How Long We Keep Your Data",
+    body: "Account data: for as long as your account is active, plus 30 days after deletion to allow for accidental-deletion recovery. Transaction records (invoices, lease contracts): six years from the date of transaction, as required by UK tax law. Uploaded content (beats, leases sold): retained while you have a Producer Pro account; on deletion, your beats are removed from public display within 24 hours, though any leases already sold to buyers remain valid in their possession (we cannot revoke existing licensees' rights). Support communications: 24 months from the last message. Logs and analytics: 12 months for security; aggregated and anonymised after that. Backups: rolling 30 days, after which deleted data is fully purged."
+  },
+  {
+    heading: "7. Your Rights Under UK GDPR",
+    body: "You have the right to: (a) ACCESS — request a copy of all personal data we hold about you (available via Settings → Download My Data, or by email); (b) RECTIFICATION — correct inaccurate data (editable from your profile); (c) ERASURE — delete your account and personal data (available via Settings → Delete Account); (d) RESTRICTION — temporarily limit how we process your data; (e) PORTABILITY — receive your data in a structured, machine-readable format (JSON); (f) OBJECTION — object to processing based on legitimate interests; (g) WITHDRAW CONSENT — for any processing based on consent; (h) NOT BE SUBJECT TO AUTOMATED DECISIONS — we do not use any fully-automated decision-making that produces legal effects on you. You can also LODGE A COMPLAINT with the Information Commissioner's Office (ICO) at ico.org.uk or by calling 0303 123 1113. We would prefer the chance to resolve any concerns directly first."
+  },
+  {
+    heading: "8. Cookies and Similar Technologies",
+    body: "We use cookies and similar storage (localStorage, sessionStorage) for: STRICTLY NECESSARY — keeping you logged in, remembering your preferences, processing payments, fraud prevention (these do not require consent); FUNCTIONAL — saved lyrics, agreed licences, install prompt dismissal (set when you choose to use those features); ANALYTICS — aggregated usage statistics to improve the Platform (we ask for consent before enabling these). You can refuse non-essential cookies via our cookie banner or by clearing storage in your browser. Refusing strictly-necessary cookies will break core functionality."
+  },
+  {
+    heading: "9. Security Measures",
+    body: "We implement appropriate technical and organisational measures including: encryption in transit (TLS 1.2+); encryption at rest for database storage; bcrypt password hashing (passwords are never stored or transmitted in plaintext, even to us); JWT-based session tokens with expiry; rate limiting on authentication endpoints; restricted database access on a need-to-know basis; regular security updates of dependencies; periodic backups. No system is 100% secure. If a personal-data breach occurs that is likely to result in a risk to your rights, we will notify the ICO within 72 hours and, where required, notify you directly without undue delay, as required by Articles 33 and 34 UK GDPR."
+  },
+  {
+    heading: "10. Children",
+    body: "BeatFinder is not directed at children under 16, and we do not knowingly collect data from anyone under 16 without verifiable parental consent. If you believe a child under 16 has provided personal data to us, please email support@beatfinder.co.uk and we will delete it promptly."
+  },
+  {
+    heading: "11. Changes to This Policy",
+    body: "We may update this Privacy Policy from time to time. The version number and effective date are shown at the top. Material changes will be notified to logged-in users by in-app notice or email at least 14 days before they take effect. Continued use after the effective date constitutes acceptance of the revised policy. Previous versions are available on request."
+  },
+  {
+    heading: "12. Contact",
+    body: "For any privacy question, to exercise your rights, or to make a complaint: email support@beatfinder.co.uk. For ICO complaints: ico.org.uk · 0303 123 1113 · Wycliffe House, Water Lane, Wilmslow, Cheshire SK9 5AF."
+  }
+];
+
+// =============================================================================
 // GLOBAL PLAY COUNT STORE
 // Single source of truth for beat play counts across ALL cards everywhere.
 // When any card records a play, all other cards showing the same beat update.
@@ -12512,6 +12572,10 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   const [newPw,            setNewPw]            = useState("");
   const [confirmPw,        setConfirmPw]        = useState("");
   const [settingsMsg,      setSettingsMsg]      = useState("");
+  const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState("");
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleting,         setDeleting]         = useState(false);
   const [authErr,     setAuthErr]     = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [rememberMe,  setRememberMe]  = useState(() => {
@@ -12771,6 +12835,68 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 )}
               </div>
 
+              {/* ── Your Data (GDPR) ───────────────────────────────────── */}
+              <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                <button onClick={() => setOpenSettingsSection(openSettingsSection === "data" ? null : "data")}
+                  style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "12px 14px", background: openSettingsSection === "data" ? "#1a1a1a" : "#141414",
+                    border: "none", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                  <span>Your Data</span>
+                  <span style={{ color: "#666", fontSize: 12, transition: "transform 0.2s",
+                    transform: openSettingsSection === "data" ? "rotate(180deg)" : "none" }}>▼</span>
+                </button>
+                {openSettingsSection === "data" && (
+                  <div style={{ padding: "14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
+                    <div style={{ color: "#aaa", fontSize: 12, lineHeight: 1.5, marginBottom: 12 }}>
+                      Under UK GDPR you have the right to access and erase your personal data.
+                    </div>
+                    <button onClick={async function() {
+                      try {
+                        var data = await apiFetch("/api/auth/export-my-data");
+                        var blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                        var url = URL.createObjectURL(blob);
+                        var a = document.createElement("a");
+                        a.href = url;
+                        a.download = "beatfinder_data_" + (user.username || "export") + "_" + new Date().toISOString().slice(0,10) + ".json";
+                        document.body.appendChild(a); a.click();
+                        setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+                        setSettingsMsg("Data export downloaded successfully.");
+                      } catch(e) {
+                        setSettingsMsg("Export failed: " + e.message);
+                      }
+                    }} style={{
+                      width: "100%", marginBottom: 10,
+                      background: "linear-gradient(135deg,#3B82F6 0%,#6366F1 50%,#7C3AED 100%)",
+                      border: "1.5px solid rgba(124,58,237,0.6)",
+                      borderRadius: 12, padding: "12px",
+                      color: "white", fontWeight: 900, fontSize: 13,
+                      letterSpacing: 0.5, cursor: "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                      boxShadow: "0 2px 12px rgba(124,58,237,0.4), inset 0 1px 0 rgba(255,255,255,0.2)",
+                      textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+                    }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+                      Download My Data (JSON)
+                    </button>
+                    <div style={{ color: "#666", fontSize: 10, marginBottom: 14, lineHeight: 1.5 }}>
+                      Downloads everything we hold on you (profile, beats, leases, lyrics, messages).
+                    </div>
+                    <button onClick={function() { setShowDeleteAccountConfirm(true); }} style={{
+                      width: "100%",
+                      background: "transparent",
+                      border: "1.5px solid #DC2626", borderRadius: 12, padding: "12px",
+                      color: "#F87171", fontWeight: 900, fontSize: 13,
+                      letterSpacing: 0.5, cursor: "pointer",
+                    }}>
+                      Delete My Account
+                    </button>
+                    <div style={{ color: "#666", fontSize: 10, marginTop: 6, lineHeight: 1.5 }}>
+                      Permanently anonymises your account. Lease contracts and tax records are retained for 6 years as required by UK law.
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* ── Terms & Conditions ─────────────────────────────────── */}
               <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
                 <button onClick={() => setOpenSettingsSection(openSettingsSection === "terms" ? null : "terms")}
@@ -12787,6 +12913,26 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                     maxHeight: 360, overflowY: "auto", WebkitOverflowScrolling: "touch",
                   }}>
                     <TermsContent compact />
+                  </div>
+                )}
+              </div>
+
+              {/* ── Privacy Policy ─────────────────────────────────────── */}
+              <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                <button onClick={() => setOpenSettingsSection(openSettingsSection === "privacy" ? null : "privacy")}
+                  style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "12px 14px", background: openSettingsSection === "privacy" ? "#1a1a1a" : "#141414",
+                    border: "none", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                  <span>Privacy Policy</span>
+                  <span style={{ color: "#666", fontSize: 12, transition: "transform 0.2s",
+                    transform: openSettingsSection === "privacy" ? "rotate(180deg)" : "none" }}>▼</span>
+                </button>
+                {openSettingsSection === "privacy" && (
+                  <div style={{
+                    padding: "14px 14px 16px", background: "#1a1a1a", borderTop: "1px solid #222",
+                    maxHeight: 360, overflowY: "auto", WebkitOverflowScrolling: "touch",
+                  }}>
+                    <PrivacyContent compact />
                   </div>
                 )}
               </div>
@@ -13592,6 +13738,112 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               try { var ct = sessionStorage.getItem("bf_tab") || "exclusive"; sessionStorage.setItem("bf_return_tab", JSON.stringify({ tab: ct, path: window.location.pathname + window.location.search, ts: Date.now() })); } catch(e) {} window.location.href = r.checkout_url;
             } catch (e) { alert("Error: " + e.message); }
           }} />
+        </div>
+      )}
+
+      {/* ── Delete Account Confirmation Modal ── */}
+      {showDeleteAccountConfirm && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 99999,
+          background: "rgba(0,0,0,0.9)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 16,
+        }} onClick={function() { if (!deleting) setShowDeleteAccountConfirm(false); }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{
+            width: "100%", maxWidth: 440,
+            background: "linear-gradient(165deg,#1a0a0a 0%,#0a0a14 60%,#080812 100%)",
+            borderRadius: 22,
+            border: "1.5px solid rgba(220,38,38,0.5)",
+            boxShadow: "0 16px 60px rgba(0,0,0,0.85), 0 0 40px rgba(220,38,38,0.3)",
+            padding: "22px 20px max(22px, env(safe-area-inset-bottom))",
+          }}>
+            <div style={{ height: 2, marginLeft: -20, marginRight: -20, marginTop: -22, marginBottom: 18,
+              background: "linear-gradient(90deg,transparent,#EF4444,transparent)",
+              boxShadow: "0 0 12px #EF4444cc",
+            }} />
+            <div style={{ color: "#F87171", fontSize: 11, fontWeight: 900, letterSpacing: 2, marginBottom: 6, textShadow: "0 0 6px rgba(220,38,38,0.5)" }}>⚠ PERMANENT ACTION</div>
+            <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 24, letterSpacing: 1, marginBottom: 10 }}>DELETE YOUR ACCOUNT</div>
+            <div style={{ color: "#bbb", fontSize: 13, lineHeight: 1.55, marginBottom: 16 }}>
+              This will anonymise your account, remove your uploaded beats from public display, and delete your saved lyrics and free-licence records. Lease contracts (sold or purchased) and tax records are retained for 6 years as required by UK law.
+            </div>
+            <div style={{ color: "#888", fontSize: 11, marginBottom: 6, fontWeight: 700, letterSpacing: 0.5 }}>
+              Type your email address to confirm
+            </div>
+            <input
+              value={deleteConfirmEmail}
+              onChange={function(e){ setDeleteConfirmEmail(e.target.value); }}
+              placeholder={user.email}
+              type="email"
+              disabled={deleting}
+              style={{
+                width: "100%", boxSizing: "border-box",
+                background: "#0a0a0a", border: "1px solid #333",
+                borderRadius: 10, padding: "10px 14px",
+                color: "white", fontSize: 14, outline: "none",
+                marginBottom: 10,
+              }}
+            />
+            <textarea
+              value={deleteReason}
+              onChange={function(e){ setDeleteReason(e.target.value); }}
+              placeholder="(Optional) Tell us why you're leaving — helps us improve."
+              disabled={deleting}
+              rows={2}
+              style={{
+                width: "100%", boxSizing: "border-box",
+                background: "#0a0a0a", border: "1px solid #333",
+                borderRadius: 10, padding: "10px 14px",
+                color: "white", fontSize: 13, outline: "none",
+                marginBottom: 16, resize: "vertical", fontFamily: "inherit",
+              }}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={function(){ if (!deleting) setShowDeleteAccountConfirm(false); }}
+                disabled={deleting}
+                style={{
+                  flex: 1, background: "transparent", border: "1.5px solid #333",
+                  borderRadius: 12, padding: "12px",
+                  color: "#aaa", fontWeight: 800, fontSize: 13,
+                  cursor: deleting ? "not-allowed" : "pointer",
+                }}>
+                Cancel
+              </button>
+              <button
+                disabled={deleting || (deleteConfirmEmail.trim().toLowerCase() !== (user.email || "").toLowerCase())}
+                onClick={async function() {
+                  if (deleting) return;
+                  if (deleteConfirmEmail.trim().toLowerCase() !== (user.email || "").toLowerCase()) return;
+                  setDeleting(true);
+                  try {
+                    await apiFetch("/api/auth/delete-my-account", {
+                      method: "POST",
+                      body: JSON.stringify({ confirm_email: deleteConfirmEmail.trim(), reason: deleteReason.trim() }),
+                    });
+                    // Clear local state and log out
+                    try { localStorage.clear(); sessionStorage.clear(); } catch(e) {}
+                    alert("Your account has been deleted. You will be logged out.");
+                    onLogout();
+                  } catch(e) {
+                    alert("Deletion failed: " + e.message);
+                    setDeleting(false);
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  background: (deleteConfirmEmail.trim().toLowerCase() === (user.email || "").toLowerCase())
+                    ? "linear-gradient(135deg,#DC2626,#991B1B)"
+                    : "rgba(220,38,38,0.15)",
+                  border: "1.5px solid " + ((deleteConfirmEmail.trim().toLowerCase() === (user.email || "").toLowerCase()) ? "#DC2626" : "#3a1a1a"),
+                  borderRadius: 12, padding: "12px",
+                  color: (deleteConfirmEmail.trim().toLowerCase() === (user.email || "").toLowerCase()) ? "white" : "#666",
+                  fontWeight: 900, fontSize: 13, letterSpacing: 0.5,
+                  cursor: (deleting || deleteConfirmEmail.trim().toLowerCase() !== (user.email || "").toLowerCase()) ? "not-allowed" : "pointer",
+                  boxShadow: (deleteConfirmEmail.trim().toLowerCase() === (user.email || "").toLowerCase()) ? "0 0 20px rgba(220,38,38,0.5)" : "none",
+                }}>
+                {deleting ? "DELETING..." : "DELETE FOREVER"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -23364,23 +23616,25 @@ function SplashScreen({ onDone }) {
 // =============================================================================
 // TERMS & CONDITIONS — modal (acceptance) and reusable content viewer
 // =============================================================================
-function TermsContent({ compact }) {
+// Generic legal-document renderer used by both T&C and Privacy Policy pages.
+// Provides consistent neon styling, header, and footer across legal pages.
+function LegalContent({ title, label, version, effective, sections, compact, footerText }) {
   return (
     <div>
       <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid rgba(124,58,237,0.2)" }}>
         <div style={{
           color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 1.5,
           textShadow: "0 0 6px rgba(124,58,237,0.55)", marginBottom: 4,
-        }}>BEATFINDER · LEGAL</div>
+        }}>{label}</div>
         <div style={{
           color: "white", fontSize: compact ? 16 : 20, fontWeight: 900,
           fontFamily: "'Bebas Neue', sans-serif", letterSpacing: 1, marginBottom: 4,
-        }}>TERMS &amp; CONDITIONS</div>
+        }}>{title}</div>
         <div style={{ color: "#888", fontSize: 11 }}>
-          Version {TERMS_VERSION} · Effective {TERMS_EFFECTIVE_DATE}
+          Version {version} · Effective {effective}
         </div>
       </div>
-      {TERMS_CONTENT.map(function(section, i) {
+      {sections.map(function(section, i) {
         return (
           <div key={i} style={{ marginBottom: 16 }}>
             <div style={{
@@ -23401,9 +23655,36 @@ function TermsContent({ compact }) {
         color: "#A78BFA", fontSize: 11, fontWeight: 700, textAlign: "center",
         letterSpacing: 0.3,
       }}>
-        Questions? Contact support@beatfinder.co.uk
+        {footerText || "Questions? Contact support@beatfinder.co.uk"}
       </div>
     </div>
+  );
+}
+
+function TermsContent({ compact }) {
+  return (
+    <LegalContent
+      label="BEATFINDER · LEGAL"
+      title="TERMS & CONDITIONS"
+      version={TERMS_VERSION}
+      effective={TERMS_EFFECTIVE_DATE}
+      sections={TERMS_CONTENT}
+      compact={compact}
+    />
+  );
+}
+
+function PrivacyContent({ compact }) {
+  return (
+    <LegalContent
+      label="BEATFINDER · PRIVACY"
+      title="PRIVACY POLICY"
+      version={PRIVACY_VERSION}
+      effective={PRIVACY_EFFECTIVE_DATE}
+      sections={PRIVACY_CONTENT}
+      compact={compact}
+      footerText="Privacy questions? Contact support@beatfinder.co.uk · ICO: ico.org.uk"
+    />
   );
 }
 
@@ -23519,11 +23800,21 @@ function TermsModal({ user, onAccepted }) {
         <div
           ref={contentRef}
           onScroll={onScroll}
+          onTouchMove={function(e){ e.stopPropagation(); }}
           style={{
-            flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch",
+            overflowY: "scroll",
+            WebkitOverflowScrolling: "touch",
+            overscrollBehavior: "contain",
             padding: "0 20px 16px",
             borderTop: "1px solid rgba(124,58,237,0.15)",
             borderBottom: "1px solid rgba(124,58,237,0.15)",
+            // Explicit height instead of flex:1 — iOS Safari needs a
+            // concrete computed height on the scrolling child for
+            // -webkit-overflow-scrolling:touch to kick in. Calculated
+            // as the modal max-height minus the header (~110px) and
+            // footer (~110px) chrome.
+            maxHeight: "calc(92vh - 220px)",
+            minHeight: 200,
           }}>
           <div style={{ paddingTop: 16 }}>
             <TermsContent compact />
@@ -23556,6 +23847,68 @@ function TermsModal({ user, onAccepted }) {
               textShadow: (!scrolledToEnd || accepting) ? "none" : "0 1px 2px rgba(0,0,0,0.3)",
             }}>
             {accepting ? "SAVING..." : (scrolledToEnd ? "✓ I AGREE TO THE TERMS" : "PLEASE SCROLL TO CONTINUE")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CookieBanner() {
+  // PECR (UK cookie law) requires opt-in for non-essential cookies.
+  // We show this banner once; choice is persisted in localStorage.
+  // "accept" = consent to all (analytics + functional);
+  // "essential-only" = strictly necessary only (still allowed without consent).
+  var [open, setOpen] = React.useState(function() {
+    try {
+      return !localStorage.getItem("bf_cookie_choice_v1");
+    } catch (e) { return true; }
+  });
+  if (!open) return null;
+  function setChoice(choice) {
+    try {
+      localStorage.setItem("bf_cookie_choice_v1", choice);
+      localStorage.setItem("bf_cookie_choice_at", String(Date.now()));
+    } catch (e) {}
+    try { window.dispatchEvent(new CustomEvent("bf-cookie-choice", { detail: { choice: choice } })); } catch(e) {}
+    setOpen(false);
+  }
+  return (
+    <div style={{
+      position: "fixed", bottom: 0, left: 0, right: 0,
+      zIndex: 99997,
+      padding: "12px 14px max(12px, env(safe-area-inset-bottom))",
+      background: "linear-gradient(180deg,rgba(15,10,31,0.85) 0%,rgba(10,10,20,0.97) 100%)",
+      backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)",
+      borderTop: "1px solid rgba(124,58,237,0.45)",
+      boxShadow: "0 -8px 32px rgba(0,0,0,0.6), 0 -1px 0 0 rgba(124,58,237,0.35)",
+    }}>
+      <div style={{ maxWidth: 520, margin: "0 auto" }}>
+        <div style={{
+          color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 1.5,
+          marginBottom: 6, textShadow: "0 0 6px rgba(124,58,237,0.55)",
+        }}>🍪 COOKIE NOTICE</div>
+        <div style={{ color: "#ddd", fontSize: 12, lineHeight: 1.5, marginBottom: 10 }}>
+          We use strictly-necessary cookies to keep you logged in and process payments. We'd also like to use functional cookies (saved preferences) and aggregate analytics to improve BeatFinder. You can change this later in Settings → Privacy Policy.
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={function(){ setChoice("essential-only"); }} style={{
+            flex: 1, background: "transparent", border: "1.5px solid #333",
+            borderRadius: 10, padding: "10px",
+            color: "#aaa", fontWeight: 800, fontSize: 12, letterSpacing: 0.3, cursor: "pointer",
+          }}>
+            Essential Only
+          </button>
+          <button onClick={function(){ setChoice("accept"); }} style={{
+            flex: 1.4,
+            background: "linear-gradient(135deg,#C026D3 0%,#A855F7 35%,#7C3AED 70%,#3B82F6 100%)",
+            border: "1.5px solid rgba(192,38,211,0.6)",
+            borderRadius: 10, padding: "10px",
+            color: "white", fontWeight: 900, fontSize: 12, letterSpacing: 0.5, cursor: "pointer",
+            boxShadow: "0 2px 14px rgba(192,38,211,0.5), inset 0 1px 0 rgba(255,255,255,0.25)",
+            textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+          }}>
+            Accept All
           </button>
         </div>
       </div>
@@ -24524,6 +24877,9 @@ export default function BeatFinder() {
           and iOS Safari (manual instructions). Hidden if already installed
           or dismissed within the last 7 days. */}
       <InstallPrompt />
+
+      {/* Cookie consent banner (PECR/UK GDPR). Shows once; choice persists. */}
+      <CookieBanner />
 
       {/* Terms & Conditions acceptance modal.
           - Logged-in users: appears once per TERMS_VERSION; acceptance is
