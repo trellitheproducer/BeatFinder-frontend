@@ -4646,11 +4646,18 @@ function TrendingStrip({ savedIds, onSave, onPlay }) {
 // =============================================================================
 // ARTISTS SCREEN
 // =============================================================================
-function ArtistsScreen({ onPlay, savedIds, onSave }) {
+function ArtistsScreen({ onPlay, savedIds, onSave, resetKey }) {
   const [region,       setRegion]       = useState("USA");
   const [cat,          setCat]          = useState("All");
   const [search,       setSearch]       = useState("");
   const [selectedArtist, setSelectedArtist] = useState(null);
+
+  // When the user re-taps the Artists tab while already inside it,
+  // resetKey bumps — clear any selected artist so they land back at the
+  // artist-list root view.
+  useEffect(function() {
+    setSelectedArtist(null);
+  }, [resetKey]);
 
   // If an artist is selected, show their beat page
   if (selectedArtist) {
@@ -26853,6 +26860,10 @@ export default function BeatFinder() {
   // studioVisited: true once the user has navigated to Studio at least once this session.
   // StudioScreen only mounts after first visit — prevents mic permission firing on page load.
   const [studioVisited, setStudioVisited] = useState(false);
+  // Bumped whenever the user re-taps the Artists tab while already on it.
+  // ArtistsScreen watches this and clears its internal selectedArtist state,
+  // returning the user to the artist-list root.
+  const [artistsResetKey, setArtistsResetKey] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   // When something routes the user into Search and wants to land them on a
   // specific tab (e.g. Feed empty-state → People tab), pass that here.
@@ -27340,6 +27351,11 @@ export default function BeatFinder() {
   }, []);
 
   const handlePlay = useCallback(beat => setPlaying(beat), []);
+  // Lightweight in-app navigation history — tracks the user's tab path so
+  // both browser back gestures AND in-screen Back buttons can pop the stack.
+  // We push every tab change EXCEPT re-taps of the same tab.
+  const navHistoryRef = useRef([]);
+
   const goTab = id => {
     // Guests cannot access Studio or Profile — prompt sign-in
     if ((id === "studio" || id === "profile") && !user) {
@@ -27362,10 +27378,61 @@ export default function BeatFinder() {
       return;
     }
     setPlaying(null);
-    setTab(id);
+
+    // Re-tap behaviour: if the user taps the tab they're already on, signal
+    // the tab's component to reset to its root view (only Artists uses this
+    // right now — clears selectedArtist back to the artist list).
+    setTab(prev => {
+      if (prev === id) {
+        if (id === "artists") setArtistsResetKey(k => k + 1);
+        return prev;
+      }
+      // Push the previous tab onto the back stack
+      navHistoryRef.current.push(prev);
+      // Cap history length to prevent memory growth
+      if (navHistoryRef.current.length > 50) {
+        navHistoryRef.current.shift();
+      }
+      // Also push to browser history so the native back gesture works
+      try {
+        window.history.pushState({ bfTab: id }, "", "");
+      } catch (e) {}
+      return id;
+    });
+
     if (id === "studio") setStudioVisited(true);
     try { sessionStorage.setItem("bf_tab", id); } catch(e) {}
   };
+
+  // Pop the back stack — used by browser back gesture / popstate.
+  // Returns true if it popped, false if nothing to pop (caller can decide
+  // whether to ignore or exit the app).
+  const goBack = useCallback(() => {
+    const hist = navHistoryRef.current;
+    if (hist.length === 0) return false;
+    const prevTab = hist.pop();
+    setPlaying(null);
+    setTab(prevTab);
+    try { sessionStorage.setItem("bf_tab", prevTab); } catch(e) {}
+    return true;
+  }, []);
+
+  // Listen for browser back gesture (popstate fires when iOS swipe-back
+  // is used or when the user taps a hardware back button on Android).
+  useEffect(function() {
+    const onPopState = function(e) {
+      // If our in-app history has entries, pop one; otherwise let the
+      // browser do its default thing (which usually means closing the PWA).
+      if (navHistoryRef.current.length > 0) {
+        const popped = navHistoryRef.current.pop();
+        setPlaying(null);
+        setTab(popped);
+        try { sessionStorage.setItem("bf_tab", popped); } catch(err) {}
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return function() { window.removeEventListener("popstate", onPopState); };
+  }, []);
 
   // Lyrics state — backed by MongoDB for logged-in users, localStorage for guests
   const [lyricsOpen,    setLyricsOpen]    = useState(false);
@@ -27670,7 +27737,7 @@ export default function BeatFinder() {
           onTouchMove={t !== "studio" ? function(e){ e.stopPropagation(); } : undefined}
           >
             {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => openMessages(null)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} onOpenPost={() => setShowPost(true)} onOpenNotifications={openNotifications} unreadMessages={unreadMessages} unreadNotifications={unreadNotifications} />}
-            {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
+            {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} resetKey={artistsResetKey} />}
             {t === "feed"      && <FollowingFeed user={user} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onViewProfile={function(u) { setPublicProfile(u); }} onSearchPeople={function() { setSearchInitialTab("people"); goTab("search"); }} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} onViewProfile={function(u) { setPublicProfile(u); }} user={user} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} initialTab={searchInitialTab} onClearInitialTab={() => setSearchInitialTab(null)} currentUser={user} onViewProfile={function(u) { setSearchProfile(u); }} />}
