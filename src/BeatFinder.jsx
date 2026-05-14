@@ -4339,8 +4339,13 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
     );
   }
 
-  // Empty state — user follows nobody OR nobody they follow has posted
-  if (!items || items.length === 0) {
+  // Filter once up here so the empty-state check (which now only considers
+  // posts since beats no longer render in the feed) and the render block
+  // can share the same derived array.
+  var posts = (items || []).filter(function(i) { return i.kind === "post"; });
+
+  // Empty state — user follows nobody who has posted, OR follows nobody at all
+  if (posts.length === 0) {
     return (
       <div style={{ padding: "60px 24px", textAlign: "center" }}>
         <div style={{ marginBottom: 16, color: "#A78BFA" }}>
@@ -4356,7 +4361,7 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
           Your feed is empty
         </div>
         <div style={{ color: "#888", fontSize: 13, lineHeight: 1.6, maxWidth: 280, margin: "0 auto 20px" }}>
-          Follow producers and artists you love. Their new beats and posts will appear here.
+          Follow producers and artists you love. Their posts will appear here.
         </div>
         {onSearchPeople && (
           <button onClick={onSearchPeople}
@@ -4373,12 +4378,6 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
       </div>
     );
   }
-
-  // Split into beats (for carousel) and posts (for stacked feed below).
-  // Beats are typically more important visually + clickable to play,
-  // so we surface them as a carousel. Posts read like a mini Twitter feed.
-  var beats = items.filter(function(i) { return i.kind === "beat"; });
-  var posts = items.filter(function(i) { return i.kind === "post"; });
 
   function timeAgo(iso) {
     if (!iso) return "";
@@ -4483,99 +4482,7 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
             </button>
           )}
         </div>
-        {/* Count pill */}
-        <div style={{
-          display: "inline-block",
-          background: "linear-gradient(135deg,#C026D3,#7C3AED,#3B82F6)",
-          color: "white", fontSize: 10, fontWeight: 900,
-          padding: "4px 10px", borderRadius: 20, letterSpacing: 0.5,
-          boxShadow: "0 0 10px rgba(124,58,237,0.4)",
-        }}>{items.length} {items.length === 1 ? "ITEM" : "ITEMS"}</div>
       </div>
-
-      {/* New beats carousel */}
-      {beats.length > 0 && (
-        <div className="bf-carousel" style={{
-          overflowX: "auto", scrollbarWidth: "none", WebkitOverflowScrolling: "touch",
-          paddingLeft: 16, paddingBottom: 4, marginBottom: posts.length > 0 ? 18 : 0,
-        }}>
-          <div style={{ display: "flex", gap: 10, paddingRight: 16 }}>
-            {beats.map(function(beat) {
-              var isFreePrice = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0";
-              var accent  = isFreePrice ? "#C026D3" : "#7C3AED";
-              var accent2 = isFreePrice ? "#7C3AED" : "#3B82F6";
-              return (
-                <div key={beat.id} style={{
-                  width: 170, flexShrink: 0,
-                  background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
-                  borderRadius: 14, overflow: "hidden",
-                  border: "1px solid rgba(124,58,237,0.25)",
-                  position: "relative",
-                  boxShadow: "0 4px 14px rgba(0,0,0,0.5), 0 0 0 1px rgba(124,58,237,0.1)",
-                }}>
-                  <div style={{
-                    height: 2,
-                    background: "linear-gradient(90deg,transparent," + accent + "," + accent2 + ",transparent)",
-                    boxShadow: "0 0 8px " + accent + "aa",
-                  }} />
-                  <div style={{ padding: "10px 10px 0", display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={{
-                      width: 22, height: 22, borderRadius: "50%", overflow: "hidden", flexShrink: 0,
-                      background: beat.user_avatar ? "#000" : "linear-gradient(135deg,#6B21A8,#C026D3)",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      color: "white", fontSize: 10, fontWeight: 900,
-                    }}>
-                      {beat.user_avatar
-                        ? <img src={beat.user_avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                        : (beat.username || "?")[0].toUpperCase()}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ color: "#DDD6FE", fontSize: 10, fontWeight: 700,
-                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {beat.username || "Producer"}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ padding: "8px 10px 4px" }}>
-                    <div style={{ color: "white", fontSize: 13, fontWeight: 800, lineHeight: 1.2,
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {beat.title || "Untitled"}
-                    </div>
-                    <div style={{ color: "#666", fontSize: 9, marginTop: 3 }}>
-                      {timeAgo(beat.created_at)}
-                      {beat.bpm ? " · " + beat.bpm + " BPM" : ""}
-                    </div>
-                  </div>
-                  <div style={{ padding: "0 10px 10px" }}>
-                    <div style={{
-                      display: "inline-block",
-                      background: "linear-gradient(135deg," + accent + "," + accent2 + ")",
-                      color: "white", fontSize: 9, fontWeight: 900,
-                      padding: "3px 8px", borderRadius: 12, letterSpacing: 0.5,
-                      textShadow: "0 1px 2px rgba(0,0,0,0.3)",
-                      boxShadow: "0 2px 8px " + accent + "55",
-                    }}>
-                      {isFreePrice ? "FREE" : (beat.price || "PAID")}
-                    </div>
-                  </div>
-                  <button onClick={function() { if (onPlay) onPlay(beat); }} style={{
-                    width: "100%", padding: "10px",
-                    background: "linear-gradient(135deg," + accent + "," + accent2 + ")",
-                    border: "none", color: "white", fontWeight: 900, fontSize: 11,
-                    cursor: "pointer", letterSpacing: 0.5,
-                    borderTop: "1px solid rgba(255,255,255,0.06)",
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                    textShadow: "0 1px 2px rgba(0,0,0,0.3)",
-                  }}>
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="white"><polygon points="6 4 20 12 6 20"/></svg>
-                    Listen
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Posts feed (Twitter-style cards stacked vertically) */}
       {posts.length > 0 && (
