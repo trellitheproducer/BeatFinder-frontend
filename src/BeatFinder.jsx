@@ -7153,9 +7153,17 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave, onSignUp
   if (!isPro) return (
     <div style={{ paddingBottom: 100, overflowY: "auto" }}>
       
-      <div style={{ background: "linear-gradient(160deg,#1a0a00,#2d1500,#1C1917)", padding: "32px 20px 24px", textAlign: "center", borderBottom: "1px solid rgba(245,158,11,0.15)" }}>
-        <div style={{ fontSize: 44, marginBottom: 10, color: "#F59E0B" }}><AppIcon id="lock" size={36} /></div>
-        <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 34, letterSpacing: 3, color: "#F59E0B", marginBottom: 6 }}>MEMBERS ONLY</div>
+      <div style={{ background: "linear-gradient(160deg,#1a0a2e,#10082d,#0a0a14)", padding: "32px 20px 24px", textAlign: "center", borderBottom: "1px solid rgba(124,58,237,0.25)" }}>
+        <div style={{ fontSize: 44, marginBottom: 10, color: "#A78BFA", filter: "drop-shadow(0 0 12px rgba(124,58,237,0.6))" }}><AppIcon id="lock" size={36} /></div>
+        <div style={{
+          fontFamily: "'Bebas Neue',sans-serif", fontSize: 34, letterSpacing: 3,
+          background: "linear-gradient(135deg,#C026D3 0%,#A855F7 50%,#3B82F6 100%)",
+          WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+          backgroundClip: "text", color: "transparent",
+          marginBottom: 6,
+          textShadow: "0 0 24px rgba(124,58,237,0.5)",
+          filter: "drop-shadow(0 0 8px rgba(124,58,237,0.4))",
+        }}>MEMBERS ONLY</div>
         <div style={{ color: "#aaa", fontSize: 14, lineHeight: 1.6, maxWidth: 300, margin: "0 auto" }}>
           Join the BeatFinder community and unlock the full producer ecosystem
         </div>
@@ -7163,18 +7171,27 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave, onSignUp
 
       
       <div style={{ padding: "20px 20px 0" }}>
-        <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, letterSpacing: 1, marginBottom: 14, textAlign: "center" }}>WHAT YOU UNLOCK</div>
+        <div style={{
+          color: "#A78BFA", fontWeight: 900, fontSize: 12, letterSpacing: 1.5,
+          marginBottom: 14, textAlign: "center",
+          textShadow: "0 0 8px rgba(124,58,237,0.55)",
+        }}>WHAT YOU UNLOCK</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
           {[
-            { icon: "note",     color: "#F59E0B", title: "Exclusive Beats", desc: "Access member-only beats unavailable anywhere else" },
-            { icon: "download", color: "#F59E0B", title: "MP3 Downloads",   desc: "Download and buy leases directly from producers" },
-            { icon: "edit",     color: "#F59E0B", title: "Lyrics/Studio",   desc: "Access Rhyme Finder tool with lyrics, record/mix & master ideas in BeatFinder's DAW" },
-            { icon: "knobs",    color: "#F59E0B", title: "Producer Tools",  desc: "Upload beats, sell leases and get paid instantly" },
+            { icon: "note",     color: "#A78BFA", title: "Exclusive Beats", desc: "Access member-only beats unavailable anywhere else" },
+            { icon: "download", color: "#A78BFA", title: "MP3 Downloads",   desc: "Download and buy leases directly from producers" },
+            { icon: "edit",     color: "#A78BFA", title: "Lyrics/Studio",   desc: "Access Rhyme Finder tool with lyrics, record/mix & master ideas in BeatFinder's DAW" },
+            { icon: "knobs",    color: "#A78BFA", title: "Producer Tools",  desc: "Upload beats, sell leases and get paid instantly" },
           ].map(v => (
-            <div key={v.title} style={{ background: "#111", borderRadius: 14, padding: 14, border: "1px solid rgba(245,158,11,0.15)" }}>
-              <div style={{ marginBottom: 10 }}><Icon id={v.icon} size={24} color={v.color} strokeWidth={1.6} /></div>
+            <div key={v.title} style={{
+              background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+              borderRadius: 14, padding: 14,
+              border: "1px solid rgba(124,58,237,0.3)",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.4), 0 0 12px rgba(124,58,237,0.15), inset 0 1px 0 rgba(255,255,255,0.04)",
+            }}>
+              <div style={{ marginBottom: 10, filter: "drop-shadow(0 0 6px rgba(124,58,237,0.6))" }}><Icon id={v.icon} size={24} color={v.color} strokeWidth={1.6} /></div>
               <div style={{ color: "white", fontWeight: 800, fontSize: 13, marginBottom: 4 }}>{v.title}</div>
-              <div style={{ color: "#555", fontSize: 11, lineHeight: 1.5 }}>{v.desc}</div>
+              <div style={{ color: "#888", fontSize: 11, lineHeight: 1.5 }}>{v.desc}</div>
             </div>
           ))}
         </div>
@@ -7204,7 +7221,15 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave, onSignUp
         </div>
 
         
-        <button onClick={user ? onGoProfile : onSignUp} style={{ width: "100%", background: "linear-gradient(135deg,#F59E0B,#C026D3)", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: "16px", fontSize: 16, cursor: "pointer", marginBottom: 20 }}>
+        <button onClick={user ? onGoProfile : onSignUp} style={{
+          width: "100%",
+          background: "linear-gradient(135deg,#C026D3 0%,#A855F7 35%,#7C3AED 70%,#3B82F6 100%)",
+          border: "1.5px solid rgba(192,38,211,0.6)", borderRadius: 32,
+          color: "white", fontWeight: 900, padding: "16px", fontSize: 16,
+          cursor: "pointer", marginBottom: 20, letterSpacing: 0.5,
+          boxShadow: "0 4px 24px rgba(192,38,211,0.5), 0 0 40px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.25)",
+          textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+        }}>
           {user ? "Unlock Access" : "Create Account"}
         </button>
 
@@ -7231,14 +7256,30 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave, onSignUp
     <div style={{ padding: "0 16px 100px" }}>
       
       <div style={{ padding: "20px 0 14px" }}>
-        <div style={{ background: "linear-gradient(135deg,#1C1917,rgba(245,158,11,0.12))", borderRadius: 16, padding: "20px", marginBottom: 18, border: "1.5px solid rgba(245,158,11,0.3)" }}>
+        <div style={{
+          background: "linear-gradient(135deg,#0f0a1f,rgba(124,58,237,0.18))",
+          borderRadius: 16, padding: "20px", marginBottom: 18,
+          border: "1.5px solid rgba(124,58,237,0.5)",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.5), 0 0 24px rgba(124,58,237,0.2), inset 0 1px 0 rgba(255,255,255,0.05)",
+        }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
-              <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 12, marginBottom: 4, letterSpacing: 1 }}><AppIcon id="lock" size={20}/> MEMBERS ONLY</div>
+              <div style={{
+                color: "#A78BFA", fontWeight: 900, fontSize: 12, marginBottom: 4, letterSpacing: 1.5,
+                textShadow: "0 0 8px rgba(124,58,237,0.55)",
+              }}><AppIcon id="lock" size={20}/> MEMBERS ONLY</div>
               <div style={{ color: "white", fontSize: 24, fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, display:"flex", alignItems:"center", gap:8 }}><AppIcon id="crown" size={22} />Members Area</div>
               <div style={{ color: "#aaa", fontSize: 12, marginTop: 4 }}>Exclusive beats and downloadable MP3s</div>
             </div>
-            <div style={{ background: user?.isPro ? "rgba(192,38,211,0.2)" : "rgba(245,158,11,0.2)", border: "1px solid " + (user?.isPro ? "#C026D3" : "#F59E0B"), borderRadius: 20, padding: "6px 12px", fontSize: 11, color: user?.isPro ? "#C026D3" : "#F59E0B", fontWeight: 800 }}>
+            <div style={{
+              background: user?.isPro
+                ? "linear-gradient(135deg,rgba(192,38,211,0.25),rgba(124,58,237,0.25))"
+                : "linear-gradient(135deg,rgba(124,58,237,0.25),rgba(59,130,246,0.25))",
+              border: "1px solid " + (user?.isPro ? "rgba(192,38,211,0.6)" : "rgba(124,58,237,0.6)"),
+              borderRadius: 20, padding: "6px 12px",
+              fontSize: 11, color: user?.isPro ? "#F3E8FF" : "#DDD6FE", fontWeight: 900, letterSpacing: 0.5,
+              boxShadow: user?.isPro ? "0 0 12px rgba(192,38,211,0.4)" : "0 0 12px rgba(124,58,237,0.4)",
+            }}>
               {user?.isPro ? "PRODUCER PRO" : "ARTIST PRO"}
             </div>
           </div>
@@ -7246,10 +7287,32 @@ function ExclusiveScreen({ user, onGoProfile, onPlay, savedIds, onSave, onSignUp
 
         
         <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-          <button onClick={() => setTab("beats")} style={{ flex: 1, padding: "12px", borderRadius: 12, fontWeight: 800, fontSize: 14, cursor: "pointer", border: tab === "beats" ? "2px solid #F59E0B" : "1.5px solid #333", background: tab === "beats" ? "rgba(245,158,11,0.15)" : "transparent", color: tab === "beats" ? "#F59E0B" : "#666" }}>
+          <button onClick={() => setTab("beats")} style={{
+            flex: 1, padding: "12px", borderRadius: 12,
+            fontWeight: 900, fontSize: 14, cursor: "pointer",
+            border: tab === "beats" ? "1.5px solid rgba(124,58,237,0.7)" : "1.5px solid #333",
+            background: tab === "beats"
+              ? "linear-gradient(135deg,rgba(124,58,237,0.2),rgba(59,130,246,0.2))"
+              : "transparent",
+            color: tab === "beats" ? "#DDD6FE" : "#666",
+            letterSpacing: 0.5,
+            boxShadow: tab === "beats" ? "0 0 16px rgba(124,58,237,0.35), inset 0 1px 0 rgba(255,255,255,0.05)" : "none",
+            textShadow: tab === "beats" ? "0 0 6px rgba(124,58,237,0.5)" : "none",
+          }}>
             <AppIcon id="flame" size={20}/> Exclusive Beats
           </button>
-          <button onClick={() => setTab("mp3s")} style={{ flex: 1, padding: "12px", borderRadius: 12, fontWeight: 800, fontSize: 14, cursor: "pointer", border: tab === "mp3s" ? "2px solid #C026D3" : "1.5px solid #333", background: tab === "mp3s" ? "rgba(192,38,211,0.15)" : "transparent", color: tab === "mp3s" ? "#C026D3" : "#666" }}>
+          <button onClick={() => setTab("mp3s")} style={{
+            flex: 1, padding: "12px", borderRadius: 12,
+            fontWeight: 900, fontSize: 14, cursor: "pointer",
+            border: tab === "mp3s" ? "1.5px solid rgba(192,38,211,0.7)" : "1.5px solid #333",
+            background: tab === "mp3s"
+              ? "linear-gradient(135deg,rgba(192,38,211,0.2),rgba(124,58,237,0.2))"
+              : "transparent",
+            color: tab === "mp3s" ? "#F3E8FF" : "#666",
+            letterSpacing: 0.5,
+            boxShadow: tab === "mp3s" ? "0 0 16px rgba(192,38,211,0.35), inset 0 1px 0 rgba(255,255,255,0.05)" : "none",
+            textShadow: tab === "mp3s" ? "0 0 6px rgba(192,38,211,0.5)" : "none",
+          }}>
             <AppIcon id="download" size={16} /> MP3 Downloads
           </button>
         </div>
