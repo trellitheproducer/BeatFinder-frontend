@@ -3963,7 +3963,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
 // posts (status, music, video). Has proper loading / error / empty states
 // so the user always sees feedback when the tab is opened.
 // =============================================================================
-function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onGoArtists }) {
+function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearchPeople }) {
   var [items, setItems]     = React.useState([]);
   var [loading, setLoading] = React.useState(true);
   var [error, setError]     = React.useState(null);
@@ -4058,8 +4058,8 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onGoArti
         <div style={{ color: "#888", fontSize: 13, lineHeight: 1.6, maxWidth: 280, margin: "0 auto 20px" }}>
           Follow producers and artists you love. Their new beats and posts will appear here.
         </div>
-        {onGoArtists && (
-          <button onClick={onGoArtists}
+        {onSearchPeople && (
+          <button onClick={onSearchPeople}
             style={{
               padding: "11px 26px", borderRadius: 20,
               background: "linear-gradient(135deg,#C026D3,#7C3AED)",
@@ -4067,7 +4067,7 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onGoArti
               cursor: "pointer",
               boxShadow: "0 4px 14px rgba(124,58,237,0.4)",
             }}>
-            Discover Artists
+            Find People to Follow
           </button>
         )}
       </div>
@@ -7287,14 +7287,24 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
 // =============================================================================
 // SEARCH SCREEN
 // =============================================================================
-function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial, currentUser, onViewProfile }) {
+function SearchScreen({ savedIds, onSave, onPlay, initialQuery, onClearInitial, currentUser, onViewProfile, initialTab, onClearInitialTab }) {
   var [input, setInput] = useState("");
   var [active, setActive] = useState(null);
-  var [searchTab, setSearchTab] = useState("beats");
+  // Default to "beats" but accept "people" via initialTab from parent
+  // (used when the Feed empty state directs user to find people to follow).
+  var [searchTab, setSearchTab] = useState(initialTab || "beats");
   var [peopleQuery, setPeopleQuery] = useState("");
   var [peopleResults, setPeopleResults] = useState([]);
   var [peopleLoading, setPeopleLoading] = useState(false);
   var [viewingProfile, setViewingProfile] = useState(null);
+  // When parent passes a NEW initialTab (e.g. after the user already had this
+  // screen mounted), switch to it and clear the request.
+  React.useEffect(function() {
+    if (initialTab) {
+      setSearchTab(initialTab);
+      if (onClearInitialTab) onClearInitialTab();
+    }
+  }, [initialTab]);
   var [recents, setRecents] = useState(function() {
     try { return JSON.parse(localStorage.getItem("bf_recents") || "[]"); } catch(e) { return []; }
   });
@@ -14307,16 +14317,32 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
       {!activeSection && (
         <div>
 
-          {/* ── Edit Profile (BandLab-style) ── */}
+          {/* ── Edit Profile (rebuilt — card-based, LED theme) ── */}
 
-          {/* Section header */}
-          <div style={{ color: "white", fontWeight: 800, fontSize: 22, fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, marginBottom: 20, textAlign: "center" }}>
-            Update Profile
+          {/* Hero section header with gradient accent bar */}
+          <div style={{
+            marginBottom: 22,
+            padding: "0 4px",
+          }}>
+            <div style={{
+              height: 3, width: 48, borderRadius: 2,
+              background: "linear-gradient(90deg,#C026D3,#7C3AED,#3B82F6)",
+              boxShadow: "0 0 12px rgba(124,58,237,0.6)",
+              marginBottom: 12,
+            }} />
+            <div style={{
+              color: "white", fontWeight: 800, fontSize: 28,
+              fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1.5, lineHeight: 1,
+              marginBottom: 6,
+            }}>
+              UPDATE PROFILE
+            </div>
+            <div style={{ color: "#888", fontSize: 12, lineHeight: 1.5 }}>
+              Customise how others see you on BeatFinder
+            </div>
           </div>
 
-          {/* ── Avatar ── tap to change photo */}
-          {/* Hidden file input */}
-          {/* Hidden header file input */}
+          {/* Hidden file inputs */}
           <input ref={headerFileRef} type="file" accept="image/*" style={{ display: "none" }}
             onChange={async function(e) {
               const file = e.target.files && e.target.files[0];
@@ -14342,61 +14368,6 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               setHeaderUploading(false);
               e.target.value = "";
             }} />
-
-          {/* Header photo preview + upload */}
-          <div style={{ marginBottom: 20, position: "relative" }}>
-            <div style={{ height: 130, borderRadius: 14, overflow: "hidden", background: "#111", border: "1px solid #1e1e1e", position: "relative" }}>
-              {headerUrl ? (
-                <img src={headerUrl} alt="header"
-                  style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} />
-              ) : (
-                <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                  background: "linear-gradient(135deg,#1a1a1a,#0a0a0a)", gap: 6 }}>
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
-                    <polyline points="21 15 16 10 5 21"/>
-                  </svg>
-                  <div style={{ color: "#333", fontSize: 12 }}>No header photo</div>
-                </div>
-              )}
-              {/* Upload / change button */}
-              <button onClick={function() { headerFileRef.current && headerFileRef.current.click(); }}
-                style={{ position: "absolute", bottom: 8, right: 8, background: "rgba(0,0,0,0.75)",
-                  border: "1px solid rgba(255,255,255,0.15)", borderRadius: 20, color: "white", fontSize: 12,
-                  padding: "6px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
-                  backdropFilter: "blur(4px)" }}>
-                {headerUploading ? (
-                  <div style={{
-                    width: 12, height: 12,
-                    border: "2px solid rgba(168,85,247,0.2)",
-                    borderTopColor: "#A855F7",
-                    borderRightColor: "#3B82F6",
-                    borderRadius: "50%",
-                    animation: "bf-spin 0.8s linear infinite",
-                    filter: "drop-shadow(0 0 4px rgba(168,85,247,0.6))",
-                  }} />
-                ) : (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-                  </svg>
-                )}
-                {headerUploading ? "Uploading..." : headerUrl ? "Change Header" : "Add Header Photo"}
-              </button>
-              {headerUrl && (
-                <button onClick={function() { setHeaderUrl(""); setUser(u => ({ ...u, headerUrl: "" })); }}
-                  style={{ position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,0.75)",
-                    border: "none", borderRadius: "50%", width: 26, height: 26, color: "white",
-                    fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  &#10005;
-                </button>
-              )}
-            </div>
-            <div style={{ color: "#444", fontSize: 11, marginTop: 6, textAlign: "center" }}>
-              Image will be cropped to fit the banner area
-            </div>
-          </div>
-
           <input ref={avatarFileRef} type="file" accept="image/*" style={{ display: "none" }}
             onChange={async function(e) {
               const file = e.target.files && e.target.files[0];
@@ -14423,149 +14394,378 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               e.target.value = "";
             }} />
 
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 24 }}>
-            <button onClick={() => avatarFileRef.current && avatarFileRef.current.click()}
-              style={{ position: "relative", display: "inline-block", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
-              {avatarUrl ? (
-                <img src={avatarUrl} alt="avatar"
-                  style={{ width: 88, height: 88, borderRadius: "50%", objectFit: "cover",
-                    border: "3px solid #333", display: "block" }} />
-              ) : (
-                <div style={{ width: 88, height: 88, borderRadius: "50%",
-                  background: avatarColor,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 34, color: "white", fontWeight: 800 }}>
-                  {(user.username || user.name || "?")[0].toUpperCase()}
-                </div>
-              )}
-              {/* Edit badge */}
-              <div style={{ position: "absolute", bottom: 2, right: 2, width: 28, height: 28,
-                borderRadius: "50%",
-                background: "linear-gradient(135deg, #A855F7 0%, #6366F1 100%)",
-                border: "2px solid #0a0a0a",
-                boxShadow: "0 0 10px rgba(168,85,247,0.6)",
-                display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {avatarUploading
-                  ? <div style={{
-                      width: 12, height: 12,
-                      border: "2px solid rgba(255,255,255,0.25)",
-                      borderTopColor: "white",
-                      borderRightColor: "rgba(255,255,255,0.7)",
-                      borderRadius: "50%",
-                      animation: "bf-spin 0.8s linear infinite",
-                    }} />
-                  : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>}
-              </div>
-            </button>
-            <div style={{ color: avatarUploading ? "#A855F7" : "#555", fontSize: 12, marginTop: 8, fontWeight: avatarUploading ? 700 : 500, letterSpacing: avatarUploading ? 0.5 : 0 }}>
-              {avatarUploading ? "Uploading photo..." : "Tap to change photo"}
+          {/* ─────────────────── CARD 1 — PHOTOS ─────────────────── */}
+          <div style={{
+            background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+            border: "1px solid rgba(124,58,237,0.18)",
+            borderRadius: 16, overflow: "hidden",
+            marginBottom: 14,
+            boxShadow: "0 4px 14px rgba(0,0,0,0.45)",
+            position: "relative",
+          }}>
+            <div style={{
+              height: 2,
+              background: "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)",
+              boxShadow: "0 0 8px rgba(124,58,237,0.7)",
+            }} />
+            <div style={{ padding: "12px 16px 10px",
+              borderBottom: "1px solid rgba(255,255,255,0.04)",
+              display: "flex", alignItems: "center", gap: 8 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+                <polyline points="21 15 16 10 5 21"/>
+              </svg>
+              <div style={{
+                color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 1.5,
+                textShadow: "0 0 6px rgba(124,58,237,0.5)",
+              }}>PHOTOS</div>
             </div>
-
-            {/* Plan badge */}
-            <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
-              {user.isPro && (
-                <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"4px 12px", color:"#C026D3", fontWeight:800, fontSize:12 }}>
-                  <VerifiedBadge size={14} /> Producer Pro
-                </span>
-              )}
-              {user.isArtistPro && !user.isPro && (
-                <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"4px 12px", color:"#F59E0B", fontWeight:800, fontSize:12 }}>
-                  <VerifiedBadge size={14}/> Artist Pro
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Name */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>Name</div>
-            <input value={editName} onChange={e => setEditName(e.target.value)}
-              placeholder="Your name"
-              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
-                padding: "13px 16px", color: "white", fontSize: 15, outline: "none", boxSizing: "border-box" }} />
-          </div>
-
-          {/* Username */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>Username</div>
-            <input value={newUsername} onChange={e => setNewUsername(e.target.value)}
-              placeholder={user.username || "Set your username"}
-              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
-                padding: "13px 16px", color: "white", fontSize: 15, outline: "none", boxSizing: "border-box" }} />
-          </div>
-
-          {/* Location */}
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ color: "#555", fontSize: 12, marginBottom: 6 }}>Location</div>
-            <input value={location} onChange={e => setLocation(e.target.value)}
-              placeholder="City, Country"
-              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
-                padding: "13px 16px", color: "white", fontSize: 15, outline: "none", boxSizing: "border-box" }} />
-          </div>
-
-          {/* Social links - all in one grouped card */}
-          <div style={{ background: "#111", borderRadius: 14, border: "1px solid #1e1e1e", marginBottom: 24, overflow: "hidden" }}>
-            {[
-              { key: "instagram", label: "Instagram", val: instagram, set: setInstagram, placeholder: "instagram.com/yourhandle",
-                icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><defs><linearGradient id="igs" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stopColor="#f09433"/><stop offset="50%" stopColor="#dc2743"/><stop offset="100%" stopColor="#bc1888"/></linearGradient></defs><rect x="2" y="2" width="20" height="20" rx="5" fill="url(#igs)"/><circle cx="12" cy="12" r="4.5" stroke="white" strokeWidth="1.5" fill="none"/><circle cx="17.5" cy="6.5" r="1.2" fill="white"/></svg>) },
-              { key: "tiktok", label: "TikTok", val: tiktok, set: setTiktok, placeholder: "tiktok.com/@yourhandle",
-                icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.34 6.34 0 0 0-6.13 6.33 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.93a8.16 8.16 0 0 0 4.77 1.52V7.01a4.85 4.85 0 0 1-1-.32z"/></svg>) },
-              { key: "spotify", label: "Spotify", val: spotify, set: setSpotify, placeholder: "open.spotify.com/artist/...",
-                icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#1DB954"/><path d="M8 15.5c2.5-1 5.5-1 8 0" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none"/><path d="M7 12.5c3-1.2 7-1.2 10 0" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none"/><path d="M6.5 9.5c3.5-1.3 8-1.3 11 0" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none"/></svg>) },
-              { key: "appleMusic", label: "Apple Music", val: appleMusic, set: setAppleMusic, placeholder: "music.apple.com/artist/...",
-                icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="2" y="2" width="20" height="20" rx="5" fill="#fc3c44"/><path d="M16 7v6.5a2.5 2.5 0 1 1-1.5-2.3V8.5L10 9.5V15a2.5 2.5 0 1 1-1.5-2.3V8l7.5-1z" fill="white"/></svg>) },
-              { key: "youtube", label: "YouTube", val: youtube, set: setYoutube, placeholder: "youtube.com/@yourchannel",
-                icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="2" y="5" width="20" height="14" rx="4" fill="#FF0000"/><polygon points="10,8.5 16,12 10,15.5" fill="white"/></svg>) },
-              { key: "website", label: "Website", val: website, set: setWebsite, placeholder: "yourwebsite.com",
-                icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>) },
-            ].map(function(s, i, arr) {
-              return (
-                <div key={s.key} style={{ borderBottom: i < arr.length - 1 ? "1px solid #1a1a1a" : "none" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px" }}>
-                    <div style={{ width: 36, height: 36, borderRadius: 10, background: "#1a1a1a",
-                      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      {s.icon}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ color: "white", fontWeight: 600, fontSize: 14 }}>{s.label}</div>
-                      <input value={s.val} onChange={function(e) { s.set(e.target.value); }}
-                        placeholder={s.placeholder}
-                        style={{ background: "none", border: "none", color: s.val ? "#C026D3" : "#555",
-                          fontSize: 12, outline: "none", width: "100%", padding: 0, marginTop: 2 }} />
-                    </div>
-                    {s.val ? (
-                      <button onClick={function() { openExternalLink(s.val); }}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: "#555", fontSize: 18, padding: 4, flexShrink: 0 }}>
-                        &#8250;
-                      </button>
-                    ) : null}
+            <div style={{ position: "relative" }}>
+              <div style={{ height: 130, overflow: "hidden", background: "#0a0a14", position: "relative" }}>
+                {headerUrl ? (
+                  <img src={headerUrl} alt="header"
+                    style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} />
+                ) : (
+                  <div style={{ width: "100%", height: "100%",
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                    background: "linear-gradient(135deg,#1a0a2e 0%,#0f0a1f 50%,#0a0a14 100%)", gap: 6 }}>
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="1.5" strokeLinecap="round"
+                      style={{ filter: "drop-shadow(0 0 8px rgba(124,58,237,0.5))", opacity: 0.6 }}>
+                      <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+                      <polyline points="21 15 16 10 5 21"/>
+                    </svg>
+                    <div style={{ color: "#666", fontSize: 11, fontWeight: 600, letterSpacing: 0.5 }}>NO HEADER PHOTO</div>
                   </div>
+                )}
+                <button onClick={function() { headerFileRef.current && headerFileRef.current.click(); }}
+                  style={{ position: "absolute", bottom: 10, right: 10,
+                    background: "rgba(124,58,237,0.85)",
+                    border: "1px solid rgba(192,38,211,0.6)", borderRadius: 20, color: "white", fontSize: 11, fontWeight: 700,
+                    padding: "7px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+                    backdropFilter: "blur(8px)",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+                    letterSpacing: 0.3,
+                  }}>
+                  {headerUploading ? (
+                    <div style={{
+                      width: 12, height: 12,
+                      border: "2px solid rgba(255,255,255,0.2)", borderTopColor: "white",
+                      borderRadius: "50%", animation: "bf-spin 0.8s linear infinite",
+                    }} />
+                  ) : (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                  )}
+                  {headerUploading ? "UPLOADING..." : headerUrl ? "CHANGE" : "ADD HEADER"}
+                </button>
+                {headerUrl && (
+                  <button onClick={function() { setHeaderUrl(""); setUser(u => ({ ...u, headerUrl: "" })); }}
+                    style={{ position: "absolute", top: 10, right: 10, background: "rgba(0,0,0,0.7)",
+                      border: "1px solid rgba(239,68,68,0.4)", borderRadius: "50%", width: 28, height: 28, color: "#F87171",
+                      cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                      backdropFilter: "blur(8px)" }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              <div style={{ padding: "0 16px",
+                marginTop: -40, marginBottom: 16,
+                display: "flex", alignItems: "flex-end", gap: 14 }}>
+                <button onClick={() => avatarFileRef.current && avatarFileRef.current.click()}
+                  style={{ position: "relative", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt="avatar"
+                      style={{ width: 86, height: 86, borderRadius: "50%", objectFit: "cover",
+                        border: "3px solid #0a0a14",
+                        boxShadow: "0 0 0 2px rgba(124,58,237,0.5), 0 4px 14px rgba(0,0,0,0.6)",
+                        display: "block" }} />
+                  ) : (
+                    <div style={{ width: 86, height: 86, borderRadius: "50%",
+                      background: "linear-gradient(135deg,#6B21A8,#C026D3)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 34, color: "white", fontWeight: 800,
+                      border: "3px solid #0a0a14",
+                      boxShadow: "0 0 0 2px rgba(124,58,237,0.5), 0 4px 14px rgba(0,0,0,0.6)" }}>
+                      {(user.username || user.name || "?")[0].toUpperCase()}
+                    </div>
+                  )}
+                  <div style={{ position: "absolute", bottom: 0, right: 0, width: 28, height: 28,
+                    borderRadius: "50%",
+                    background: "linear-gradient(135deg,#C026D3,#7C3AED,#3B82F6)",
+                    border: "2px solid #0a0a14",
+                    boxShadow: "0 0 10px rgba(192,38,211,0.6)",
+                    display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {avatarUploading
+                      ? <div style={{ width: 12, height: 12,
+                          border: "2px solid rgba(255,255,255,0.25)", borderTopColor: "white",
+                          borderRadius: "50%", animation: "bf-spin 0.8s linear infinite" }} />
+                      : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                          <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>}
+                  </div>
+                </button>
+                <div style={{ paddingBottom: 6, flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    color: avatarUploading ? "#A78BFA" : "white",
+                    fontSize: 14, fontWeight: 700, letterSpacing: 0.3,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {avatarUploading ? "Uploading..." : (user.username || user.name || "Your profile")}
+                  </div>
+                  <div style={{ color: "#666", fontSize: 11, marginTop: 2 }}>
+                    Tap photo to change
+                  </div>
+                  {(user.isPro || user.isArtistPro) && (
+                    <div style={{ marginTop: 6 }}>
+                      {user.isPro && (
+                        <span style={{ display:"inline-flex", alignItems:"center", gap:4,
+                          background:"rgba(192,38,211,0.12)", border:"1px solid rgba(192,38,211,0.4)",
+                          borderRadius:20, padding:"3px 10px", color:"#C026D3", fontWeight:800, fontSize:10, letterSpacing: 0.3 }}>
+                          <VerifiedBadge size={11} /> PRODUCER PRO
+                        </span>
+                      )}
+                      {user.isArtistPro && !user.isPro && (
+                        <span style={{ display:"inline-flex", alignItems:"center", gap:4,
+                          background:"rgba(245,158,11,0.12)", border:"1px solid rgba(245,158,11,0.4)",
+                          borderRadius:20, padding:"3px 10px", color:"#F59E0B", fontWeight:800, fontSize:10, letterSpacing: 0.3 }}>
+                          <VerifiedBadge size={11}/> ARTIST PRO
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
-              );
-            })}
-          </div>
-
-          {/* About / Bio */}
-          <div style={{ marginBottom: 6 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-              <div style={{ color: "#555", fontSize: 12 }}>About</div>
-              <div style={{ color: bio.length > 240 ? "#F87171" : "#333", fontSize: 12 }}>{bio.length}/250</div>
+              </div>
             </div>
-            <textarea value={bio} onChange={e => setBio(e.target.value)}
-              placeholder="Tell the world about yourself..."
-              rows={5}
-              style={{ width: "100%", background: "#111", border: "1px solid #1e1e1e", borderRadius: 12,
-                padding: "13px 16px", color: "white", fontSize: 14, outline: "none",
-                resize: "none", boxSizing: "border-box", lineHeight: 1.6, fontFamily: "inherit" }} />
           </div>
 
-          {/* Save all button */}
+          {/* ─────────────────── CARD 2 — IDENTITY ─────────────────── */}
+          <div style={{
+            background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+            border: "1px solid rgba(124,58,237,0.18)",
+            borderRadius: 16, overflow: "hidden",
+            marginBottom: 14,
+            boxShadow: "0 4px 14px rgba(0,0,0,0.45)",
+          }}>
+            <div style={{ height: 2,
+              background: "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)",
+              boxShadow: "0 0 8px rgba(124,58,237,0.7)" }} />
+            <div style={{ padding: "12px 16px 10px",
+              borderBottom: "1px solid rgba(255,255,255,0.04)",
+              display: "flex", alignItems: "center", gap: 8 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round">
+                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+              <div style={{
+                color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 1.5,
+                textShadow: "0 0 6px rgba(124,58,237,0.5)",
+              }}>IDENTITY</div>
+            </div>
+            <div style={{ padding: "16px" }}>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>NAME</div>
+                <input value={editName} onChange={e => setEditName(e.target.value)}
+                  placeholder="Your name"
+                  style={{ width: "100%",
+                    background: "rgba(0,0,0,0.4)",
+                    border: "1px solid rgba(124,58,237,0.2)", borderRadius: 10,
+                    padding: "12px 14px", color: "white", fontSize: 14, outline: "none",
+                    boxSizing: "border-box",
+                    transition: "border 0.15s, box-shadow 0.15s",
+                  }}
+                  onFocus={e => { e.target.style.border = "1px solid rgba(124,58,237,0.6)"; e.target.style.boxShadow = "0 0 0 3px rgba(124,58,237,0.1)"; }}
+                  onBlur={e  => { e.target.style.border = "1px solid rgba(124,58,237,0.2)"; e.target.style.boxShadow = "none"; }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>USERNAME</div>
+                <div style={{ position: "relative" }}>
+                  <span style={{
+                    position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)",
+                    color: "#666", fontSize: 14, fontWeight: 700, pointerEvents: "none",
+                  }}>@</span>
+                  <input value={newUsername} onChange={e => setNewUsername(e.target.value)}
+                    placeholder={user.username || "yourhandle"}
+                    style={{ width: "100%",
+                      background: "rgba(0,0,0,0.4)",
+                      border: "1px solid rgba(124,58,237,0.2)", borderRadius: 10,
+                      padding: "12px 14px 12px 30px", color: "white", fontSize: 14, outline: "none",
+                      boxSizing: "border-box",
+                      transition: "border 0.15s, box-shadow 0.15s",
+                    }}
+                    onFocus={e => { e.target.style.border = "1px solid rgba(124,58,237,0.6)"; e.target.style.boxShadow = "0 0 0 3px rgba(124,58,237,0.1)"; }}
+                    onBlur={e  => { e.target.style.border = "1px solid rgba(124,58,237,0.2)"; e.target.style.boxShadow = "none"; }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>LOCATION</div>
+                <div style={{ position: "relative" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
+                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/>
+                    <circle cx="12" cy="10" r="3"/>
+                  </svg>
+                  <input value={location} onChange={e => setLocation(e.target.value)}
+                    placeholder="City, Country"
+                    style={{ width: "100%",
+                      background: "rgba(0,0,0,0.4)",
+                      border: "1px solid rgba(124,58,237,0.2)", borderRadius: 10,
+                      padding: "12px 14px 12px 34px", color: "white", fontSize: 14, outline: "none",
+                      boxSizing: "border-box",
+                      transition: "border 0.15s, box-shadow 0.15s",
+                    }}
+                    onFocus={e => { e.target.style.border = "1px solid rgba(124,58,237,0.6)"; e.target.style.boxShadow = "0 0 0 3px rgba(124,58,237,0.1)"; }}
+                    onBlur={e  => { e.target.style.border = "1px solid rgba(124,58,237,0.2)"; e.target.style.boxShadow = "none"; }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ─────────────────── CARD 3 — ABOUT ─────────────────── */}
+          <div style={{
+            background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+            border: "1px solid rgba(124,58,237,0.18)",
+            borderRadius: 16, overflow: "hidden",
+            marginBottom: 14,
+            boxShadow: "0 4px 14px rgba(0,0,0,0.45)",
+          }}>
+            <div style={{ height: 2,
+              background: "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)",
+              boxShadow: "0 0 8px rgba(124,58,237,0.7)" }} />
+            <div style={{ padding: "12px 16px 10px",
+              borderBottom: "1px solid rgba(255,255,255,0.04)",
+              display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+                </svg>
+                <div style={{
+                  color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 1.5,
+                  textShadow: "0 0 6px rgba(124,58,237,0.5)",
+                }}>ABOUT</div>
+              </div>
+              <div style={{
+                color: bio.length > 240 ? "#F87171" : "#666",
+                fontSize: 10, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+              }}>{bio.length}/250</div>
+            </div>
+            <div style={{ padding: 16 }}>
+              <textarea value={bio} onChange={e => setBio(e.target.value)}
+                placeholder="Tell the world about yourself..."
+                rows={5}
+                style={{ width: "100%",
+                  background: "rgba(0,0,0,0.4)",
+                  border: "1px solid rgba(124,58,237,0.2)", borderRadius: 10,
+                  padding: "12px 14px", color: "white", fontSize: 14, outline: "none",
+                  resize: "none", boxSizing: "border-box",
+                  lineHeight: 1.6, fontFamily: "inherit",
+                  transition: "border 0.15s, box-shadow 0.15s",
+                }}
+                onFocus={e => { e.target.style.border = "1px solid rgba(124,58,237,0.6)"; e.target.style.boxShadow = "0 0 0 3px rgba(124,58,237,0.1)"; }}
+                onBlur={e  => { e.target.style.border = "1px solid rgba(124,58,237,0.2)"; e.target.style.boxShadow = "none"; }}
+              />
+            </div>
+          </div>
+
+          {/* ─────────────────── CARD 4 — SOCIAL LINKS ─────────────────── */}
+          <div style={{
+            background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+            border: "1px solid rgba(124,58,237,0.18)",
+            borderRadius: 16, overflow: "hidden",
+            marginBottom: 16,
+            boxShadow: "0 4px 14px rgba(0,0,0,0.45)",
+          }}>
+            <div style={{ height: 2,
+              background: "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)",
+              boxShadow: "0 0 8px rgba(124,58,237,0.7)" }} />
+            <div style={{ padding: "12px 16px 10px",
+              borderBottom: "1px solid rgba(255,255,255,0.04)",
+              display: "flex", alignItems: "center", gap: 8 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round">
+                <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
+              </svg>
+              <div style={{
+                color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 1.5,
+                textShadow: "0 0 6px rgba(124,58,237,0.5)",
+              }}>SOCIAL LINKS</div>
+            </div>
+            <div>
+              {[
+                { key: "instagram", label: "Instagram", val: instagram, set: setInstagram, placeholder: "instagram.com/yourhandle",
+                  icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><defs><linearGradient id="igs2" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" stopColor="#f09433"/><stop offset="50%" stopColor="#dc2743"/><stop offset="100%" stopColor="#bc1888"/></linearGradient></defs><rect x="2" y="2" width="20" height="20" rx="5" fill="url(#igs2)"/><circle cx="12" cy="12" r="4.5" stroke="white" strokeWidth="1.5" fill="none"/><circle cx="17.5" cy="6.5" r="1.2" fill="white"/></svg>) },
+                { key: "tiktok", label: "TikTok", val: tiktok, set: setTiktok, placeholder: "tiktok.com/@yourhandle",
+                  icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.34 6.34 0 0 0-6.13 6.33 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.93a8.16 8.16 0 0 0 4.77 1.52V7.01a4.85 4.85 0 0 1-1-.32z"/></svg>) },
+                { key: "spotify", label: "Spotify", val: spotify, set: setSpotify, placeholder: "open.spotify.com/artist/...",
+                  icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#1DB954"/><path d="M8 15.5c2.5-1 5.5-1 8 0" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none"/><path d="M7 12.5c3-1.2 7-1.2 10 0" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none"/><path d="M6.5 9.5c3.5-1.3 8-1.3 11 0" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none"/></svg>) },
+                { key: "appleMusic", label: "Apple Music", val: appleMusic, set: setAppleMusic, placeholder: "music.apple.com/artist/...",
+                  icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="2" y="2" width="20" height="20" rx="5" fill="#fc3c44"/><path d="M16 7v6.5a2.5 2.5 0 1 1-1.5-2.3V8.5L10 9.5V15a2.5 2.5 0 1 1-1.5-2.3V8l7.5-1z" fill="white"/></svg>) },
+                { key: "youtube", label: "YouTube", val: youtube, set: setYoutube, placeholder: "youtube.com/@yourchannel",
+                  icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="2" y="5" width="20" height="14" rx="4" fill="#FF0000"/><polygon points="10,8.5 16,12 10,15.5" fill="white"/></svg>) },
+                { key: "website", label: "Website", val: website, set: setWebsite, placeholder: "yourwebsite.com",
+                  icon: (<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>) },
+              ].map(function(s, i, arr) {
+                const hasValue = !!s.val;
+                return (
+                  <div key={s.key} style={{ borderBottom: i < arr.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px" }}>
+                      <div style={{ width: 38, height: 38, borderRadius: 10,
+                        background: "rgba(0,0,0,0.4)",
+                        border: "1px solid " + (hasValue ? "rgba(124,58,237,0.35)" : "rgba(124,58,237,0.12)"),
+                        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                        boxShadow: hasValue ? "0 0 8px rgba(124,58,237,0.2)" : "none",
+                      }}>
+                        {s.icon}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ color: "white", fontWeight: 700, fontSize: 13, marginBottom: 2 }}>{s.label}</div>
+                        <input value={s.val} onChange={function(e) { s.set(e.target.value); }}
+                          placeholder={s.placeholder}
+                          style={{ background: "none", border: "none",
+                            color: hasValue ? "#A78BFA" : "#555",
+                            fontSize: 12, outline: "none", width: "100%", padding: 0,
+                            fontWeight: hasValue ? 600 : 400,
+                          }} />
+                      </div>
+                      {hasValue && (
+                        <button onClick={function() { openExternalLink(s.val); }}
+                          style={{ background: "rgba(124,58,237,0.1)",
+                            border: "1px solid rgba(124,58,237,0.25)",
+                            borderRadius: "50%", width: 28, height: 28,
+                            cursor: "pointer", flexShrink: 0,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            color: "#A78BFA",
+                          }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                            <line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/>
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* SAVE BUTTON */}
           <button
             disabled={profileSaving}
             onClick={async () => {
               setProfileSaving(true);
               try {
-                // Save name/username/location/links/bio in one call
                 await Promise.all([
                   apiFetch("/api/auth/profile/update", { method: "POST", body: JSON.stringify({
                     name: editName.trim(), location: location.trim(),
@@ -14584,28 +14784,78 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               } catch(e) { setBioMsg("Error: " + e.message); setTimeout(() => setBioMsg(""), 3000); }
               setProfileSaving(false);
             }}
-            style={{ width: "100%", background: profileSaving ? "#333" : "linear-gradient(135deg,#C026D3,#7C3AED)",
-              border: "none", borderRadius: 32, color: "white", fontWeight: 800, fontSize: 16,
-              padding: "15px", cursor: "pointer", marginBottom: 12, opacity: profileSaving ? 0.6 : 1 }}>
-            {profileSaving ? "Saving..." : "Save Profile"}
+            style={{
+              width: "100%",
+              background: profileSaving
+                ? "rgba(255,255,255,0.05)"
+                : "linear-gradient(135deg,#C026D3 0%,#A855F7 50%,#7C3AED 100%)",
+              border: profileSaving ? "1px solid #333" : "none",
+              borderRadius: 14, color: profileSaving ? "#666" : "white",
+              fontWeight: 900, fontSize: 14, letterSpacing: 1,
+              padding: "16px", cursor: profileSaving ? "not-allowed" : "pointer",
+              marginBottom: 10,
+              boxShadow: profileSaving ? "none" : "0 4px 18px rgba(192,38,211,0.4), inset 0 1px 0 rgba(255,255,255,0.2)",
+              textShadow: profileSaving ? "none" : "0 1px 2px rgba(0,0,0,0.3)",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            }}>
+            {profileSaving ? (
+              <>
+                <div style={{ width: 14, height: 14,
+                  border: "2px solid rgba(255,255,255,0.2)", borderTopColor: "#A78BFA",
+                  borderRadius: "50%", animation: "bf-spin 0.8s linear infinite" }} />
+                SAVING…
+              </>
+            ) : (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
+                  <polyline points="17 21 17 13 7 13 7 21"/>
+                  <polyline points="7 3 7 8 15 8"/>
+                </svg>
+                SAVE PROFILE
+              </>
+            )}
           </button>
 
-          {bioMsg && <div style={{ color: bioMsg.startsWith("Error") ? "#F87171" : "#22C55E", fontSize: 13, textAlign: "center", marginBottom: 16, fontWeight: 600 }}>{bioMsg}</div>}
+          {bioMsg && (
+            <div style={{
+              color: bioMsg.startsWith("Error") ? "#F87171" : "#22C55E",
+              fontSize: 12, fontWeight: 700, textAlign: "center",
+              marginBottom: 14, padding: "8px 14px",
+              background: bioMsg.startsWith("Error") ? "rgba(239,68,68,0.08)" : "rgba(34,197,94,0.08)",
+              border: "1px solid " + (bioMsg.startsWith("Error") ? "rgba(239,68,68,0.25)" : "rgba(34,197,94,0.25)"),
+              borderRadius: 10,
+            }}>{bioMsg}</div>
+          )}
 
-          {/* Share link */}
+          {/* SHARE LINK */}
           {user.username && (
-            <div style={{ background: "#111", borderRadius: 12, padding: "12px 16px",
-              border: "1px solid #1e1e1e", display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
-              <div style={{ flex: 1, color: "#555", fontSize: 12, fontFamily: "monospace",
+            <div style={{
+              background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+              border: "1px solid rgba(124,58,237,0.18)",
+              borderRadius: 12, padding: "12px 14px",
+              display: "flex", alignItems: "center", gap: 10, marginBottom: 24,
+              boxShadow: "0 4px 14px rgba(0,0,0,0.45)",
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
+              </svg>
+              <div style={{ flex: 1, color: "#888", fontSize: 12, fontFamily: "monospace",
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 beatfinder.app/u/{user.username}
               </div>
               <button onClick={() => {
                 navigator.clipboard?.writeText("beatfinder.app/u/" + user.username)
                   .then(() => { setBioMsg("Link copied!"); setTimeout(() => setBioMsg(""), 2000); });
-              }} style={{ background: "none", border: "none", color: "#C026D3", fontSize: 12,
-                fontWeight: 700, cursor: "pointer", flexShrink: 0, padding: 0 }}>
-                Copy Link
+              }} style={{
+                background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+                border: "none", color: "white", fontSize: 11, fontWeight: 800, letterSpacing: 0.5,
+                cursor: "pointer", flexShrink: 0, padding: "6px 12px",
+                borderRadius: 16,
+                boxShadow: "0 2px 8px rgba(192,38,211,0.35)",
+              }}>
+                COPY
               </button>
             </div>
           )}
@@ -25861,6 +26111,9 @@ export default function BeatFinder() {
   // StudioScreen only mounts after first visit — prevents mic permission firing on page load.
   const [studioVisited, setStudioVisited] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  // When something routes the user into Search and wants to land them on a
+  // specific tab (e.g. Feed empty-state → People tab), pass that here.
+  const [searchInitialTab, setSearchInitialTab] = useState(null);
   const [artist,  setArtist]  = useState(null); // kept for compatibility
   const [user,    setUser]    = useState(null);
   // Global lease cache — fetched once at login and refreshed on returning
@@ -26615,9 +26868,9 @@ export default function BeatFinder() {
           >
             {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => openMessages(null)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} onOpenPost={() => setShowPost(true)} onOpenNotifications={openNotifications} unreadMessages={unreadMessages} unreadNotifications={unreadNotifications} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} />}
-            {t === "feed"      && <FollowingFeed user={user} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onViewProfile={function(u) { setPublicProfile(u); }} onGoArtists={() => goTab("artists")} />}
+            {t === "feed"      && <FollowingFeed user={user} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onViewProfile={function(u) { setPublicProfile(u); }} onSearchPeople={function() { setSearchInitialTab("people"); goTab("search"); }} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} onViewProfile={function(u) { setPublicProfile(u); }} user={user} />}
-            {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} currentUser={user} onViewProfile={function(u) { setSearchProfile(u); }} />}
+            {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} initialTab={searchInitialTab} onClearInitialTab={() => setSearchInitialTab(null)} currentUser={user} onViewProfile={function(u) { setSearchProfile(u); }} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
             {t === "studio"    && studioVisited && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
             {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onSignUp={() => { setAuthStartMode("signup"); setShowAuthWall(true); setWelcomeDone(false); }} onViewProfile={function(u) { setPublicProfile(u); }} />}
