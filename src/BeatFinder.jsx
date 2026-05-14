@@ -2410,24 +2410,56 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
       flexDirection: "column", fontFamily: "'DM Sans',sans-serif",
       paddingTop: "env(safe-area-inset-top)",
     }}>
-      <div style={{ background: "#0a0a0a", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderBottom: "1px solid #1a1a1a" }}>
+      <div style={{
+        background: "linear-gradient(180deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+        flexShrink: 0,
+        position: "relative",
+      }}>
+        {/* LED top accent edge */}
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0, height: 1,
+          background: "linear-gradient(90deg,transparent,rgba(192,38,211,0.5),rgba(124,58,237,0.5),rgba(59,130,246,0.5),transparent)",
+        }} />
+        <div style={{
+          display: "flex", alignItems: "center", gap: 12,
+          padding: "14px 16px",
+          borderBottom: "1px solid rgba(124,58,237,0.2)",
+        }}>
           <button onClick={handleClose} style={{
-            background: "#1a1a1a", border: "1px solid #333", borderRadius: "50%",
-            color: "white", width: 36, height: 36, fontSize: 20, cursor: "pointer",
+            background: "linear-gradient(135deg,rgba(124,58,237,0.15),rgba(192,38,211,0.12))",
+            border: "1px solid rgba(124,58,237,0.4)",
+            borderRadius: "50%",
+            color: "#E9D5FF", width: 36, height: 36, fontSize: 18,
+            cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 0 10px rgba(124,58,237,0.15)",
           }}>
             ←
           </button>
-          <div style={{ flex: 1 }}>
-            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13 }}>Lyrics Notepad</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontFamily: "'Bebas Neue',sans-serif",
+              fontSize: 18, letterSpacing: 2.5, fontWeight: 700,
+              background: "linear-gradient(90deg,#C026D3,#7C3AED,#3B82F6)",
+              WebkitBackgroundClip: "text", backgroundClip: "text",
+              color: "transparent",
+              filter: "drop-shadow(0 0 8px rgba(124,58,237,0.3))",
+              lineHeight: 1,
+            }}>LYRICS NOTEPAD</div>
           </div>
           <button onClick={handleSave} style={{
-            background: saved ? "#22C55E" : "#C026D3",
-            border: "none", borderRadius: 20, color: "white",
-            fontWeight: 800, fontSize: 13, padding: "8px 16px", cursor: "pointer",
+            background: saved
+              ? "linear-gradient(135deg,#22C55E,#16A34A)"
+              : "linear-gradient(135deg,#C026D3,#7C3AED,#3B82F6)",
+            border: "none", borderRadius: 20,
+            color: "white",
+            fontWeight: 800, fontSize: 12, letterSpacing: 1,
+            padding: "8px 18px", cursor: "pointer",
+            boxShadow: saved
+              ? "0 0 14px rgba(34,197,94,0.35)"
+              : "0 0 14px rgba(124,58,237,0.35)",
           }}>
-            {saved ? "Saved!" : "Save"}
+            {saved ? "SAVED ✓" : "SAVE"}
           </button>
         </div>
 
