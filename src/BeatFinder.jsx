@@ -11257,6 +11257,46 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
   const [badgePopup,   setBadgePopup]   = useState(null);
   const [followList,   setFollowList]   = useState(null);
   const [nestedProfile,setNestedProfile]= useState(null);
+  // Block-state for this profile, loaded once when profile mounts.
+  // iBlockedThem  → the current user has blocked this profile
+  // theyBlockedMe → this profile has blocked the current user (we hide content)
+  const [iBlockedThem,  setIBlockedThem]  = useState(false);
+  const [theyBlockedMe, setTheyBlockedMe] = useState(false);
+  const [blockLoading,  setBlockLoading]  = useState(false);
+  const [overflowOpen,  setOverflowOpen]  = useState(false);
+  const [confirmBlock,  setConfirmBlock]  = useState(false);
+
+  // Fetch block status as soon as profile loads (only for logged-in users
+  // viewing someone else's profile). Failures are silently ignored — block
+  // state just defaults to false, which is the safe default.
+  useEffect(() => {
+    if (!currentUser || !username || currentUser.username === username) return;
+    apiFetch("/api/auth/block-status/" + encodeURIComponent(username))
+      .then(d => {
+        setIBlockedThem(!!(d && d.i_blocked_them));
+        setTheyBlockedMe(!!(d && d.they_blocked_me));
+      })
+      .catch(() => {});
+  }, [username, currentUser && currentUser.id]);
+
+  const toggleBlock = async () => {
+    if (!currentUser) return;
+    setBlockLoading(true);
+    try {
+      await apiFetch("/api/auth/block/" + encodeURIComponent(username), {
+        method: iBlockedThem ? "DELETE" : "POST",
+      });
+      const newState = !iBlockedThem;
+      setIBlockedThem(newState);
+      // Blocking also unfollows in both directions (server-side) — keep UI in sync
+      if (newState) setFollowing(false);
+      setOverflowOpen(false);
+      setConfirmBlock(false);
+    } catch(e) {
+      console.warn("[Block] failed:", e.message);
+    }
+    setBlockLoading(false);
+  };
 
   useEffect(() => {
     // Always use unauthenticated route — works for everyone including guests
@@ -11342,6 +11382,34 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
   const isArtist = profile.plan === "artist" || isProd;
   const isOwnProfile = currentUser && username && currentUser.username && 
     currentUser.username.toLowerCase() === username.toLowerCase();
+
+  // If the profile owner has blocked the current user, hide all content
+  // and show a friendly empty state. This is a defence-in-depth measure:
+  // backend endpoints should also enforce this, but the frontend gate
+  // prevents any cached profile data from leaking through.
+  if (theyBlockedMe && !isOwnProfile) {
+    return (
+      <div style={{ textAlign: "center", padding: "80px 24px", color: "#555" }}>
+        {!hideBack && (
+          <div style={{ textAlign: "left", marginBottom: 30 }}>
+            <button onClick={onBack} style={{
+              background: "none", border: "none", color: "#888",
+              fontSize: 15, cursor: "pointer", padding: 0,
+            }}>← Back</button>
+          </div>
+        )}
+        <div style={{ marginBottom: 14 }}>
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#444" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg>
+        </div>
+        <div style={{ color: "white", fontSize: 17, fontWeight: 700, marginBottom: 6 }}>
+          You can't view this profile
+        </div>
+        <div style={{ color: "#777", fontSize: 13, lineHeight: 1.6, maxWidth: 280, margin: "0 auto" }}>
+          @{username} isn't available to you right now.
+        </div>
+      </div>
+    );
+  }
 
   const handleDownload = async (beat) => {
     await downloadMp3(beat.url, beat.title, beat.id);
@@ -11504,21 +11572,107 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 
         {/* Action buttons — only show for other users */}
         {currentUser && !isOwnProfile && (
-          <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
-            <button onClick={toggleFollow} disabled={followLoading}
-              style={{ flex: 1, padding: "10px 0", borderRadius: 20, fontWeight: 800, fontSize: 14, cursor: "pointer",
+          <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center", position: "relative" }}>
+            <button onClick={toggleFollow} disabled={followLoading || iBlockedThem}
+              style={{ flex: 1, padding: "10px 0", borderRadius: 20, fontWeight: 800, fontSize: 14,
+                cursor: (followLoading || iBlockedThem) ? "not-allowed" : "pointer",
+                opacity: iBlockedThem ? 0.4 : 1,
                 background: following ? "transparent" : "#C026D3",
                 border: "1.5px solid " + (following ? "#444" : "#C026D3"),
                 color: following ? "#777" : "white" }}>
               {followLoading ? "..." : following ? "Following" : "Follow"}
             </button>
-            {onMessage && (
+            {onMessage && !iBlockedThem && (
               <button onClick={() => onMessage(username)}
                 style={{ padding: "10px 18px", borderRadius: 20, fontWeight: 700, fontSize: 13, cursor: "pointer",
                   background: "transparent", border: "1.5px solid #333", color: "#aaa" }}>
                 Message
               </button>
             )}
+            {/* Overflow kebab — block/unblock and (future) report */}
+            <button onClick={() => setOverflowOpen(v => !v)}
+              style={{
+                width: 38, height: 38, borderRadius: "50%",
+                background: "transparent", border: "1.5px solid #333",
+                color: "#aaa", cursor: "pointer", flexShrink: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+            </button>
+            {overflowOpen && (
+              <>
+                <div onClick={() => setOverflowOpen(false)}
+                  style={{ position: "fixed", inset: 0, zIndex: 998, background: "transparent" }} />
+                <div style={{
+                  position: "absolute", top: 44, right: 0, zIndex: 999,
+                  background: "#1a1a1a", border: "1px solid #2a2a2a",
+                  borderRadius: 12, minWidth: 180, overflow: "hidden",
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+                }}>
+                  <button onClick={() => {
+                    if (iBlockedThem) toggleBlock();           // unblock immediately
+                    else { setConfirmBlock(true); setOverflowOpen(false); }
+                  }} disabled={blockLoading}
+                    style={{
+                      width: "100%", padding: "12px 14px", background: "transparent",
+                      border: "none", color: "#F87171", fontSize: 14, fontWeight: 700,
+                      textAlign: "left", cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 10,
+                    }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F87171" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg>
+                    {blockLoading ? "..." : iBlockedThem ? "Unblock @" + username : "Block @" + username}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Block confirmation modal — full-page overlay */}
+        {confirmBlock && (
+          <div onClick={() => setConfirmBlock(false)} style={{
+            position: "fixed", inset: 0, zIndex: 99997,
+            background: "rgba(0,0,0,0.85)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 24,
+          }}>
+            <div onClick={e => e.stopPropagation()} style={{
+              background: "#1a1a1a", borderRadius: 16,
+              border: "1px solid rgba(239,68,68,0.3)",
+              maxWidth: 360, width: "100%", padding: 22,
+              boxShadow: "0 16px 40px rgba(0,0,0,0.7)",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                <div style={{
+                  width: 40, height: 40, borderRadius: "50%",
+                  background: "rgba(239,68,68,0.15)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F87171" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg>
+                </div>
+                <div style={{ color: "white", fontSize: 17, fontWeight: 800 }}>Block @{username}?</div>
+              </div>
+              <div style={{ color: "#999", fontSize: 13, lineHeight: 1.6, marginBottom: 18 }}>
+                They won't be able to see your profile, posts, beats, or message you.
+                Any existing follow between you both will be removed.
+                You can unblock them from Settings → Blocked Users.
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setConfirmBlock(false)}
+                  style={{ flex: 1, padding: "11px", borderRadius: 12,
+                    background: "transparent", border: "1.5px solid #333",
+                    color: "#aaa", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                  Cancel
+                </button>
+                <button onClick={toggleBlock} disabled={blockLoading}
+                  style={{ flex: 1, padding: "11px", borderRadius: 12,
+                    background: "linear-gradient(135deg,#DC2626,#B91C1C)", border: "none",
+                    color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
+                  {blockLoading ? "..." : "Block"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -13313,6 +13467,102 @@ function BeatArtworkUploader({ user, setUser }) {
   );
 }
 
+// =============================================================================
+// BLOCKED USERS PANEL
+// Shows everyone the current user has blocked. Unblock button opens their
+// profile back up + restores follow eligibility. Empty state for fresh users.
+// =============================================================================
+function BlockedUsersPanel() {
+  var [list, setList]       = React.useState([]);
+  var [loading, setLoading] = React.useState(true);
+  var [busy, setBusy]       = React.useState({}); // username → bool
+
+  function load() {
+    setLoading(true);
+    apiFetch("/api/auth/blocked-users")
+      .then(function(d) { setList(d || []); setLoading(false); })
+      .catch(function() { setList([]); setLoading(false); });
+  }
+
+  React.useEffect(function() { load(); }, []);
+
+  function unblock(username) {
+    setBusy(function(prev) { var n = Object.assign({}, prev); n[username] = true; return n; });
+    apiFetch("/api/auth/block/" + encodeURIComponent(username), { method: "DELETE" })
+      .then(function() {
+        setList(function(prev) { return prev.filter(function(u) { return u.username !== username; }); });
+      })
+      .catch(function() {})
+      .finally(function() {
+        setBusy(function(prev) { var n = Object.assign({}, prev); n[username] = false; return n; });
+      });
+  }
+
+  return (
+    <div style={{ padding: "14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
+      <div style={{ color: "#aaa", fontSize: 12, lineHeight: 1.5, marginBottom: 14 }}>
+        Users you've blocked can't see your profile, posts, beats, or message you.
+        Unblock anytime to restore mutual visibility.
+      </div>
+
+      {loading && (
+        <div style={{ color: "#555", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
+          Loading...
+        </div>
+      )}
+
+      {!loading && list.length === 0 && (
+        <div style={{ color: "#555", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
+          You haven't blocked anyone.
+        </div>
+      )}
+
+      {!loading && list.map(function(u) {
+        return (
+          <div key={u.username} style={{
+            display: "flex", alignItems: "center", gap: 12, padding: "10px 0",
+            borderBottom: "1px solid #222",
+          }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: "50%", overflow: "hidden", flexShrink: 0,
+              background: u.avatarUrl ? "#000" : "linear-gradient(135deg,#6B21A8,#C026D3)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "white", fontSize: 16, fontWeight: 800,
+            }}>
+              {u.avatarUrl
+                ? <img src={u.avatarUrl} alt={u.username} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : (u.username || "?")[0].toUpperCase()}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: "white", fontSize: 14, fontWeight: 700,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                @{u.username}
+              </div>
+              {u.name && (
+                <div style={{ color: "#666", fontSize: 11,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {u.name}
+                </div>
+              )}
+            </div>
+            <button onClick={function() { unblock(u.username); }}
+              disabled={!!busy[u.username]}
+              style={{
+                padding: "8px 14px", borderRadius: 16,
+                background: "transparent", border: "1.5px solid #444",
+                color: "#aaa", fontWeight: 700, fontSize: 12,
+                cursor: busy[u.username] ? "not-allowed" : "pointer",
+                flexShrink: 0,
+              }}>
+              {busy[u.username] ? "..." : "Unblock"}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric, onOpenMessages }) {
   const [mode,          setMode]          = useState("landing");
   const [ownBadgePopup, setOwnBadgePopup] = useState(null);
@@ -13656,6 +13906,21 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                   )}
                 </div>
               )}
+
+              {/* ── Blocked Users ──────────────────────────────────────── */}
+              <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                <button onClick={() => setOpenSettingsSection(openSettingsSection === "blocked" ? null : "blocked")}
+                  style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "12px 14px", background: openSettingsSection === "blocked" ? "#1a1a1a" : "#141414",
+                    border: "none", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                  <span>Blocked Users</span>
+                  <span style={{ color: "#666", fontSize: 12, transition: "transform 0.2s",
+                    transform: openSettingsSection === "blocked" ? "rotate(180deg)" : "none" }}>▼</span>
+                </button>
+                {openSettingsSection === "blocked" && (
+                  <BlockedUsersPanel />
+                )}
+              </div>
 
               {/* ── Your Data (GDPR) ───────────────────────────────────── */}
               <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
@@ -23469,7 +23734,20 @@ self.onmessage = async function(e) {
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 2v9M2 6.5h9" stroke="#888" strokeWidth="1.6" strokeLinecap="round"/></svg>
         </button>
         <div style={{ width:1,background:"#1a1a1a",height:14,margin:"0 4px" }} />
-        <button onClick={function(){ setLoopEnabled(function(v){return !v;});}} style={{ background:loopEnabled?"rgba(59,130,246,0.2)":"#141414",border:"1px solid "+(loopEnabled?"#3B82F6":"#222"),borderRadius:6,color:loopEnabled?"#3B82F6":"#555",fontSize:10,fontWeight:700,padding:"3px 8px",cursor:"pointer" }}>LOOP</button>
+        <button onClick={function(){
+          setLoopEnabled(function(v){
+            const enabling = !v;
+            // On first enable (no region yet), default to a single bar starting
+            // at bar 1 (t=0). Users can then drag the handles to resize/move it
+            // anywhere on the timeline. Preserves any existing region the user
+            // has already set.
+            if (enabling && (loopOut <= loopIn || loopOut === 0)) {
+              setLoopIn(0);
+              setLoopOut(spBar);
+            }
+            return enabling;
+          });
+        }} style={{ background:loopEnabled?"rgba(59,130,246,0.2)":"#141414",border:"1px solid "+(loopEnabled?"#3B82F6":"#222"),borderRadius:6,color:loopEnabled?"#3B82F6":"#555",fontSize:10,fontWeight:700,padding:"3px 8px",cursor:"pointer" }}>LOOP</button>
         <div style={{ flex:1 }} />
         <div style={{ width:1, background:"#1a1a1a", height:14, margin:"0 2px" }} />
         {/* Input monitoring toggle — only available when headphones/headset connected */}
