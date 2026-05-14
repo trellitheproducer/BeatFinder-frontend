@@ -4107,6 +4107,14 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
   var [error, setError]     = React.useState(null);
   var [lightbox, setLightbox] = React.useState(null); // { images, index }
   var [refreshing, setRefreshing] = React.useState(false);
+  // Tick state — bumps every 10s to force re-render of the timeAgo labels
+  // so they update live ("5s ago" → "15s ago" → "25s ago"…) without needing
+  // a server fetch.
+  var [, setTick] = React.useState(0);
+  React.useEffect(function() {
+    var id = setInterval(function() { setTick(function(n) { return n + 1; }); }, 10000);
+    return function() { clearInterval(id); };
+  }, []);
 
   function load(showSpinner) {
     if (!user) { setItems([]); setLoading(false); return; }
@@ -4266,8 +4274,10 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
   function timeAgo(iso) {
     if (!iso) return "";
     var diff = Date.now() - new Date(iso).getTime();
-    var mins = Math.floor(diff / 60000);
-    if (mins < 1) return "just now";
+    if (diff < 0) diff = 0;
+    var secs = Math.floor(diff / 1000);
+    if (secs < 60) return secs + "s ago";
+    var mins = Math.floor(secs / 60);
     if (mins < 60) return mins + "m ago";
     var hrs = Math.floor(mins / 60);
     if (hrs < 24) return hrs + "h ago";
