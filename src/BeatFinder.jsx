@@ -13792,6 +13792,8 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
   // Add activeSection state for dashboard navigation
   const [activeSection, setActiveSection] = useState(null);
+  // Logout confirmation modal — prevents accidental sign-outs
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const [bio,              setBio]              = useState(user?.bio || "");
   const [editName,         setEditName]         = useState(user?.name || "");
   const [location,         setLocation]         = useState(user?.location || "");
@@ -13998,8 +14000,8 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51h0a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/>
             </svg>
           </button>
-          {/* Logout — icon button in red */}
-          <button onClick={() => { onLogout(); }}
+          {/* Logout — icon button in red, opens confirmation modal */}
+          <button onClick={() => { setConfirmLogout(true); setToolsOpen(false); setSettingsOpen(false); }}
             title="Log out"
             style={{
               width: 38, height: 38, borderRadius: 11,
@@ -14467,6 +14469,123 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         </div>
         <BadgeInfoPopup message={ownBadgePopup} onClose={() => setOwnBadgePopup(null)} />
       </div>
+
+      {/* ── Logout confirmation modal ── */}
+      {confirmLogout && (
+        <div onClick={() => setConfirmLogout(false)} style={{
+          position: "fixed", inset: 0, zIndex: 99997,
+          background: "rgba(0,0,0,0.85)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 24,
+          backdropFilter: "blur(4px)",
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+            border: "1px solid rgba(239,68,68,0.3)",
+            borderRadius: 18, padding: 24,
+            maxWidth: 360, width: "100%",
+            boxShadow: "0 16px 40px rgba(0,0,0,0.75), 0 0 24px rgba(239,68,68,0.15)",
+            position: "relative", overflow: "hidden",
+          }}>
+            {/* LED top edge — red since this is a destructive confirmation */}
+            <div style={{
+              position: "absolute", top: 0, left: 0, right: 0, height: 2,
+              background: "linear-gradient(90deg,transparent,#DC2626,#F87171,#DC2626,transparent)",
+              boxShadow: "0 0 8px rgba(239,68,68,0.7)",
+            }} />
+
+            {/* Icon + title row */}
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: 14, flexShrink: 0,
+                background: "linear-gradient(135deg,rgba(220,38,38,0.2),rgba(220,38,38,0.08))",
+                border: "1px solid rgba(239,68,68,0.4)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                boxShadow: "0 0 14px rgba(239,68,68,0.3)",
+              }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F87171" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+                  <polyline points="16 17 21 12 16 7"/>
+                  <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 2 }}>
+                  Sign Out?
+                </div>
+                <div style={{ color: "#888", fontSize: 12 }}>
+                  @{user.username || user.name}
+                </div>
+              </div>
+            </div>
+
+            {/* Message + data-loss warning */}
+            <div style={{
+              color: "#bbb", fontSize: 13, lineHeight: 1.6,
+              marginBottom: 14,
+              padding: "12px 14px",
+              background: "rgba(0,0,0,0.3)",
+              border: "1px solid rgba(124,58,237,0.15)",
+              borderRadius: 10,
+            }}>
+              You'll need to sign back in to access your account, beats, lyrics and messages.
+            </div>
+
+            {/* Data-loss warning — amber, attention-grabbing */}
+            <div style={{
+              display: "flex", gap: 10, alignItems: "flex-start",
+              padding: "12px 14px", marginBottom: 22,
+              background: "rgba(245,158,11,0.08)",
+              border: "1px solid rgba(245,158,11,0.3)",
+              borderRadius: 10,
+            }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                style={{ flexShrink: 0, marginTop: 1, filter: "drop-shadow(0 0 4px rgba(245,158,11,0.5))" }}>
+                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              <div style={{ flex: 1, color: "#FBBF24", fontSize: 12, lineHeight: 1.55, fontWeight: 600 }}>
+                Save any open lyrics and Studio projects first — unsaved work will be lost on sign out.
+              </div>
+            </div>
+
+            {/* Buttons row */}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setConfirmLogout(false)}
+                style={{
+                  flex: 1, padding: "13px",
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 12,
+                  color: "#ccc", fontWeight: 700, fontSize: 14,
+                  cursor: "pointer", letterSpacing: 0.3,
+                }}>
+                Cancel
+              </button>
+              <button onClick={() => { setConfirmLogout(false); onLogout(); }}
+                style={{
+                  flex: 1, padding: "13px",
+                  background: "linear-gradient(135deg,#DC2626,#B91C1C)",
+                  border: "none",
+                  borderRadius: 12,
+                  color: "white", fontWeight: 800, fontSize: 14,
+                  cursor: "pointer", letterSpacing: 0.4,
+                  boxShadow: "0 4px 14px rgba(220,38,38,0.4), inset 0 1px 0 rgba(255,255,255,0.15)",
+                  textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+                }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+                  <polyline points="16 17 21 12 16 7"/>
+                  <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       
       {!activeSection && (
