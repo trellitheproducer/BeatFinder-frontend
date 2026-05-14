@@ -4447,24 +4447,49 @@ function ContractViewer({ html, onClose, filename, pdfDownloader }) {
       </div>
 
       {/* Scrollable contract content
-         - iframe gives the contract HTML its own document/CSS context, so its
-           internal styles (font, max-width, etc) can't leak into our app and
-           the contract can't horizontally overflow the viewer.
-         - The iframe itself fills the available space; we render the full
-           HTML via srcDoc which is identical to opening the file. */}
+         - iOS Safari can't reliably scroll content inside an iframe with
+           touch. Workaround: let the iframe auto-resize to match its
+           full content height, and have the PARENT div do the scrolling.
+           This sidesteps the iframe-scroll limitation entirely while
+           keeping the contract's HTML/CSS isolated. */}
       <div style={{
         flex: 1, width: "100%",
         background: "#fff",
         boxSizing: "border-box",
+        overflowY: "scroll",
+        WebkitOverflowScrolling: "touch",
+        overscrollBehavior: "contain",
+        // Explicit height so iOS Safari activates touch scrolling.
+        // 100dvh minus header (~64px) and footer (~72px).
+        height: "calc(100dvh - 136px)",
+        minHeight: 200,
       }}>
         <iframe
           title="Licence Contract"
           srcDoc={html}
           sandbox="allow-same-origin"
+          scrolling="no"
+          onLoad={function(e){
+            // Auto-resize iframe to content height so parent scrolls naturally.
+            try {
+              var ifr = e.currentTarget;
+              var doc = ifr.contentDocument || ifr.contentWindow.document;
+              if (doc) {
+                var h = Math.max(
+                  doc.body ? doc.body.scrollHeight : 0,
+                  doc.documentElement ? doc.documentElement.scrollHeight : 0
+                );
+                if (h > 0) ifr.style.height = h + "px";
+              }
+            } catch(err) {}
+          }}
           style={{
-            width: "100%", height: "100%",
+            width: "100%",
             border: "none", display: "block",
             background: "#fff",
+            // Default height before onLoad fires — overwritten by the
+            // resize logic. Generous enough to avoid initial clipping.
+            height: 900,
           }}
         />
       </div>
@@ -6199,7 +6224,13 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
   // detail.beat_id; we open if it matches.
   React.useEffect(function() {
     function onReopen(e) {
-      if (e && e.detail && e.detail.beat_id === beat.id) setSheetOpen(true);
+      if (!e || !e.detail || e.detail.beat_id !== beat.id) return;
+      // De-duplicate: only the first matching listener should open its sheet.
+      // Subsequent listeners for the same beat (e.g. the same beat appearing
+      // on multiple screens like Trending + Profile) must NOT open too.
+      if (window.__bf_reopen_consumed__ === beat.id) return;
+      window.__bf_reopen_consumed__ = beat.id;
+      setSheetOpen(true);
     }
     window.addEventListener("bf-reopen-sheet", onReopen);
     return function() { window.removeEventListener("bf-reopen-sheet", onReopen); };
@@ -6409,9 +6440,14 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
   React.useEffect(function() {
     function onReopen(e) {
       if (!e || !e.detail || !e.detail.beat_id) return;
+      // De-duplicate: only first matching listener opens sheet
+      if (window.__bf_reopen_consumed__ === e.detail.beat_id) return;
       var b = (rising || []).find(function(x){ return x.id === e.detail.beat_id; })
            || (fresh   || []).find(function(x){ return x.id === e.detail.beat_id; });
-      if (b) setSheetBeat(b);
+      if (b) {
+        window.__bf_reopen_consumed__ = e.detail.beat_id;
+        setSheetBeat(b);
+      }
     }
     window.addEventListener("bf-reopen-sheet", onReopen);
     return function() { window.removeEventListener("bf-reopen-sheet", onReopen); };
@@ -8124,7 +8160,10 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   var [sheetOpen,   setSheetOpen]   = React.useState(false); // opens contract preview before Stripe
   React.useEffect(function() {
     function onReopen(e) {
-      if (e && e.detail && e.detail.beat_id === beat.id) setSheetOpen(true);
+      if (!e || !e.detail || e.detail.beat_id !== beat.id) return;
+      if (window.__bf_reopen_consumed__ === beat.id) return;
+      window.__bf_reopen_consumed__ = beat.id;
+      setSheetOpen(true);
     }
     window.addEventListener("bf-reopen-sheet", onReopen);
     return function() { window.removeEventListener("bf-reopen-sheet", onReopen); };
@@ -9582,7 +9621,10 @@ function CompactBeatCard({ beat, currentUser }) {
   }, [isFree, beat.id, currentUser]);
   React.useEffect(function() {
     function onReopen(e) {
-      if (e && e.detail && e.detail.beat_id === beat.id) setSheetOpen(true);
+      if (!e || !e.detail || e.detail.beat_id !== beat.id) return;
+      if (window.__bf_reopen_consumed__ === beat.id) return;
+      window.__bf_reopen_consumed__ = beat.id;
+      setSheetOpen(true);
     }
     window.addEventListener("bf-reopen-sheet", onReopen);
     return function() { window.removeEventListener("bf-reopen-sheet", onReopen); };
@@ -24759,6 +24801,10 @@ export default function BeatFinder() {
     // Done dismissal. Clear flag, expose pending reopen, restore route.
     try { sessionStorage.removeItem("bf_payment_in_flight"); } catch(e) {}
     try { window.__bf_pending_reopen__ = beatId; } catch(e) {}
+    // Reset the consume flag so listeners on this fresh app boot can fire
+    // (a previous boot may have set it). Once any listener takes the event
+    // it will set this flag again and short-circuit the remaining dispatches.
+    try { window.__bf_reopen_consumed__ = null; } catch(e) {}
     try {
       var saved = JSON.parse(sessionStorage.getItem("bf_return_tab") || "{}");
       if (saved && saved.tab) setTab(saved.tab);
@@ -24770,10 +24816,15 @@ export default function BeatFinder() {
       }
     } catch(e) {}
     // Dispatch event repeatedly over the first 2 seconds — covers screens
-    // that mount lazily after route restoration.
+    // that mount lazily after route restoration. Stops as soon as a listener
+    // takes the event (sets __bf_reopen_consumed__).
     var attempts = 0;
     var interval = setInterval(function() {
       attempts++;
+      if (window.__bf_reopen_consumed__ === beatId) {
+        clearInterval(interval);
+        return;
+      }
       try { window.dispatchEvent(new CustomEvent("bf-reopen-sheet", { detail: { beat_id: beatId } })); } catch(e) {}
       if (attempts >= 8) clearInterval(interval);
     }, 250);
