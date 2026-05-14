@@ -12842,6 +12842,11 @@ function RootAuthScreen({ onLogin, startMode }) {
   const [authErr,     setAuthErr]     = useState("");
   const [selectedPlan,    setSelectedPlan]    = useState("artist");
   const [selectedPriceId, setSelectedPriceId] = useState(PLAN_PRICES.artist.monthly);
+  // Signup-only — user must tick this to agree to T&Cs. Reset whenever
+  // the user toggles between login and signup so the state can't leak.
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  // Show the full T&Cs in a scrollable modal when the user taps the link.
+  const [showTermsPreview, setShowTermsPreview] = useState(false);
 
   useEffect(() => {
     try {
@@ -12904,16 +12909,76 @@ function RootAuthScreen({ onLogin, startMode }) {
           </div>
         </div>
       )}
+
+      {/* T&Cs acceptance — required to sign up. This is the legal moment
+          of contract formation: ticking the box + clicking Create binds
+          the user to the Terms at the version-bumped current revision.
+          The acceptance is recorded server-side against the new account. */}
+      {mode === "signup" && (
+        <div style={{
+          marginBottom: 16,
+          padding: "12px 14px",
+          background: acceptTerms ? "rgba(124,58,237,0.08)" : "rgba(0,0,0,0.3)",
+          border: "1px solid " + (acceptTerms ? "rgba(124,58,237,0.35)" : "rgba(124,58,237,0.18)"),
+          borderRadius: 12,
+          transition: "background 0.15s, border 0.15s",
+        }}>
+          <label htmlFor="bf_accept_terms"
+            style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer",
+              userSelect: "none", WebkitUserSelect: "none" }}>
+            <input
+              id="bf_accept_terms"
+              type="checkbox"
+              checked={acceptTerms}
+              onChange={e => setAcceptTerms(e.target.checked)}
+              style={{
+                width: 18, height: 18, marginTop: 1, flexShrink: 0,
+                accentColor: "#7C3AED", cursor: "pointer",
+              }}
+            />
+            <span style={{ color: "#ccc", fontSize: 13, lineHeight: 1.5 }}>
+              I agree to BeatFinder's{" "}
+              <span onClick={e => { e.preventDefault(); e.stopPropagation(); setShowTermsPreview(true); }}
+                style={{ color: "#A78BFA", fontWeight: 700, textDecoration: "underline", cursor: "pointer" }}>
+                Terms &amp; Conditions
+              </span>
+              {" "}and Privacy Policy. I confirm I am at least 16 years old.
+            </span>
+          </label>
+        </div>
+      )}
+
       <button
         disabled={authLoading}
         onClick={async () => {
           setAuthErr("");
+          if (mode === "signup" && !name.trim())  { setAuthErr("Please enter your name"); return; }
+          if (mode === "signup" && !email.trim()) { setAuthErr("Please enter your email"); return; }
+          if (mode === "signup" && !pw.trim())    { setAuthErr("Please enter a password"); return; }
+          if (mode === "signup" && !acceptTerms)  { setAuthErr("Please accept the Terms & Conditions to continue"); return; }
           if (mode === "login" && !pw.trim()) { setAuthErr("Please enter your password"); return; }
           setAuthLoading(true);
           try {
             const u = mode === "signup"
               ? await AuthAPI.register(name || email.split("@")[0], email, pw)
               : await AuthAPI.login(email, pw);
+            // Record T&Cs acceptance immediately on signup. We do this
+            // right after the register call so the server has an audit
+            // trail tying the accepted version to the new account at
+            // the moment of creation.
+            if (mode === "signup" && u) {
+              try {
+                await apiFetch("/api/auth/accept-terms", {
+                  method: "POST",
+                  body: JSON.stringify({ version: TERMS_VERSION }),
+                });
+                u.terms_accepted_version = TERMS_VERSION;
+              } catch (termsErr) {
+                console.error("[BF terms] signup accept failed", termsErr);
+                // Non-blocking — registration succeeded. The version-mismatch
+                // modal will catch it on next load and re-prompt them.
+              }
+            }
             if (rememberMe) {
               try { localStorage.setItem("bf_saved_email", email); } catch {}
             } else {
@@ -12955,7 +13020,7 @@ function RootAuthScreen({ onLogin, startMode }) {
       {authErr && <div style={{ color: "#F87171", fontSize: 13, textAlign: "center", marginTop: 12 }}>{authErr}</div>}
       <div style={{ textAlign: "center", marginTop: 20 }}>
         <span style={{ color: "#888", fontSize: 14 }}>{mode === "signup" ? "Already have an account? " : "No account? "}</span>
-        <button onClick={() => { setAuthErr(""); setMode(mode === "signup" ? "login" : "signup"); }}
+        <button onClick={() => { setAuthErr(""); setAcceptTerms(false); setMode(mode === "signup" ? "login" : "signup"); }}
           style={{ background: "none", border: "none", color: "#06B6D4", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
           {mode === "signup" ? "Log In" : "Sign Up"}
         </button>
@@ -12966,6 +13031,99 @@ function RootAuthScreen({ onLogin, startMode }) {
             style={{ background: "none", border: "none", color: "#666", fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>
             Forgot your password?
           </button>
+        </div>
+      )}
+
+      {/* T&Cs preview modal — opens when the user taps the link
+          inside the signup checkbox row. Read-only; closes on tap. */}
+      {showTermsPreview && (
+        <div onClick={() => setShowTermsPreview(false)} style={{
+          position: "fixed", inset: 0, zIndex: 99998,
+          background: "rgba(0,0,0,0.85)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 20,
+          backdropFilter: "blur(4px)",
+          fontFamily: "'DM Sans',sans-serif",
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+            border: "1px solid rgba(124,58,237,0.3)",
+            borderRadius: 18,
+            maxWidth: 520, width: "100%", maxHeight: "85vh",
+            display: "flex", flexDirection: "column",
+            boxShadow: "0 16px 40px rgba(0,0,0,0.75), 0 0 24px rgba(124,58,237,0.15)",
+            position: "relative", overflow: "hidden",
+          }}>
+            {/* LED top edge */}
+            <div style={{
+              position: "absolute", top: 0, left: 0, right: 0, height: 2,
+              background: "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)",
+              boxShadow: "0 0 8px rgba(124,58,237,0.7)",
+            }} />
+            {/* Header */}
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "16px 20px", borderBottom: "1px solid rgba(124,58,237,0.15)",
+              flexShrink: 0,
+            }}>
+              <div>
+                <div style={{
+                  color: "white", fontSize: 20, fontWeight: 800,
+                  fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1,
+                }}>TERMS &amp; CONDITIONS</div>
+                <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>
+                  Version {TERMS_VERSION}
+                </div>
+              </div>
+              <button onClick={() => setShowTermsPreview(false)} style={{
+                width: 32, height: 32, borderRadius: "50%",
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid #2a2a2a", color: "#888",
+                cursor: "pointer", flexShrink: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+            {/* Scrollable T&Cs body */}
+            <div style={{
+              flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch",
+              padding: "16px 20px",
+            }}>
+              {TERMS_CONTENT.map(function(sec, i) {
+                return (
+                  <div key={i} style={{ marginBottom: 18 }}>
+                    <div style={{
+                      color: "#A78BFA", fontSize: 12, fontWeight: 900, letterSpacing: 1,
+                      marginBottom: 6,
+                    }}>{sec.title}</div>
+                    <div style={{ color: "#bbb", fontSize: 12, lineHeight: 1.65 }}>
+                      {sec.body}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Footer */}
+            <div style={{
+              padding: "12px 20px",
+              borderTop: "1px solid rgba(124,58,237,0.15)",
+              flexShrink: 0,
+            }}>
+              <button onClick={() => setShowTermsPreview(false)} style={{
+                width: "100%", padding: "12px",
+                background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+                border: "none", borderRadius: 12,
+                color: "white", fontWeight: 800, fontSize: 14, letterSpacing: 0.5,
+                cursor: "pointer",
+                boxShadow: "0 4px 14px rgba(124,58,237,0.4)",
+              }}>
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -13732,6 +13890,9 @@ function BlockedUsersPanel() {
 function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric, onNewLyric, onOpenMessages }) {
   const [mode,          setMode]          = useState("landing");
   const [ownBadgePopup, setOwnBadgePopup] = useState(null);
+  // T&Cs acceptance — signup-only in this in-profile auth form too.
+  const [acceptTerms,        setAcceptTerms]        = useState(false);
+  const [showTermsPreview,   setShowTermsPreview]   = useState(false);
   const [email,       setEmail]       = useState(() => {
     try { return localStorage.getItem("bf_remember") === "1" ? (localStorage.getItem("bf_saved_email") || "") : ""; } catch { return ""; }
   });
@@ -13898,14 +14059,60 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             <label htmlFor="rm" style={{ color: "#888", fontSize: 13 }}>Remember my login</label>
           </div>
         )}
+        {/* T&Cs checkbox — required on signup. Records acceptance against
+            the new account immediately after registration. */}
+        {mode === "signup" && (
+          <div style={{
+            marginBottom: 16, padding: "12px 14px",
+            background: acceptTerms ? "rgba(124,58,237,0.08)" : "rgba(0,0,0,0.3)",
+            border: "1px solid " + (acceptTerms ? "rgba(124,58,237,0.35)" : "rgba(124,58,237,0.18)"),
+            borderRadius: 12,
+            transition: "background 0.15s, border 0.15s",
+          }}>
+            <label htmlFor="bf_accept_terms_p"
+              style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", userSelect: "none", WebkitUserSelect: "none" }}>
+              <input
+                id="bf_accept_terms_p"
+                type="checkbox"
+                checked={acceptTerms}
+                onChange={e => setAcceptTerms(e.target.checked)}
+                style={{ width: 18, height: 18, marginTop: 1, flexShrink: 0, accentColor: "#7C3AED", cursor: "pointer" }}
+              />
+              <span style={{ color: "#ccc", fontSize: 13, lineHeight: 1.5 }}>
+                I agree to BeatFinder's{" "}
+                <span onClick={e => { e.preventDefault(); e.stopPropagation(); setShowTermsPreview(true); }}
+                  style={{ color: "#A78BFA", fontWeight: 700, textDecoration: "underline", cursor: "pointer" }}>
+                  Terms &amp; Conditions
+                </span>
+                {" "}and Privacy Policy. I confirm I am at least 16 years old.
+              </span>
+            </label>
+          </div>
+        )}
         <button disabled={authLoading} onClick={async () => {
           setAuthErr("");
+          if (mode === "signup" && !name.trim())  { setAuthErr("Please enter your name"); return; }
+          if (mode === "signup" && !email.trim()) { setAuthErr("Please enter your email"); return; }
+          if (mode === "signup" && !pw.trim())    { setAuthErr("Please enter a password"); return; }
+          if (mode === "signup" && !acceptTerms)  { setAuthErr("Please accept the Terms & Conditions to continue"); return; }
           if (mode === "login" && !pw.trim()) { setAuthErr("Please enter your password"); return; }
           setAuthLoading(true);
           try {
             const u = mode === "signup"
               ? await AuthAPI.register(name || email.split("@")[0], email, pw)
               : await AuthAPI.login(email, pw);
+            // Record T&Cs acceptance immediately on signup
+            if (mode === "signup" && u) {
+              try {
+                await apiFetch("/api/auth/accept-terms", {
+                  method: "POST",
+                  body: JSON.stringify({ version: TERMS_VERSION }),
+                });
+                u.terms_accepted_version = TERMS_VERSION;
+              } catch (termsErr) {
+                console.error("[BF terms] signup accept failed", termsErr);
+              }
+            }
             if (rememberMe) { try { localStorage.setItem("bf_saved_email", email); localStorage.setItem("bf_remember", "1"); } catch {} }
             else { try { localStorage.removeItem("bf_saved_email"); localStorage.removeItem("bf_remember"); } catch {} }
             setUser(u);
@@ -13917,7 +14124,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         {authErr && <div style={{ color: "#F87171", fontSize: 13, textAlign: "center", marginTop: 12 }}>{authErr}</div>}
         <div style={{ textAlign: "center", marginTop: 20 }}>
           <span style={{ color: "#888", fontSize: 14 }}>{mode === "signup" ? "Already have an account? " : "No account? "}</span>
-          <button onClick={() => { setAuthErr(""); setMode(mode === "signup" ? "login" : "signup"); }}
+          <button onClick={() => { setAuthErr(""); setAcceptTerms(false); setMode(mode === "signup" ? "login" : "signup"); }}
             style={{ background: "none", border: "none", color: "#06B6D4", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
             {mode === "signup" ? "Log In" : "Sign Up"}
           </button>
@@ -13928,6 +14135,72 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               style={{ background: "none", border: "none", color: "#666", fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>
               Forgot your password?
             </button>
+          </div>
+        )}
+
+        {/* T&Cs preview modal */}
+        {showTermsPreview && (
+          <div onClick={() => setShowTermsPreview(false)} style={{
+            position: "fixed", inset: 0, zIndex: 99998,
+            background: "rgba(0,0,0,0.85)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 20, backdropFilter: "blur(4px)", fontFamily: "'DM Sans',sans-serif",
+          }}>
+            <div onClick={e => e.stopPropagation()} style={{
+              background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+              border: "1px solid rgba(124,58,237,0.3)",
+              borderRadius: 18, maxWidth: 520, width: "100%", maxHeight: "85vh",
+              display: "flex", flexDirection: "column",
+              boxShadow: "0 16px 40px rgba(0,0,0,0.75), 0 0 24px rgba(124,58,237,0.15)",
+              position: "relative", overflow: "hidden",
+            }}>
+              <div style={{
+                position: "absolute", top: 0, left: 0, right: 0, height: 2,
+                background: "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)",
+                boxShadow: "0 0 8px rgba(124,58,237,0.7)",
+              }} />
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "16px 20px", borderBottom: "1px solid rgba(124,58,237,0.15)", flexShrink: 0,
+              }}>
+                <div>
+                  <div style={{ color: "white", fontSize: 20, fontWeight: 800,
+                    fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1 }}>TERMS &amp; CONDITIONS</div>
+                  <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>Version {TERMS_VERSION}</div>
+                </div>
+                <button onClick={() => setShowTermsPreview(false)} style={{
+                  width: 32, height: 32, borderRadius: "50%",
+                  background: "rgba(255,255,255,0.04)", border: "1px solid #2a2a2a", color: "#888",
+                  cursor: "pointer", flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </div>
+              <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "16px 20px" }}>
+                {TERMS_CONTENT.map(function(sec, i) {
+                  return (
+                    <div key={i} style={{ marginBottom: 18 }}>
+                      <div style={{ color: "#A78BFA", fontSize: 12, fontWeight: 900, letterSpacing: 1, marginBottom: 6 }}>{sec.title}</div>
+                      <div style={{ color: "#bbb", fontSize: 12, lineHeight: 1.65 }}>{sec.body}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ padding: "12px 20px", borderTop: "1px solid rgba(124,58,237,0.15)", flexShrink: 0 }}>
+                <button onClick={() => setShowTermsPreview(false)} style={{
+                  width: "100%", padding: "12px",
+                  background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+                  border: "none", borderRadius: 12,
+                  color: "white", fontWeight: 800, fontSize: 14, letterSpacing: 0.5,
+                  cursor: "pointer", boxShadow: "0 4px 14px rgba(124,58,237,0.4)",
+                }}>
+                  Close
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -26028,8 +26301,8 @@ function TermsModal({ user, onAccepted }) {
   React.useEffect(function() {
     function check() {
       // If a JWT exists but user hasn't loaded yet, hold off the decision.
-      // Otherwise we'd flash the guest-state modal (because user is null)
-      // before /me returns and reveals the accepted_version.
+      // Otherwise we'd flash the modal (because user is null) before /me
+      // returns and reveals the accepted_version.
       var hasToken = false;
       try { hasToken = !!localStorage.getItem("bf_token"); } catch(e) {}
       if (hasToken && !user) {
@@ -26038,15 +26311,17 @@ function TermsModal({ user, onAccepted }) {
         return;
       }
       if (user) {
+        // Logged-in user — show modal only if their accepted version is stale.
+        // Acceptance is recorded server-side against their account (proper audit trail).
         var accepted = user.terms_accepted_version;
         console.log("[BF terms] check — accepted:", accepted, "vs TERMS_VERSION:", TERMS_VERSION, "match:", accepted === TERMS_VERSION);
         setOpen(accepted !== TERMS_VERSION);
       } else {
-        try {
-          var sessVal = sessionStorage.getItem("bf_terms_accepted_v" + TERMS_VERSION);
-          console.log("[BF terms] guest check — sessionStorage:", sessVal);
-          setOpen(sessVal !== "1");
-        } catch (e) { setOpen(true); }
+        // Guest — DON'T show the modal. Guests cannot legally accept T&Cs
+        // for an account they don't yet have. Acceptance happens at signup
+        // via the required checkbox on the registration form, which ties
+        // who-and-when to the new account record at creation time.
+        setOpen(false);
       }
     }
     check();
@@ -26061,26 +26336,26 @@ function TermsModal({ user, onAccepted }) {
 
   function handleAccept() {
     if (!scrolledToEnd || accepting) return;
-    setAccepting(true);
-    if (user) {
-      console.log("[BF terms] POSTing accept-terms version:", TERMS_VERSION);
-      apiFetch("/api/auth/accept-terms", {
-        method: "POST",
-        body: JSON.stringify({ version: TERMS_VERSION }),
-      }).then(function(r) {
-        console.log("[BF terms] accept-terms OK", r);
-        setOpen(false);
-        if (onAccepted) onAccepted(TERMS_VERSION);
-      }).catch(function(err) {
-        console.error("[BF terms] accept-terms FAILED", err && err.message);
-        try { sessionStorage.setItem("bf_terms_accepted_v" + TERMS_VERSION, "1"); } catch(e) {}
-        setOpen(false);
-      }).finally(function() { setAccepting(false); });
-    } else {
-      try { sessionStorage.setItem("bf_terms_accepted_v" + TERMS_VERSION, "1"); } catch(e) {}
+    if (!user) {
+      // Should not happen — modal only renders for logged-in users now.
       setOpen(false);
-      setAccepting(false);
+      return;
     }
+    setAccepting(true);
+    console.log("[BF terms] POSTing accept-terms version:", TERMS_VERSION);
+    apiFetch("/api/auth/accept-terms", {
+      method: "POST",
+      body: JSON.stringify({ version: TERMS_VERSION }),
+    }).then(function(r) {
+      console.log("[BF terms] accept-terms OK", r);
+      setOpen(false);
+      if (onAccepted) onAccepted(TERMS_VERSION);
+    }).catch(function(err) {
+      console.error("[BF terms] accept-terms FAILED", err && err.message);
+      // Don't silently mark as accepted — keep the modal open so the
+      // user is prompted again. Better to be annoying than to record
+      // a false acceptance.
+    }).finally(function() { setAccepting(false); });
   }
 
   if (!open) return null;
