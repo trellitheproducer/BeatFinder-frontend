@@ -839,6 +839,62 @@ const BF_OVERLAY_IMG = "data:image/webp;base64,UklGRjb2AABXRUJQVlA4WAoAAAAQAAAAC
 const API_BASE = "https://beatfinder-backend.onrender.com";
 
 // =============================================================================
+// TERMS & CONDITIONS
+// Versioned: bumping TERMS_VERSION re-prompts every user to re-accept.
+// Acceptance is recorded server-side for logged-in users (so they only
+// see this once unless the version changes) and in sessionStorage for
+// guests (so it shows every fresh session).
+// =============================================================================
+const TERMS_VERSION = "1.0";
+const TERMS_EFFECTIVE_DATE = "14 May 2026";
+const TERMS_CONTENT = [
+  {
+    heading: "1. Acceptance of Terms",
+    body: "By accessing or using BeatFinder (the \"Platform\"), whether as a registered account holder or as a guest, you agree to be bound by these Terms & Conditions (the \"Terms\"). If you do not accept these Terms in full, you must immediately stop using the Platform. Continued use after any update to these Terms constitutes acceptance of the revised version. These Terms form a legally binding contract between you and BeatFinder, governed by the laws of England and Wales."
+  },
+  {
+    heading: "2. Eligibility & Account Responsibility",
+    body: "You must be at least 16 years of age (or the age of digital consent in your jurisdiction) to create an account. By registering, you confirm that all information you provide is accurate, current, and complete, and that you will keep it updated. You are solely responsible for safeguarding your account credentials. Any activity occurring under your account is your responsibility, whether or not authorised by you. BeatFinder will not be liable for any loss or damage arising from your failure to protect your account."
+  },
+  {
+    heading: "3. Licences, Beats & Intellectual Property",
+    body: "All beats, instrumentals, samples, sound recordings, artwork, written content, and other media displayed on the Platform (\"Content\") are protected by copyright and other intellectual property laws. Producers who upload Content retain ownership of their original works and grant BeatFinder a limited, non-exclusive licence to host, display, and distribute that Content through the Platform. Buyers who purchase a Basic Lease or Premium Exclusive Lease receive only the specific rights described in the lease agreement issued at the point of sale — no other rights of any kind are granted. Free downloads are governed by the Free Licence agreement displayed at download time."
+  },
+  {
+    heading: "4. Strictly Prohibited Conduct — Piracy, Theft & Misuse",
+    body: "You agree NOT to: (a) copy, redistribute, re-upload, resell, sub-license, or otherwise exploit any Content beyond the explicit scope of the licence granted to you; (b) attempt to circumvent any technical protection measures, watermarks, or access controls; (c) use scraping, automation, bots, or any unauthorised means to access or extract Content; (d) remove, alter, or obscure producer credits, watermarks, or copyright notices; (e) upload Content you do not own or have written authorisation to upload, including AI-generated content trained on third-party works without consent; (f) claim authorship of any Content you did not create. Any breach of this section constitutes copyright infringement and is grounds for immediate account termination, removal of all uploaded Content, forfeiture of any pending earnings, and referral for civil and/or criminal legal action. BeatFinder reserves the right to pursue full damages, legal costs, and statutory remedies under the UK Copyright, Designs and Patents Act 1988 and equivalent international laws. Pirates and infringers will be held personally liable in their own name."
+  },
+  {
+    heading: "5. Payments, Subscriptions & Refunds",
+    body: "Paid subscriptions (Artist Pro, Producer Pro) and one-off lease purchases are processed by Stripe. By making a payment you authorise the charge and agree to Stripe's own terms. Subscriptions auto-renew at the end of each billing period at the then-current price unless cancelled at least 24 hours before renewal. Lease purchases are non-refundable once the contract is countersigned and the MP3 has been made available for download, save where required by mandatory consumer protection law. Subscription cancellations take effect at the end of the current billing period — no pro-rated refunds are issued. BeatFinder is not responsible for foreign exchange differences, bank fees, or chargebacks attempted in bad faith, which may result in account suspension."
+  },
+  {
+    heading: "6. User-Uploaded Content & Producer Warranties",
+    body: "If you upload beats, tracks, videos, images, or any other content, you warrant that you are the sole author, that the Content does not infringe any third-party rights (including copyright, moral rights, trademark, publicity, or privacy rights), and that you have full authority to grant the licences described in these Terms. You indemnify BeatFinder, its affiliates, employees, and contractors against any claim, loss, damage, or legal cost arising from a breach of this warranty. BeatFinder may remove any Content at any time without notice if we suspect a breach, receive a takedown request, or in our reasonable discretion."
+  },
+  {
+    heading: "7. Data, Privacy & Security",
+    body: "We collect and process personal data (account details, payment metadata via Stripe, usage analytics, uploaded files) only to operate the Platform, fulfil purchases, and improve the service. We do not sell your personal data to third parties. Data is stored on secure servers and protected by industry-standard measures, but no online service is completely immune to risk; you acknowledge this residual risk. By using the Platform you consent to our collection and processing of data as described, and you confirm you have lawful authority to share any information you provide about others (e.g. collaborators)."
+  },
+  {
+    heading: "8. Platform Availability, Modifications & Termination",
+    body: "We aim to keep the Platform available 24/7 but make no warranty of uninterrupted access. We may modify, suspend, or discontinue any feature at any time without liability. We may suspend or permanently terminate any account that, in our reasonable judgement, has breached these Terms, abused the Platform, or harmed other users. On termination, your access ceases immediately, but any licences validly granted to third parties before termination survive."
+  },
+  {
+    heading: "9. Disclaimer of Warranties & Limitation of Liability",
+    body: "The Platform and all Content are provided \"as is\" and \"as available\" without warranties of any kind, express or implied, including fitness for purpose, merchantability, or non-infringement, save for warranties that cannot be excluded under English law. To the maximum extent permitted by law, BeatFinder's total aggregate liability to you in any 12-month period is limited to the greater of (a) the fees you paid to BeatFinder during that period or (b) £100. BeatFinder is not liable for indirect, consequential, special, or punitive damages, lost profits, lost data, or loss of goodwill. Nothing in these Terms limits liability for death or personal injury caused by negligence, fraud, or any other liability that cannot be excluded under English law."
+  },
+  {
+    heading: "10. Governing Law & Jurisdiction",
+    body: "These Terms are governed by the laws of England and Wales. Any dispute arising under or in connection with these Terms is subject to the exclusive jurisdiction of the courts of England and Wales. If you are based outside the UK, you accept English jurisdiction and waive any objection to venue or forum non conveniens."
+  },
+  {
+    heading: "11. Acknowledgement & Consent",
+    body: "By tapping \"I Agree\" you confirm that you have read, understood, and accept these Terms in their entirety; that you are entering into a legally binding contract with BeatFinder; that you waive any defence based on not reading the Terms; and that this electronic acceptance has the same legal force as a handwritten signature under the UK Electronic Communications Act 2000."
+  }
+];
+
+// =============================================================================
 // GLOBAL PLAY COUNT STORE
 // Single source of truth for beat play counts across ALL cards everywhere.
 // When any card records a play, all other cards showing the same beat update.
@@ -12715,6 +12771,26 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 )}
               </div>
 
+              {/* ── Terms & Conditions ─────────────────────────────────── */}
+              <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                <button onClick={() => setOpenSettingsSection(openSettingsSection === "terms" ? null : "terms")}
+                  style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "12px 14px", background: openSettingsSection === "terms" ? "#1a1a1a" : "#141414",
+                    border: "none", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                  <span>Terms &amp; Conditions</span>
+                  <span style={{ color: "#666", fontSize: 12, transition: "transform 0.2s",
+                    transform: openSettingsSection === "terms" ? "rotate(180deg)" : "none" }}>▼</span>
+                </button>
+                {openSettingsSection === "terms" && (
+                  <div style={{
+                    padding: "14px 14px 16px", background: "#1a1a1a", borderTop: "1px solid #222",
+                    maxHeight: 360, overflowY: "auto", WebkitOverflowScrolling: "touch",
+                  }}>
+                    <TermsContent compact />
+                  </div>
+                )}
+              </div>
+
               {/* ── Contact Support ─────────────────────────────────────── */}
               <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
                 <button onClick={() => setOpenSettingsSection(openSettingsSection === "support" ? null : "support")}
@@ -23285,6 +23361,208 @@ function SplashScreen({ onDone }) {
 //   • Already-installed PWA: hides itself entirely
 //   • Dismissed: snoozed for 7 days via localStorage flag
 // =============================================================================
+// =============================================================================
+// TERMS & CONDITIONS — modal (acceptance) and reusable content viewer
+// =============================================================================
+function TermsContent({ compact }) {
+  return (
+    <div>
+      <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid rgba(124,58,237,0.2)" }}>
+        <div style={{
+          color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 1.5,
+          textShadow: "0 0 6px rgba(124,58,237,0.55)", marginBottom: 4,
+        }}>BEATFINDER · LEGAL</div>
+        <div style={{
+          color: "white", fontSize: compact ? 16 : 20, fontWeight: 900,
+          fontFamily: "'Bebas Neue', sans-serif", letterSpacing: 1, marginBottom: 4,
+        }}>TERMS &amp; CONDITIONS</div>
+        <div style={{ color: "#888", fontSize: 11 }}>
+          Version {TERMS_VERSION} · Effective {TERMS_EFFECTIVE_DATE}
+        </div>
+      </div>
+      {TERMS_CONTENT.map(function(section, i) {
+        return (
+          <div key={i} style={{ marginBottom: 16 }}>
+            <div style={{
+              color: "#DDD6FE", fontWeight: 800, fontSize: compact ? 13 : 14,
+              marginBottom: 6, letterSpacing: 0.3,
+            }}>{section.heading}</div>
+            <div style={{
+              color: "#bbb", fontSize: compact ? 12 : 13, lineHeight: 1.65,
+            }}>{section.body}</div>
+          </div>
+        );
+      })}
+      <div style={{
+        marginTop: 20, padding: 12,
+        background: "linear-gradient(135deg,rgba(124,58,237,0.08),rgba(59,130,246,0.08))",
+        border: "1px solid rgba(124,58,237,0.3)",
+        borderRadius: 10,
+        color: "#A78BFA", fontSize: 11, fontWeight: 700, textAlign: "center",
+        letterSpacing: 0.3,
+      }}>
+        Questions? Contact support@beatfinder.co.uk
+      </div>
+    </div>
+  );
+}
+
+function TermsModal({ user, onAccepted }) {
+  // Decide whether the user needs to see this modal.
+  // - Logged-in users: check the server-recorded version against TERMS_VERSION
+  // - Guests: check sessionStorage so they re-accept each new session
+  var [open, setOpen] = React.useState(false);
+  var [scrolledToEnd, setScrolledToEnd] = React.useState(false);
+  var [accepting, setAccepting] = React.useState(false);
+  var contentRef = React.useRef(null);
+
+  React.useEffect(function() {
+    function check() {
+      if (user) {
+        // Logged-in: hit the server (or read from user object if available)
+        var accepted = user.terms_accepted_version;
+        if (accepted === TERMS_VERSION) {
+          setOpen(false);
+        } else {
+          setOpen(true);
+        }
+      } else {
+        // Guest: sessionStorage so they accept every new session
+        try {
+          var sessVal = sessionStorage.getItem("bf_terms_accepted_v" + TERMS_VERSION);
+          setOpen(sessVal !== "1");
+        } catch (e) { setOpen(true); }
+      }
+    }
+    check();
+  }, [user]);
+
+  function onScroll(e) {
+    var el = e.target;
+    // Marked as fully read when within 40px of the bottom
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) {
+      setScrolledToEnd(true);
+    }
+  }
+
+  function handleAccept() {
+    if (!scrolledToEnd || accepting) return;
+    setAccepting(true);
+    if (user) {
+      // Persist server-side so this user never sees this version again
+      apiFetch("/api/auth/accept-terms", {
+        method: "POST",
+        body: JSON.stringify({ version: TERMS_VERSION }),
+      }).then(function() {
+        setOpen(false);
+        if (onAccepted) onAccepted(TERMS_VERSION);
+      }).catch(function() {
+        // Even if server save fails, don't block them — accept locally for this session
+        try { sessionStorage.setItem("bf_terms_accepted_v" + TERMS_VERSION, "1"); } catch(e) {}
+        setOpen(false);
+      }).finally(function() { setAccepting(false); });
+    } else {
+      // Guest — sessionStorage only
+      try { sessionStorage.setItem("bf_terms_accepted_v" + TERMS_VERSION, "1"); } catch(e) {}
+      setOpen(false);
+      setAccepting(false);
+    }
+  }
+
+  if (!open) return null;
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 99999,
+      background: "rgba(0,0,0,0.92)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: 16,
+    }}>
+      <div style={{
+        width: "100%", maxWidth: 520,
+        background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+        borderRadius: 22,
+        border: "1px solid rgba(124,58,237,0.55)",
+        boxShadow:
+          "0 16px 60px rgba(0,0,0,0.85)," +
+          "0 0 0 1px rgba(124,58,237,0.3)," +
+          "0 0 40px rgba(124,58,237,0.3)," +
+          "inset 0 1px 0 rgba(255,255,255,0.05)",
+        display: "flex", flexDirection: "column",
+        maxHeight: "92vh", overflow: "hidden",
+      }}>
+        {/* LED top edge */}
+        <div style={{
+          height: 2,
+          background: "linear-gradient(90deg,transparent 0%,#7C3AED 20%,#3B82F6 50%,#7C3AED 80%,transparent 100%)",
+          boxShadow: "0 0 12px #7C3AEDcc, 0 0 24px #3B82F666",
+        }} />
+
+        {/* Header */}
+        <div style={{ padding: "18px 20px 14px", textAlign: "center" }}>
+          <div style={{
+            color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 2,
+            marginBottom: 6, textShadow: "0 0 8px rgba(124,58,237,0.55)",
+          }}>BEFORE YOU CONTINUE</div>
+          <div style={{
+            fontFamily: "'Bebas Neue',sans-serif", fontSize: 26, letterSpacing: 2,
+            background: "linear-gradient(135deg,#C026D3 0%,#A855F7 50%,#3B82F6 100%)",
+            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+            color: "transparent",
+          }}>TERMS &amp; CONDITIONS</div>
+          <div style={{ color: "#888", fontSize: 11, marginTop: 4 }}>
+            Please read and scroll to the bottom to continue
+          </div>
+        </div>
+
+        {/* Scrollable content */}
+        <div
+          ref={contentRef}
+          onScroll={onScroll}
+          style={{
+            flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch",
+            padding: "0 20px 16px",
+            borderTop: "1px solid rgba(124,58,237,0.15)",
+            borderBottom: "1px solid rgba(124,58,237,0.15)",
+          }}>
+          <div style={{ paddingTop: 16 }}>
+            <TermsContent compact />
+          </div>
+        </div>
+
+        {/* Action footer */}
+        <div style={{
+          padding: "14px 20px max(14px, env(safe-area-inset-bottom))",
+          background: "linear-gradient(180deg,rgba(0,0,0,0) 0%,rgba(0,0,0,0.4) 100%)",
+        }}>
+          {!scrolledToEnd && (
+            <div style={{
+              color: "#888", fontSize: 11, textAlign: "center", marginBottom: 10,
+            }}>↓ Scroll to the bottom to enable acceptance</div>
+          )}
+          <button onClick={handleAccept} disabled={!scrolledToEnd || accepting}
+            style={{
+              width: "100%", borderRadius: 14, padding: "14px",
+              background: (!scrolledToEnd || accepting)
+                ? "rgba(255,255,255,0.04)"
+                : "linear-gradient(135deg,#C026D3 0%,#A855F7 35%,#7C3AED 70%,#3B82F6 100%)",
+              border: "1.5px solid " + ((!scrolledToEnd || accepting) ? "#222" : "rgba(192,38,211,0.6)"),
+              color: (!scrolledToEnd || accepting) ? "#444" : "white",
+              fontWeight: 900, fontSize: 14, letterSpacing: 0.8,
+              cursor: (!scrolledToEnd || accepting) ? "not-allowed" : "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              boxShadow: (!scrolledToEnd || accepting) ? "none"
+                : "0 4px 20px rgba(192,38,211,0.55), 0 0 36px rgba(168,85,247,0.4), inset 0 1px 0 rgba(255,255,255,0.3)",
+              textShadow: (!scrolledToEnd || accepting) ? "none" : "0 1px 2px rgba(0,0,0,0.3)",
+            }}>
+            {accepting ? "SAVING..." : (scrolledToEnd ? "✓ I AGREE TO THE TERMS" : "PLEASE SCROLL TO CONTINUE")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InstallPrompt() {
   const [show, setShow]               = React.useState(false);
   const [platform, setPlatform]       = React.useState(null); // "android" | "ios" | null
@@ -24246,6 +24524,19 @@ export default function BeatFinder() {
           and iOS Safari (manual instructions). Hidden if already installed
           or dismissed within the last 7 days. */}
       <InstallPrompt />
+
+      {/* Terms & Conditions acceptance modal.
+          - Logged-in users: appears once per TERMS_VERSION; acceptance is
+            persisted server-side via /api/auth/accept-terms.
+          - Guests: appears on every fresh session (sessionStorage only).
+          - Blocks the UI until the user scrolls to the bottom and taps
+            "I AGREE". The version bump rule means we can re-prompt all
+            users globally simply by bumping TERMS_VERSION above. */}
+      <TermsModal user={user} onAccepted={function(version) {
+        // Mirror server response onto the in-memory user object so the
+        // modal doesn't re-open on subsequent re-renders this session.
+        if (user) setUser(Object.assign({}, user, { terms_accepted_version: version }));
+      }} />
 
       {showAuthPrompt && (
         <div style={{
