@@ -15577,10 +15577,10 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               </svg>
               <div style={{ flex: 1, color: "#888", fontSize: 12, fontFamily: "monospace",
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                beatfinder.app/u/{user.username}
+                beatfinder.app/profile/{user.username}
               </div>
               <button onClick={() => {
-                navigator.clipboard?.writeText("beatfinder.app/u/" + user.username)
+                navigator.clipboard?.writeText("beatfinder.app/profile/" + user.username)
                   .then(() => { setBioMsg("Link copied!"); setTimeout(() => setBioMsg(""), 2000); });
               }} style={{
                 background: "linear-gradient(135deg,#C026D3,#7C3AED)",
