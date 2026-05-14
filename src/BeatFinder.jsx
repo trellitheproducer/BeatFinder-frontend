@@ -24666,6 +24666,10 @@ export default function BeatFinder() {
             try { window.dispatchEvent(new CustomEvent("bf-free-licences-hydrated")); } catch(e) {}
           })
           .catch(function(err) { console.error("[BF hydrate/boot] /my-free-licences FAILED", err && err.message); });
+        // TEMPORARY: also call the debug endpoint to see raw DB state
+        apiFetch("/api/producer/debug-free-licences")
+          .then(function(d) { console.log("[BF DEBUG free-licences]", d); })
+          .catch(function(err) { console.error("[BF DEBUG free-licences] FAILED", err && err.message); });
         // Also hydrate the paid-lease cache so beat sheets that need to check
         // ownership can do so instantly without their own API call.
         refreshUserLeases();
