@@ -22052,7 +22052,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     let mode = "new";
     if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
     else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
-    rulerDragRef.current = { mode, startT: t, startX: e.touches[0].clientX, committed: mode !== "new" };
+    rulerDragRef.current = { mode, startT: t, startX: e.touches[0].clientX, startY: e.touches[0].clientY, committed: mode !== "new" };
 
     // Do NOT auto-create loop region on touch — wait for drag movement
   };
@@ -22085,15 +22085,35 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // releases without having dragged (no commit, minimal movement), and the
   // loop is off, jump the playhead to where they tapped. Continues playback
   // from the new position if a track was playing.
+  //
+  // Also defensively checks if the released touch position is far from the
+  // initial press — touch sequences on iOS sometimes don't trigger
+  // touchmove for small vertical drift but still indicate a scroll intent,
+  // so we treat any release more than 6px away in either axis as a drag,
+  // not a tap.
   const handleRulerTouchEnd = function (e) {
     const drag = rulerDragRef.current;
     if (drag && !drag.committed && !loopEnabled) {
-      const wasPlaying = isPlayingRef.current;
-      const seekT = drag.startT;
-      syncUItoTime(seekT);
-      if (wasPlaying) {
-        setIsPlaying(false);
-        doPlay(seekT).then(function() { setIsPlaying(true); });
+      // Defensive end-distance check — handles iOS quirks where a vertical
+      // drift accumulates without firing enough touchmove events.
+      let movedFar = false;
+      try {
+        const tch = (e.changedTouches && e.changedTouches[0]) || null;
+        if (tch && drag.startX !== undefined && drag.startY !== undefined) {
+          const dx = Math.abs(tch.clientX - drag.startX);
+          const dy = Math.abs(tch.clientY - drag.startY);
+          movedFar = dx > 6 || dy > 6;
+        }
+      } catch (err) { /* fall through with movedFar=false */ }
+
+      if (!movedFar) {
+        const wasPlaying = isPlayingRef.current;
+        const seekT = drag.startT;
+        syncUItoTime(seekT);
+        if (wasPlaying) {
+          setIsPlaying(false);
+          doPlay(seekT).then(function() { setIsPlaying(true); });
+        }
       }
     }
     rulerDragRef.current = null;
@@ -22964,8 +22984,11 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     };
 
     const onEnd = function() {
+      // Keep the selBox visible if clips were selected — the user needs
+      // a visual indicator of what they've grabbed. The box auto-clears
+      // when the user taps outside, or when Delete / Duplicate is used.
+      // selBoxRef is reset so a fresh long-press starts a new selection.
       selBoxRef.current = null;
-      setSelBox(null);
       scrollEl.removeEventListener("touchmove", onMove);
       scrollEl.removeEventListener("touchend", onEnd);
     };
@@ -22990,14 +23013,16 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       longPressRef.current = null;
       // Haptic-style visual pulse then start lasso
       startLassoFromTouch(startX, startY);
-    }, 400);
+    }, 600); // 0.6s — clear intent, doesn't fight with scroll
 
     const cancelLP = function(te) {
       if (!longPressRef.current) return;
-      // Cancel if finger moved more than 8px
+      // Cancel if finger moved more than 14px — gives the user normal
+      // scroll headroom on iOS (10-12px is typical finger drift before
+      // a scroll gesture commits). Previously 8px was too tight.
       const dx = te.touches[0].clientX - startX;
       const dy = te.touches[0].clientY - startY;
-      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+      if (Math.abs(dx) > 14 || Math.abs(dy) > 14) {
         clearTimeout(longPressRef.current);
         longPressRef.current = null;
       }
@@ -23777,7 +23802,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   return (
     <div
       style={{ background:"#080808", height:"calc(100% - 72px - env(safe-area-inset-bottom))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
-      onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
+      onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); setSelBox(null); setSelClipIds(new Set()); }}
       onTouchMove={function(e){
         // Only allow touchmove inside the DAW scroll container — block everything else
         // This prevents the toolbars, header, and transport from being dragged
