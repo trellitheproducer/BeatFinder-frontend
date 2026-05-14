@@ -23936,29 +23936,53 @@ function InstallPrompt() {
       if (dismissedAt && (Date.now() - dismissedAt) < 7 * 24 * 60 * 60 * 1000) return;
     } catch(e) {}
 
-    // Detect platform
-    var ua = (navigator.userAgent || "").toLowerCase();
-    var isIOS = /iphone|ipad|ipod/.test(ua);
-    var isMacTouchpad = navigator.maxTouchPoints > 1 && /macintosh/.test(ua); // iPad in desktop mode
-    var isAndroid = /android/.test(ua);
-    var isSafari = /safari/.test(ua) && !/crios|fxios|chrome|edg/.test(ua);
-
-    if ((isIOS || isMacTouchpad) && isSafari) {
-      // iOS Safari → show manual-instructions banner immediately
-      setPlatform("ios");
-      setShow(true);
-    } else if (isAndroid) {
-      // Android → wait for beforeinstallprompt event before showing
-      var handler = function(e) {
-        e.preventDefault();
-        setDeferredEvt(e);
-        setPlatform("android");
-        setShow(true);
-      };
-      window.addEventListener("beforeinstallprompt", handler);
-      return function() { window.removeEventListener("beforeinstallprompt", handler); };
+    // Wait until the cookie banner has been resolved — they should never
+    // both be on screen at once. Cookie banner sets bf_cookie_choice_v1
+    // on either button tap.
+    function cookiesResolved() {
+      try { return !!localStorage.getItem("bf_cookie_choice_v1"); } catch(e) { return true; }
     }
-    // Desktop browsers / other platforms: silent (no banner needed)
+    if (!cookiesResolved()) {
+      // Listen for the cookie choice event then re-mount the prompt logic
+      function onCookieChoice() {
+        window.removeEventListener("bf-cookie-choice", onCookieChoice);
+        // Small delay so the cookie banner finishes animating away first
+        setTimeout(function() { startDetection(); }, 400);
+      }
+      window.addEventListener("bf-cookie-choice", onCookieChoice);
+      return function() { window.removeEventListener("bf-cookie-choice", onCookieChoice); };
+    }
+    // Detection function — called immediately (if cookies already resolved)
+    // or after cookie banner dismissal.
+    var androidHandler = null;
+    function startDetection() {
+      // Detect platform
+      var ua = (navigator.userAgent || "").toLowerCase();
+      var isIOS = /iphone|ipad|ipod/.test(ua);
+      var isMacTouchpad = navigator.maxTouchPoints > 1 && /macintosh/.test(ua); // iPad in desktop mode
+      var isAndroid = /android/.test(ua);
+      var isSafari = /safari/.test(ua) && !/crios|fxios|chrome|edg/.test(ua);
+
+      if ((isIOS || isMacTouchpad) && isSafari) {
+        // iOS Safari → show manual-instructions banner immediately
+        setPlatform("ios");
+        setShow(true);
+      } else if (isAndroid) {
+        // Android → wait for beforeinstallprompt event before showing
+        androidHandler = function(e) {
+          e.preventDefault();
+          setDeferredEvt(e);
+          setPlatform("android");
+          setShow(true);
+        };
+        window.addEventListener("beforeinstallprompt", androidHandler);
+      }
+      // Desktop browsers / other platforms: silent (no banner needed)
+    }
+    startDetection();
+    return function() {
+      if (androidHandler) window.removeEventListener("beforeinstallprompt", androidHandler);
+    };
   }, []);
 
   function dismiss() {
@@ -23990,7 +24014,7 @@ function InstallPrompt() {
       position: "fixed",
       left: 12, right: 12,
       bottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)",
-      zIndex: 30000,
+      zIndex: 99998,
       background: "linear-gradient(135deg,#16101f 0%,#0d0d12 100%)",
       border: "1.5px solid rgba(192,38,211,0.4)",
       borderRadius: 18,
@@ -24504,6 +24528,31 @@ export default function BeatFinder() {
       })
       .catch(() => clearToken());
   }, []);
+
+  // Re-hydrate cross-context state when the user returns to this tab/window.
+  // Free-licence agreements and paid leases may have been added in another
+  // browser context (PWA vs Safari, or another device), so we re-pull from
+  // server whenever the document becomes visible again.
+  useEffect(() => {
+    if (!user) return;
+    function rehydrate() {
+      if (document.visibilityState !== "visible") return;
+      // Re-pull free licences and tell mounted components to re-check
+      apiFetch("/api/producer/my-free-licences")
+        .then(function(res) {
+          var ids = (res && res.beat_ids) || [];
+          ids.forEach(function(id) {
+            try { localStorage.setItem("bf_signed_free_" + id, "1"); } catch(e) {}
+          });
+          try { window.dispatchEvent(new CustomEvent("bf-free-licences-hydrated")); } catch(e) {}
+        })
+        .catch(function() { /* non-fatal */ });
+      // Re-pull paid leases too (window.__bf_leases__ + bf-leases-updated event)
+      refreshUserLeases();
+    }
+    document.addEventListener("visibilitychange", rehydrate);
+    return function() { document.removeEventListener("visibilitychange", rehydrate); };
+  }, [user]);
 
   // Poll unread counts every 30s when logged in
   useEffect(() => {
