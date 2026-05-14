@@ -6911,9 +6911,9 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
               : "linear-gradient(135deg,#0f0a1f 0%,#1e1a45 50%,#1E40AF 100%)",
             display: "flex", alignItems: "center", justifyContent: "center",
           }}>
-          {beat.producer_avatar && (
-            <img src={beat.producer_avatar} alt=""
-              style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.45 }} />
+          {beat.beat_artwork && (
+            <img src={beat.beat_artwork} alt=""
+              style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.65 }} />
           )}
           <div style={{ position: "absolute", inset: 0,
             background: "linear-gradient(to top,rgba(0,0,0,0.75),transparent 55%)" }} />
@@ -13176,6 +13176,143 @@ function ContactSupportForm({ currentUser }) {
 }
 
 
+// =============================================================================
+// BEAT ARTWORK UPLOADER
+// Producer Pro users can set one image that displays on every beat card
+// they upload. Uploading replaces it across all their existing beats.
+// =============================================================================
+function BeatArtworkUploader({ user, setUser }) {
+  var [uploading, setUploading] = React.useState(false);
+  var [msg, setMsg] = React.useState("");
+  var [preview, setPreview] = React.useState(user.beatArtworkUrl || "");
+  var fileInputRef = React.useRef(null);
+
+  React.useEffect(function() { setPreview(user.beatArtworkUrl || ""); }, [user.beatArtworkUrl]);
+
+  async function handleFile(file) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setMsg("Please choose an image file (JPG, PNG, etc.)");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setMsg("Image too large — maximum 5MB");
+      return;
+    }
+    // Optimistic local preview
+    try {
+      var reader = new FileReader();
+      reader.onload = function(e) { setPreview(e.target.result); };
+      reader.readAsDataURL(file);
+    } catch(e) {}
+
+    setUploading(true);
+    setMsg("Uploading…");
+    var form = new FormData();
+    form.append("file", file);
+    try {
+      var token = localStorage.getItem("bf_token");
+      var res = await fetch(API_BASE + "/api/auth/beat-artwork", {
+        method: "POST",
+        headers: token ? { Authorization: "Bearer " + token } : {},
+        body: form,
+      });
+      if (!res.ok) {
+        var err = await res.json().catch(function(){ return { detail: "Upload failed" }; });
+        throw new Error(err.detail || "Upload failed");
+      }
+      var data = await res.json();
+      setPreview(data.beatArtworkUrl || "");
+      // Update user in parent state so it sticks
+      setUser(Object.assign({}, user, { beatArtworkUrl: data.beatArtworkUrl }));
+      setMsg("✓ Artwork updated on all your beats");
+      setTimeout(function() { setMsg(""); }, 3000);
+    } catch(e) {
+      setMsg("Error: " + (e.message || "upload failed"));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div style={{ padding: "14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
+      <div style={{ color: "#aaa", fontSize: 12, lineHeight: 1.5, marginBottom: 14 }}>
+        Choose one image that will appear on every beat card you upload.
+        Replacing it updates all your existing beats too.
+      </div>
+
+      {/* Preview */}
+      <div style={{
+        width: "100%", aspectRatio: "1 / 1",
+        background: preview
+          ? "#000"
+          : "linear-gradient(135deg,#1a0a2e,#2a0a4a,#3b0070)",
+        borderRadius: 12, marginBottom: 12,
+        border: "1.5px solid rgba(124,58,237,0.3)",
+        boxShadow: "0 0 16px rgba(124,58,237,0.15), inset 0 1px 0 rgba(255,255,255,0.05)",
+        overflow: "hidden", position: "relative",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        maxWidth: 220, marginLeft: "auto", marginRight: "auto",
+      }}>
+        {preview ? (
+          <img src={preview} alt="Beat artwork"
+            style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : (
+          <div style={{ textAlign: "center", color: "#A78BFA", padding: 20 }}>
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 8, filter: "drop-shadow(0 0 6px rgba(124,58,237,0.5))" }}>
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5 }}>No artwork yet</div>
+          </div>
+        )}
+      </div>
+
+      <input
+        ref={fileInputRef}
+        type="file" accept="image/*"
+        style={{ display: "none" }}
+        onChange={function(e) {
+          if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
+          e.target.value = "";
+        }}
+      />
+      <button
+        onClick={function() { if (fileInputRef.current) fileInputRef.current.click(); }}
+        disabled={uploading}
+        style={{
+          width: "100%",
+          background: uploading
+            ? "rgba(255,255,255,0.04)"
+            : "linear-gradient(135deg,#C026D3 0%,#A855F7 50%,#7C3AED 100%)",
+          border: "1.5px solid " + (uploading ? "#333" : "rgba(192,38,211,0.6)"),
+          borderRadius: 12, padding: "12px",
+          color: uploading ? "#666" : "white",
+          fontWeight: 900, fontSize: 13, letterSpacing: 0.5,
+          cursor: uploading ? "not-allowed" : "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          boxShadow: uploading ? "none" : "0 2px 12px rgba(192,38,211,0.4), inset 0 1px 0 rgba(255,255,255,0.2)",
+          textShadow: uploading ? "none" : "0 1px 2px rgba(0,0,0,0.3)",
+        }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        {uploading ? "UPLOADING…" : (preview ? "REPLACE ARTWORK" : "UPLOAD ARTWORK")}
+      </button>
+
+      {msg && (
+        <div style={{
+          marginTop: 10, fontSize: 12, fontWeight: 700, textAlign: "center",
+          color: msg.startsWith("Error") ? "#F87171" : (msg.startsWith("✓") ? "#22C55E" : "#A78BFA"),
+        }}>{msg}</div>
+      )}
+
+      <div style={{ color: "#666", fontSize: 10, lineHeight: 1.5, marginTop: 10, textAlign: "center" }}>
+        Recommended: square image, 800×800 minimum. Max 5MB.
+      </div>
+    </div>
+  );
+}
+
 function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric, onOpenMessages }) {
   const [mode,          setMode]          = useState("landing");
   const [ownBadgePopup, setOwnBadgePopup] = useState(null);
@@ -13499,6 +13636,23 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                     <div style={{ padding: "14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
                       <DebugLogViewer />
                     </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Beat Artwork (Producer Pro only) ──────────────────── */}
+              {user.isPro && (
+                <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                  <button onClick={() => setOpenSettingsSection(openSettingsSection === "artwork" ? null : "artwork")}
+                    style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "12px 14px", background: openSettingsSection === "artwork" ? "#1a1a1a" : "#141414",
+                      border: "none", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                    <span>Beat Artwork</span>
+                    <span style={{ color: "#666", fontSize: 12, transition: "transform 0.2s",
+                      transform: openSettingsSection === "artwork" ? "rotate(180deg)" : "none" }}>▼</span>
+                  </button>
+                  {openSettingsSection === "artwork" && (
+                    <BeatArtworkUploader user={user} setUser={setUser} />
                   )}
                 </div>
               )}
