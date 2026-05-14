@@ -2812,7 +2812,7 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
     {
       id: "artist",
       label: "Artist Pro",
-      color: "#F59E0B",
+      color: "#A855F7",
       monthlyPrice: 4.99,
       yearlyPrice:  49.99,
       monthlyStr: "£4.99/mo",
@@ -2928,8 +2928,32 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
                   padding: "3px 8px", borderBottomLeftRadius: 8,
                 }}>{p.saving}</div>
               )}
-              <div style={{ color: "white", fontWeight: 800, fontSize: compact ? 11 : 13, marginBottom: 2 }}>{p.label}</div>
-              <div style={{ color: p.color, fontWeight: 800, fontSize: compact ? 13 : 16, marginBottom: (!isFree && billing === "yearly") ? 2 : 10 }}>{priceStr}</div>
+              {(function() {
+                // Producer Pro gets a neon purple-to-blue gradient on its label and price text.
+                // Other plans use solid p.color.
+                var isProducer = p.id === "producer";
+                var gradientStyle = isProducer ? {
+                  background: "linear-gradient(135deg,#C026D3 0%,#A855F7 50%,#3B82F6 100%)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  backgroundClip: "text",
+                  color: "transparent",
+                  filter: "drop-shadow(0 0 6px rgba(192,38,211,0.45))",
+                } : null;
+                return (
+                  <>
+                    <div style={Object.assign({
+                      fontWeight: 800, fontSize: compact ? 11 : 13, marginBottom: 2,
+                      color: isProducer ? "transparent" : "white",
+                    }, gradientStyle || {})}>{p.label}</div>
+                    <div style={Object.assign({
+                      fontWeight: 800, fontSize: compact ? 13 : 16,
+                      marginBottom: (!isFree && billing === "yearly") ? 2 : 10,
+                      color: isProducer ? "transparent" : p.color,
+                    }, gradientStyle || {})}>{priceStr}</div>
+                  </>
+                );
+              })()}
               {!isFree && billing === "yearly" && (
                 <div style={{ color: "#555", fontSize: 10, marginBottom: 10 }}>≈ £{(p.yearlyPrice / 12).toFixed(2)}/mo</div>
               )}
@@ -2950,7 +2974,9 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
                       ? "linear-gradient(135deg," + glowClr + " 0%," + glowClr2 + " 100%)"
                       : (isFree
                         ? "transparent"
-                        : "linear-gradient(135deg," + p.color + ",#7C3AED)"),
+                        : (p.id === "producer"
+                          ? "linear-gradient(135deg,#C026D3 0%,#A855F7 50%,#3B82F6 100%)"
+                          : "linear-gradient(135deg," + p.color + ",#7C3AED)")),
                     border: isSelected
                       ? ("1.5px solid " + glowClr)
                       : (isFree ? ("1.5px solid " + p.color) : "none"),
@@ -2962,8 +2988,8 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
                     letterSpacing: 0.5,
                     boxShadow: isSelected
                       ? "0 0 16px " + glowClr + "88, inset 0 1px 0 rgba(255,255,255,0.25)"
-                      : "none",
-                    textShadow: isSelected ? "0 1px 2px rgba(0,0,0,0.3)" : "none",
+                      : (p.id === "producer" ? "0 2px 12px rgba(192,38,211,0.35), inset 0 1px 0 rgba(255,255,255,0.15)" : "none"),
+                    textShadow: isSelected || p.id === "producer" ? "0 1px 2px rgba(0,0,0,0.3)" : "none",
                     transition: "all 0.18s ease",
                   }}>
                   {isSelected ? "✓ SELECTED" : (isFree ? "Start Free" : "Subscribe")}
@@ -23796,18 +23822,18 @@ function TermsModal({ user, onAccepted }) {
       var hasToken = false;
       try { hasToken = !!localStorage.getItem("bf_token"); } catch(e) {}
       if (hasToken && !user) {
-        // Still loading session — stay in "deciding" state
+        console.log("[BF terms] waiting for /me to load");
         setOpen(null);
         return;
       }
       if (user) {
-        // Logged-in: check server-recorded version against TERMS_VERSION
         var accepted = user.terms_accepted_version;
+        console.log("[BF terms] check — accepted:", accepted, "vs TERMS_VERSION:", TERMS_VERSION, "match:", accepted === TERMS_VERSION);
         setOpen(accepted !== TERMS_VERSION);
       } else {
-        // Guest (no token, no user): sessionStorage gate
         try {
           var sessVal = sessionStorage.getItem("bf_terms_accepted_v" + TERMS_VERSION);
+          console.log("[BF terms] guest check — sessionStorage:", sessVal);
           setOpen(sessVal !== "1");
         } catch (e) { setOpen(true); }
       }
@@ -23817,7 +23843,6 @@ function TermsModal({ user, onAccepted }) {
 
   function onScroll(e) {
     var el = e.target;
-    // Marked as fully read when within 40px of the bottom
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) {
       setScrolledToEnd(true);
     }
@@ -23827,20 +23852,20 @@ function TermsModal({ user, onAccepted }) {
     if (!scrolledToEnd || accepting) return;
     setAccepting(true);
     if (user) {
-      // Persist server-side so this user never sees this version again
+      console.log("[BF terms] POSTing accept-terms version:", TERMS_VERSION);
       apiFetch("/api/auth/accept-terms", {
         method: "POST",
         body: JSON.stringify({ version: TERMS_VERSION }),
-      }).then(function() {
+      }).then(function(r) {
+        console.log("[BF terms] accept-terms OK", r);
         setOpen(false);
         if (onAccepted) onAccepted(TERMS_VERSION);
-      }).catch(function() {
-        // Even if server save fails, don't block them — accept locally for this session
+      }).catch(function(err) {
+        console.error("[BF terms] accept-terms FAILED", err && err.message);
         try { sessionStorage.setItem("bf_terms_accepted_v" + TERMS_VERSION, "1"); } catch(e) {}
         setOpen(false);
       }).finally(function() { setAccepting(false); });
     } else {
-      // Guest — sessionStorage only
       try { sessionStorage.setItem("bf_terms_accepted_v" + TERMS_VERSION, "1"); } catch(e) {}
       setOpen(false);
       setAccepting(false);
@@ -24133,7 +24158,9 @@ function CookieBanner() {
   // "essential-only" = strictly necessary only (still allowed without consent).
   var [open, setOpen] = React.useState(function() {
     try {
-      return !localStorage.getItem("bf_cookie_choice_v1");
+      var existing = localStorage.getItem("bf_cookie_choice_v1");
+      console.log("[BF cookie] mount check — existing choice:", existing, "→ open:", !existing);
+      return !existing;
     } catch (e) { return true; }
   });
   if (!open) return null;
@@ -24210,13 +24237,20 @@ function InstallPrompt() {
       var isStandalone =
         (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
         window.navigator.standalone === true;
-      if (isStandalone) return;
+      if (isStandalone) {
+        console.log("[BF install] skipped — running in standalone (PWA) mode");
+        return;
+      }
     } catch(e) {}
 
     // Bail out if user dismissed recently (within 7 days)
     try {
       var dismissedAt = parseInt(localStorage.getItem("bf_install_dismissed") || "0", 10);
-      if (dismissedAt && (Date.now() - dismissedAt) < 7 * 24 * 60 * 60 * 1000) return;
+      if (dismissedAt && (Date.now() - dismissedAt) < 7 * 24 * 60 * 60 * 1000) {
+        var daysLeft = Math.ceil((7 * 24 * 60 * 60 * 1000 - (Date.now() - dismissedAt)) / (24*60*60*1000));
+        console.log("[BF install] skipped — dismissed", daysLeft, "days ago (7-day cooldown)");
+        return;
+      }
     } catch(e) {}
 
     // Wait until the cookie banner has been resolved — they should never
@@ -24226,32 +24260,29 @@ function InstallPrompt() {
       try { return !!localStorage.getItem("bf_cookie_choice_v1"); } catch(e) { return true; }
     }
     if (!cookiesResolved()) {
-      // Listen for the cookie choice event then re-mount the prompt logic
+      console.log("[BF install] waiting for cookie banner choice");
       function onCookieChoice() {
         window.removeEventListener("bf-cookie-choice", onCookieChoice);
-        // Small delay so the cookie banner finishes animating away first
+        console.log("[BF install] cookie choice made, starting detection");
         setTimeout(function() { startDetection(); }, 400);
       }
       window.addEventListener("bf-cookie-choice", onCookieChoice);
       return function() { window.removeEventListener("bf-cookie-choice", onCookieChoice); };
     }
-    // Detection function — called immediately (if cookies already resolved)
-    // or after cookie banner dismissal.
     var androidHandler = null;
     function startDetection() {
-      // Detect platform
       var ua = (navigator.userAgent || "").toLowerCase();
       var isIOS = /iphone|ipad|ipod/.test(ua);
-      var isMacTouchpad = navigator.maxTouchPoints > 1 && /macintosh/.test(ua); // iPad in desktop mode
+      var isMacTouchpad = navigator.maxTouchPoints > 1 && /macintosh/.test(ua);
       var isAndroid = /android/.test(ua);
       var isSafari = /safari/.test(ua) && !/crios|fxios|chrome|edg/.test(ua);
-
+      console.log("[BF install] detection — iOS:", isIOS, "Safari:", isSafari, "Android:", isAndroid);
       if ((isIOS || isMacTouchpad) && isSafari) {
-        // iOS Safari → show manual-instructions banner immediately
+        console.log("[BF install] showing iOS Safari install instructions");
         setPlatform("ios");
         setShow(true);
       } else if (isAndroid) {
-        // Android → wait for beforeinstallprompt event before showing
+        console.log("[BF install] waiting for Android beforeinstallprompt event");
         androidHandler = function(e) {
           e.preventDefault();
           setDeferredEvt(e);
@@ -24259,8 +24290,9 @@ function InstallPrompt() {
           setShow(true);
         };
         window.addEventListener("beforeinstallprompt", androidHandler);
+      } else {
+        console.log("[BF install] no eligible platform detected — no banner");
       }
-      // Desktop browsers / other platforms: silent (no banner needed)
     }
     startDetection();
     return function() {
