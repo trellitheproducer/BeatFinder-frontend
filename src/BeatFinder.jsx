@@ -13729,7 +13729,7 @@ function BlockedUsersPanel() {
   );
 }
 
-function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric, onOpenMessages }) {
+function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, onPlayBeat, onEditLyric, onNewLyric, onOpenMessages }) {
   const [mode,          setMode]          = useState("landing");
   const [ownBadgePopup, setOwnBadgePopup] = useState(null);
   const [email,       setEmail]       = useState(() => {
@@ -15161,10 +15161,31 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
           <SectionBack onBack={() => setActiveSection(null)} label="Back to Dashboard" />
           <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 6 }}>My Lyrics</div>
           <div style={{ color: "#666", fontSize: 13, marginBottom: 16 }}>Tap any lyric to continue writing</div>
+
+          {/* + New Blank Lyric — opens LyricsNotepad with no beat, for pure writing */}
+          {onNewLyric && (
+            <button onClick={function() { onNewLyric(); }}
+              style={{
+                width: "100%", marginBottom: 16,
+                background: "linear-gradient(135deg,#C026D3 0%,#A855F7 50%,#7C3AED 100%)",
+                border: "none", borderRadius: 12,
+                color: "white", fontWeight: 900, fontSize: 13, letterSpacing: 0.6,
+                padding: "13px", cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                boxShadow: "0 4px 16px rgba(192,38,211,0.35), inset 0 1px 0 rgba(255,255,255,0.18)",
+                textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+              }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              NEW BLANK LYRIC
+            </button>
+          )}
+
           {savedLyrics.length === 0 ? (
             <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>
             <div style={{ marginBottom: 10 }}><Icon id="edit" size={40} color="#555" strokeWidth={1.5} /></div>
-              <div>No saved lyrics yet. Open a beat and tap Write Lyrics.</div>
+              <div>No saved lyrics yet. Tap above to start writing, or open a beat and tap Write Lyrics.</div>
             </div>
           ) : savedLyrics.map(function(lyric, i) {
             return (
@@ -19268,7 +19289,7 @@ const FX_PRESETS = [
 ];
 
 
-function StudioScreen({ user, onExit }) {
+function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric }) {
 
   // ── Constants ─────────────────────────────────────────────────
   // PIXELS_PER_SECOND. Lowered from 100 → 85 to zoom the timeline out a
@@ -19296,9 +19317,37 @@ function StudioScreen({ user, onExit }) {
   const [projectKey,   setProjectKey]   = useState("C major");
   const [projectName,  setProjectName]  = useState("New Project");
 
+  // ── Lyrics workspace overlay ─────────────────────────────────
+  // BandLab-style: a side panel that slides in from the right so the
+  // user can read or write lyrics while recording. Reads `savedLyrics`
+  // from the App; tapping a saved lyric opens the full editor.
+  const [lyricsPanelOpen, setLyricsPanelOpen] = useState(false);
+
   // ── Playback ──────────────────────────────────────────────────
   const [isPlaying,    setIsPlaying]    = useState(false);
   const [isRecording,  setIsRecording]  = useState(false);
+
+  // FX-on-record warning modal. Shown when the user tries to record onto
+  // a track that already has FX enabled — chained effects add audible
+  // latency through the mic monitor loop. State holds the pending track
+  // id so the user can confirm + continue, dismiss permanently, or cancel.
+  const [fxRecordWarn, setFxRecordWarn] = useState(null); // { trackId } or null
+
+  // Returns true if the given track has any audio FX enabled — used to
+  // warn the user before recording into an effected chain.
+  function trackHasFx(track) {
+    if (!track || !track.effects) return false;
+    var fx = track.effects;
+    // Plugin chain
+    if (Array.isArray(fx.pluginChain) && fx.pluginChain.length > 0) return true;
+    // Individual effect flags (in case pluginChain isn't the source of truth)
+    var keys = ["reverb","delay","eq","compressor","autotune","saturation","chorus","flanger","phaser","distortion","filter","limiter"];
+    for (var i = 0; i < keys.length; i++) {
+      var f = fx[keys[i]];
+      if (f && f.on === true) return true;
+    }
+    return false;
+  }
   const [currentTime,  setCurrentTime]  = useState(0);
   const [loopEnabled,  setLoopEnabled]  = useState(false);
   const [loopIn,       setLoopIn]       = useState(0);
@@ -24385,6 +24434,27 @@ self.onmessage = async function(e) {
         }
         <button onClick={function(e){ e.stopPropagation();setShowProjMenu(function(v){return !v;});setShowSettings(false); }} style={{ background:showProjMenu?"rgba(192,38,211,0.15)":"#1a1a1a",border:"1px solid "+(showProjMenu?"rgba(192,38,211,0.4)":"#2a2a2a"),borderRadius:8,color:"#aaa",fontSize:13,fontWeight:700,padding:"5px 10px",cursor:"pointer",flexShrink:0,letterSpacing:2 }}>···</button>
         <button onClick={function(e){ e.stopPropagation();setShowProjMenu(false);setShowSettings(function(v){return !v;}); }} style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:8,color:"#888",fontSize:12,padding:"5px 8px",cursor:"pointer",flexShrink:0 }}>⚙</button>
+        {/* Lyrics — toggles a side panel that lets you read/write lyrics while recording, BandLab-style */}
+        <button onClick={function(e){ e.stopPropagation(); setLyricsPanelOpen(function(v){ return !v; }); }}
+          title="Lyrics"
+          style={{
+            background: lyricsPanelOpen ? "rgba(192,38,211,0.15)" : "#1a1a1a",
+            border: "1px solid " + (lyricsPanelOpen ? "rgba(192,38,211,0.5)" : "#2a2a2a"),
+            borderRadius: 8, color: lyricsPanelOpen ? "#C026D3" : "#888",
+            width: 32, height: 32,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer", flexShrink: 0,
+            boxShadow: lyricsPanelOpen ? "0 0 8px rgba(192,38,211,0.35)" : "none",
+            transition: "all 0.15s ease",
+          }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+            <polyline points="10 9 9 9 8 9"/>
+          </svg>
+        </button>
         <div style={{ color:isRecording?"#EF4444":"#aaa",fontSize:11,fontFamily:"monospace",fontWeight:700,flexShrink:0,background:"#141414",border:"1px solid #222",borderRadius:6,padding:"4px 7px" }}>{fmt(currentTime)}</div>
       </div>
 
@@ -25276,7 +25346,22 @@ userPickedMicRef.current = true;
             <svg width="15" height="15" viewBox="0 0 24 24" fill="white"><path d="M12.5 8.5 7 12l5.5 3.5V8.5z"/><path d="M19.5 8.5 14 12l5.5 3.5V8.5z"/></svg>
           </button>
           {/* Record */}
-          <button onClick={function(){ if(isRecording)stopRecording();else startCountIn(selectedTrackId); }} disabled={countIn>0} style={{ width:48,height:48,borderRadius:"50%",background:isRecording?"#EF4444":"linear-gradient(135deg,#EF4444,#DC2626)",border:isRecording?"3px solid rgba(239,68,68,0.5)":"3px solid rgba(239,68,68,0.2)",cursor:countIn>0?"not-allowed":"pointer",opacity:countIn>0?0.4:1,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:isRecording?"0 0 20px rgba(239,68,68,0.5)":"none",flexShrink:0 }}>
+          <button onClick={function(){
+            if(isRecording){ stopRecording(); return; }
+            // FX warning — if the selected track has FX enabled, prompt
+            // first so the user knows about the latency risk. Honour the
+            // 'don't show again' preference.
+            var skipFxWarn = false;
+            try { skipFxWarn = localStorage.getItem("bf_skip_fx_record_warn") === "1"; } catch(e) {}
+            if (!skipFxWarn && selectedTrackId) {
+              var sel = tracks.find(function(t){ return t.id === selectedTrackId; });
+              if (sel && trackHasFx(sel)) {
+                setFxRecordWarn({ trackId: selectedTrackId });
+                return;
+              }
+            }
+            startCountIn(selectedTrackId);
+          }} disabled={countIn>0} style={{ width:48,height:48,borderRadius:"50%",background:isRecording?"#EF4444":"linear-gradient(135deg,#EF4444,#DC2626)",border:isRecording?"3px solid rgba(239,68,68,0.5)":"3px solid rgba(239,68,68,0.2)",cursor:countIn>0?"not-allowed":"pointer",opacity:countIn>0?0.4:1,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:isRecording?"0 0 20px rgba(239,68,68,0.5)":"none",flexShrink:0 }}>
             {isRecording?<div style={{ width:14,height:14,background:"white",borderRadius:3 }} />:<div style={{ width:18,height:18,background:"white",borderRadius:"50%" }} />}
           </button>
           {/* Play / Pause */}
@@ -25293,6 +25378,342 @@ userPickedMicRef.current = true;
           </button>
         </div>
       </div>
+
+      {/* ── FX-on-record warning modal ────────────────────────
+          Shown when the user attempts to record onto a track that has
+          one or more FX enabled. Effects in the monitoring chain add
+          audible latency, so we let the user know and offer a clean
+          path (create a new empty channel) before continuing. */}
+      {fxRecordWarn && (
+        <div onClick={function(){ setFxRecordWarn(null); }} style={{
+          position: "fixed", inset: 0, zIndex: 99996,
+          background: "rgba(0,0,0,0.85)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 24,
+          backdropFilter: "blur(4px)",
+          fontFamily: "'DM Sans',sans-serif",
+        }}>
+          <div onClick={function(e){ e.stopPropagation(); }} style={{
+            background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+            border: "1px solid rgba(245,158,11,0.3)",
+            borderRadius: 18, padding: 24,
+            maxWidth: 380, width: "100%",
+            boxShadow: "0 16px 40px rgba(0,0,0,0.75), 0 0 24px rgba(245,158,11,0.15)",
+            position: "relative", overflow: "hidden",
+          }}>
+            {/* LED top edge — amber for warning */}
+            <div style={{
+              position: "absolute", top: 0, left: 0, right: 0, height: 2,
+              background: "linear-gradient(90deg,transparent,#F59E0B,#FBBF24,#F59E0B,transparent)",
+              boxShadow: "0 0 8px rgba(245,158,11,0.7)",
+            }} />
+
+            {/* Icon + title row */}
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: 14, flexShrink: 0,
+                background: "linear-gradient(135deg,rgba(245,158,11,0.2),rgba(245,158,11,0.08))",
+                border: "1px solid rgba(245,158,11,0.4)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                boxShadow: "0 0 14px rgba(245,158,11,0.3)",
+              }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 002 3h16.94a2 2 0 002-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 2 }}>
+                  FX Detected on Track
+                </div>
+                <div style={{ color: "#888", fontSize: 12 }}>
+                  Latency warning
+                </div>
+              </div>
+            </div>
+
+            {/* Explanation */}
+            <div style={{
+              color: "#bbb", fontSize: 13, lineHeight: 1.6,
+              marginBottom: 12,
+              padding: "12px 14px",
+              background: "rgba(0,0,0,0.3)",
+              border: "1px solid rgba(124,58,237,0.15)",
+              borderRadius: 10,
+            }}>
+              This track has effects enabled. Recording with FX in the chain can introduce monitoring delay and may print latency into the take.
+            </div>
+
+            {/* Tip */}
+            <div style={{
+              display: "flex", gap: 10, alignItems: "flex-start",
+              padding: "11px 13px", marginBottom: 18,
+              background: "rgba(124,58,237,0.08)",
+              border: "1px solid rgba(124,58,237,0.25)",
+              borderRadius: 10,
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                style={{ flexShrink: 0, marginTop: 1 }}>
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+              </svg>
+              <div style={{ flex: 1, color: "#C4B5FD", fontSize: 11.5, lineHeight: 1.55, fontWeight: 500 }}>
+                For the cleanest take, record onto an empty channel with no FX, then add effects after recording.
+              </div>
+            </div>
+
+            {/* Don't show again */}
+            <label style={{
+              display: "flex", alignItems: "center", gap: 8,
+              marginBottom: 14, cursor: "pointer",
+              userSelect: "none", WebkitUserSelect: "none",
+            }}>
+              <input type="checkbox" id="bf_fx_warn_dismiss"
+                style={{ width: 14, height: 14, accentColor: "#7C3AED", cursor: "pointer" }} />
+              <span style={{ color: "#888", fontSize: 11, fontWeight: 600 }}>
+                Don't show this again
+              </span>
+            </label>
+
+            {/* Buttons row */}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={function(){ setFxRecordWarn(null); }}
+                style={{
+                  flex: 1, padding: "13px",
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 12,
+                  color: "#ccc", fontWeight: 700, fontSize: 14,
+                  cursor: "pointer", letterSpacing: 0.3,
+                }}>
+                Cancel
+              </button>
+              <button onClick={function(){
+                // Honour 'don't show again' checkbox
+                try {
+                  var cb = document.getElementById("bf_fx_warn_dismiss");
+                  if (cb && cb.checked) localStorage.setItem("bf_skip_fx_record_warn", "1");
+                } catch(e) {}
+                var tid = fxRecordWarn.trackId;
+                setFxRecordWarn(null);
+                startCountIn(tid);
+              }}
+                style={{
+                  flex: 1, padding: "13px",
+                  background: "linear-gradient(135deg,#EF4444,#DC2626)",
+                  border: "none",
+                  borderRadius: 12,
+                  color: "white", fontWeight: 800, fontSize: 14,
+                  cursor: "pointer", letterSpacing: 0.3,
+                  boxShadow: "0 4px 14px rgba(239,68,68,0.4), inset 0 1px 0 rgba(255,255,255,0.15)",
+                  textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+                }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="white">
+                  <circle cx="12" cy="12" r="6"/>
+                </svg>
+                Record Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Lyrics workspace panel (BandLab-style side overlay) ──
+          Lets the user read or write lyrics while recording. Slides in
+          from the right, sits above the timeline but doesn't block it. */}
+      {lyricsPanelOpen && (
+        <>
+          {/* Tap-outside backdrop */}
+          <div onClick={function(){ setLyricsPanelOpen(false); }}
+            style={{ position: "fixed", inset: 0, zIndex: 9000, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(2px)" }} />
+          {/* The panel */}
+          <div onClick={function(e){ e.stopPropagation(); }}
+            style={{
+              position: "fixed", top: 0, right: 0, bottom: 0,
+              width: "min(380px, 88vw)", zIndex: 9001,
+              background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+              borderLeft: "1px solid rgba(124,58,237,0.3)",
+              boxShadow: "-12px 0 40px rgba(0,0,0,0.7), 0 0 24px rgba(124,58,237,0.15)",
+              display: "flex", flexDirection: "column",
+              paddingTop: "env(safe-area-inset-top)",
+              fontFamily: "'DM Sans',sans-serif",
+            }}>
+            {/* LED top edge */}
+            <div style={{
+              height: 2,
+              background: "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)",
+              boxShadow: "0 0 8px rgba(124,58,237,0.7)",
+            }} />
+            {/* Header */}
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "14px 16px", borderBottom: "1px solid rgba(124,58,237,0.15)",
+              flexShrink: 0,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: 9,
+                  background: "linear-gradient(135deg,#C026D3,#7C3AED,#3B82F6)",
+                  boxShadow: "0 0 12px rgba(124,58,237,0.5)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                  </svg>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{
+                    color: "white", fontSize: 18, fontWeight: 800,
+                    fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, lineHeight: 1,
+                  }}>LYRICS</div>
+                  <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>
+                    Write while you record
+                  </div>
+                </div>
+              </div>
+              <button onClick={function(){ setLyricsPanelOpen(false); }}
+                style={{
+                  width: 32, height: 32, borderRadius: "50%",
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid #2a2a2a", color: "#888",
+                  cursor: "pointer", flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+
+            {/* New Blank Lyric button */}
+            {onNewLyric && (
+              <div style={{ padding: "14px 16px 8px", flexShrink: 0 }}>
+                <button onClick={function(){ setLyricsPanelOpen(false); onNewLyric(); }}
+                  style={{
+                    width: "100%",
+                    background: "linear-gradient(135deg,#C026D3 0%,#A855F7 50%,#7C3AED 100%)",
+                    border: "none", borderRadius: 12,
+                    color: "white", fontWeight: 900, fontSize: 13, letterSpacing: 0.6,
+                    padding: "12px", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                    boxShadow: "0 4px 16px rgba(192,38,211,0.35), inset 0 1px 0 rgba(255,255,255,0.18)",
+                    textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+                  }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                  </svg>
+                  NEW BLANK LYRIC
+                </button>
+              </div>
+            )}
+
+            {/* Section label */}
+            <div style={{
+              padding: "10px 16px 8px", flexShrink: 0,
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+            }}>
+              <div style={{
+                color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 1.5,
+                textShadow: "0 0 6px rgba(124,58,237,0.5)",
+              }}>SAVED LYRICS</div>
+              {savedLyrics && savedLyrics.length > 0 && (
+                <div style={{
+                  background: "rgba(124,58,237,0.15)",
+                  border: "1px solid rgba(124,58,237,0.3)",
+                  color: "#A78BFA", fontSize: 9, fontWeight: 900, letterSpacing: 0.5,
+                  padding: "2px 8px", borderRadius: 12,
+                }}>{savedLyrics.length}</div>
+              )}
+            </div>
+
+            {/* Saved lyrics list — scrollable */}
+            <div style={{
+              flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch",
+              padding: "0 16px 16px",
+            }}>
+              {(!savedLyrics || savedLyrics.length === 0) ? (
+                <div style={{
+                  textAlign: "center", padding: "40px 16px",
+                  background: "rgba(0,0,0,0.3)",
+                  border: "1px solid rgba(124,58,237,0.12)",
+                  borderRadius: 12,
+                }}>
+                  <div style={{ marginBottom: 10, color: "#A78BFA", opacity: 0.6 }}>
+                    <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+                      style={{ filter: "drop-shadow(0 0 8px rgba(124,58,237,0.4))" }}>
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <polyline points="14 2 14 8 20 8"/>
+                      <line x1="16" y1="13" x2="8" y2="13"/>
+                      <line x1="16" y1="17" x2="8" y2="17"/>
+                    </svg>
+                  </div>
+                  <div style={{ color: "white", fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
+                    No saved lyrics yet
+                  </div>
+                  <div style={{ color: "#888", fontSize: 11, lineHeight: 1.5 }}>
+                    Tap NEW BLANK LYRIC above to start writing.
+                  </div>
+                </div>
+              ) : (
+                savedLyrics.map(function(lyric, i) {
+                  return (
+                    <button key={i}
+                      onClick={function(){ setLyricsPanelOpen(false); onEditLyric && onEditLyric(lyric, i); }}
+                      style={{
+                        display: "block", width: "100%", textAlign: "left",
+                        background: "linear-gradient(165deg,rgba(15,10,31,0.7) 0%,rgba(10,10,20,0.85) 100%)",
+                        border: "1px solid rgba(124,58,237,0.18)",
+                        borderRadius: 12, padding: "12px 14px", marginBottom: 8,
+                        cursor: "pointer",
+                        position: "relative", overflow: "hidden",
+                      }}>
+                      {/* tiny LED edge */}
+                      <div style={{
+                        position: "absolute", top: 0, left: 0, right: 0, height: 1,
+                        background: "linear-gradient(90deg,transparent,rgba(192,38,211,0.5),transparent)",
+                      }} />
+                      <div style={{ color: "white", fontWeight: 700, fontSize: 13, marginBottom: 3,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {lyric.title || "Untitled"}
+                      </div>
+                      {lyric.beatTitle && (
+                        <div style={{ color: "#888", fontSize: 11, marginBottom: 6,
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          🎵 {lyric.beatTitle}
+                        </div>
+                      )}
+                      {lyric.text && (
+                        <div style={{
+                          color: "#777", fontSize: 11, lineHeight: 1.5,
+                          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}>
+                          {lyric.text}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                        </svg>
+                        <span style={{ color: "#A78BFA", fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>
+                          TAP TO EDIT
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
     </div>
   );
@@ -26800,6 +27221,18 @@ export default function BeatFinder() {
     setLyricsOpen(true);
   }, []);
 
+  // Open the lyrics notepad without any beat — for standalone writing
+  // (used by Profile → My Lyrics → New Blank Lyric, and the Studio
+  // workspace lyrics overlay). LyricsNotepad already hides the YouTube
+  // iframe when beat is null.
+  const handleNewLyric = useCallback(() => {
+    setPlaying(null);
+    setLyricsBeat(null);
+    setEditingLyric(null);
+    setEditingIndex(null);
+    setLyricsOpen(true);
+  }, []);
+
   const handleEditLyric = useCallback((lyric, index) => {
     // Reconstruct beat object from stored fields if full object not available
     var beatObj = lyric.beat || null;
@@ -26812,6 +27245,20 @@ export default function BeatFinder() {
       };
     }
     setLyricsBeat(beatObj);
+    setEditingLyric(lyric);
+    setEditingIndex(index);
+    setLyricsOpen(true);
+  }, []);
+
+  // Same as handleEditLyric but force-hides the YouTube beat embed.
+  // Used when opening saved lyrics from Profile → My Lyrics or from the
+  // Studio side panel — these contexts should not surface the YouTube
+  // player even if the lyric was originally written against a YT beat.
+  // The original beat reference is preserved on the lyric record itself
+  // (beatId / beatTitle / beatChannel) so future opens from the main
+  // player can still reattach it.
+  const handleEditLyricNoBeat = useCallback((lyric, index) => {
+    setLyricsBeat(null);
     setEditingLyric(lyric);
     setEditingIndex(index);
     setLyricsOpen(true);
@@ -27143,7 +27590,7 @@ export default function BeatFinder() {
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} onViewProfile={function(u) { setPublicProfile(u); }} user={user} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} initialTab={searchInitialTab} onClearInitialTab={() => setSearchInitialTab(null)} currentUser={user} onViewProfile={function(u) { setSearchProfile(u); }} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
-            {t === "studio"    && studioVisited && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} /></StudioErrorBoundary>}
+            {t === "studio"    && studioVisited && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} savedLyrics={savedLyrics} onEditLyric={handleEditLyricNoBeat} onNewLyric={handleNewLyric} /></StudioErrorBoundary>}
             {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onSignUp={() => { setAuthStartMode("signup"); setShowAuthWall(true); setWelcomeDone(false); }} onViewProfile={function(u) { setPublicProfile(u); }} />}
           </div>
         ))}
@@ -27178,7 +27625,7 @@ export default function BeatFinder() {
               setShowAuthWall(false);
               setAuthStartMode("login");
               goTab("home");
-            }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyric} onOpenMessages={u => { openMessages(u); }} />
+            }} savedLyrics={savedLyrics} setSavedLyrics={setSavedLyrics} onPlayBeat={handlePlay} onEditLyric={handleEditLyricNoBeat} onNewLyric={handleNewLyric} onOpenMessages={u => { openMessages(u); }} />
           </div>
         )}
       </div>
