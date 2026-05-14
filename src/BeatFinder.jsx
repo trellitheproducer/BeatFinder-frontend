@@ -18329,7 +18329,11 @@ const FX_PRESETS = [
 function StudioScreen({ user, onExit }) {
 
   // ── Constants ─────────────────────────────────────────────────
-  const PPS         = 100;       // PIXELS_PER_SECOND — single source of truth
+  // PIXELS_PER_SECOND. Lowered from 100 → 85 to zoom the timeline out a
+  // bit more — at the same H% setting, the user now sees more of their
+  // arrangement on screen. The user-displayed H% number is unchanged
+  // (it shows the raw zoom multiplier).
+  const PPS         = 85;
   const SIDEBAR_W   = 158;       // left column: Logic Pro-style track headers
   const RULER_H     = 32;        // timeline ruler height
   const PLAYHEAD_X  = 0;         // playhead flush with sidebar edge — no gap
@@ -18341,7 +18345,11 @@ function StudioScreen({ user, onExit }) {
   const [zoom,         setZoom]         = useState(0.1); // start at 10% H-zoom
   const [vZoom,        setVZoom]        = useState(0.99); // vertical track-height zoom — start at 100%
 
-  const TRACK_H     = Math.round(92 * vZoom); // each track row height — scales with vertical zoom
+  // Base row height. Bumped from 92 → 110 to give the pan knob (last row in
+  // the track header) full vertical space. The user-displayed V% reading is
+  // unchanged — only the underlying pixel multiplier is larger so each row
+  // gets a bit more headroom at every zoom level.
+  const TRACK_H     = Math.round(110 * vZoom);
   const [snapToGrid,   setSnapToGrid]   = useState(true);
   const [projectKey,   setProjectKey]   = useState("C major");
   const [projectName,  setProjectName]  = useState("New Project");
