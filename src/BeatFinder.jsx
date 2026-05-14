@@ -20698,6 +20698,13 @@ function StudioScreen({ user, onExit }) {
   // cache to rebuild on next Play (handled automatically by fxSignature change).
   const applyPreset = function (trackId, preset) {
     if (!preset || !preset.fx) return;
+    // Build the chain ordering from the preset's plugin list. Preserve the
+    // order plugins are defined in FX_PRESETS (insertion order in the fx
+    // object) — this is the producer-curated processing order.
+    // Only include plugins that are actually turned ON in the preset.
+    const presetChain = Object.keys(preset.fx).filter(function(k) {
+      return preset.fx[k] && preset.fx[k].on === true;
+    });
     setTracks(function (prev) {
       return prev.map(function(t) {
         if (t.id !== trackId) return t;
@@ -20708,6 +20715,10 @@ function StudioScreen({ user, onExit }) {
         Object.keys(preset.fx).forEach(function(key) {
           merged[key] = { ...(base[key] || {}), ...preset.fx[key] };
         });
+        // Set the visible plugin chain so the FX panel actually renders
+        // these plugins (without this they'd be ON in audio terms but
+        // invisible in the UI because the panel reads pluginChain).
+        merged.pluginChain = presetChain;
         return { ...t, effects: merged };
       });
     });
@@ -20720,6 +20731,7 @@ function StudioScreen({ user, onExit }) {
       Object.keys(preset.fx).forEach(function(key) {
         merged[key] = { ...(base[key] || {}), ...preset.fx[key] };
       });
+      merged.pluginChain = presetChain;
       return merged;
     })();
     applyFxLive(trackId, newEffectsForLive);
