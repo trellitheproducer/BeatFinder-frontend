@@ -4962,18 +4962,43 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
                       <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/>
                       <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/>
                     </svg>
-                    <span>Reposted by @{item.username}</span>
+                    <span
+                      onClick={function(e) {
+                        e.stopPropagation();
+                        if (onViewProfile && item.username) onViewProfile(item.username);
+                      }}
+                      style={{ cursor: onViewProfile && item.username ? "pointer" : "default" }}>
+                      Reposted by @{item.username}
+                    </span>
                     <UserBadges username={item.username} plan={item.plan} compact={true} size={11} />
                   </div>
                 )}
                 {/* Header: avatar + username + time */}
                 <div style={{ padding: "12px 14px 8px", display: "flex", alignItems: "center", gap: 10 }}>
-                  <Avatar url={post.user_avatar} username={post.username} />
+                  <span
+                    onClick={function(e) {
+                      e.stopPropagation();
+                      if (onViewProfile && post.username) onViewProfile(post.username);
+                    }}
+                    style={{ display: "inline-flex", cursor: onViewProfile && post.username ? "pointer" : "default" }}>
+                    <Avatar url={post.user_avatar} username={post.username} />
+                  </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ color: "white", fontWeight: 800, fontSize: 13,
                       display: "flex", alignItems: "center", gap: 5,
                       overflow: "hidden", whiteSpace: "nowrap" }}>
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>@{post.username}</span>
+                      {/* Tap @username → open that user's public profile.
+                          The handler stops propagation so the click
+                          doesn't bubble to the card's other handlers. */}
+                      <span
+                        onClick={function(e) {
+                          e.stopPropagation();
+                          if (onViewProfile && post.username) onViewProfile(post.username);
+                        }}
+                        style={{
+                          overflow: "hidden", textOverflow: "ellipsis", minWidth: 0,
+                          cursor: onViewProfile && post.username ? "pointer" : "default",
+                        }}>@{post.username}</span>
                       <UserBadges username={post.username} plan={post.plan} compact={true} />
                     </div>
                     <div style={{ color: "#666", fontSize: 10, marginTop: 1 }}>{timeAgo(post.created_at)}</div>
@@ -12131,15 +12156,28 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
                         <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/>
                         <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/>
                       </svg>
-                      <span>Reposted by @{wrapper.username}</span>
+                      <span
+                        onClick={function(e) {
+                          e.stopPropagation();
+                          if (onViewProfile && wrapper.username) onViewProfile(wrapper.username);
+                        }}
+                        style={{ cursor: onViewProfile && wrapper.username ? "pointer" : "default" }}>
+                        Reposted by @{wrapper.username}
+                      </span>
                     </div>
                   )}
                   {/* Post header */}
                   <div style={{ padding: "12px 14px 8px", display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
-                      background: "linear-gradient(135deg,#6B21A8,#C026D3)", overflow: "hidden",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      color: "white", fontWeight: 800, fontSize: 14 }}>
+                    <div
+                      onClick={function(e) {
+                        e.stopPropagation();
+                        if (onViewProfile && post.username) onViewProfile(post.username);
+                      }}
+                      style={{ width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
+                        background: "linear-gradient(135deg,#6B21A8,#C026D3)", overflow: "hidden",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        color: "white", fontWeight: 800, fontSize: 14,
+                        cursor: onViewProfile && post.username ? "pointer" : "default" }}>
                       {post.avatarUrl
                         ? <img src={post.avatarUrl} alt={post.username} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                         : (post.username || "?")[0].toUpperCase()}
@@ -12148,7 +12186,15 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
                       <div style={{ color: "white", fontWeight: 700, fontSize: 14,
                         display: "flex", alignItems: "center", gap: 5,
                         overflow: "hidden", whiteSpace: "nowrap" }}>
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>@{post.username}</span>
+                        <span
+                          onClick={function(e) {
+                            e.stopPropagation();
+                            if (onViewProfile && post.username) onViewProfile(post.username);
+                          }}
+                          style={{
+                            overflow: "hidden", textOverflow: "ellipsis", minWidth: 0,
+                            cursor: onViewProfile && post.username ? "pointer" : "default",
+                          }}>@{post.username}</span>
                         <UserBadges username={post.username} plan={post.plan} compact={true} />
                       </div>
                       <div style={{ color: "#666", fontSize: 11, marginTop: 1 }}>{bfTimeAgo(wrapper.createdAt)}</div>
@@ -20541,12 +20587,11 @@ function UserBadges({ username, plan, size, compact }) {
   var isPro    = isProd || isArtist;
   return (
     <React.Fragment>
-      {/* Pro plan → blue/purple tick. Special-case badges below replace
-          rather than stack with this one for the special users, so we
-          gate the tick on NOT being one of those special users. */}
-      {isPro && username !== "Trelli" && username !== "Mikez" && (
-        <VerifiedBadge size={sz} />
-      )}
+      {/* Pro plan → blue/purple verified tick. Always shown for any
+          Pro user, including the special-badge holders (Trelli, Mikez)
+          since they're also Pro plan members. Their special seal sits
+          alongside the tick rather than replacing it. */}
+      {isPro && <VerifiedBadge size={sz} />}
       {/* Trelli: gold seal + (if not compact) the CEO chip */}
       {username === "Trelli" && <GoldVerifiedBadge size={sz + 2} />}
       {username === "Trelli" && !compact && <CEOBadge />}
