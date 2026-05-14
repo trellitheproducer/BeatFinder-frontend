@@ -18967,7 +18967,7 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
   const eq5 = { hpfFreq:80,hpfQ:0.707,lowFreq:200,low:0,lowQ:0.707,midFreq:1000,mid:0,midQ:1.41,highFreq:8000,high:0,highQ:0.707,lpfFreq:18000,lpfQ:0.707,...fx.eq };
 
   return (
-    <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto", paddingTop:"env(safe-area-inset-top)" }} onClick={function(e){ e.stopPropagation(); }} onTouchMove={function(e){ e.stopPropagation(); }}>
+    <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto", paddingTop:"env(safe-area-inset-top)", paddingBottom:"calc(80px + env(safe-area-inset-bottom))" }} onClick={function(e){ e.stopPropagation(); }} onTouchMove={function(e){ e.stopPropagation(); }}>
       <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0, position:"sticky", top:0, zIndex:10 }}>
         <div style={{ width:8, height:8, borderRadius:"50%", background:trackColor, marginRight:8 }} />
         <span style={{ color:"white", fontWeight:800, fontSize:14, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{trackName} — Effects</span>
@@ -24203,7 +24203,7 @@ self.onmessage = async function(e) {
   // ── RENDER ────────────────────────────────────────────────────
   return (
     <div
-      style={{ background:"#080808", height:"100%", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
+      style={{ background:"#080808", height:"calc(100% - 72px - env(safe-area-inset-bottom))", display:"flex", flexDirection:"column", fontFamily:"'DM Sans',sans-serif", overflow:"hidden", WebkitUserSelect:"none", userSelect:"none", WebkitTouchCallout:"none" }}
       onClick={function(){ setContextMenu(null); setShowProjMenu(false); setShowSettings(false); setShowAddMenu(false); setShowProjects(false); setSelectedClipId(null); }}
       onTouchMove={function(e){
         // Only allow touchmove inside the DAW scroll container — block everything else
@@ -25603,8 +25603,27 @@ userPickedMicRef.current = true;
         );
       })()}
 
-      {/* ══ TRANSPORT ════════════════════════════════════════════ */}
-      <div style={{ background:"#0a0a0a",borderTop:"1px solid #141414",padding:"8px 12px",paddingBottom:"max(env(safe-area-inset-bottom), 16px)",flexShrink:0,zIndex:50 }}>
+      {/* ══ TRANSPORT ════════════════════════════════════════════
+          Fixed to the bottom of the viewport so the user can always
+          reach Record/Play/seek/etc. — even when the FX, Mixer, Takes,
+          or Lyrics panel is open. z-index sits above all overlays
+          (FX panel = 800, Lyrics panel = 9001, so 9100 wins). */}
+      <div style={{
+        position:"fixed", left:0, right:0, bottom:0,
+        background:"linear-gradient(180deg,rgba(15,10,31,0.96) 0%,rgba(10,10,20,0.98) 100%)",
+        borderTop:"1px solid rgba(124,58,237,0.25)",
+        padding:"8px 12px",
+        paddingBottom:"max(env(safe-area-inset-bottom), 12px)",
+        flexShrink:0,
+        zIndex:9100,
+        backdropFilter:"blur(8px)",
+        boxShadow:"0 -8px 24px rgba(0,0,0,0.5), 0 -1px 0 rgba(124,58,237,0.15)",
+      }}>
+        {/* LED top edge — subtle accent */}
+        <div style={{
+          position:"absolute", top:0, left:0, right:0, height:1,
+          background:"linear-gradient(90deg,transparent,rgba(192,38,211,0.4),rgba(124,58,237,0.4),transparent)",
+        }} />
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:6 }}>
           {/* Mixer toggle */}
           <div style={{ width:36,height:36,borderRadius:10,background:showMixer?"rgba(139,92,246,0.2)":"#141414",border:"1px solid "+(showMixer?"#8B5CF6":"#222"),display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0 }} onClick={function(){ setShowMixer(function(v){return !v;}); }}>
@@ -25805,7 +25824,8 @@ userPickedMicRef.current = true;
           {/* The panel */}
           <div onClick={function(e){ e.stopPropagation(); }}
             style={{
-              position: "fixed", top: 0, right: 0, bottom: 0,
+              position: "fixed", top: 0, right: 0,
+              bottom: "calc(80px + env(safe-area-inset-bottom))",
               width: "min(380px, 88vw)", zIndex: 9001,
               background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
               borderLeft: "1px solid rgba(124,58,237,0.3)",
