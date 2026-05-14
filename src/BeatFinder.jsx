@@ -23534,7 +23534,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
 
     setBpmDetecting(true);
     setBpmProgress(0);
-    setBpmDetectMsg("Encoding audio…");
+    setBpmDetectMsg("Reading track audio…");
     setDetectedBpm(null);
     setBpmConfidence(null);
     setBpmBandConf(null);
@@ -23558,7 +23558,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
 
       // 2. Upload to /api/bpm/analyze
       setBpmProgress(15);
-      setBpmDetectMsg("Uploading audio…");
+      setBpmDetectMsg("Sending to analyser…");
       const fd = new FormData();
       fd.append("file", wavBlob, "studio_track.wav");
 
