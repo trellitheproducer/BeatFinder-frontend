@@ -2331,7 +2331,7 @@ function RhymeFinder({ onClose, onInsert }) {
   );
 }
 
-function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, user }) {
+function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, user, studioControls }) {
   const [text,       setText]       = useState(initialLyric ? initialLyric.text  : "");
   const [title,      setTitle]      = useState(initialLyric ? initialLyric.title : "");
   const [saved,      setSaved]      = useState(false);
@@ -2430,6 +2430,69 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
             {saved ? "Saved!" : "Save"}
           </button>
         </div>
+
+        {/* Studio transport row — only renders when this notepad was opened
+            from inside the Studio. The main fixed transport bar is hidden
+            behind this fullscreen overlay, so we surface the same controls
+            here so the user can still record/play while writing lyrics. */}
+        {studioControls && (
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            gap: 8, padding: "10px 12px",
+            borderBottom: "1px solid #1a1a1a",
+            background: "linear-gradient(180deg,rgba(15,10,31,0.7) 0%,rgba(10,10,20,0.7) 100%)",
+            position: "relative",
+          }}>
+            {/* LED accent line */}
+            <div style={{
+              position: "absolute", bottom: -1, left: 0, right: 0, height: 1,
+              background: "linear-gradient(90deg,transparent,rgba(192,38,211,0.4),rgba(124,58,237,0.4),transparent)",
+            }} />
+            {/* Skip to Start */}
+            <button onClick={studioControls.rewind} title="Skip to start"
+              style={{ width:32,height:32,borderRadius:8,background:"#141414",border:"1px solid #222",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+            </button>
+            {/* Rewind 5s */}
+            <button onClick={studioControls.seekBack} title="Rewind 5s"
+              style={{ width:32,height:32,borderRadius:8,background:"#141414",border:"1px solid #222",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M12.5 8.5 7 12l5.5 3.5V8.5z"/><path d="M19.5 8.5 14 12l5.5 3.5V8.5z"/></svg>
+            </button>
+            {/* Record */}
+            <button onClick={studioControls.onRecord} disabled={studioControls.countIn > 0}
+              style={{
+                width:44,height:44,borderRadius:"50%",
+                background: studioControls.isRecording ? "#EF4444" : "linear-gradient(135deg,#EF4444,#DC2626)",
+                border: studioControls.isRecording ? "3px solid rgba(239,68,68,0.5)" : "3px solid rgba(239,68,68,0.2)",
+                cursor: studioControls.countIn > 0 ? "not-allowed" : "pointer",
+                opacity: studioControls.countIn > 0 ? 0.4 : 1,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                boxShadow: studioControls.isRecording ? "0 0 18px rgba(239,68,68,0.5)" : "none",
+                flexShrink: 0,
+              }}>
+              {studioControls.isRecording
+                ? <div style={{ width:12,height:12,background:"white",borderRadius:3 }} />
+                : <div style={{ width:16,height:16,background:"white",borderRadius:"50%" }} />}
+            </button>
+            {/* Play / Pause */}
+            <button onClick={studioControls.togglePlay}
+              style={{ width:34,height:34,borderRadius:"50%",background:"linear-gradient(135deg,#C026D3,#7C3AED)",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+              {studioControls.isPlaying
+                ? <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                : <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>}
+            </button>
+            {/* Fast Forward 5s */}
+            <button onClick={studioControls.seekForward} title="Fast forward 5s"
+              style={{ width:32,height:32,borderRadius:8,background:"#141414",border:"1px solid #222",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M11.5 8.5 17 12l-5.5 3.5V8.5z"/><path d="M4.5 8.5 10 12 4.5 15.5V8.5z"/></svg>
+            </button>
+            {/* Skip to End */}
+            <button onClick={studioControls.skipToEnd} title="Skip to end"
+              style={{ width:32,height:32,borderRadius:8,background:"#141414",border:"1px solid #222",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M16 6h2v12h-2zm-2.5 6L5 6v12z"/></svg>
+            </button>
+          </div>
+        )}
 
         {beat && (
           <div style={{ borderBottom: "1px solid #1a1a1a", background: "#000" }}>
@@ -19562,7 +19625,7 @@ const FX_PRESETS = [
 ];
 
 
-function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric }) {
+function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRegisterTransport }) {
 
   // ── Constants ─────────────────────────────────────────────────
   // PIXELS_PER_SECOND. Lowered from 100 → 85 to zoom the timeline out a
@@ -24146,6 +24209,44 @@ self.onmessage = async function(e) {
     });
   }, []);
 
+  // Expose transport controls to the parent App so the LyricsNotepad can
+  // surface them in its own header when launched from Studio (the main
+  // fixed transport bar is hidden behind the fullscreen lyrics overlay).
+  // Re-register whenever any of the relevant state changes so the buttons
+  // always have fresh handlers + live state (avoids stale React closures).
+  React.useEffect(function() {
+    if (!onRegisterTransport) return;
+    onRegisterTransport({
+      isPlaying:   isPlaying,
+      isRecording: isRecording,
+      countIn:     countIn,
+      togglePlay:  togglePlay,
+      rewind:      rewind,
+      skipToEnd:   skipToEnd,
+      seekBack:    seekBack,
+      seekForward: seekForward,
+      onRecord:    function() {
+        if (isRecording) { stopRecording(); return; }
+        // Same FX-record guard as the main transport button
+        var skipFxWarn = false;
+        try { skipFxWarn = localStorage.getItem("bf_skip_fx_record_warn") === "1"; } catch(e) {}
+        if (!skipFxWarn && selectedTrackId) {
+          var sel = tracks.find(function(t){ return t.id === selectedTrackId; });
+          if (sel && trackHasFx(sel)) {
+            setFxRecordWarn({ trackId: selectedTrackId });
+            return;
+          }
+        }
+        startCountIn(selectedTrackId);
+      },
+    });
+    return function() {
+      // Clear the registration on unmount so the App doesn't hold a
+      // stale reference to a destroyed Studio instance.
+      if (onRegisterTransport) onRegisterTransport(null);
+    };
+  }, [isPlaying, isRecording, countIn, selectedTrackId, tracks]);
+
 
   // ── Export ────────────────────────────────────────────────────
   const audioBufferToWav = function (buf) {
@@ -27513,6 +27614,7 @@ export default function BeatFinder() {
     setLyricsBeat(beat);
     setEditingLyric(null);
     setEditingIndex(null);
+    setLyricsFromStudio(false);
     setLyricsOpen(true);
   }, []);
 
@@ -27525,6 +27627,18 @@ export default function BeatFinder() {
     setLyricsBeat(null);
     setEditingLyric(null);
     setEditingIndex(null);
+    setLyricsFromStudio(false);
+    setLyricsOpen(true);
+  }, []);
+
+  // Studio-specific variants — set lyricsFromStudio=true so the notepad
+  // shows the in-header transport controls. Same payload, different flag.
+  const handleNewLyricFromStudio = useCallback(() => {
+    setPlaying(null);
+    setLyricsBeat(null);
+    setEditingLyric(null);
+    setEditingIndex(null);
+    setLyricsFromStudio(true);
     setLyricsOpen(true);
   }, []);
 
@@ -27542,6 +27656,7 @@ export default function BeatFinder() {
     setLyricsBeat(beatObj);
     setEditingLyric(lyric);
     setEditingIndex(index);
+    setLyricsFromStudio(false);
     setLyricsOpen(true);
   }, []);
 
@@ -27556,6 +27671,16 @@ export default function BeatFinder() {
     setLyricsBeat(null);
     setEditingLyric(lyric);
     setEditingIndex(index);
+    setLyricsFromStudio(false);
+    setLyricsOpen(true);
+  }, []);
+
+  // Studio-specific variant — same as handleEditLyricNoBeat plus the flag.
+  const handleEditLyricFromStudio = useCallback((lyric, index) => {
+    setLyricsBeat(null);
+    setEditingLyric(lyric);
+    setEditingIndex(index);
+    setLyricsFromStudio(true);
     setLyricsOpen(true);
   }, []);
 
@@ -27592,6 +27717,16 @@ export default function BeatFinder() {
   const [lyricsBeat,    setLyricsBeat]    = useState(null);
   const [editingLyric,  setEditingLyric]  = useState(null);
   const [editingIndex,  setEditingIndex]  = useState(null);
+  // Track whether the lyrics editor was launched from inside Studio. When
+  // true, LyricsNotepad shows transport controls (record/play/seek) in its
+  // header so the user can keep recording while writing lyrics — the main
+  // fixed transport bar is hidden behind the fullscreen lyrics overlay.
+  const [lyricsFromStudio, setLyricsFromStudio] = useState(false);
+  // Ref holding the live Studio transport API. The Studio populates this
+  // on mount and clears on unmount; LyricsNotepad reads it through the
+  // studioControls prop and the snapshot is refreshed via a tiny tick state.
+  const studioTransportRef = useRef(null);
+  const [studioTransportTick, setStudioTransportTick] = useState(0);
   // If the page was opened via /u/:username or /profile/:username, boot
   // straight into that public profile rendered inside the main app tree
   // (same code path as in-app navigation). This avoids the broken early-
@@ -27885,7 +28020,7 @@ export default function BeatFinder() {
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} onViewProfile={function(u) { setPublicProfile(u); }} user={user} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} initialTab={searchInitialTab} onClearInitialTab={() => setSearchInitialTab(null)} currentUser={user} onViewProfile={function(u) { setSearchProfile(u); }} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
-            {t === "studio"    && studioVisited && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} savedLyrics={savedLyrics} onEditLyric={handleEditLyricNoBeat} onNewLyric={handleNewLyric} /></StudioErrorBoundary>}
+            {t === "studio"    && studioVisited && <StudioErrorBoundary><StudioScreen user={user} onExit={() => goTab("home")} savedLyrics={savedLyrics} onEditLyric={handleEditLyricFromStudio} onNewLyric={handleNewLyricFromStudio} onRegisterTransport={api => { studioTransportRef.current = api; setStudioTransportTick(t => t + 1); }} /></StudioErrorBoundary>}
             {t === "exclusive" && <ExclusiveScreen user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onSignUp={() => { setAuthStartMode("signup"); setShowAuthWall(true); setWelcomeDone(false); }} onViewProfile={function(u) { setPublicProfile(u); }} />}
           </div>
         ))}
@@ -27945,7 +28080,15 @@ export default function BeatFinder() {
         </div>
       )}
 
-      {lyricsOpen && <LyricsNotepad beat={lyricsBeat} onClose={() => { setLyricsOpen(false); setEditingLyric(null); setEditingIndex(null); }} onSaveLyric={handleSaveLyric} initialLyric={editingLyric} lyricIndex={editingIndex} user={user} />}
+      {lyricsOpen && <LyricsNotepad
+        beat={lyricsBeat}
+        onClose={() => { setLyricsOpen(false); setEditingLyric(null); setEditingIndex(null); setLyricsFromStudio(false); }}
+        onSaveLyric={handleSaveLyric}
+        initialLyric={editingLyric}
+        lyricIndex={editingIndex}
+        user={user}
+        studioControls={(lyricsFromStudio && studioTransportRef.current) ? studioTransportRef.current : null}
+      />}
 
       {/* ── Lease purchase success modal ── */}
       {leaseModal && (
