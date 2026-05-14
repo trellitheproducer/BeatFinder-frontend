@@ -23234,49 +23234,49 @@ export default function BeatFinder() {
     }
   }, []);
 
-  // Detect iOS "Done" button dismissal of Stripe popup. Stripe's own Back
-  // button hits cancel_url (→ ?lease=cancelled) and Success hits success_url
-  // (→ ?lease=success), both of which clear bf_payment_in_flight via the
-  // handlers below. If the flag is STILL set when the tab becomes visible
-  // again, the user dismissed Stripe via the iOS system "Done" button
-  // without making a payment decision. We treat that as a cancellation:
-  // reopen the contract sheet so they have to either cancel properly or
-  // re-attempt the purchase. (Mobile-Safari-only behaviour; desktop has no
-  // equivalent dismissal path.)
+  // Detect iOS PWA "Done" dismissal of Stripe checkout. In PWA mode, tapping
+  // Done collapses the whole webview and the app reloads fresh on next
+  // launch. We persist a payment-in-flight flag in sessionStorage right
+  // before redirecting to Stripe; on app mount, if that flag is still set
+  // and we're NOT returning via Stripe's success/cancel redirect, the user
+  // dismissed Stripe via Done. We treat that as a cancellation: restore
+  // the route they were on AND signal the relevant screen to reopen the
+  // contract sheet for that beat.
+  //
+  // The flag is exposed via window.__bf_pending_reopen__ — screens
+  // (TrendingScreen, ExclusiveScreen, PublicProfileScreen) poll this on
+  // their data-load completion and open the matching beat's sheet.
   React.useEffect(function() {
-    function onVisibility() {
-      if (document.visibilityState !== "visible") return;
-      var beatId;
-      try { beatId = sessionStorage.getItem("bf_payment_in_flight"); } catch(e) {}
-      if (!beatId) return;
-      // If we're returning via Stripe's redirect (success/cancel URL), let
-      // those handlers run instead — don't reopen the sheet preemptively.
-      var qs = new URLSearchParams(window.location.search);
-      if (qs.get("lease") === "success" || qs.get("lease") === "cancelled") return;
-      // User dismissed Stripe popup via Done — clear flag and reopen sheet.
-      try { sessionStorage.removeItem("bf_payment_in_flight"); } catch(e) {}
-      // Restore the public profile route if they were on one before Buy.
-      try {
-        var saved = JSON.parse(sessionStorage.getItem("bf_return_tab") || "{}");
-        if (saved && saved.path) {
-          var profileMatch = saved.path.match(/^\/(u|profile)\/([^\/?#]+)/);
-          if (profileMatch && profileMatch[2] && !publicProfile) {
-            setPublicProfile(decodeURIComponent(profileMatch[2]));
-          }
-        }
-      } catch(e) {}
-      setTimeout(function() {
-        try {
-          window.dispatchEvent(new CustomEvent("bf-reopen-sheet", { detail: { beat_id: beatId } }));
-        } catch(e) {}
-      }, 300);
+    var beatId;
+    try { beatId = sessionStorage.getItem("bf_payment_in_flight"); } catch(e) {}
+    if (!beatId) return;
+    var qs = new URLSearchParams(window.location.search);
+    if (qs.get("lease") === "success" || qs.get("lease") === "cancelled") {
+      // Returning via Stripe redirect — let those dedicated handlers run.
+      return;
     }
-    document.addEventListener("visibilitychange", onVisibility);
-    // Also fire on the first render in case the user is already returning.
-    onVisibility();
-    return function() {
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
+    // Done dismissal. Clear flag, expose pending reopen, restore route.
+    try { sessionStorage.removeItem("bf_payment_in_flight"); } catch(e) {}
+    try { window.__bf_pending_reopen__ = beatId; } catch(e) {}
+    try {
+      var saved = JSON.parse(sessionStorage.getItem("bf_return_tab") || "{}");
+      if (saved && saved.tab) setTab(saved.tab);
+      if (saved && saved.path) {
+        var profileMatch = saved.path.match(/^\/(u|profile)\/([^\/?#]+)/);
+        if (profileMatch && profileMatch[2]) {
+          setPublicProfile(decodeURIComponent(profileMatch[2]));
+        }
+      }
+    } catch(e) {}
+    // Dispatch event repeatedly over the first 2 seconds — covers screens
+    // that mount lazily after route restoration.
+    var attempts = 0;
+    var interval = setInterval(function() {
+      attempts++;
+      try { window.dispatchEvent(new CustomEvent("bf-reopen-sheet", { detail: { beat_id: beatId } })); } catch(e) {}
+      if (attempts >= 8) clearInterval(interval);
+    }, 250);
+    return function() { clearInterval(interval); };
   }, []);
 
   // When returning from Stripe, fetch the purchased beat details and restore page
