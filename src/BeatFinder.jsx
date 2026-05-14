@@ -7719,7 +7719,9 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   var timerRef  = React.useRef(null);
   var seekedRef = React.useRef(false);  // tracks whether we've seeked to preview_start yet
   var isFree    = !beat.price || beat.price === "free" || beat.price === "£0" || beat.price === "0" || beat.price === "£0.00" || beat.price === "0.00";
-  var accentClr = isFree ? "#C026D3" : "#F59E0B";
+  // LED theme: free = magenta-violet, paid = electric purple-to-blue
+  var accentClr  = isFree ? "#C026D3" : "#7C3AED";
+  var accentClr2 = isFree ? "#7C3AED" : "#3B82F6";
   var previewId = React.useRef("profile_" + beat.id);
 
   function startPreview() {
@@ -7804,22 +7806,32 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   return (
     <>
     <div className="bf-card" style={{
-      background: "linear-gradient(160deg,#151515 0%,#0f0f0f 100%)",
-      borderRadius: 20, marginBottom: 16, overflow: "hidden",
-      border: "1px solid " + accentClr + "44",
-      boxShadow: "0 4px 32px rgba(0,0,0,0.6), 0 0 0 0.5px " + accentClr + "22",
+      background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+      borderRadius: 22, marginBottom: 16, overflow: "hidden",
+      border: "1px solid " + accentClr + "55",
+      boxShadow:
+        "0 8px 40px rgba(0,0,0,0.7)," +
+        "0 0 0 0.5px " + accentClr + "33," +
+        "inset 0 1px 0 rgba(255,255,255,0.04)," +
+        "0 0 24px " + accentClr + "1a",
+      position: "relative",
     }}>
-      {/* ── Top accent line ── */}
-      <div style={{ height: 3, background: "linear-gradient(90deg," + accentClr + "cc,transparent)" }} />
+      {/* ── LED top edge — glowing gradient bar ── */}
+      <div style={{
+        height: 2,
+        background: "linear-gradient(90deg,transparent 0%," + accentClr + " 20%," + accentClr2 + " 50%," + accentClr + " 80%,transparent 100%)",
+        boxShadow: "0 0 12px " + accentClr + "cc, 0 0 24px " + accentClr2 + "66",
+      }} />
 
-      <div style={{ padding: "16px 16px 0" }}>
+      <div style={{ padding: "18px 18px 0" }}>
         {/* ── Header row: thumbnail + info ── */}
         <div style={{ display: "flex", gap: 14, marginBottom: 14 }}>
           {/* Thumbnail */}
           <div style={{
-            width: 80, height: 80, borderRadius: 12, flexShrink: 0, overflow: "hidden",
+            width: 82, height: 82, borderRadius: 14, flexShrink: 0, overflow: "hidden",
             background: "#0a0a0a",
-            border: "1px solid " + accentClr + "33",
+            border: "1px solid " + accentClr + "55",
+            boxShadow: "0 0 16px " + accentClr + "22, inset 0 0 0 1px rgba(255,255,255,0.03)",
             display: "flex", alignItems: "center", justifyContent: "center",
             position: "relative",
           }}>
@@ -8014,36 +8026,63 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
               var basicLocked = premiumSold;
               return (
                 <>
+                  {/* Basic Lease — LED blue-cyan gradient, disabled once Premium has been sold */}
                   <button onClick={function() { if (!basicLocked && !buyLoading) handleBuy("basic"); }}
                     disabled={buyLoading || basicLocked} style={{
-                    width: "100%", borderRadius: 14, padding: "13px",
-                    background: (buyLoading || basicLocked) ? "transparent" : "linear-gradient(135deg,#F59E0B,#D97706)",
-                    border: "2px solid " + ((buyLoading || basicLocked) ? "#333" : "#F59E0B"),
-                    color: (buyLoading || basicLocked) ? "#555" : "white", fontWeight: 800, fontSize: 14,
-                    cursor: (buyLoading || basicLocked) ? "not-allowed" : "pointer", letterSpacing: 0.5,
+                    width: "100%", borderRadius: 14, padding: "14px",
+                    background: (buyLoading || basicLocked)
+                      ? "rgba(255,255,255,0.02)"
+                      : "linear-gradient(135deg,#3B82F6 0%,#6366F1 50%,#7C3AED 100%)",
+                    border: "1.5px solid " + ((buyLoading || basicLocked) ? "#222" : "rgba(124,58,237,0.6)"),
+                    color: (buyLoading || basicLocked) ? "#444" : "white",
+                    fontWeight: 900, fontSize: 14,
+                    cursor: (buyLoading || basicLocked) ? "not-allowed" : "pointer",
+                    letterSpacing: 0.8,
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-                    boxShadow: (buyLoading || basicLocked) ? "none" : "0 0 18px rgba(245,158,11,0.25)",
-                    marginBottom: premiumPrice > 0 ? 8 : 0,
-                    opacity: basicLocked ? 0.55 : 1,
+                    boxShadow: (buyLoading || basicLocked)
+                      ? "none"
+                      : "0 4px 20px rgba(124,58,237,0.45), 0 0 32px rgba(59,130,246,0.35), inset 0 1px 0 rgba(255,255,255,0.25), inset 0 -2px 4px rgba(0,0,0,0.2)",
+                    textShadow: (buyLoading || basicLocked) ? "none" : "0 1px 2px rgba(0,0,0,0.3)",
+                    marginBottom: premiumPrice > 0 ? 10 : 0,
+                    opacity: basicLocked ? 0.5 : 1,
+                    position: "relative", overflow: "hidden",
                   }}>
-                    {buyLoading ? "Loading..." : (basicLocked ? "Basic — UNAVAILABLE (Beat Sold Exclusive)" : "Basic Lease — £" + basicPrice)}
+                    {!buyLoading && !basicLocked && (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" style={{ filter: "drop-shadow(0 0 4px rgba(255,255,255,0.8))" }}>
+                        <path d="M5 7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v12l-7-3-7 3V7z"/>
+                      </svg>
+                    )}
+                    {buyLoading ? "Loading..." : (basicLocked ? "UNAVAILABLE — Sold Exclusive" : "BASIC LEASE — £" + basicPrice)}
                   </button>
+                  {/* Premium Exclusive — magenta-purple-blue LED gradient (premium CTA) */}
                   {premiumPrice > 0 && (
                     <button
                       onClick={function() { if (premiumAvailable && !buyLoading) handleBuy("premium"); }}
                       disabled={buyLoading || !premiumAvailable}
                       style={{
-                        width: "100%", borderRadius: 14, padding: "13px",
-                        background: (buyLoading || !premiumAvailable) ? "transparent" : "linear-gradient(135deg,#A855F7,#7C3AED)",
-                        border: "2px solid " + ((buyLoading || !premiumAvailable) ? "#333" : "#A855F7"),
-                        color: (buyLoading || !premiumAvailable) ? "#555" : "white",
-                        fontWeight: 800, fontSize: 14,
+                        width: "100%", borderRadius: 14, padding: "14px",
+                        background: (buyLoading || !premiumAvailable)
+                          ? "rgba(255,255,255,0.02)"
+                          : "linear-gradient(135deg,#C026D3 0%,#A855F7 35%,#7C3AED 70%,#3B82F6 100%)",
+                        border: "1.5px solid " + ((buyLoading || !premiumAvailable) ? "#222" : "rgba(192,38,211,0.6)"),
+                        color: (buyLoading || !premiumAvailable) ? "#444" : "white",
+                        fontWeight: 900, fontSize: 14,
                         cursor: (buyLoading || !premiumAvailable) ? "not-allowed" : "pointer",
-                        letterSpacing: 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-                        boxShadow: (buyLoading || !premiumAvailable) ? "none" : "0 0 18px rgba(168,85,247,0.3)",
-                        opacity: premiumSold ? 0.55 : 1,
+                        letterSpacing: 0.8,
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                        boxShadow: (buyLoading || !premiumAvailable)
+                          ? "none"
+                          : "0 4px 20px rgba(192,38,211,0.55), 0 0 36px rgba(168,85,247,0.4), inset 0 1px 0 rgba(255,255,255,0.3), inset 0 -2px 4px rgba(0,0,0,0.25)",
+                        textShadow: (buyLoading || !premiumAvailable) ? "none" : "0 1px 2px rgba(0,0,0,0.3)",
+                        opacity: premiumSold ? 0.5 : 1,
+                        position: "relative", overflow: "hidden",
                       }}>
-                      {premiumSold ? "Premium — SOLD" : ("Premium Exclusive — £" + premiumPrice)}
+                      {!buyLoading && premiumAvailable && (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="white" style={{ filter: "drop-shadow(0 0 4px rgba(255,255,255,0.9))" }}>
+                          <path d="M12 2l2.4 6.5L21 9l-5 4.5 1.5 7L12 17l-5.5 3.5L8 13.5 3 9l6.6-0.5L12 2z"/>
+                        </svg>
+                      )}
+                      {premiumSold ? "PREMIUM — SOLD OUT" : ("PREMIUM EXCLUSIVE — £" + premiumPrice)}
                     </button>
                   )}
                 </>
@@ -8060,20 +8099,20 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
               Sign Up to Buy Lease
             </button>
           )}
-          <div style={{ display: "flex", gap: 0, marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 12 }}>
+          <div style={{ display: "flex", gap: 0, marginTop: 14, borderTop: "1px solid rgba(124,58,237,0.1)", paddingTop: 12 }}>
             {[
-              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>, title: "MP3 LEASE", sub: "Instant delivery." },
-              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>, title: "UNLIMITED STREAMS", sub: "No expiry date." },
-              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>, title: "COMMERCIAL USE", sub: "Monetise your music." },
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>, title: "MP3 LEASE", sub: "Instant delivery." },
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>, title: "UNLIMITED STREAMS", sub: "No expiry date." },
+              { icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2" strokeLinecap="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>, title: "COMMERCIAL USE", sub: "Monetise your music." },
             ].map(function(item, i) {
               return (
                 <div key={i} style={{
                   flex: 1, textAlign: "center", padding: "0 4px",
-                  borderRight: i < 2 ? "1px solid rgba(255,255,255,0.05)" : "none",
+                  borderRight: i < 2 ? "1px solid rgba(124,58,237,0.1)" : "none",
                 }}>
-                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>{item.icon}</div>
-                  <div style={{ color: "#555", fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>{item.title}</div>
-                  <div style={{ color: "#333", fontSize: 8, marginTop: 1 }}>{item.sub}</div>
+                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 4, filter: "drop-shadow(0 0 4px rgba(124,58,237,0.5))" }}>{item.icon}</div>
+                  <div style={{ color: "#888", fontSize: 8, fontWeight: 800, letterSpacing: 0.5 }}>{item.title}</div>
+                  <div style={{ color: "#444", fontSize: 8, marginTop: 1 }}>{item.sub}</div>
                 </div>
               );
             })}
@@ -9007,7 +9046,9 @@ function CompactBeatActionSheet({ beat, user, onClose, compact }) {
 function CompactBeatCard({ beat, currentUser }) {
   var isFreePrice = function(p) { return !p || p === "free" || p === "£0" || p === "0" || p === "£0.00" || p === "0.00"; };
   var isFree  = isFreePrice(beat.price);
-  var accent  = isFree ? "#C026D3" : "#F59E0B";
+  // LED theme: free = magenta-violet, paid = electric purple-to-blue
+  var accent  = isFree ? "#C026D3" : "#7C3AED";
+  var accent2 = isFree ? "#7C3AED" : "#3B82F6";
   var [previewing, setPreviewing] = React.useState(false);
   var [previewTime, setPreviewTime] = React.useState(0);
   var [buyLoading, setBuyLoading] = React.useState(false);
@@ -9078,11 +9119,17 @@ function CompactBeatCard({ beat, currentUser }) {
 
   return (
     <div style={{
-      background: "linear-gradient(160deg,#151515,#0f0f0f)",
-      borderRadius: 14, marginBottom: 10, overflow: "hidden",
-      border: "1px solid " + accent + "33",
+      background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+      borderRadius: 16, marginBottom: 10, overflow: "hidden",
+      border: "1px solid " + accent + "55",
+      boxShadow: "0 4px 20px rgba(0,0,0,0.6), 0 0 0 0.5px " + accent + "33, 0 0 16px " + accent + "1a, inset 0 1px 0 rgba(255,255,255,0.04)",
+      position: "relative",
     }}>
-      <div style={{ height: 2, background: "linear-gradient(90deg," + accent + "cc,transparent)" }} />
+      <div style={{
+        height: 2,
+        background: "linear-gradient(90deg,transparent 0%," + accent + " 20%," + accent2 + " 50%," + accent + " 80%,transparent 100%)",
+        boxShadow: "0 0 8px " + accent + "cc, 0 0 16px " + accent2 + "66",
+      }} />
       <div style={{ padding: "10px 10px 0" }}>
         <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
           <div style={{ width: 40, height: 40, borderRadius: 8, flexShrink: 0, overflow: "hidden", background: "#111" }}>
@@ -9170,11 +9217,15 @@ function CompactBeatCard({ beat, currentUser }) {
                 if (!currentUser) { alert("Sign up and purchase a plan to buy beat leases!"); return; }
                 setSheetOpen(true);
               }} disabled={buyLoading} style={{
-                background: "transparent", border: "1.5px solid " + (currentUser ? "#F59E0B" : "#555"),
-                borderRadius: 20, padding: "5px 10px",
-                color: currentUser ? "#F59E0B" : "#555", fontSize: 9, fontWeight: 800,
+                background: currentUser ? "linear-gradient(135deg,#3B82F6 0%,#6366F1 50%,#7C3AED 100%)" : "transparent",
+                border: "1.5px solid " + (currentUser ? "rgba(124,58,237,0.6)" : "#444"),
+                borderRadius: 20, padding: "5px 11px",
+                color: currentUser ? "white" : "#555", fontSize: 9, fontWeight: 900,
                 cursor: buyLoading ? "not-allowed" : "pointer", flexShrink: 0,
                 display: "flex", alignItems: "center", gap: 4,
+                letterSpacing: 0.5,
+                boxShadow: currentUser ? "0 2px 10px rgba(124,58,237,0.4), 0 0 14px rgba(59,130,246,0.3), inset 0 1px 0 rgba(255,255,255,0.2)" : "none",
+                textShadow: currentUser ? "0 1px 2px rgba(0,0,0,0.3)" : "none",
               }}>
                 {!currentUser && <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>}
                 {buyLoading ? "..." : "BUY " + (beat.price || "£50")}
@@ -9185,17 +9236,20 @@ function CompactBeatCard({ beat, currentUser }) {
           var basicLabel = "BUY £" + (basicP || 50);
           var premiumLabel = "PREMIUM £" + premiumP;
           return (
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5, flexShrink: 0 }}>
               <button onClick={function() {
                 if (!currentUser) { alert("Sign up and purchase a plan to buy beat leases!"); return; }
                 setSheetOpen(true);
               }} disabled={buyLoading} style={{
-                background: "transparent", border: "1.5px solid " + (currentUser ? "#F59E0B" : "#555"),
-                borderRadius: 20, padding: "5px 10px",
-                color: currentUser ? "#F59E0B" : "#555", fontSize: 9, fontWeight: 800,
+                background: currentUser ? "linear-gradient(135deg,#3B82F6 0%,#6366F1 50%,#7C3AED 100%)" : "transparent",
+                border: "1.5px solid " + (currentUser ? "rgba(124,58,237,0.6)" : "#444"),
+                borderRadius: 20, padding: "5px 11px",
+                color: currentUser ? "white" : "#555", fontSize: 9, fontWeight: 900,
                 cursor: buyLoading ? "not-allowed" : "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
-                minWidth: 78,
+                minWidth: 84, letterSpacing: 0.5,
+                boxShadow: currentUser ? "0 2px 10px rgba(124,58,237,0.4), 0 0 14px rgba(59,130,246,0.3), inset 0 1px 0 rgba(255,255,255,0.2)" : "none",
+                textShadow: currentUser ? "0 1px 2px rgba(0,0,0,0.3)" : "none",
               }}>
                 {!currentUser && <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>}
                 {buyLoading ? "..." : basicLabel}
@@ -9205,12 +9259,15 @@ function CompactBeatCard({ beat, currentUser }) {
                   if (!currentUser) { alert("Sign up and purchase a plan to buy beat leases!"); return; }
                   setSheetOpen(true);
                 }} disabled={buyLoading} style={{
-                  background: "transparent", border: "1.5px solid " + (currentUser ? "#A855F7" : "#555"),
-                  borderRadius: 20, padding: "5px 10px",
-                  color: currentUser ? "#A855F7" : "#555", fontSize: 9, fontWeight: 800,
+                  background: currentUser ? "linear-gradient(135deg,#C026D3 0%,#A855F7 35%,#7C3AED 70%,#3B82F6 100%)" : "transparent",
+                  border: "1.5px solid " + (currentUser ? "rgba(192,38,211,0.6)" : "#444"),
+                  borderRadius: 20, padding: "5px 11px",
+                  color: currentUser ? "white" : "#555", fontSize: 9, fontWeight: 900,
                   cursor: buyLoading ? "not-allowed" : "pointer",
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
-                  minWidth: 78,
+                  minWidth: 84, letterSpacing: 0.5,
+                  boxShadow: currentUser ? "0 2px 10px rgba(192,38,211,0.5), 0 0 16px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.25)" : "none",
+                  textShadow: currentUser ? "0 1px 2px rgba(0,0,0,0.3)" : "none",
                 }}>
                   {buyLoading ? "..." : premiumLabel}
                 </button>
