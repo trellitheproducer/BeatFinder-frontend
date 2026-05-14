@@ -25829,13 +25829,20 @@ userPickedMicRef.current = true;
               >
                 {Array.from({length:numBars}, function(_,bi){
                   const bx = bi * spBar * effectivePPS;
+                  // pointerEvents:"none" on the bar marker wrapper AND its
+                  // tick lines + label span. Without this, tapping on or
+                  // near a bar number lands on the span/div instead of
+                  // bubbling cleanly to the ruler's tap-to-seek handler,
+                  // which made taps near "1", "2", "3", "4" feel
+                  // temperamental — sometimes nothing happens, sometimes
+                  // the playhead jumped to a stale position.
                   return (
-                    <div key={bi} style={{ position:"absolute", left:bx, top:0, bottom:0 }}>
-                      <div style={{ position:"absolute", left:0, top:0, bottom:0, width:1, background:bi===0?"#555":"#1e1e1e" }} />
-                      <span style={{ position:"absolute", top:5, left:4, color:"#555", fontSize:9, fontFamily:"monospace", fontWeight:700, userSelect:"none" }}>{bi+1}</span>
+                    <div key={bi} style={{ position:"absolute", left:bx, top:0, bottom:0, pointerEvents:"none" }}>
+                      <div style={{ position:"absolute", left:0, top:0, bottom:0, width:1, background:bi===0?"#555":"#1e1e1e", pointerEvents:"none" }} />
+                      <span style={{ position:"absolute", top:5, left:4, color:"#555", fontSize:9, fontFamily:"monospace", fontWeight:700, userSelect:"none", pointerEvents:"none" }}>{bi+1}</span>
                       {Array.from({length:timeSigNum}, function(_,di){
                         if (di===0) return null;
-                        return <div key={di} style={{ position:"absolute", left:di*spb*effectivePPS, top:Math.round(RULER_H*0.55), bottom:0, width:1, background:"#181818" }} />;
+                        return <div key={di} style={{ position:"absolute", left:di*spb*effectivePPS, top:Math.round(RULER_H*0.55), bottom:0, width:1, background:"#181818", pointerEvents:"none" }} />;
                       })}
                     </div>
                   );
