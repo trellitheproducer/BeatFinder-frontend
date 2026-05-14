@@ -4596,6 +4596,45 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
                   </div>
                 )}
 
+                {/* Link preview card — rendered when the backend stored OG
+                    metadata for a URL in this post. Tapping opens in a new
+                    tab. Defensive about missing fields. */}
+                {post.linkUrl && (
+                  <div onClick={function(e) {
+                      e.stopPropagation();
+                      try { window.open(post.linkUrl, "_blank", "noopener,noreferrer"); } catch(_) {}
+                    }}
+                    style={{
+                      margin: "0 14px 10px", borderRadius: 12, overflow: "hidden",
+                      background: "linear-gradient(165deg,#120b22 0%,#0a0a14 60%,#080812 100%)",
+                      border: "1px solid rgba(124,58,237,0.25)",
+                      cursor: "pointer",
+                    }}>
+                    {post.linkImage && (
+                      <img src={post.linkImage} alt=""
+                        style={{ width: "100%", maxHeight: 200, objectFit: "cover", display: "block", background: "#000" }}
+                        onError={function(e) { e.target.style.display = "none"; }} />
+                    )}
+                    <div style={{ padding: "10px 12px" }}>
+                      {post.linkSiteName && (
+                        <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 3 }}>
+                          {post.linkSiteName}
+                        </div>
+                      )}
+                      <div style={{ color: "white", fontWeight: 800, fontSize: 13, lineHeight: 1.3, marginBottom: 3,
+                        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                        {post.linkTitle || post.linkUrl}
+                      </div>
+                      {post.linkDescription && (
+                        <div style={{ color: "#8b8b9a", fontSize: 12, lineHeight: 1.4,
+                          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                          {post.linkDescription}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Images */}
                 {post.images && post.images.length > 0 && (
                   <div style={{
@@ -8869,10 +8908,72 @@ function PostSheet({ user, onClose, onPosted }) {
   var [caption, setCaption]   = React.useState("");
   var [loading, setLoading]   = React.useState(false);
   var [msg, setMsg]           = React.useState("");
+  // Link preview state — when the user pastes a URL into the status text
+  // we auto-fetch its Open Graph metadata and show a preview card. Cleared
+  // if they edit the text and the URL disappears.
+  var [linkPreview, setLinkPreview]   = React.useState(null);  // { url, title, description, image, siteName } | null
+  var [previewLoading, setPreviewLoading] = React.useState(false);
+  var lastFetchedUrlRef = React.useRef("");
   var imageFileRef             = React.useRef(null);
   var videoFileRef             = React.useRef(null);
   var sheetRef                 = React.useRef(null);
   var startY                   = React.useRef(null);
+
+  // Match the first http(s) URL inside arbitrary text. Used both to power
+  // the live preview and to send link_url to the backend so it doesn't
+  // have to re-parse on its side.
+  function findFirstUrl(s) {
+    if (!s) return "";
+    var m = s.match(/https?:\/\/[^\s<>"'`]+/i);
+    return m ? m[0].replace(/[.,;!?)]+$/, "") : "";
+  }
+
+  // Debounced preview fetch — runs whenever `text` changes. We wait 600ms
+  // after the user stops typing to avoid hammering the backend on every
+  // keystroke. The current fetched url is tracked so we don't redundantly
+  // re-fetch the same URL when the user is just editing surrounding text.
+  React.useEffect(function() {
+    var url = findFirstUrl(text);
+    if (!url) {
+      lastFetchedUrlRef.current = "";
+      setLinkPreview(null);
+      setPreviewLoading(false);
+      return;
+    }
+    if (url === lastFetchedUrlRef.current) return;
+    var cancelled = false;
+    setPreviewLoading(true);
+    var timer = setTimeout(function() {
+      lastFetchedUrlRef.current = url;
+      apiFetch("/api/posts/link-preview", {
+        method: "POST", body: JSON.stringify({ url: url })
+      }).then(function(data) {
+        if (cancelled) return;
+        setPreviewLoading(false);
+        // If the URL changed while we were fetching, drop the result
+        if (findFirstUrl(text) !== url) return;
+        if (data && (data.title || data.description || data.image)) {
+          setLinkPreview({
+            url:         url,
+            title:       data.title || "",
+            description: data.description || "",
+            image:       data.image || "",
+            siteName:    data.siteName || data.site_name || "",
+          });
+        } else {
+          // No useful metadata — still keep a minimal card so the user
+          // sees something rather than guessing whether the URL "took".
+          setLinkPreview({ url: url, title: url, description: "", image: "", siteName: "" });
+        }
+      }).catch(function() {
+        if (cancelled) return;
+        setPreviewLoading(false);
+        // Fallback to bare-URL card on error
+        setLinkPreview({ url: url, title: url, description: "", image: "", siteName: "" });
+      });
+    }, 600);
+    return function() { cancelled = true; clearTimeout(timer); };
+  }, [text]);
 
   function onTouchStart(e) { startY.current = e.touches[0].clientY; }
   function onTouchMove(e) {
@@ -8904,6 +9005,11 @@ function PostSheet({ user, onClose, onPosted }) {
     var fd = new FormData();
     fd.append("text", text.trim());
     images.forEach(function(img) { fd.append("images", img.file); });
+    // If a URL was detected in the text, send it so the backend can store
+    // the parsed OG metadata on the post doc. We send the URL — not the
+    // preview blob — so the server controls what gets persisted.
+    var detectedUrl = findFirstUrl(text);
+    if (detectedUrl) fd.append("link_url", detectedUrl);
     var attempt = 0;
     while (attempt < 2) {
       try {
@@ -8970,31 +9076,59 @@ function PostSheet({ user, onClose, onPosted }) {
       style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.7)",
         display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
       <div ref={sheetRef}
-        style={{ background: "#111", borderRadius: "20px 20px 0 0",
+        style={{
+          background: "linear-gradient(180deg,#0f0a1f 0%,#0a0a14 50%,#080812 100%)",
+          borderRadius: "24px 24px 0 0",
           maxHeight: "85vh", minHeight: "50vh",
           display: "flex", flexDirection: "column",
           transition: "transform 0.15s",
-          paddingBottom: "env(safe-area-inset-bottom)" }}>
+          paddingBottom: "env(safe-area-inset-bottom)",
+          boxShadow: "0 -8px 40px rgba(124,58,237,0.25), 0 -2px 16px rgba(0,0,0,0.6)",
+          border: "1px solid rgba(124,58,237,0.2)",
+          borderBottom: "none",
+          position: "relative", overflow: "hidden",
+        }}>
+        {/* Subtle top accent line */}
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0, height: 1,
+          background: "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)",
+          opacity: 0.6,
+        }} />
 
         {/* Handle — drag to dismiss */}
         <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
           style={{ display: "flex", justifyContent: "center", padding: "12px 0 4px", cursor: "grab" }}>
-          <div style={{ width: 36, height: 4, borderRadius: 2, background: "#333" }} />
+          <div style={{
+            width: 40, height: 4, borderRadius: 2,
+            background: "linear-gradient(90deg,#7C3AED,#C026D3)",
+            opacity: 0.7,
+          }} />
         </div>
 
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-          padding: "4px 16px 12px", borderBottom: "1px solid #1a1a1a" }}>
+          padding: "4px 18px 14px", borderBottom: "1px solid rgba(124,58,237,0.15)" }}>
           {mode ? (
             <button onClick={function() { setMode(null); setMsg(""); }}
-              style={{ background: "none", border: "none", color: "#C026D3", fontSize: 14, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+              style={{ background: "none", border: "none", color: "#A78BFA", fontSize: 14, fontWeight: 700, cursor: "pointer", padding: 0 }}>
               &#8592; Back
             </button>
           ) : (
-            <div style={{ color: "white", fontWeight: 700, fontSize: 16 }}>Create Post</div>
+            <div style={{
+              fontWeight: 900, fontSize: 18, letterSpacing: 0.5,
+              fontFamily: "'Bebas Neue',sans-serif",
+              background: "linear-gradient(135deg,#C026D3,#7C3AED,#3B82F6)",
+              WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+              backgroundClip: "text",
+            }}>CREATE POST</div>
           )}
           <button onClick={onClose}
-            style={{ background: "none", border: "none", color: "#555", fontSize: 22, cursor: "pointer", padding: 4 }}>
+            style={{
+              background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.25)",
+              borderRadius: "50%", width: 30, height: 30,
+              color: "#A78BFA", fontSize: 16, cursor: "pointer", padding: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
             &#10005;
           </button>
         </div>
@@ -9003,28 +9137,49 @@ function PostSheet({ user, onClose, onPosted }) {
           onTouchMove={function(e) { e.stopPropagation(); }}>
           {/* Mode picker */}
           {!mode && (
-            <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
               {[
-                { id: "status", label: "Post Status", desc: "Share thoughts, news or photos", color: "#C026D3",
-                  icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2" strokeLinecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
-                { id: "music", label: "Post Track", desc: "Share a Spotify track or album", color: "#1DB954",
-                  icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1DB954" strokeWidth="2" strokeLinecap="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> },
-                { id: "video", label: "Post Video", desc: "Upload a video clip", color: "#3B82F6",
-                  icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round"><rect x="2" y="2" width="20" height="20" rx="3"/><polygon points="10,8 16,12 10,16"/></svg> },
+                { id: "status", label: "Post Status", desc: "Share thoughts, news, photos or links",
+                  accent: "#C026D3", accent2: "#7C3AED",
+                  icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
+                { id: "video", label: "Post Video", desc: "Upload a video clip from your camera roll",
+                  accent: "#3B82F6", accent2: "#06B6D4",
+                  icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="3"/><polygon points="10,8 16,12 10,16" fill="white"/></svg> },
               ].map(function(opt) {
                 return (
                   <button key={opt.id} onClick={function() { setMode(opt.id); }}
-                    style={{ background: "#1a1a1a", border: "1px solid #222", borderRadius: 14,
-                      padding: "14px 16px", cursor: "pointer", textAlign: "left",
-                      display: "flex", alignItems: "center", gap: 14 }}>
-                    <div style={{ width: 44, height: 44, borderRadius: 12, background: "#111",
-                      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    className="bf-btn"
+                    style={{
+                      background: "linear-gradient(135deg,rgba(124,58,237,0.10) 0%,rgba(10,10,20,0.6) 60%,rgba(8,8,18,0.8) 100%)",
+                      border: "1px solid rgba(124,58,237,0.28)",
+                      borderRadius: 16,
+                      padding: "16px 18px",
+                      cursor: "pointer", textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 14,
+                      boxShadow: "0 4px 14px rgba(0,0,0,0.4), 0 0 0 1px rgba(124,58,237,0.08)",
+                      position: "relative", overflow: "hidden",
+                    }}>
+                    {/* Left accent bar */}
+                    <div style={{
+                      position: "absolute", left: 0, top: 0, bottom: 0, width: 3,
+                      background: "linear-gradient(180deg," + opt.accent + "," + opt.accent2 + ")",
+                      boxShadow: "0 0 8px " + opt.accent + "aa",
+                    }} />
+                    <div style={{
+                      width: 48, height: 48, borderRadius: 14,
+                      background: "linear-gradient(135deg," + opt.accent + "," + opt.accent2 + ")",
+                      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                      boxShadow: "0 4px 14px " + opt.accent + "66",
+                    }}>
                       {opt.icon}
                     </div>
-                    <div>
-                      <div style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{opt.label}</div>
-                      <div style={{ color: "#555", fontSize: 13, marginTop: 2 }}>{opt.desc}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: "white", fontWeight: 800, fontSize: 15, marginBottom: 3, letterSpacing: 0.2 }}>{opt.label}</div>
+                      <div style={{ color: "#8b8b9a", fontSize: 12, lineHeight: 1.4 }}>{opt.desc}</div>
                     </div>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.6 }}>
+                      <polyline points="9 18 15 12 9 6"/>
+                    </svg>
                   </button>
                 );
               })}
@@ -9067,6 +9222,64 @@ function PostSheet({ user, onClose, onPosted }) {
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {/* Link preview card — appears below text when URL detected */}
+              {(linkPreview || previewLoading) && (
+                <div style={{
+                  marginBottom: 12, borderRadius: 14, overflow: "hidden",
+                  background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+                  border: "1px solid rgba(124,58,237,0.25)",
+                  boxShadow: "0 4px 14px rgba(0,0,0,0.4)",
+                  position: "relative",
+                }}>
+                  {previewLoading && !linkPreview ? (
+                    <div style={{ padding: "14px 16px", color: "#888", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "bf-spin 0.8s linear infinite" }}>
+                        <path d="M21 12a9 9 0 11-6.219-8.56"/>
+                      </svg>
+                      Fetching link preview…
+                    </div>
+                  ) : (
+                    <React.Fragment>
+                      {linkPreview && linkPreview.image && (
+                        <img src={linkPreview.image} alt="" style={{ width: "100%", maxHeight: 180, objectFit: "cover", display: "block", background: "#000" }} />
+                      )}
+                      <div style={{ padding: "10px 14px" }}>
+                        {linkPreview && linkPreview.siteName && (
+                          <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 3 }}>
+                            {linkPreview.siteName}
+                          </div>
+                        )}
+                        {linkPreview && linkPreview.title && (
+                          <div style={{ color: "white", fontWeight: 800, fontSize: 13, lineHeight: 1.3, marginBottom: 3,
+                            display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                            {linkPreview.title}
+                          </div>
+                        )}
+                        {linkPreview && linkPreview.description && (
+                          <div style={{ color: "#8b8b9a", fontSize: 12, lineHeight: 1.4,
+                            display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                            {linkPreview.description}
+                          </div>
+                        )}
+                      </div>
+                      {/* Dismiss preview button — doesn't remove the URL from
+                          text, just hides the card. The user can re-trigger
+                          by editing the text. */}
+                      <button onClick={function() {
+                          setLinkPreview(null);
+                          lastFetchedUrlRef.current = "__dismissed__";
+                        }}
+                        style={{ position: "absolute", top: 8, right: 8,
+                          background: "rgba(0,0,0,0.65)", border: "none", borderRadius: "50%",
+                          width: 22, height: 22, color: "white", cursor: "pointer", fontSize: 11,
+                          display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        &#10005;
+                      </button>
+                    </React.Fragment>
+                  )}
                 </div>
               )}
 
