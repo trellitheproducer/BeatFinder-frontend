@@ -5998,6 +5998,22 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
   const [tLoading,  setTLoading]  = useState(true);
   const [rLoading,  setRLoading]  = useState(true);
   const [fLoading,  setFLoading]  = useState(true);
+  // Sheet hoisted to screen level — rendering it inside ProducerCard puts it
+  // inside the horizontal-scroll carousel (overflow-x:auto + WebkitOverflow-
+  // Scrolling:touch), which on iOS Safari traps position:fixed children so
+  // they align to the carousel's scroll area instead of the viewport.
+  const [sheetBeat, setSheetBeat] = useState(null);
+  // Allow bf-reopen-sheet events (fired after Stripe cancel) to reopen here too.
+  React.useEffect(function() {
+    function onReopen(e) {
+      if (!e || !e.detail || !e.detail.beat_id) return;
+      var b = (rising || []).find(function(x){ return x.id === e.detail.beat_id; })
+           || (fresh   || []).find(function(x){ return x.id === e.detail.beat_id; });
+      if (b) setSheetBeat(b);
+    }
+    window.addEventListener("bf-reopen-sheet", onReopen);
+    return function() { window.removeEventListener("bf-reopen-sheet", onReopen); };
+  }, [rising, fresh]);
 
   useEffect(() => {
     apiFetch("/api/youtube/trending")
@@ -6090,14 +6106,6 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
     const [pTime,      setPTime]      = React.useState(0);
     const [buyLoading, setBuyLoading] = React.useState(false);
     const [buyErr,     setBuyErr]     = React.useState("");
-    const [sheetOpen,  setSheetOpen]  = React.useState(false); // contract preview before Stripe
-    React.useEffect(function() {
-      function onReopen(e) {
-        if (e && e.detail && e.detail.beat_id === beat.id) setSheetOpen(true);
-      }
-      window.addEventListener("bf-reopen-sheet", onReopen);
-      return function() { window.removeEventListener("bf-reopen-sheet", onReopen); };
-    }, [beat.id]);
     const aRef = React.useRef(null);
     const tRef = React.useRef(null);
     const seekedRef = React.useRef(false);
@@ -6136,7 +6144,10 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
       if (el.currentTime >= st + 45) { el.pause(); stopPrev(); }
       if (el.currentTime < st) el.currentTime = st;
     }
-    // Contract-first flow: tapping Buy opens the preview sheet (CompactBeatActionSheet).
+    // Contract-first flow: tapping Buy hoists the sheet to TrendingScreen
+    // level so it renders OUTSIDE the horizontal carousel and behaves as
+    // proper position:fixed (instead of being trapped inside the carousel's
+    // scroll context, which iOS Safari treats as a non-viewport ancestor).
     function handleBuy(tier) {
       if (!user) { setBuyErr("Log in to purchase"); return; }
       if (!user.isArtistPro && !user.isPro) { requireUpgrade("buy"); return; }
@@ -6145,7 +6156,7 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
         return;
       }
       setBuyErr("");
-      setSheetOpen(true);
+      setSheetBeat(beat);
     }
     React.useEffect(function() { return function() { clearInterval(tRef.current); }; }, []);
 
@@ -6169,9 +6180,6 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
               onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
           ) : null}
         />
-        {sheetOpen && (
-          <CompactBeatActionSheet beat={beat} user={user} compact={true} onClose={function(){ setSheetOpen(false); }} />
-        )}
       </div>
     );
   };
@@ -6245,6 +6253,17 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
             }
           </div>
         </div>
+      )}
+
+      {/* Sheet rendered at screen-root level — escapes the carousel scroll
+          context that traps position:fixed children on iOS Safari. */}
+      {sheetBeat && (
+        <CompactBeatActionSheet
+          beat={sheetBeat}
+          user={user}
+          compact={true}
+          onClose={function(){ setSheetBeat(null); }}
+        />
       )}
     </div>
   );
@@ -8537,7 +8556,10 @@ function CompactBeatActionSheet({ beat, user, onClose, compact }) {
       )}
 
       <div onClick={onClose} style={{
-        position: "fixed", inset: 0, zIndex: 99998,
+        position: "fixed",
+        top: 0, left: 0, right: 0,
+        bottom: compact ? "calc(72px + env(safe-area-inset-bottom))" : 0,
+        zIndex: 99998,
         background: "rgba(0,0,0,0.75)",
         display: "flex", alignItems: "flex-end", justifyContent: "center",
       }}>
@@ -8545,15 +8567,8 @@ function CompactBeatActionSheet({ beat, user, onClose, compact }) {
           width: "100%", maxWidth: 480,
           background: "#0d0d0d", borderTop: "1px solid #222",
           borderRadius: "20px 20px 0 0", padding: 18,
-          paddingBottom: compact
-            ? "calc(72px + env(safe-area-inset-bottom) + 24px)"
-            : "max(env(safe-area-inset-bottom), 18px)",
-          maxHeight: compact
-            ? "calc(100dvh - 72px - env(safe-area-inset-bottom) - 24px)"
-            : "85vh",
-          marginBottom: compact
-            ? "calc(72px + env(safe-area-inset-bottom))"
-            : 0,
+          paddingBottom: compact ? 24 : "max(env(safe-area-inset-bottom), 18px)",
+          maxHeight: compact ? "calc(100dvh - 72px - env(safe-area-inset-bottom) - 24px)" : "85vh",
           overflowY: "auto", WebkitOverflowScrolling: "touch",
         }}>
           {/* Drag handle */}
