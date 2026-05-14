@@ -6980,11 +6980,22 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
               WebkitLineClamp: 1, WebkitBoxOrient: "vertical",
               textShadow: "0 1px 2px rgba(0,0,0,0.7)",
             }}>{beat.title || "Untitled"}</div>
-            <div style={{
-              color: "#A78BFA", fontSize: 9, fontWeight: 600, marginTop: 1,
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              textShadow: "0 1px 2px rgba(0,0,0,0.7)",
-            }}>@{beat.producer_username || beat.producer || "Producer"}</div>
+            <div
+              onClick={function(e) {
+                e.stopPropagation();
+                const handle = beat.producer_username || beat.producer;
+                if (onViewProfile && handle) onViewProfile(handle);
+              }}
+              style={{
+                color: "#A78BFA", fontSize: 9, fontWeight: 600, marginTop: 1,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                textShadow: "0 1px 2px rgba(0,0,0,0.7)",
+                cursor: (onViewProfile && (beat.producer_username || beat.producer)) ? "pointer" : "default",
+                // Tappable bit — extend hit area slightly so a small finger
+                // can reliably land on it without firing the play button.
+                padding: "2px 0",
+                position: "relative", zIndex: 2,
+              }}>@{beat.producer_username || beat.producer || "Producer"}</div>
           </div>
         </div>
 
@@ -18688,6 +18699,14 @@ function StudioScreen({ user, onExit }) {
   const micInputGainRef = useRef(1.0); // default 0dB (unity gain)
   const [micInputGain, setMicInputGainState] = useState(1.0); // 0.25–4.0 range (-12..+12dB)
   const [headphonesIn, setHeadphonesIn] = useState(false);
+  // Mirror headphonesIn into a ref so plain functions (restoreIOSSpeaker, doPlay)
+  // can read the live value without going through closures.
+  const headphonesInRef = useRef(false);
+  React.useEffect(function() { headphonesInRef.current = headphonesIn; }, [headphonesIn]);
+  // Live ref for Bluetooth-specific detection. Set by checkHeadphones() when
+  // an output or input device label matches BT keywords. Used to warn about
+  // monitoring latency and to bias buffer sizes for stability over latency.
+  const bluetoothInRef = useRef(false);
   const [monitorWarn,  setMonitorWarn]  = useState("");
   const [showAutoPitch,setShowAutoPitch] = useState(false);
   const [autoPitch,    setAutoPitch]     = useState({ on:false, key:"C", scale:"major", speed:50, humanize:10, wet:1, vibrato:0, formant:true });
@@ -18765,17 +18784,18 @@ function StudioScreen({ user, onExit }) {
   // worklet path (proper RMS-based noise gate) or fall back to a DynamicsCompressor.
   const noiseGateWorkletReady = useRef(false);
 
-  // Re-route iOS audio output back to speaker after mic use.
-  // iOS switches to earpiece when getUserMedia is called; this forces it back.
+  // Re-route iOS audio output after mic use.
+  // iOS switches to earpiece when getUserMedia is called; this forces the
+  // route to be re-evaluated. With NO headset connected, iOS picks the
+  // loudspeaker. With a wired/Bluetooth headset connected, iOS keeps it
+  // on the headset because that's its natural priority.
+  //
+  // CRITICAL: we must NOT pause/replay the silent audio element when a BT
+  // headset is in use — doing so causes iOS to drop the BT route and pick
+  // the phone speaker, which is exactly the wrong behaviour. We only
+  // bounce the silent element when there's no headset detected.
   const restoreIOSSpeaker = async function() {
-    // iOS routes AudioContext to the earpiece when a mic stream is open.
-    // Even after mic tracks stop, the existing AudioContext stays earpiece-routed.
-    // This is WebKit bug 295889 (open as of late 2025). Workaround chain:
-    //   1. Close the existing AudioContext entirely so iOS releases its audio session
-    //   2. Pause + restart the silent <audio> element — this nudges iOS to re-evaluate
-    //      the audio session category and pick the speaker (not earpiece) for output
-    //   3. Wait briefly so iOS registers the session change before we build the new context
-    //   4. Create a fresh AudioContext; iOS now routes it to the loudspeaker
+    const hasHeadphones = !!headphonesInRef.current;
     try {
       const old = actxRef.current;
       if (old && old.state !== "closed") {
@@ -18785,37 +18805,45 @@ function StudioScreen({ user, onExit }) {
       gainNodesRef.current = {};
       masterGainRef.current = null;
       fxNodesRef.current = {};
-      chainsRef.current = {}; // cached chains are tied to the old context — drop them
+      chainsRef.current = {};
       scheduledRef.current = [];
-      // Worklets are scoped to their AudioContext — when we recreate, they're gone
       noiseGateWorkletReady.current = false;
 
-      // Bounce the silent audio element. Pausing fully releases iOS's audio session
-      // claim, and restarting it forces iOS to choose a fresh output route. With
-      // no mic stream alive, that route is the speaker.
-      try {
-        const sa = silentAudioRef.current;
-        if (sa) {
-          sa.pause();
-          // Tiny pause helps iOS register the session release
-          await new Promise(function(res){ setTimeout(res, 30); });
-          // Reset to the start in case it's been seeked away
-          try { sa.currentTime = 0; } catch(e) {}
-          await sa.play().catch(function(){});
-        }
-      } catch(e) {}
+      // Only bounce the silent audio element when there's no headset. With
+      // a headset (wired or BT) connected, this would fight iOS's natural
+      // routing and force audio back through the phone speaker.
+      if (!hasHeadphones) {
+        try {
+          const sa = silentAudioRef.current;
+          if (sa) {
+            sa.pause();
+            await new Promise(function(res){ setTimeout(res, 30); });
+            try { sa.currentTime = 0; } catch(e) {}
+            await sa.play().catch(function(){});
+          }
+        } catch(e) {}
+        // Slightly longer pause so iOS finishes the session re-evaluation
+        await new Promise(function(res) { setTimeout(res, 120); });
+      } else {
+        // With a headset connected, just give iOS a brief moment to settle
+        // the audio session before we build the new context. No element bounce.
+        await new Promise(function(res) { setTimeout(res, 80); });
+      }
 
-      // Slightly longer pause so iOS finishes the session re-evaluation
-      await new Promise(function(res) { setTimeout(res, 120); });
-
-      // Create fresh AudioContext — iOS now picks speaker for output
+      // Create fresh AudioContext.
+      // - Without a headset: iOS picks the loudspeaker.
+      // - With BT/wired headset: iOS routes to the headset.
+      // latencyHint "playback" gives Bluetooth devices a larger buffer
+      // window, which reduces dropouts caused by BT's lossy transport.
+      // We use "interactive" only when no headset is present (lower latency
+      // matters more for tight playback on phone speaker than for BT).
       actxRef.current = new (window.AudioContext || window.webkitAudioContext)({
-        latencyHint: "interactive",
+        latencyHint: hasHeadphones ? "playback" : "interactive",
       });
       if (actxRef.current.state === "suspended") {
         try { await actxRef.current.resume(); } catch(e) {}
       }
-    } catch(e) { console.warn("[iOS speaker restore]", e); }
+    } catch(e) { console.warn("[audio route restore]", e); }
   };
   // micReady: true if we've confirmed mic permission this session.
   // We check the Permissions API first — if the browser shows "granted", skip the prompt.
@@ -19126,18 +19154,19 @@ function StudioScreen({ user, onExit }) {
   // ── AudioContext ──────────────────────────────────────────────
   const getActx = function () {
     if (!actxRef.current || actxRef.current.state === "closed") {
+      // Bluetooth devices need a bigger buffer window than the phone speaker
+      // to avoid dropouts and glitching on BT's lossy transport. We use
+      // "playback" latency hint whenever a headset is connected (wired or BT)
+      // and the tighter "interactive" hint only on the phone speaker.
+      const hint = headphonesInRef.current ? "playback" : "interactive";
       actxRef.current = new (window.AudioContext || window.webkitAudioContext)({
-        latencyHint: "interactive",
+        latencyHint: hint,
       });
-      // A fresh context invalidates every cached chain (they reference nodes
-      // from the closed/old context). Drop them so doPlay rebuilds.
       chainsRef.current = {};
       fxNodesRef.current = {};
       masterGainRef.current = null;
       noiseGateWorkletReady.current = false;
-      // Connect silent audio through the new AudioContext — must happen after creation
-      // and inside a user gesture (getActx is always called from one)
-      silentSrcNodeRef.current = null; // reset so ensureSilentAudio reconnects
+      silentSrcNodeRef.current = null;
       ensureSilentAudio();
     }
     if (actxRef.current.state === "suspended") {
@@ -19179,6 +19208,16 @@ function StudioScreen({ user, onExit }) {
 
       // NOTE: Removed hpByLatency (iPhone reports low latency regardless of headset state)
       // and hpByExtraInput (false positive after getUserMedia temporarily shows 2 inputs)
+
+      // Bluetooth-specific detection. Used to warn about input-monitoring
+      // latency (BT has ~100-200ms RTT that no software can fix) and to
+      // pick a more forgiving audio-context buffer.
+      const isBT = [...outputs, ...inputs].some(function(d) {
+        const l = (d.label || "").toLowerCase();
+        return l.includes("bluetooth") || l.includes("airpod") ||
+               l.includes("airpods") || l.includes("beats");
+      });
+      bluetoothInRef.current = isBT;
 
       const hp = hpByOutput || hpByInputLabel || hpByCount;
       setHeadphonesIn(hp);
@@ -19271,7 +19310,10 @@ function StudioScreen({ user, onExit }) {
       prevHeadphonesRef.current = headphonesIn;
       return;
     }
-    if (!headphonesIn && prevHeadphonesRef.current) {
+    const wasHeadphones = prevHeadphonesRef.current;
+    const isHeadphones  = headphonesIn;
+
+    if (!isHeadphones && wasHeadphones) {
       // Headphones disconnected — defer all cleanup off the main thread.
       // iOS is mid-route-change here; doing work synchronously causes the freeze.
       setTimeout(function () {
@@ -19285,6 +19327,27 @@ function StudioScreen({ user, onExit }) {
         }
       }, 200);
     }
+
+    // On EITHER direction of change, if we're not playing, close the current
+    // AudioContext so the next playback rebuilds it with the correct latency
+    // hint ("playback" for headset/BT, "interactive" for speaker). This is
+    // what prevents Bluetooth playback dropouts after a mid-session BT pair.
+    if (wasHeadphones !== isHeadphones && !isPlayingRef.current) {
+      setTimeout(function() {
+        try {
+          if (actxRef.current && actxRef.current.state !== "closed") {
+            actxRef.current.close().catch(function(){});
+          }
+          actxRef.current = null;
+          chainsRef.current = {};
+          fxNodesRef.current = {};
+          masterGainRef.current = null;
+          noiseGateWorkletReady.current = false;
+          silentSrcNodeRef.current = null;
+        } catch(e) {}
+      }, 300);
+    }
+
     prevHeadphonesRef.current = headphonesIn;
   }, [headphonesIn]);
 
@@ -19373,14 +19436,23 @@ function StudioScreen({ user, onExit }) {
       monitorMicStreamRef.current = stream;
       monitorStreamRef.current    = stream;
 
-      // Reuse or create monitoring AudioContext
+      // Reuse or create monitoring AudioContext.
+      // For Bluetooth headsets we use "playback" hint — BT can't deliver low
+      // latency monitoring anyway (~100-200ms RTT), so a larger buffer at
+      // least keeps audio glitch-free. Wired headsets use "interactive".
       if (!monitorCtxRef.current || monitorCtxRef.current.state === "closed") {
         monitorCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({
-          latencyHint: "interactive",
+          latencyHint: bluetoothInRef.current ? "playback" : "interactive",
         });
       }
       const mCtx = monitorCtxRef.current;
       if (mCtx.state === "suspended") await mCtx.resume();
+
+      // Surface a one-time warning about BT monitoring latency — user can
+      // still proceed, but at least they know why their vocal sounds delayed.
+      if (bluetoothInRef.current) {
+        setMonitorWarn("Bluetooth audio has noticeable latency — use wired headphones for low-latency monitoring");
+      }
 
       const src      = mCtx.createMediaStreamSource(stream);
       const micBoost = mCtx.createGain();
