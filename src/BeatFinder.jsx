@@ -2633,7 +2633,7 @@ var PLAN_PRICES = {
   producer: { monthly: "price_1TQDpBFHyNSCxas8cktbqw1n", yearly: "price_producer_yearly_REPLACE" },
 };
 
-function PlanPicker({ onSelectPlan, compact }) {
+function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
   var [billing, setBilling] = React.useState("monthly"); // "monthly" | "yearly"
 
   var plans = [
@@ -2707,12 +2707,58 @@ function PlanPicker({ onSelectPlan, compact }) {
           var isFree    = (p.id === "free");
           var priceStr  = isFree ? p.monthlyStr : (billing === "yearly" ? p.yearlyStr : p.monthlyStr);
           var priceId   = isFree ? null : (PLAN_PRICES[p.id] ? PLAN_PRICES[p.id][billing] : null);
+          var isSelected = selectedPlanId === p.id;
+          // LED highlight colors: each plan gets a glow tint when selected.
+          // Free = grey, Artist = electric blue, Producer = magenta. The
+          // selected card lifts visually and pulses with a neon glow ring.
+          var glowClr  = isFree ? "#9CA3AF" : (p.id === "producer" ? "#C026D3" : "#3B82F6");
+          var glowClr2 = isFree ? "#9CA3AF" : (p.id === "producer" ? "#A855F7" : "#7C3AED");
           return (
-            <div key={p.id} style={{
-              flex: 1, background: "#111", border: "1.5px solid " + p.color,
-              borderRadius: 14, padding: compact ? "10px 8px" : "14px 12px", textAlign: "left",
-              position: "relative", overflow: "hidden",
-            }}>
+            <div key={p.id}
+              onClick={function() { if (onSelectPlan) onSelectPlan(p.id, priceId, billing); }}
+              style={{
+                flex: 1,
+                background: isSelected
+                  ? "linear-gradient(160deg,rgba(124,58,237,0.08) 0%,#0d0d12 60%,#0a0a0e 100%)"
+                  : "#111",
+                border: "1.5px solid " + (isSelected ? glowClr : (p.color + "55")),
+                borderRadius: 14,
+                padding: compact ? "10px 8px" : "14px 12px",
+                textAlign: "left",
+                position: "relative",
+                overflow: "hidden",
+                cursor: "pointer",
+                transform: isSelected ? "translateY(-2px)" : "none",
+                transition: "all 0.22s cubic-bezier(0.22, 1, 0.36, 1)",
+                boxShadow: isSelected
+                  ? "0 8px 28px " + glowClr + "44, 0 0 0 1px " + glowClr + "88, 0 0 32px " + glowClr2 + "55, inset 0 1px 0 rgba(255,255,255,0.08)"
+                  : "none",
+              }}>
+              {/* LED corner glow when selected — softens edges with neon halo */}
+              {isSelected && (
+                <>
+                  <div style={{
+                    position: "absolute", top: -20, left: -20, width: 60, height: 60,
+                    background: "radial-gradient(circle," + glowClr + "66 0%,transparent 70%)",
+                    pointerEvents: "none",
+                  }} />
+                  <div style={{
+                    position: "absolute", bottom: -20, right: -20, width: 60, height: 60,
+                    background: "radial-gradient(circle," + glowClr2 + "55 0%,transparent 70%)",
+                    pointerEvents: "none",
+                  }} />
+                  {/* SELECTED badge — top right corner */}
+                  <div style={{
+                    position: "absolute", top: 6, right: 6,
+                    background: "linear-gradient(135deg," + glowClr + "," + glowClr2 + ")",
+                    color: "white", fontSize: 8, fontWeight: 900,
+                    padding: "3px 7px", borderRadius: 20,
+                    letterSpacing: 0.8,
+                    boxShadow: "0 0 12px " + glowClr + "88",
+                    zIndex: 2,
+                  }}>✓ SELECTED</div>
+                </>
+              )}
               {!isFree && billing === "yearly" && (
                 <div style={{
                   position: "absolute", top: 0, right: 0,
@@ -2735,20 +2781,31 @@ function PlanPicker({ onSelectPlan, compact }) {
                 );
               })}
               {onSelectPlan && (
-                <button onClick={function() { onSelectPlan(p.id, priceId, billing); }}
+                <button
+                  onClick={function(e) { e.stopPropagation(); onSelectPlan(p.id, priceId, billing); }}
                   style={{
                     width: "100%", marginTop: compact ? 8 : 12,
-                    background: isFree
-                      ? "transparent"
-                      : "linear-gradient(135deg," + p.color + ",#7C3AED)",
-                    border: isFree ? ("1.5px solid " + p.color) : "none",
+                    background: isSelected
+                      ? "linear-gradient(135deg," + glowClr + " 0%," + glowClr2 + " 100%)"
+                      : (isFree
+                        ? "transparent"
+                        : "linear-gradient(135deg," + p.color + ",#7C3AED)"),
+                    border: isSelected
+                      ? ("1.5px solid " + glowClr)
+                      : (isFree ? ("1.5px solid " + p.color) : "none"),
                     borderRadius: 10,
-                    color: isFree ? p.color : "white",
-                    fontWeight: 800, fontSize: compact ? 11 : 13,
+                    color: isSelected ? "white" : (isFree ? p.color : "white"),
+                    fontWeight: 900, fontSize: compact ? 11 : 13,
                     padding: compact ? "7px 4px" : "11px",
                     cursor: "pointer",
+                    letterSpacing: 0.5,
+                    boxShadow: isSelected
+                      ? "0 0 16px " + glowClr + "88, inset 0 1px 0 rgba(255,255,255,0.25)"
+                      : "none",
+                    textShadow: isSelected ? "0 1px 2px rgba(0,0,0,0.3)" : "none",
+                    transition: "all 0.18s ease",
                   }}>
-                  {isFree ? "Start Free" : "Subscribe"}
+                  {isSelected ? "✓ SELECTED" : (isFree ? "Start Free" : "Subscribe")}
                 </button>
               )}
             </div>
@@ -9509,20 +9566,46 @@ function BeatsTabContent({ profile, currentUser, onViewProfile }) {
     <div style={{ padding: "0 16px" }}>
       {freeBeats.length > 0 && (
         <div style={{ marginBottom: 24 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(192,38,211,0.2)" }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#C026D3" }} />
-            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 13 }}>FREE BEATS</div>
-            <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "1px 8px", fontSize: 10, color: "#C026D3", fontWeight: 700 }}>{freeBeats.length}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(192,38,211,0.25)" }}>
+            <div style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+              boxShadow: "0 0 8px #C026D3cc, 0 0 14px #7C3AED88",
+            }} />
+            <div style={{
+              color: "#E9D5FF", fontWeight: 900, fontSize: 13, letterSpacing: 1,
+              textShadow: "0 0 8px rgba(192,38,211,0.55)",
+            }}>FREE BEATS</div>
+            <div style={{
+              background: "linear-gradient(135deg,rgba(192,38,211,0.2),rgba(124,58,237,0.2))",
+              border: "1px solid rgba(192,38,211,0.5)",
+              borderRadius: 20, padding: "1px 8px",
+              fontSize: 10, color: "#F3E8FF", fontWeight: 800,
+              boxShadow: "0 0 10px rgba(192,38,211,0.35)",
+            }}>{freeBeats.length}</div>
           </div>
           {freeBeats.map(function(b) { return <ProfileBeatCard key={b.id} beat={b} currentUser={currentUser} onViewProfile={onViewProfile} />; })}
         </div>
       )}
       {licensedBeats.length > 0 && (
         <div style={{ marginBottom: 24 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(245,158,11,0.2)" }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#F59E0B" }} />
-            <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 13 }}>LICENSED BEATS</div>
-            <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "1px 8px", fontSize: 10, color: "#F59E0B", fontWeight: 700 }}>{licensedBeats.length}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid rgba(124,58,237,0.25)" }}>
+            <div style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: "linear-gradient(135deg,#7C3AED,#3B82F6)",
+              boxShadow: "0 0 8px #7C3AEDcc, 0 0 14px #3B82F688",
+            }} />
+            <div style={{
+              color: "#A78BFA", fontWeight: 900, fontSize: 13, letterSpacing: 1,
+              textShadow: "0 0 8px rgba(124,58,237,0.55)",
+            }}>LICENSED BEATS</div>
+            <div style={{
+              background: "linear-gradient(135deg,rgba(124,58,237,0.2),rgba(59,130,246,0.2))",
+              border: "1px solid rgba(124,58,237,0.5)",
+              borderRadius: 20, padding: "1px 8px",
+              fontSize: 10, color: "#DDD6FE", fontWeight: 800,
+              boxShadow: "0 0 10px rgba(124,58,237,0.35)",
+            }}>{licensedBeats.length}</div>
           </div>
           {licensedBeats.map(function(b) { return <ProfileBeatCard key={b.id} beat={b} currentUser={currentUser} onViewProfile={onViewProfile} />; })}
         </div>
@@ -9534,19 +9617,47 @@ function BeatsTabContent({ profile, currentUser, onViewProfile }) {
     <div style={{ padding: "0 12px" }}>
       <div style={{ display: "flex", gap: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(192,38,211,0.2)" }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#C026D3", flexShrink: 0 }} />
-            <div style={{ color: "#C026D3", fontWeight: 800, fontSize: 11 }}>FREE</div>
-            <div style={{ background: "rgba(192,38,211,0.15)", border: "1px solid rgba(192,38,211,0.3)", borderRadius: 20, padding: "1px 6px", fontSize: 9, color: "#C026D3", fontWeight: 700 }}>{freeBeats.length}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(192,38,211,0.25)" }}>
+            <div style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+              boxShadow: "0 0 6px #C026D3cc, 0 0 10px #7C3AED88",
+              flexShrink: 0,
+            }} />
+            <div style={{
+              color: "#E9D5FF", fontWeight: 900, fontSize: 11, letterSpacing: 0.8,
+              textShadow: "0 0 6px rgba(192,38,211,0.55)",
+            }}>FREE</div>
+            <div style={{
+              background: "linear-gradient(135deg,rgba(192,38,211,0.2),rgba(124,58,237,0.2))",
+              border: "1px solid rgba(192,38,211,0.5)",
+              borderRadius: 20, padding: "1px 6px",
+              fontSize: 9, color: "#F3E8FF", fontWeight: 800,
+              boxShadow: "0 0 8px rgba(192,38,211,0.35)",
+            }}>{freeBeats.length}</div>
           </div>
           {freeBeats.map(function(b) { return <CompactBeatCard key={b.id} beat={b} currentUser={currentUser} />; })}
         </div>
         <div style={{ width: 1, background: "rgba(255,255,255,0.05)", flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(245,158,11,0.2)" }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#F59E0B", flexShrink: 0 }} />
-            <div style={{ color: "#F59E0B", fontWeight: 800, fontSize: 11 }}>LICENSED</div>
-            <div style={{ background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "1px 6px", fontSize: 9, color: "#F59E0B", fontWeight: 700 }}>{licensedBeats.length}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid rgba(124,58,237,0.25)" }}>
+            <div style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: "linear-gradient(135deg,#7C3AED,#3B82F6)",
+              boxShadow: "0 0 6px #7C3AEDcc, 0 0 10px #3B82F688",
+              flexShrink: 0,
+            }} />
+            <div style={{
+              color: "#A78BFA", fontWeight: 900, fontSize: 11, letterSpacing: 0.8,
+              textShadow: "0 0 6px rgba(124,58,237,0.55)",
+            }}>LICENSED</div>
+            <div style={{
+              background: "linear-gradient(135deg,rgba(124,58,237,0.2),rgba(59,130,246,0.2))",
+              border: "1px solid rgba(124,58,237,0.5)",
+              borderRadius: 20, padding: "1px 6px",
+              fontSize: 9, color: "#DDD6FE", fontWeight: 800,
+              boxShadow: "0 0 8px rgba(124,58,237,0.35)",
+            }}>{licensedBeats.length}</div>
           </div>
           {licensedBeats.map(function(b) { return <CompactBeatCard key={b.id} beat={b} currentUser={currentUser} />; })}
         </div>
@@ -11629,7 +11740,7 @@ function RootAuthScreen({ onLogin, startMode }) {
       {mode === "signup" && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ color: "#888", fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>CHOOSE YOUR PLAN</div>
-          <PlanPicker compact onSelectPlan={function(planId, priceId) {
+          <PlanPicker compact selectedPlanId={selectedPlan} onSelectPlan={function(planId, priceId) {
             setSelectedPlan(planId);
             setSelectedPriceId(priceId);
           }} />
