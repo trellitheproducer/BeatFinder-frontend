@@ -43,25 +43,6 @@ const LOADER_STYLE = `
   .bf-nav-btn:active { transform: scale(0.85); }
   .bf-play    { animation: bf-play-pulse 2s ease infinite; }
   .bf-carousel { scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
-  /* ── Contract / Action Sheet — iOS PWA scroll fix ──
-     The sheet's backdrop overlay MUST scroll in iOS PWA contexts even when
-     its parent tab container has a captured -webkit-overflow-scrolling
-     context. !important is required to defeat any clamp from a parent class.
-     The inner panel scrolls inside the wrapper; the wrapper itself scrolls
-     in case the panel content is taller than 85vh on small screens. */
-  .bf-sheet-wrapper {
-    position: fixed !important;
-    inset: 0 !important;
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch !important;
-    overscroll-behavior: contain !important;
-  }
-  .bf-sheet-panel {
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch !important;
-    overscroll-behavior: contain !important;
-    padding-bottom: 120px !important;
-  }
   * { scrollbar-width: none; -ms-overflow-style: none; }
   *::-webkit-scrollbar { display: none; }
   .bf-save    { transition: transform 0.18s cubic-bezier(0.34,1.56,0.64,1), color 0.15s ease; }
@@ -5895,7 +5876,7 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
       ) : null}
     />
     {sheetOpen && (
-      <CompactBeatActionSheet beat={beat} user={user} onClose={function(){ setSheetOpen(false); }} />
+      <CompactBeatActionSheet beat={beat} user={user} compact={true} onClose={function(){ setSheetOpen(false); }} />
     )}
     </>
   );
@@ -6189,7 +6170,7 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
           ) : null}
         />
         {sheetOpen && (
-          <CompactBeatActionSheet beat={beat} user={user} onClose={function(){ setSheetOpen(false); }} />
+          <CompactBeatActionSheet beat={beat} user={user} compact={true} onClose={function(){ setSheetOpen(false); }} />
         )}
       </div>
     );
@@ -8367,7 +8348,7 @@ function ArtistTrackCard({ track, isOwner, onDeleted, onViewProfile }) {
 // The local signedKey flag is reserved for the contract-acceptance state AFTER
 // the purchase is verified — it never marks a paid purchase. Cancelling the
 // Stripe checkout therefore can NEVER unlock the download.
-function CompactBeatActionSheet({ beat, user, onClose }) {
+function CompactBeatActionSheet({ beat, user, onClose, compact }) {
   var isFreePrice = function(p) { return !p || p === "free" || p === "£0" || p === "0" || p === "£0.00" || p === "0.00"; };
   var isFree   = isFreePrice(beat.price);
   var accent   = isFree ? "#C026D3" : "#F59E0B";
@@ -8555,33 +8536,31 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
         />
       )}
 
-      <div onClick={onClose} className="bf-sheet-wrapper" style={{
-        zIndex: 99998,
+      <div onClick={onClose} style={{
+        position: "fixed", inset: 0, zIndex: 99998,
         background: "rgba(0,0,0,0.75)",
         display: "flex", alignItems: "flex-end", justifyContent: "center",
       }}>
-        <div ref={sheetPanelRef} onClick={function(e) { e.stopPropagation(); }} className="bf-sheet-panel" style={{
+        <div ref={sheetPanelRef} onClick={function(e) { e.stopPropagation(); }} style={{
           width: "100%", maxWidth: 480,
           background: "#0d0d0d", borderTop: "1px solid #222",
           borderRadius: "20px 20px 0 0", padding: 18,
-          maxHeight: "85vh",
-          position: "relative",
+          paddingBottom: compact
+            ? "calc(72px + env(safe-area-inset-bottom) + 24px)"
+            : "max(env(safe-area-inset-bottom), 18px)",
+          maxHeight: compact
+            ? "calc(100dvh - 72px - env(safe-area-inset-bottom) - 24px)"
+            : "85vh",
+          marginBottom: compact
+            ? "calc(72px + env(safe-area-inset-bottom))"
+            : 0,
+          overflowY: "auto", WebkitOverflowScrolling: "touch",
         }}>
           {/* Drag handle */}
           <div style={{ width: 40, height: 4, background: "#333", borderRadius: 2, margin: "0 auto 14px" }} />
 
-          {/* Close button — position absolute so it doesn't interfere with scroll */}
-          <button onClick={onClose} style={{
-            position: "absolute", top: 14, right: 14, zIndex: 5,
-            width: 32, height: 32, borderRadius: "50%",
-            background: "rgba(0,0,0,0.7)", border: "1px solid #333",
-            color: "#aaa", fontSize: 15, cursor: "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
-          }}>✕</button>
-
           {/* Beat header */}
-          <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, paddingRight: 40 }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
             <div style={{ width: 48, height: 48, borderRadius: 10, overflow: "hidden", flexShrink: 0, background: "#111" }}>
               <img src="https://i.ibb.co/v4wcZVJW/IMG-9119.jpg" alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             </div>
@@ -8590,6 +8569,12 @@ function CompactBeatActionSheet({ beat, user, onClose }) {
               <div style={{ color: "white", fontWeight: 800, fontSize: 14, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{beat.title}</div>
               <div style={{ color: "#666", fontSize: 11, marginTop: 2 }}>by {producer}</div>
             </div>
+            <button onClick={onClose} style={{
+              width: 30, height: 30, borderRadius: "50%",
+              background: "rgba(255,255,255,0.05)", border: "1px solid #222",
+              color: "#888", fontSize: 14, cursor: "pointer", flexShrink: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>✕</button>
           </div>
 
           {/* Pop-up block warning — only renders if blocked */}
