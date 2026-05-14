@@ -20631,7 +20631,22 @@ function StudioScreen({ user, onExit }) {
         else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
       }
     };
-    const onUp = function () {
+    const onUp = function (ue) {
+      // Tap-to-seek: if user released without dragging (no commit happened
+      // and movement was minimal) AND loop is disabled, jump the playhead
+      // to the tapped position. If playing, continue playback from there.
+      const drag = rulerDragRef.current;
+      const movedFar = drag && Math.abs((ue && ue.clientX) - drag.startX) > 4;
+      const wasTap = drag && !drag.committed && !movedFar;
+      if (wasTap && !loopEnabled) {
+        const wasPlaying = isPlayingRef.current;
+        const seekT = drag.startT;
+        syncUItoTime(seekT);
+        if (wasPlaying) {
+          setIsPlaying(false);
+          doPlay(seekT).then(function() { setIsPlaying(true); });
+        }
+      }
       rulerDragRef.current = null;
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup",   onUp);
@@ -20676,6 +20691,24 @@ function StudioScreen({ user, onExit }) {
       if (nt > rulerDragRef.current.startT) setLoopOut(Math.max(nt, rulerDragRef.current.startT + spb));
       else { setLoopIn(Math.min(nt, rulerDragRef.current.startT)); setLoopOut(rulerDragRef.current.startT); }
     }
+  };
+
+  // Touch end on the ruler — tap-to-seek for non-loop mode. When the user
+  // releases without having dragged (no commit, minimal movement), and the
+  // loop is off, jump the playhead to where they tapped. Continues playback
+  // from the new position if a track was playing.
+  const handleRulerTouchEnd = function (e) {
+    const drag = rulerDragRef.current;
+    if (drag && !drag.committed && !loopEnabled) {
+      const wasPlaying = isPlayingRef.current;
+      const seekT = drag.startT;
+      syncUItoTime(seekT);
+      if (wasPlaying) {
+        setIsPlaying(false);
+        doPlay(seekT).then(function() { setIsPlaying(true); });
+      }
+    }
+    rulerDragRef.current = null;
   };
 
   const handleScroll = function (e) {
@@ -23641,6 +23674,8 @@ userPickedMicRef.current = true;
                 onMouseDown={handleRulerMouseDown}
                 onTouchStart={handleRulerTouchStart}
                 onTouchMove={handleRulerTouchMove}
+                onTouchEnd={handleRulerTouchEnd}
+                onTouchCancel={handleRulerTouchEnd}
               >
                 {Array.from({length:numBars}, function(_,bi){
                   const bx = bi * spBar * effectivePPS;
