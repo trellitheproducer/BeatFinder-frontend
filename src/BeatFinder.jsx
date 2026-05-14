@@ -3617,7 +3617,7 @@ function WorkspaceSection({ user, savedLyrics, onEditLyric, onPlay, savedIds, on
 // =============================================================================
 // NOTIFICATIONS PANEL
 // =============================================================================
-function NotificationsPanel({ user, onClose }) {
+function NotificationsPanel({ user, onClose, onJumpToFeed }) {
   var [notifs,  setNotifs]  = React.useState([]);
   var [loading, setLoading] = React.useState(true);
 
@@ -3643,6 +3643,15 @@ function NotificationsPanel({ user, onClose }) {
     if (type === "message") return (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
     );
+    if (type === "post") return (
+      // Wifi/signal icon for new posts from people you follow
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+        <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+        <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+        <circle cx="12" cy="20" r="0.5" fill="#A78BFA"/>
+      </svg>
+    );
     return (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
     );
@@ -3656,19 +3665,46 @@ function NotificationsPanel({ user, onClose }) {
     return Math.floor(diff / 86400) + "d ago";
   }
 
+  // Tap behaviour: "post" type notifications jump to the Feed tab.
+  // Other types are display-only for now (likes/comments could open the
+  // post detail later — out of scope for this feature).
+  function handleNotifTap(n) {
+    if (n.type === "post" && onJumpToFeed) {
+      onJumpToFeed();
+      onClose();
+    }
+  }
+
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 9500, background: "rgba(0,0,0,0.7)" }}
       onClick={function(e) { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ position: "absolute", top: 0, right: 0, width: "min(360px, 100vw)",
-        height: "100dvh", background: "#0d0d0d", borderLeft: "1px solid #1a1a1a",
+      <div style={{
+        position: "absolute", top: 0, right: 0, width: "min(360px, 100vw)",
+        height: "100dvh",
+        background: "linear-gradient(180deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+        borderLeft: "1px solid rgba(124,58,237,0.25)",
         display: "flex", flexDirection: "column",
-        paddingTop: "env(safe-area-inset-top)" }}>
+        paddingTop: "env(safe-area-inset-top)",
+        boxShadow: "-12px 0 32px rgba(0,0,0,0.5)",
+      }}>
+        {/* LED top edge */}
+        <div style={{
+          position: "absolute", top: "env(safe-area-inset-top)", left: 0, right: 0, height: 1,
+          background: "linear-gradient(90deg,transparent,rgba(192,38,211,0.4),rgba(124,58,237,0.4),rgba(59,130,246,0.4),transparent)",
+        }} />
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "16px 16px 12px", borderBottom: "1px solid #1a1a1a", flexShrink: 0 }}>
-          <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>Notifications</div>
+          padding: "16px 16px 12px", borderBottom: "1px solid rgba(124,58,237,0.2)", flexShrink: 0 }}>
+          <div style={{
+            fontFamily: "'Bebas Neue',sans-serif",
+            fontSize: 22, letterSpacing: 2, fontWeight: 700,
+            background: "linear-gradient(90deg,#C026D3,#7C3AED,#3B82F6)",
+            WebkitBackgroundClip: "text", backgroundClip: "text",
+            color: "transparent",
+            filter: "drop-shadow(0 0 8px rgba(124,58,237,0.3))",
+          }}>NOTIFICATIONS</div>
           <button onClick={onClose}
-            style={{ background: "none", border: "none", color: "#555", fontSize: 22, cursor: "pointer", padding: 4 }}>
+            style={{ background: "none", border: "none", color: "#A78BFA", fontSize: 22, cursor: "pointer", padding: 4 }}>
             ✕
           </button>
         </div>
@@ -3677,32 +3713,39 @@ function NotificationsPanel({ user, onClose }) {
         <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch" }}
           onTouchMove={function(e) { e.stopPropagation(); }}>
           {loading && (
-            <div style={{ textAlign: "center", padding: "60px 0", color: "#555" }}>Loading...</div>
+            <div style={{ textAlign: "center", padding: "60px 0", color: "#A78BFA" }}>Loading...</div>
           )}
           {!loading && notifs.length === 0 && (
             <div style={{ textAlign: "center", padding: "60px 24px" }}>
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round" style={{ marginBottom: 12 }}>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(124,58,237,0.4)" strokeWidth="1.5" strokeLinecap="round" style={{ marginBottom: 12, filter:"drop-shadow(0 0 8px rgba(124,58,237,0.3))" }}>
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
               </svg>
-              <div style={{ color: "#444", fontWeight: 700, fontSize: 15 }}>No notifications yet</div>
-              <div style={{ color: "#333", fontSize: 13, marginTop: 6 }}>Activity from likes, comments and purchases will appear here</div>
+              <div style={{ color: "#A78BFA", fontWeight: 700, fontSize: 15 }}>No notifications yet</div>
+              <div style={{ color: "#6b6685", fontSize: 13, marginTop: 6 }}>Likes, comments, posts and purchases will show here</div>
             </div>
           )}
           {!loading && notifs.map(function(n) {
+            var clickable = n.type === "post";
             return (
-              <div key={n.id} style={{ display: "flex", alignItems: "flex-start", gap: 12,
-                padding: "14px 16px", borderBottom: "1px solid #111",
-                background: n.read ? "transparent" : "rgba(192,38,211,0.05)" }}>
+              <div key={n.id} onClick={function(){ handleNotifTap(n); }}
+                style={{
+                  display: "flex", alignItems: "flex-start", gap: 12,
+                  padding: "14px 16px", borderBottom: "1px solid rgba(124,58,237,0.1)",
+                  background: n.read ? "transparent" : "rgba(124,58,237,0.06)",
+                  cursor: clickable ? "pointer" : "default",
+                }}>
                 <div style={{ width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
-                  background: "#1a1a1a", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  background: "linear-gradient(135deg,rgba(124,58,237,0.15),rgba(192,38,211,0.10))",
+                  border: "1px solid rgba(124,58,237,0.25)",
+                  display: "flex", alignItems: "center", justifyContent: "center" }}>
                   {iconForType(n.type)}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: "white", fontSize: 13, lineHeight: 1.5 }}>{n.text}</div>
-                  <div style={{ color: "#555", fontSize: 11, marginTop: 4 }}>{timeAgo(n.createdAt)}</div>
+                  <div style={{ color: "#6b6685", fontSize: 11, marginTop: 4 }}>{timeAgo(n.createdAt)}</div>
                 </div>
                 {!n.read && (
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#C026D3", flexShrink: 0, marginTop: 4 }} />
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#C026D3", flexShrink: 0, marginTop: 4, boxShadow:"0 0 6px rgba(192,38,211,0.6)" }} />
                 )}
               </div>
             );
@@ -4058,7 +4101,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
 // posts (status, music, video). Has proper loading / error / empty states
 // so the user always sees feedback when the tab is opened.
 // =============================================================================
-function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearchPeople }) {
+function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearchPeople, refreshKey }) {
   var [items, setItems]     = React.useState([]);
   var [loading, setLoading] = React.useState(true);
   var [error, setError]     = React.useState(null);
@@ -4079,7 +4122,52 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
       });
   }
 
+  // Quiet background refresh — same fetch, but doesn't toggle the loading
+  // spinner or reset error state. Used by the 30s polling timer and the
+  // window-focus re-fetch so the feed stays live without flicker.
+  function quietLoad() {
+    if (!user) return;
+    apiFetch("/api/auth/feed?limit=30")
+      .then(function(list) {
+        if (list) setItems(list);
+      })
+      .catch(function() { /* keep old items on transient failure */ });
+  }
+
   React.useEffect(function() { load(false); }, [user && user.id]);
+
+  // Live refresh on demand — when the user posts (refreshKey bumps from
+  // the App level), re-fetch immediately so their own post appears at
+  // the top of their feed.
+  React.useEffect(function() {
+    if (refreshKey > 0) quietLoad();
+  }, [refreshKey]);
+
+  // Background polling — every 30s while the feed tab is mounted AND
+  // the page is visible, pull the latest posts so users see new content
+  // from people they follow without manually refreshing.
+  React.useEffect(function() {
+    if (!user) return;
+    var timer = null;
+    var tick = function() {
+      // Only poll when the document is visible — saves bandwidth + battery
+      if (!document.hidden) quietLoad();
+    };
+    timer = setInterval(tick, 30000);
+    // Refresh whenever the user returns to the tab (e.g. switches back
+    // from another app or another tab) — gives them an instant fresh feed.
+    var onVisibility = function() {
+      if (!document.hidden) quietLoad();
+    };
+    var onFocus = function() { quietLoad(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    return function() {
+      if (timer) clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [user && user.id]);
 
   // Logged-out state — prompt to sign in
   if (!user) {
@@ -27145,10 +27233,14 @@ export default function BeatFinder() {
     return function() { document.removeEventListener("visibilitychange", rehydrate); };
   }, [user]);
 
-  // Poll unread counts every 30s when logged in
+  // Poll unread counts every 15s when logged in, plus an immediate
+  // refresh whenever the tab becomes visible again. This keeps the bell
+  // badge live without hammering the server (15s × hidden = paused).
   useEffect(() => {
     if (!user) { setUnreadMessages(0); setUnreadNotifications(0); return; }
     function fetchUnread() {
+      // Skip polling when the tab is hidden — saves Render request quota
+      if (document.hidden) return;
       apiFetch("/api/notifications/unread-count")
         .then(function(d) {
           setUnreadMessages(d.messages || 0);
@@ -27157,8 +27249,17 @@ export default function BeatFinder() {
         .catch(function() {});
     }
     fetchUnread();
-    var interval = setInterval(fetchUnread, 30000);
-    return function() { clearInterval(interval); };
+    var interval = setInterval(fetchUnread, 15000);
+    // Immediate refresh when user returns to the tab
+    var onVis = function() { if (!document.hidden) fetchUnread(); };
+    var onFocus = function() { fetchUnread(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onFocus);
+    return function() {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [user]);
 
   // When user opens messages, clear message badge
@@ -27459,6 +27560,9 @@ export default function BeatFinder() {
   const [searchProfile, setSearchProfile] = useState(null);
   const [showMessages,       setShowMessages]       = useState(false);
   const [showPost,           setShowPost]           = useState(false);
+  // Bumped each time the user successfully posts, so the FollowingFeed
+  // re-fetches and shows their own post immediately at the top.
+  const [feedRefreshKey,     setFeedRefreshKey]     = useState(0);
   const [messageThread,      setMessageThread]      = useState(null);
   const [showNotifications,  setShowNotifications]  = useState(false);
   const [unreadMessages,     setUnreadMessages]     = useState(0);
@@ -27738,7 +27842,7 @@ export default function BeatFinder() {
           >
             {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => openMessages(null)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} onOpenPost={() => setShowPost(true)} onOpenNotifications={openNotifications} unreadMessages={unreadMessages} unreadNotifications={unreadNotifications} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} resetKey={artistsResetKey} />}
-            {t === "feed"      && <FollowingFeed user={user} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onViewProfile={function(u) { setPublicProfile(u); }} onSearchPeople={function() { setSearchInitialTab("people"); goTab("search"); }} />}
+            {t === "feed"      && <FollowingFeed user={user} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onViewProfile={function(u) { setPublicProfile(u); }} onSearchPeople={function() { setSearchInitialTab("people"); goTab("search"); }} refreshKey={feedRefreshKey} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} onViewProfile={function(u) { setPublicProfile(u); }} user={user} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} initialTab={searchInitialTab} onClearInitialTab={() => setSearchInitialTab(null)} currentUser={user} onViewProfile={function(u) { setSearchProfile(u); }} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
@@ -27783,11 +27887,16 @@ export default function BeatFinder() {
       </div>
 
       {showPost && (
-        <PostSheet user={user} onClose={() => setShowPost(false)} onPosted={() => setShowPost(false)} />
+        <PostSheet user={user} onClose={() => setShowPost(false)} onPosted={() => {
+          setShowPost(false);
+          // Bump the feed refresh key so FollowingFeed re-fetches and the
+          // user's own post appears at the top of the live feed immediately.
+          setFeedRefreshKey(k => k + 1);
+        }} />
       )}
 
       {showNotifications && (
-        <NotificationsPanel user={user} onClose={() => setShowNotifications(false)} />
+        <NotificationsPanel user={user} onClose={() => setShowNotifications(false)} onJumpToFeed={() => goTab("feed")} />
       )}
 
       {searchProfile && (
