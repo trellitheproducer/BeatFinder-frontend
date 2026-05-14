@@ -5418,8 +5418,24 @@ function FreeBeatCTA({ beat, user }) {
         }
       } catch (e) {}
     }
+    // Listen for server hydration completing — components mount BEFORE the
+    // server-side /my-free-licences fetch resolves, so their initial read
+    // of localStorage misses agreements made in a different browser context
+    // (PWA vs Safari tab). When App.tsx dispatches this event after writing
+    // hydrated IDs to localStorage, this re-reads and updates UI state.
+    function onHydrated() {
+      try {
+        if (window.localStorage && window.localStorage.getItem(signedKey)) {
+          setStep("done");
+        }
+      } catch (e) {}
+    }
     document.addEventListener("visibilitychange", onVis);
-    return function() { document.removeEventListener("visibilitychange", onVis); };
+    window.addEventListener("bf-free-licences-hydrated", onHydrated);
+    return function() {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("bf-free-licences-hydrated", onHydrated);
+    };
   }, [signedKey]);
 
   // Always use the backend proxy for downloads — it sets Content-Disposition: attachment
@@ -5586,6 +5602,33 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
   // LED theme: free = magenta-violet glow, paid = electric purple-to-blue
   var accentClr = isFree ? "#C026D3" : "#7C3AED";
   var accentClr2 = isFree ? "#7C3AED" : "#3B82F6";
+
+  // Check if the current user already owns a lease for this beat. Reads from
+  // the global lease cache populated by App.tsx on login/Stripe-success, and
+  // re-checks when the "bf-leases-updated" event fires (e.g. after a fresh
+  // purchase, cache refresh on login, or cross-context sync). This lets the
+  // card show "OWNED ✓ DOWNLOAD" instead of "BUY £50" once a lease is
+  // confirmed — consistent across PWA / Safari tab / multi-device.
+  var [ownedLease, setOwnedLease] = React.useState(function() {
+    try {
+      if (isFree || !user || !Array.isArray(window.__bf_leases__)) return null;
+      var match = window.__bf_leases__.find(function(l){ return (l.beat_id === beat.id || l.id === beat.id) && !l.voided; });
+      return match || null;
+    } catch(e) { return null; }
+  });
+  React.useEffect(function() {
+    if (isFree || !user) { setOwnedLease(null); return; }
+    function check() {
+      try {
+        if (!Array.isArray(window.__bf_leases__)) return;
+        var match = window.__bf_leases__.find(function(l){ return (l.beat_id === beat.id || l.id === beat.id) && !l.voided; });
+        setOwnedLease(match || null);
+      } catch(e) {}
+    }
+    check();
+    window.addEventListener("bf-leases-updated", check);
+    return function() { window.removeEventListener("bf-leases-updated", check); };
+  }, [isFree, beat.id, user]);
   var totalSecs = Math.floor(previewTime || 0);
   var progMins  = String(Math.floor(totalSecs / 60)).padStart(2, "0");
   var progSecs  = String(totalSecs % 60).padStart(2, "0");
@@ -5756,6 +5799,40 @@ function NewBeatCardShell({ beat, previewTime, previewing, onTogglePreview, audi
       {/* CTA */}
       {isFree ? (
         <FreeBeatCTA beat={beat} user={user} />
+      ) : ownedLease ? (
+        /* OWNED state — user already purchased a lease for this beat.
+           Replaces buy buttons across PWA / Safari / multi-device. */
+        <div style={{ padding: "0 16px 16px" }}>
+          <button
+            onClick={function(){ onBuy && onBuy(ownedLease.tier === "premium" ? "premium" : "basic"); }}
+            style={{
+              width: "100%", borderRadius: 14, padding: "14px",
+              background: ownedLease.tier === "premium"
+                ? "linear-gradient(135deg,#C026D3 0%,#A855F7 35%,#7C3AED 70%,#3B82F6 100%)"
+                : "linear-gradient(135deg,#3B82F6 0%,#6366F1 50%,#7C3AED 100%)",
+              border: "1.5px solid " + (ownedLease.tier === "premium" ? "rgba(192,38,211,0.6)" : "rgba(124,58,237,0.6)"),
+              color: "white", fontWeight: 900, fontSize: 14,
+              cursor: "pointer", letterSpacing: 0.8,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              boxShadow: ownedLease.tier === "premium"
+                ? "0 4px 20px rgba(192,38,211,0.55), 0 0 36px rgba(168,85,247,0.4), inset 0 1px 0 rgba(255,255,255,0.3), inset 0 -2px 4px rgba(0,0,0,0.25)"
+                : "0 4px 20px rgba(124,58,237,0.45), 0 0 32px rgba(59,130,246,0.35), inset 0 1px 0 rgba(255,255,255,0.25), inset 0 -2px 4px rgba(0,0,0,0.2)",
+              textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+              position: "relative", overflow: "hidden",
+            }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" style={{ filter: "drop-shadow(0 0 4px rgba(255,255,255,0.9))" }}>
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            OWNED — {ownedLease.tier === "premium" ? "PREMIUM EXCLUSIVE" : "BASIC LEASE"}
+          </button>
+          <div style={{
+            marginTop: 8, textAlign: "center",
+            color: accentClr, fontSize: 10, fontWeight: 800, letterSpacing: 1,
+            textShadow: "0 0 6px " + accentClr + "55",
+          }}>
+            TAP TO DOWNLOAD MP3
+          </div>
+        </div>
       ) : (
         <div style={{ padding: "0 16px 16px" }}>
           {(function() {
@@ -7722,6 +7799,27 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   // LED theme: free = magenta-violet, paid = electric purple-to-blue
   var accentClr  = isFree ? "#C026D3" : "#7C3AED";
   var accentClr2 = isFree ? "#7C3AED" : "#3B82F6";
+  // Check the global lease cache for ownership of THIS beat.
+  var [ownedLease, setOwnedLease] = React.useState(function() {
+    try {
+      if (isFree || !currentUser || !Array.isArray(window.__bf_leases__)) return null;
+      var match = window.__bf_leases__.find(function(l){ return (l.beat_id === beat.id || l.id === beat.id) && !l.voided; });
+      return match || null;
+    } catch(e) { return null; }
+  });
+  React.useEffect(function() {
+    if (isFree || !currentUser) { setOwnedLease(null); return; }
+    function check() {
+      try {
+        if (!Array.isArray(window.__bf_leases__)) return;
+        var match = window.__bf_leases__.find(function(l){ return (l.beat_id === beat.id || l.id === beat.id) && !l.voided; });
+        setOwnedLease(match || null);
+      } catch(e) {}
+    }
+    check();
+    window.addEventListener("bf-leases-updated", check);
+    return function() { window.removeEventListener("bf-leases-updated", check); };
+  }, [isFree, beat.id, currentUser]);
   var previewId = React.useRef("profile_" + beat.id);
 
   function startPreview() {
@@ -8012,6 +8110,39 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
                 Sign Up to Download
               </button>
           }
+        </div>
+      ) : ownedLease ? (
+        /* OWNED state — user already purchased a lease for this beat */
+        <div style={{ padding: "0 16px 16px" }}>
+          <button
+            onClick={function(){ setSheetOpen(true); }}
+            style={{
+              width: "100%", borderRadius: 14, padding: "14px",
+              background: ownedLease.tier === "premium"
+                ? "linear-gradient(135deg,#C026D3 0%,#A855F7 35%,#7C3AED 70%,#3B82F6 100%)"
+                : "linear-gradient(135deg,#3B82F6 0%,#6366F1 50%,#7C3AED 100%)",
+              border: "1.5px solid " + (ownedLease.tier === "premium" ? "rgba(192,38,211,0.6)" : "rgba(124,58,237,0.6)"),
+              color: "white", fontWeight: 900, fontSize: 14,
+              cursor: "pointer", letterSpacing: 0.8,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              boxShadow: ownedLease.tier === "premium"
+                ? "0 4px 20px rgba(192,38,211,0.55), 0 0 36px rgba(168,85,247,0.4), inset 0 1px 0 rgba(255,255,255,0.3), inset 0 -2px 4px rgba(0,0,0,0.25)"
+                : "0 4px 20px rgba(124,58,237,0.45), 0 0 32px rgba(59,130,246,0.35), inset 0 1px 0 rgba(255,255,255,0.25), inset 0 -2px 4px rgba(0,0,0,0.2)",
+              textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+              position: "relative", overflow: "hidden",
+            }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" style={{ filter: "drop-shadow(0 0 4px rgba(255,255,255,0.9))" }}>
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            OWNED — {ownedLease.tier === "premium" ? "PREMIUM EXCLUSIVE" : "BASIC LEASE"}
+          </button>
+          <div style={{
+            marginTop: 8, textAlign: "center",
+            color: accentClr, fontSize: 10, fontWeight: 800, letterSpacing: 1,
+            textShadow: "0 0 6px " + accentClr + "55",
+          }}>
+            TAP TO DOWNLOAD MP3
+          </div>
         </div>
       ) : (
         <div style={{ padding: "0 16px 16px" }}>
@@ -8503,7 +8634,23 @@ function CompactBeatActionSheet({ beat, user, onClose, compact }) {
     if (sheetPanelRef.current) {
       try { sheetPanelRef.current.scrollTop = 0; } catch(e) {}
     }
-  }, []);
+    // When server hydration of free-licence agreements completes, re-check
+    // localStorage. The sheet may have been opened before the boot-time
+    // fetch resolved, so the initial useState read would have missed
+    // hydrated entries from a different browser context (PWA vs Safari).
+    function onHydrated() {
+      if (!isFree) return;
+      try {
+        if (window.localStorage && window.localStorage.getItem(signedKey)) {
+          setStep("done");
+        }
+      } catch (e) {}
+    }
+    window.addEventListener("bf-free-licences-hydrated", onHydrated);
+    return function() {
+      window.removeEventListener("bf-free-licences-hydrated", onHydrated);
+    };
+  }, [isFree, signedKey]);
 
   // For LICENSED beats, check if the user owns a lease for this beat. Reads
   // from the global cache (window.__bf_leases__) first — that's populated by
@@ -9053,6 +9200,27 @@ function CompactBeatCard({ beat, currentUser }) {
   var [previewTime, setPreviewTime] = React.useState(0);
   var [buyLoading, setBuyLoading] = React.useState(false);
   var [sheetOpen, setSheetOpen] = React.useState(false);
+  // Check global lease cache for ownership of this beat
+  var [ownedLease, setOwnedLease] = React.useState(function() {
+    try {
+      if (isFree || !currentUser || !Array.isArray(window.__bf_leases__)) return null;
+      var match = window.__bf_leases__.find(function(l){ return (l.beat_id === beat.id || l.id === beat.id) && !l.voided; });
+      return match || null;
+    } catch(e) { return null; }
+  });
+  React.useEffect(function() {
+    if (isFree || !currentUser) { setOwnedLease(null); return; }
+    function check() {
+      try {
+        if (!Array.isArray(window.__bf_leases__)) return;
+        var match = window.__bf_leases__.find(function(l){ return (l.beat_id === beat.id || l.id === beat.id) && !l.voided; });
+        setOwnedLease(match || null);
+      } catch(e) {}
+    }
+    check();
+    window.addEventListener("bf-leases-updated", check);
+    return function() { window.removeEventListener("bf-leases-updated", check); };
+  }, [isFree, beat.id, currentUser]);
   React.useEffect(function() {
     function onReopen(e) {
       if (e && e.detail && e.detail.beat_id === beat.id) setSheetOpen(true);
@@ -9187,6 +9355,28 @@ function CompactBeatCard({ beat, currentUser }) {
               }
             </svg>
             FREE
+          </button>
+        ) : ownedLease ? (
+          /* OWNED state — small pill button showing the user owns this beat */
+          <button onClick={function() { setSheetOpen(true); }} style={{
+            background: ownedLease.tier === "premium"
+              ? "linear-gradient(135deg,#C026D3 0%,#A855F7 35%,#7C3AED 70%,#3B82F6 100%)"
+              : "linear-gradient(135deg,#3B82F6 0%,#6366F1 50%,#7C3AED 100%)",
+            border: "1.5px solid " + (ownedLease.tier === "premium" ? "rgba(192,38,211,0.6)" : "rgba(124,58,237,0.6)"),
+            borderRadius: 20, padding: "5px 11px",
+            color: "white", fontSize: 9, fontWeight: 900,
+            cursor: "pointer", flexShrink: 0,
+            display: "flex", alignItems: "center", gap: 4,
+            letterSpacing: 0.5,
+            boxShadow: ownedLease.tier === "premium"
+              ? "0 2px 10px rgba(192,38,211,0.5), 0 0 16px rgba(168,85,247,0.35), inset 0 1px 0 rgba(255,255,255,0.25)"
+              : "0 2px 10px rgba(124,58,237,0.4), 0 0 14px rgba(59,130,246,0.3), inset 0 1px 0 rgba(255,255,255,0.2)",
+            textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+          }}>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" style={{ filter: "drop-shadow(0 0 3px rgba(255,255,255,0.9))" }}>
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            OWNED
           </button>
         ) : (function() {
           // Render tier buttons on the compact card.
@@ -23479,6 +23669,12 @@ export default function BeatFinder() {
             ids.forEach(function(id) {
               try { localStorage.setItem("bf_signed_free_" + id, "1"); } catch(e) {}
             });
+            // Tell already-mounted FreeBeatCTA components to re-read
+            // localStorage. They mount BEFORE this hydration completes,
+            // so their initial useState read missed these IDs — without
+            // this event, the UI would stay in the "unsigned" state until
+            // the user refreshes the page.
+            try { window.dispatchEvent(new CustomEvent("bf-free-licences-hydrated")); } catch(e) {}
           })
           .catch(function() { /* non-fatal */ });
         // Also hydrate the paid-lease cache so beat sheets that need to check
@@ -23799,6 +23995,7 @@ export default function BeatFinder() {
                 ids.forEach(function(id) {
                   try { localStorage.setItem("bf_signed_free_" + id, "1"); } catch(e) {}
                 });
+                try { window.dispatchEvent(new CustomEvent("bf-free-licences-hydrated")); } catch(e) {}
               })
               .catch(function() { /* non-fatal */ });
             // Also hydrate the paid-lease cache so every sheet renders the
