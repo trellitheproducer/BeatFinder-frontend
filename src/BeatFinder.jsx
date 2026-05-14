@@ -23117,15 +23117,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         // Use raw (unsnapped) position so the playhead lands exactly
         // where the user clicked, not at the nearest beat.
         const seekT = (typeof drag.rawT === "number") ? drag.rawT : drag.startT;
-        // Move the playhead via direct DOM mutation first — instant
-        // visual response — then defer the React state update one
-        // frame so the heavy Studio re-render doesn't block the
-        // click handler and cause perceptible lag.
-        playheadAtRef.current = seekT;
-        liveTimeRef.current   = seekT;
-        const el = scrollRef.current;
-        if (el) updatePlayheadDOM(seekT, el.scrollLeft);
-        requestAnimationFrame(function() { syncUItoTime(seekT); });
+        syncUItoTime(seekT);
         if (wasPlaying) {
           setIsPlaying(false);
           doPlay(seekT).then(function() { setIsPlaying(true); });
@@ -23238,17 +23230,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         // user expects precise positioning. Falls back to startT for
         // legacy state objects without rawT.
         const seekT = (typeof drag.rawT === "number") ? drag.rawT : drag.startT;
-        // Update playhead position via direct DOM mutation FIRST so
-        // the user sees the playhead jump immediately, without waiting
-        // for React to re-render the entire Studio component (which
-        // is heavy enough to cause perceptible lag). The React state
-        // update for currentTime still happens — but inside
-        // requestAnimationFrame so it doesn't block the touch handler.
-        playheadAtRef.current = seekT;
-        liveTimeRef.current   = seekT;
-        const el = scrollRef.current;
-        if (el) updatePlayheadDOM(seekT, el.scrollLeft);
-        requestAnimationFrame(function() { syncUItoTime(seekT); });
+        syncUItoTime(seekT);
         if (wasPlaying) {
           setIsPlaying(false);
           doPlay(seekT).then(function() { setIsPlaying(true); });
