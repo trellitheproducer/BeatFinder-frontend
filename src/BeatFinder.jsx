@@ -6881,25 +6881,155 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
     React.useEffect(function() { return function() { clearInterval(tRef.current); }; }, []);
 
     return (
-      <div style={{ flexShrink: 0, width: 168 }}>
-        <NewBeatCardShell
-          beat={beat}
-          previewing={prev}
-          previewTime={pTime}
-          onTogglePreview={startPrev}
-          onDownload={function(){ downloadMp3(beat.url, beat.title, beat.id); }}
-          onBuy={handleBuy}
-          buyLoading={buyLoading}
-          buyErr={buyErr}
-          user={user}
-          onViewProfile={onViewProfile}
-          audioEl={prev && beat.url ? (
-            <audio ref={aRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
-              onPlay={function(){ onPlay(); if (aRef.current && (beat.preview_start||0) > 0 && !seekedRef.current) { aRef.current.currentTime = beat.preview_start; seekedRef.current = true; } }}
-              onPause={function(){ clearInterval(tRef.current); }}
-              onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
-          ) : null}
-        />
+      <div style={{
+        flexShrink: 0, width: 170, height: 170,
+        background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+        borderRadius: 16, overflow: "hidden",
+        border: "1px solid rgba(124,58,237,0.25)",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.5), 0 0 0 1px rgba(124,58,237,0.08)",
+        position: "relative",
+        display: "flex", flexDirection: "column",
+      }}>
+        {/* LED top edge */}
+        <div style={{
+          height: 2, flexShrink: 0,
+          background: isFree
+            ? "linear-gradient(90deg,transparent,#C026D3,#7C3AED,transparent)"
+            : "linear-gradient(90deg,transparent,#7C3AED,#3B82F6,transparent)",
+          boxShadow: isFree ? "0 0 8px rgba(192,38,211,0.7)" : "0 0 8px rgba(124,58,237,0.7)",
+        }} />
+
+        {/* Top half — gradient background with producer avatar fade-in,
+            big play button overlay (tap = preview). FREE / £price badge
+            sits top-right corner. */}
+        <div
+          onClick={startPrev}
+          style={{
+            flex: 1, position: "relative", overflow: "hidden", cursor: "pointer",
+            background: isFree
+              ? "linear-gradient(135deg,#1a0a2e 0%,#2a0a4a 50%,#3b0070 100%)"
+              : "linear-gradient(135deg,#0f0a1f 0%,#1e1a45 50%,#1E40AF 100%)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+          {beat.producer_avatar && (
+            <img src={beat.producer_avatar} alt=""
+              style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.45 }} />
+          )}
+          <div style={{ position: "absolute", inset: 0,
+            background: "linear-gradient(to top,rgba(0,0,0,0.75),transparent 55%)" }} />
+
+          {/* Play / pause button — large, centered */}
+          <div style={{ position: "absolute", inset: 0,
+            display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{
+              width: 44, height: 44, borderRadius: "50%",
+              background: prev
+                ? "linear-gradient(135deg,#C026D3,#7C3AED)"
+                : "rgba(0,0,0,0.55)",
+              border: "1.5px solid " + (prev ? "rgba(192,38,211,0.8)" : "rgba(255,255,255,0.25)"),
+              display: "flex", alignItems: "center", justifyContent: "center",
+              boxShadow: prev
+                ? "0 0 16px rgba(192,38,211,0.7)"
+                : "0 4px 12px rgba(0,0,0,0.5)",
+              color: "white",
+            }}>
+              {prev
+                ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3.5l15 8.5-15 8.5V3.5z"/></svg>
+              }
+            </div>
+          </div>
+
+          {/* FREE / price badge — top-right */}
+          <div style={{
+            position: "absolute", top: 6, right: 6,
+            background: isFree
+              ? "linear-gradient(135deg,#C026D3,#7C3AED)"
+              : "linear-gradient(135deg,#7C3AED,#3B82F6)",
+            color: "white", fontSize: 9, fontWeight: 900,
+            padding: "3px 8px", borderRadius: 10, letterSpacing: 0.5,
+            boxShadow: "0 2px 6px rgba(0,0,0,0.5)",
+            textShadow: "0 1px 1px rgba(0,0,0,0.3)",
+          }}>
+            {isFree ? "FREE" : (beat.basic_lease_price ? "£" + beat.basic_lease_price : (beat.price || "PAID"))}
+          </div>
+
+          {/* Preview progress bar — only visible while previewing */}
+          {prev && (
+            <div style={{
+              position: "absolute", bottom: 0, left: 0, right: 0,
+              height: 2, background: "rgba(255,255,255,0.1)",
+            }}>
+              <div style={{
+                height: "100%", width: ((pTime / 45) * 100) + "%",
+                background: "linear-gradient(90deg,#C026D3,#7C3AED,#3B82F6)",
+                boxShadow: "0 0 6px rgba(192,38,211,0.6)",
+                transition: "width 0.1s linear",
+              }} />
+            </div>
+          )}
+
+          {/* Title (bottom of thumbnail area) */}
+          <div style={{
+            position: "absolute", bottom: 0, left: 0, right: 0,
+            padding: "0 8px 6px",
+          }}>
+            <div style={{
+              color: "white", fontSize: 11, fontWeight: 800, lineHeight: 1.2,
+              overflow: "hidden", display: "-webkit-box",
+              WebkitLineClamp: 1, WebkitBoxOrient: "vertical",
+              textShadow: "0 1px 2px rgba(0,0,0,0.7)",
+            }}>{beat.title || "Untitled"}</div>
+            <div style={{
+              color: "#A78BFA", fontSize: 9, fontWeight: 600, marginTop: 1,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              textShadow: "0 1px 2px rgba(0,0,0,0.7)",
+            }}>@{beat.producer_username || beat.producer || "Producer"}</div>
+          </div>
+        </div>
+
+        {/* Audio element (hidden) */}
+        {prev && beat.url && (
+          <audio ref={aRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
+            onPlay={function(){ onPlay(); if (aRef.current && (beat.preview_start||0) > 0 && !seekedRef.current) { aRef.current.currentTime = beat.preview_start; seekedRef.current = true; } }}
+            onPause={function(){ clearInterval(tRef.current); }}
+            onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
+        )}
+
+        {/* Bottom CTA strip — opens the full action sheet for tier selection */}
+        <button
+          onClick={function() {
+            if (beat.premium_sold && (!user || (user.id !== beat.premium_sold_to && user.id !== beat.producer_id))) {
+              setBuyErr("Sold exclusively");
+              return;
+            }
+            setSheetBeat(beat);
+          }}
+          style={{
+            flexShrink: 0, width: "100%", padding: "8px",
+            background: isFree
+              ? "linear-gradient(135deg,#C026D3 0%,#A855F7 50%,#7C3AED 100%)"
+              : "linear-gradient(135deg,#7C3AED 0%,#6366F1 50%,#3B82F6 100%)",
+            border: "none",
+            color: "white", fontWeight: 900, fontSize: 10, letterSpacing: 0.7,
+            cursor: "pointer",
+            borderTop: "1px solid rgba(255,255,255,0.08)",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+            textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15)",
+          }}>
+          {isFree ? (
+            <>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 3v13M6 11l6 6 6-6"/><path d="M4 20h16"/></svg>
+              GET FREE
+            </>
+          ) : (
+            <>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              BUY LEASE
+            </>
+          )}
+        </button>
       </div>
     );
   };
