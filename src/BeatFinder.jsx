@@ -3898,16 +3898,6 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
         </button>
 
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          {/* + Post button — Pro users only */}
-          {user && (user.isPro || user.isArtistPro) && (
-            <button onClick={onOpenPost}
-              style={{ width: 36, height: 36, borderRadius: "50%", background: "#2a2a2a",
-                border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#aaa" strokeWidth="2.5" strokeLinecap="round">
-                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-            </button>
-          )}
           {/* Bell notifications icon */}
           {user && (
             <button onClick={onOpenNotifications} style={{ background: "none", border: "none", padding: 8, cursor: "pointer", position: "relative" }}>
@@ -4101,7 +4091,7 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
 // posts (status, music, video). Has proper loading / error / empty states
 // so the user always sees feedback when the tab is opened.
 // =============================================================================
-function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearchPeople, refreshKey }) {
+function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearchPeople, onOpenPost, refreshKey }) {
   var [items, setItems]     = React.useState([]);
   var [loading, setLoading] = React.useState(true);
   var [error, setError]     = React.useState(null);
@@ -4116,6 +4106,124 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
     return function() { clearInterval(id); };
   }, []);
 
+  // Per-post interaction state — keyed by post id
+  var [postLikes,    setPostLikes]    = React.useState({});  // { id: boolean }
+  var [postReposts,  setPostReposts]  = React.useState({});  // { id: boolean }
+  var [postComments, setPostComments] = React.useState({});  // { id: comment[] }
+  var [openCommentsFor, setOpenCommentsFor] = React.useState(null); // post.id | null
+  // Which post's ••• menu is currently open. Null = none. We use the
+  // feed-item id (the wrapper id for reposts) so each card menu is
+  // independently togglable.
+  var [openMenuFor, setOpenMenuFor] = React.useState(null);
+
+  // Delete a post the user owns, OR remove the user's own repost. The
+  // backend's DELETE /api/posts/{id} verifies the requester's username
+  // matches the doc's username, so either case works through the same
+  // endpoint. We pass the WRAPPER id (the item.id from the feed) so
+  // reposts delete the wrapper, not the underlying original.
+  function deleteOwnPost(wrapperId) {
+    if (!wrapperId) return;
+    if (!window.confirm("Delete this post? This cannot be undone.")) return;
+    // Optimistic — remove from view immediately, restore on error
+    var removed = null;
+    setItems(function(prev) {
+      var n = prev.filter(function(it) {
+        if (it.id === wrapperId) { removed = it; return false; }
+        return true;
+      });
+      return n;
+    });
+    apiFetch("/api/posts/" + wrapperId, { method: "DELETE" })
+      .catch(function() {
+        // Restore on failure
+        if (removed) setItems(function(prev) { return [removed].concat(prev); });
+        alert("Failed to delete.");
+      });
+  }
+
+
+  // After we load the feed, hydrate liked/reposted state for the current user
+  // for every post we got back. We do this in parallel so the UI hot-states
+  // appear quickly. Failures are non-fatal — buttons just stay grey.
+  function hydrateInteractionState(list) {
+    if (!user || !list) return;
+    list.forEach(function(it) {
+      if (it.kind !== "post" || !it.id) return;
+      apiFetch("/api/posts/" + it.id + "/liked")
+        .then(function(r) { setPostLikes(function(p) { var n = Object.assign({}, p); n[it.id] = !!(r && r.liked); return n; }); })
+        .catch(function() {});
+      apiFetch("/api/posts/" + it.id + "/reposted")
+        .then(function(r) { setPostReposts(function(p) { var n = Object.assign({}, p); n[it.id] = !!(r && r.reposted); return n; }); })
+        .catch(function() {});
+    });
+  }
+
+  function togglePostLike(id) {
+    if (!user) return;
+    var wasLiked = !!postLikes[id];
+    // optimistic
+    setPostLikes(function(p) { var n = Object.assign({}, p); n[id] = !wasLiked; return n; });
+    setItems(function(prev) { return prev.map(function(it) {
+      return it.id === id ? Object.assign({}, it, { likeCount: Math.max(0, (it.likeCount || 0) + (!wasLiked ? 1 : -1)) }) : it;
+    }); });
+    apiFetch("/api/posts/" + id + "/like", { method: "POST" })
+      .then(function(r) { setPostLikes(function(p) { var n = Object.assign({}, p); n[id] = !!(r && r.liked); return n; }); })
+      .catch(function() {
+        // revert
+        setPostLikes(function(p) { var n = Object.assign({}, p); n[id] = wasLiked; return n; });
+        setItems(function(prev) { return prev.map(function(it) {
+          return it.id === id ? Object.assign({}, it, { likeCount: Math.max(0, (it.likeCount || 0) + (wasLiked ? 1 : -1)) }) : it;
+        }); });
+      });
+  }
+
+  function togglePostRepost(id) {
+    if (!user) return;
+    var wasReposted = !!postReposts[id];
+    // optimistic
+    setPostReposts(function(p) { var n = Object.assign({}, p); n[id] = !wasReposted; return n; });
+    setItems(function(prev) { return prev.map(function(it) {
+      return it.id === id ? Object.assign({}, it, { repostCount: Math.max(0, (it.repostCount || 0) + (!wasReposted ? 1 : -1)) }) : it;
+    }); });
+    var method = wasReposted ? "DELETE" : "POST";
+    apiFetch("/api/posts/" + id + "/repost", { method: method })
+      .then(function(r) { setPostReposts(function(p) { var n = Object.assign({}, p); n[id] = !!(r && r.reposted); return n; }); })
+      .catch(function() {
+        setPostReposts(function(p) { var n = Object.assign({}, p); n[id] = wasReposted; return n; });
+        setItems(function(prev) { return prev.map(function(it) {
+          return it.id === id ? Object.assign({}, it, { repostCount: Math.max(0, (it.repostCount || 0) + (wasReposted ? 1 : -1)) }) : it;
+        }); });
+      });
+  }
+
+  function loadCommentsFor(id) {
+    apiFetch("/api/posts/" + id + "/comments")
+      .then(function(data) { setPostComments(function(p) { var n = Object.assign({}, p); n[id] = data || []; return n; }); })
+      .catch(function() {});
+  }
+
+  function submitPostComment(postId, text, parentId, onSuccess, onError) {
+    apiFetch("/api/posts/" + postId + "/comments", {
+      method: "POST", body: JSON.stringify({ text: text, parentId: parentId || null })
+    }).then(function(c) {
+      setPostComments(function(p) { var n = Object.assign({}, p); n[postId] = [...(n[postId] || []), c]; return n; });
+      setItems(function(prev) { return prev.map(function(it) {
+        return it.id === postId ? Object.assign({}, it, { commentCount: (it.commentCount || 0) + 1 }) : it;
+      }); });
+      if (onSuccess) onSuccess();
+    }).catch(function() { if (onError) onError(); });
+  }
+
+  function deletePostComment(postId, commentId) {
+    apiFetch("/api/posts/" + postId + "/comments/" + commentId, { method: "DELETE" })
+      .then(function() {
+        setPostComments(function(p) { var n = Object.assign({}, p); n[postId] = (n[postId] || []).filter(function(c) { return c.id !== commentId; }); return n; });
+        setItems(function(prev) { return prev.map(function(it) {
+          return it.id === postId ? Object.assign({}, it, { commentCount: Math.max(0, (it.commentCount || 0) - 1) }) : it;
+        }); });
+      }).catch(function() {});
+  }
+
   function load(showSpinner) {
     if (!user) { setItems([]); setLoading(false); return; }
     if (showSpinner) setRefreshing(true); else setLoading(true);
@@ -4123,6 +4231,7 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
       .then(function(list) {
         setItems(list || []);
         setLoading(false); setRefreshing(false); setError(null);
+        hydrateInteractionState(list);
       })
       .catch(function(err) {
         setError(err && err.message);
@@ -4137,7 +4246,7 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
     if (!user) return;
     apiFetch("/api/auth/feed?limit=30")
       .then(function(list) {
-        if (list) setItems(list);
+        if (list) { setItems(list); hydrateInteractionState(list); }
       })
       .catch(function() { /* keep old items on transient failure */ });
   }
@@ -4305,7 +4414,8 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
   }
 
   return (
-    <div style={{ paddingTop: 16, paddingBottom: 80 }}>
+    <div style={{ paddingTop: 16, paddingBottom: 80 }}
+      onClick={function() { if (openMenuFor) setOpenMenuFor(null); }}>
       {/* Big screen header (dedicated tab) */}
       <div style={{ padding: "0 16px 14px" }}>
         <div style={{
@@ -4356,6 +4466,22 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
               <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
             </svg>
           </button>
+          {/* + Compose Post button — Pro users only. Moved here from Home header. */}
+          {user && (user.isPro || user.isArtistPro) && onOpenPost && (
+            <button onClick={onOpenPost}
+              style={{
+                width: 36, height: 36, borderRadius: "50%",
+                background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+                border: "none", color: "white", cursor: "pointer", flexShrink: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                boxShadow: "0 4px 12px rgba(124,58,237,0.45)",
+              }}
+              title="Create a post">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
+          )}
         </div>
         {/* Count pill */}
         <div style={{
@@ -4454,14 +4580,46 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
       {/* Posts feed (Twitter-style cards stacked vertically) */}
       {posts.length > 0 && (
         <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-          {posts.map(function(post) {
+          {posts.map(function(item) {
+            // Reposts: the feed item is owned by the reposter but the
+            // payload it carries (text/images/etc.) is the ORIGINAL post.
+            // We show "reposted by @reposter" above the original author's
+            // identity. like/comment/repost actions still target the
+            // ORIGINAL post id (so a repost is a re-share, not a new post
+            // with its own engagement). Action ids prefer original.id then
+            // fall back to repost id (legacy data).
+            var isRepost = !!(item.repost_of && item.original_post);
+            var post = isRepost ? Object.assign({}, item.original_post, {
+              // Keep counts from the merged item if the backend already merged them
+              likeCount:    item.original_post.likeCount    || 0,
+              commentCount: item.original_post.commentCount || 0,
+              repostCount:  item.original_post.repostCount  || 0,
+            }) : item;
+            var actionId  = isRepost ? (item.original_post.id || item.repost_of) : item.id;
+            var liked     = !!postLikes[actionId];
+            var reposted  = !!postReposts[actionId];
+
             return (
-              <div key={post.id} style={{
+              <div key={item.id} style={{
                 background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
                 borderRadius: 14, overflow: "hidden",
                 border: "1px solid rgba(124,58,237,0.18)",
                 boxShadow: "0 4px 14px rgba(0,0,0,0.45)",
               }}>
+                {/* "Reposted by …" chip — only shown for reposts */}
+                {isRepost && (
+                  <div style={{
+                    padding: "8px 14px 0", display: "flex", alignItems: "center",
+                    gap: 6, color: "#A78BFA", fontSize: 11, fontWeight: 700,
+                  }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/>
+                      <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/>
+                    </svg>
+                    <span>Reposted by @{item.username}</span>
+                  </div>
+                )}
                 {/* Header: avatar + username + time */}
                 <div style={{ padding: "12px 14px 8px", display: "flex", alignItems: "center", gap: 10 }}>
                   <Avatar url={post.user_avatar} username={post.username} />
@@ -4472,6 +4630,55 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
                     </div>
                     <div style={{ color: "#666", fontSize: 10, marginTop: 1 }}>{timeAgo(post.created_at)}</div>
                   </div>
+                  {/* ••• menu — only shown if the current user owns this feed
+                      item. For reposts that's the reposter (item.username);
+                      for normal posts it's the author (post.username). The
+                      backend DELETE endpoint enforces the same check so this
+                      is just to keep the UI clean. */}
+                  {user && user.username && user.username === item.username && (
+                    <div style={{ position: "relative", flexShrink: 0 }}
+                      onClick={function(e) { e.stopPropagation(); }}>
+                      <button
+                        onClick={function() {
+                          setOpenMenuFor(openMenuFor === item.id ? null : item.id);
+                        }}
+                        style={{
+                          background: "none", border: "none", color: "#555",
+                          cursor: "pointer", fontSize: 18, padding: "4px 8px",
+                          lineHeight: 1, borderRadius: 6,
+                        }}
+                        aria-label="Post options">•••</button>
+                      {openMenuFor === item.id && (
+                        <div style={{
+                          position: "absolute", right: 0, top: "100%", zIndex: 100,
+                          background: "#1a1a1a", border: "1px solid #2a2a2a",
+                          borderRadius: 10, minWidth: 140,
+                          boxShadow: "0 4px 20px rgba(0,0,0,0.6)", overflow: "hidden",
+                          marginTop: 4,
+                        }}>
+                          <button
+                            onClick={function() {
+                              setOpenMenuFor(null);
+                              deleteOwnPost(item.id);
+                            }}
+                            style={{
+                              width: "100%", background: "none", border: "none",
+                              padding: "12px 16px", color: "#F87171",
+                              fontSize: 13, fontWeight: 700, cursor: "pointer",
+                              textAlign: "left", display: "flex",
+                              alignItems: "center", gap: 8,
+                            }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                              stroke="#F87171" strokeWidth="2" strokeLinecap="round">
+                              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+                              <path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                            </svg>
+                            {isRepost ? "Remove Repost" : "Delete Post"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Text */}
@@ -4520,20 +4727,90 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
                   </video>
                 )}
 
-                {/* Counters */}
-                {(post.likeCount > 0 || post.commentCount > 0) && (
-                  <div style={{ padding: "10px 14px",
-                    color: "#666", fontSize: 11, fontWeight: 700,
-                    borderTop: "1px solid rgba(255,255,255,0.04)",
-                    display: "flex", gap: 14 }}>
-                    {post.likeCount > 0 && <span>{post.likeCount} {post.likeCount === 1 ? "like" : "likes"}</span>}
-                    {post.commentCount > 0 && <span>{post.commentCount} {post.commentCount === 1 ? "comment" : "comments"}</span>}
-                  </div>
-                )}
+                {/* Action bar — like / comment / repost. Always shown so the
+                    user can engage even when counts are zero. Disabled if not
+                    signed in. */}
+                <div style={{
+                  padding: "8px 6px", borderTop: "1px solid rgba(255,255,255,0.04)",
+                  display: "flex", alignItems: "center",
+                }}>
+                  {/* Like */}
+                  <button
+                    onClick={function() { if (user) togglePostLike(actionId); }}
+                    disabled={!user}
+                    style={{
+                      flex: 1, background: "none", border: "none",
+                      cursor: user ? "pointer" : "not-allowed",
+                      padding: "8px 6px",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      color: liked ? "#EF4444" : "#888", fontSize: 12, fontWeight: 700,
+                    }}>
+                    <svg width="17" height="17" viewBox="0 0 24 24"
+                      fill={liked ? "#EF4444" : "none"} stroke="currentColor"
+                      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
+                    </svg>
+                    {post.likeCount > 0 && <span>{post.likeCount}</span>}
+                  </button>
+                  {/* Comment */}
+                  <button
+                    onClick={function() {
+                      loadCommentsFor(actionId);
+                      setOpenCommentsFor(actionId);
+                    }}
+                    style={{
+                      flex: 1, background: "none", border: "none", cursor: "pointer",
+                      padding: "8px 6px",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      color: "#888", fontSize: 12, fontWeight: 700,
+                    }}>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/>
+                    </svg>
+                    {post.commentCount > 0 && <span>{post.commentCount}</span>}
+                  </button>
+                  {/* Repost — only enabled for signed-in users, can't repost your own post */}
+                  <button
+                    onClick={function() {
+                      if (!user) return;
+                      if (post.username === user.username) return;
+                      togglePostRepost(actionId);
+                    }}
+                    disabled={!user || post.username === (user && user.username)}
+                    title={post.username === (user && user.username) ? "You can't repost your own post" : ""}
+                    style={{
+                      flex: 1, background: "none", border: "none",
+                      cursor: (!user || post.username === (user && user.username)) ? "not-allowed" : "pointer",
+                      padding: "8px 6px",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      color: reposted ? "#10B981" : "#888", fontSize: 12, fontWeight: 700,
+                      opacity: post.username === (user && user.username) ? 0.4 : 1,
+                    }}>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/>
+                      <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/>
+                    </svg>
+                    {post.repostCount > 0 && <span>{post.repostCount}</span>}
+                  </button>
+                </div>
               </div>
             );
           })}
         </div>
+      )}
+
+      {/* Comments bottom sheet — reused from existing component */}
+      {openCommentsFor && (
+        <CommentsBottomSheet
+          contentId={openCommentsFor}
+          itemComments={postComments[openCommentsFor] || []}
+          currentUser={user}
+          onSubmit={submitPostComment}
+          onDelete={deletePostComment}
+          onClose={function() { setOpenCommentsFor(null); }}
+        />
       )}
 
       {/* Image lightbox */}
@@ -11300,9 +11577,36 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
           {loading ? (
             <div style={{ textAlign: "center", padding: "40px 0", color: "#555" }}>Loading...</div>
           ) : posts.length > 0 ? (
-            posts.map(function(post) {
+            posts.map(function(wrapper) {
+              // Reposts on profile: the doc itself is a thin wrapper, the
+              // displayed content (text/images/embed/etc.) comes from the
+              // original post the user reposted. The wrapper still owns
+              // the timestamp ("when did you repost it") and the menu
+              // actions (delete repost). The "Reposted" chip is rendered
+              // above the original poster's identity. Normal posts: no
+              // original_post, display === wrapper.
+              var isRepost = !!(wrapper.repost_of && wrapper.original_post);
+              var post = isRepost ? Object.assign({}, wrapper.original_post, {
+                // Keep id as the original's id so like/comment buttons
+                // target the underlying post, not the repost wrapper.
+                id: wrapper.original_post.id,
+              }) : wrapper;
               return (
-                <div key={post.id} style={{ background: "#111", borderRadius: 16, border: "1px solid #1e1e1e", marginBottom: 14, overflow: "hidden" }}>
+                <div key={wrapper.id} style={{ background: "#111", borderRadius: 16, border: "1px solid #1e1e1e", marginBottom: 14, overflow: "hidden" }}>
+                  {/* Reposted-by chip — only shown for reposts */}
+                  {isRepost && (
+                    <div style={{
+                      padding: "10px 14px 0", display: "flex", alignItems: "center",
+                      gap: 6, color: "#A78BFA", fontSize: 11, fontWeight: 700,
+                    }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/>
+                        <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/>
+                      </svg>
+                      <span>Reposted by @{wrapper.username}</span>
+                    </div>
+                  )}
                   {/* Post header */}
                   <div style={{ padding: "12px 14px 8px", display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
@@ -11315,27 +11619,27 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ color: "white", fontWeight: 700, fontSize: 14 }}>@{post.username}</div>
-                      <div style={{ color: "#444", fontSize: 11 }}>{new Date(post.createdAt).toLocaleDateString()}</div>
+                      <div style={{ color: "#444", fontSize: 11 }}>{new Date(wrapper.createdAt).toLocaleDateString()}</div>
                     </div>
                     {isOwner && (
                       <div style={{ position: "relative", flexShrink: 0 }}>
-                        <button onClick={function(e) { e.stopPropagation(); setOpenMenu(openMenu === post.id ? null : post.id); }}
+                        <button onClick={function(e) { e.stopPropagation(); setOpenMenu(openMenu === wrapper.id ? null : wrapper.id); }}
                           style={{ background: "none", border: "none", color: "#555", cursor: "pointer",
                             fontSize: 20, padding: "2px 6px", lineHeight: 1, borderRadius: 6 }}>
                           •••
                         </button>
-                        {openMenu === post.id && (
+                        {openMenu === wrapper.id && (
                           <div style={{ position: "absolute", right: 0, top: "100%", zIndex: 100,
                             background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 10,
                             minWidth: 120, boxShadow: "0 4px 20px rgba(0,0,0,0.6)", overflow: "hidden" }}>
-                            <button onClick={function(e) { e.stopPropagation(); setOpenMenu(null); deletePost(post.id); }}
+                            <button onClick={function(e) { e.stopPropagation(); setOpenMenu(null); deletePost(wrapper.id); }}
                               style={{ width: "100%", background: "none", border: "none", padding: "12px 16px",
                                 color: "#F87171", fontSize: 13, fontWeight: 700, cursor: "pointer",
                                 textAlign: "left", display: "flex", alignItems: "center", gap: 8 }}>
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F87171" strokeWidth="2" strokeLinecap="round">
                                 <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
                               </svg>
-                              Delete Post
+                              {isRepost ? "Remove Repost" : "Delete Post"}
                             </button>
                           </div>
                         )}
@@ -27852,7 +28156,7 @@ export default function BeatFinder() {
           >
             {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => openMessages(null)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} onOpenPost={() => setShowPost(true)} onOpenNotifications={openNotifications} unreadMessages={unreadMessages} unreadNotifications={unreadNotifications} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} resetKey={artistsResetKey} />}
-            {t === "feed"      && <FollowingFeed user={user} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onViewProfile={function(u) { setPublicProfile(u); }} onSearchPeople={function() { setSearchInitialTab("people"); goTab("search"); }} refreshKey={feedRefreshKey} />}
+            {t === "feed"      && <FollowingFeed user={user} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onViewProfile={function(u) { setPublicProfile(u); }} onSearchPeople={function() { setSearchInitialTab("people"); goTab("search"); }} onOpenPost={() => setShowPost(true)} refreshKey={feedRefreshKey} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} onViewProfile={function(u) { setPublicProfile(u); }} user={user} />}
             {t === "search"    && <SearchScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} initialQuery={searchQuery} onClearInitial={() => setSearchQuery("")} initialTab={searchInitialTab} onClearInitialTab={() => setSearchInitialTab(null)} currentUser={user} onViewProfile={function(u) { setSearchProfile(u); }} />}
             {t === "saved"     && <SavedScreen savedMap={savedMap} savedIds={savedIds} onSave={toggleSave} user={user} onGoProfile={() => goTab("profile")} onPlay={handlePlay} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} />}
