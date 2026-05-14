@@ -6881,89 +6881,25 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
     React.useEffect(function() { return function() { clearInterval(tRef.current); }; }, []);
 
     return (
-      <div onClick={function() { setSheetBeat(beat); }} className="bf-card" style={{
-        flexShrink: 0, width: 168, cursor: "pointer",
-        background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
-        borderRadius: 16, overflow: "hidden",
-        border: "1px solid rgba(124,58,237,0.25)",
-        boxShadow: "0 4px 16px rgba(0,0,0,0.5), 0 0 0 1px rgba(124,58,237,0.08)",
-        position: "relative",
-      }}>
-        {/* LED top edge — neon purple-to-blue to match the LED theme */}
-        <div style={{
-          height: 2,
-          background: isFree
-            ? "linear-gradient(90deg,transparent,#C026D3,#7C3AED,transparent)"
-            : "linear-gradient(90deg,transparent,#7C3AED,#3B82F6,transparent)",
-          boxShadow: isFree ? "0 0 8px rgba(192,38,211,0.7)" : "0 0 8px rgba(124,58,237,0.7)",
-        }} />
-
-        {/* Thumbnail area (108px tall — matches CarouselCard).
-            Producer beats don't have YouTube thumbnails, so we show a styled
-            gradient block with the producer's avatar and a play icon overlay. */}
-        <div style={{
-          position: "relative", height: 106, overflow: "hidden",
-          background: isFree
-            ? "linear-gradient(135deg,#1a0a2e 0%,#2a0a4a 50%,#3b0070 100%)"
-            : "linear-gradient(135deg,#0f0a1f 0%,#1e1a45 50%,#1E40AF 100%)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          {beat.producer_avatar ? (
-            <img src={beat.producer_avatar} alt=""
-              style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.55 }} />
+      <div style={{ flexShrink: 0, width: 168 }}>
+        <NewBeatCardShell
+          beat={beat}
+          previewing={prev}
+          previewTime={pTime}
+          onTogglePreview={startPrev}
+          onDownload={function(){ downloadMp3(beat.url, beat.title, beat.id); }}
+          onBuy={handleBuy}
+          buyLoading={buyLoading}
+          buyErr={buyErr}
+          user={user}
+          onViewProfile={onViewProfile}
+          audioEl={prev && beat.url ? (
+            <audio ref={aRef} src={beat.url} autoPlay data-start-time={String(beat.preview_start || 0)}
+              onPlay={function(){ onPlay(); if (aRef.current && (beat.preview_start||0) > 0 && !seekedRef.current) { aRef.current.currentTime = beat.preview_start; seekedRef.current = true; } }}
+              onPause={function(){ clearInterval(tRef.current); }}
+              onTimeUpdate={onTimeUpdate} onEnded={stopPrev} />
           ) : null}
-          <div style={{ position: "absolute", inset: 0,
-            background: "linear-gradient(to top,rgba(0,0,0,0.7),transparent 60%)" }} />
-          {/* Neon play icon (same vibe as CarouselCard) */}
-          <div style={{ position: "absolute", inset: 0,
-            display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-            <svg width="54" height="38" viewBox="0 0 72 52" fill="none">
-              <defs>
-                <filter id={"neon-prod-" + beat.id} x="-40%" y="-40%" width="180%" height="180%">
-                  <feGaussianBlur stdDeviation="3" result="blur1"/>
-                  <feGaussianBlur stdDeviation="8" result="blur2"/>
-                  <feMerge><feMergeNode in="blur2"/><feMergeNode in="blur1"/><feMergeNode in="SourceGraphic"/></feMerge>
-                </filter>
-                <linearGradient id={"ng-prod-" + beat.id} x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor={isFree ? "#C026D3" : "#7C3AED"}/>
-                  <stop offset="100%" stopColor={isFree ? "#7C3AED" : "#3B82F6"}/>
-                </linearGradient>
-              </defs>
-              <rect x="3" y="3" width="66" height="46" rx="8"
-                stroke={"url(#ng-prod-" + beat.id + ")"} strokeWidth="1.5"
-                fill="black" filter={"url(#neon-prod-" + beat.id + ")"} opacity="0.9"/>
-              <polygon points="29,16 29,36 48,26"
-                stroke={"url(#ng-prod-" + beat.id + ")"} strokeWidth="1.5"
-                fill="none" strokeLinejoin="round"
-                filter={"url(#neon-prod-" + beat.id + ")"} opacity="0.9"/>
-            </svg>
-          </div>
-          {/* FREE / paid badge in top-right */}
-          <div style={{
-            position: "absolute", top: 6, right: 6,
-            background: isFree
-              ? "linear-gradient(135deg,#C026D3,#7C3AED)"
-              : "linear-gradient(135deg,#7C3AED,#3B82F6)",
-            color: "white", fontSize: 8, fontWeight: 900,
-            padding: "3px 7px", borderRadius: 10, letterSpacing: 0.5,
-            boxShadow: "0 2px 6px rgba(0,0,0,0.4)",
-            textShadow: "0 1px 1px rgba(0,0,0,0.3)",
-          }}>
-            {isFree ? "FREE" : (beat.price || "PAID")}
-          </div>
-        </div>
-
-        {/* Title + producer (matches CarouselCard layout) */}
-        <div style={{ padding: "10px 12px 12px" }}>
-          <div style={{ color: "white", fontSize: 12, fontWeight: 700, lineHeight: 1.4, marginBottom: 4,
-            overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-            {beat.title || "Untitled"}
-          </div>
-          <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 600,
-            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            @{beat.producer_username || beat.producer || "Producer"}
-          </div>
-        </div>
+        />
       </div>
     );
   };
