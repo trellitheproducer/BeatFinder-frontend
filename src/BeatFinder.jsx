@@ -1317,6 +1317,219 @@ async function apiFetch(path, options = {}) {
 }
 
 // =============================================================================
+// AUTOLINK + LINK PREVIEW HELPERS
+// Shared by FollowingFeed and PublicProfileScreen so URLs inside post text
+// render as underlined tappable links, and the post's link preview card
+// renders consistently in both places.
+// =============================================================================
+
+// Match http(s) URLs greedily, stopping at whitespace and angle brackets.
+// We trim trailing punctuation ourselves below — that's nicer than baking
+// it into the regex because it preserves URLs that legitimately end in
+// punctuation (e.g. trailing slash).
+var BF_URL_REGEX = /(https?:\/\/[^\s<>]+)/gi;
+
+// Open a URL in the user-appropriate way. iOS PWAs misbehave with
+// target="_blank" (the blank "Done screen" issue), so when running in a
+// home-screen-installed PWA we let the anchor's default navigate the
+// current tab — iOS hands off to the YouTube app, Spotify app, etc via
+// universal links. Outside PWA we keep target="_blank" so users don't
+// lose their place. The render code below sets target accordingly.
+function bfIsPWAiOS() {
+  try {
+    var ua = navigator.userAgent || "";
+    var standalone =
+      (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+      window.navigator.standalone === true;
+    return standalone && /iPad|iPhone|iPod/.test(ua);
+  } catch(_) { return false; }
+}
+
+// Live "Xs / Xm / Xh / Xd ago" formatter — used by both Feed and
+// public-profile post headers so timestamps tick in real time on every
+// surface that shows them. Pure function; the live update comes from
+// the consuming component re-rendering on a setInterval tick (see
+// useLiveTick below).
+function bfTimeAgo(iso) {
+  if (!iso) return "";
+  var diff = Date.now() - new Date(iso).getTime();
+  if (diff < 0) diff = 0;
+  var secs = Math.floor(diff / 1000);
+  if (secs < 60) return secs + "s ago";
+  var mins = Math.floor(secs / 60);
+  if (mins < 60) return mins + "m ago";
+  var hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + "h ago";
+  var days = Math.floor(hrs / 24);
+  if (days < 7) return days + "d ago";
+  var weeks = Math.floor(days / 7);
+  if (weeks < 4) return weeks + "w ago";
+  return Math.floor(days / 30) + "mo ago";
+}
+
+// Force a re-render of the calling component every `intervalMs` ms so
+// any bfTimeAgo() call inside it updates live. Hook is opt-in per
+// component — keeps the timer scoped and cheap.
+function useLiveTick(intervalMs) {
+  var setTick = React.useState(0)[1];
+  React.useEffect(function() {
+    var id = setInterval(function() { setTick(function(n) { return n + 1; }); }, intervalMs || 10000);
+    return function() { clearInterval(id); };
+  }, [intervalMs]);
+}
+
+// Split `text` into an array of strings and React anchor elements so URLs
+// inside post bodies render as underlined tappable links. The whole array
+// can be rendered in place of {post.text}. We trim trailing punctuation
+// off each matched URL (period at end of sentence, etc) but show the
+// trimmed punctuation back in the surrounding text node so nothing is
+// lost visually.
+function renderTextWithLinks(text) {
+  if (!text) return null;
+  var pwa = bfIsPWAiOS();
+  var parts = [];
+  var lastIdx = 0;
+  var m;
+  // Reset the regex's lastIndex each call (it's a /g regex, so state
+  // would leak between calls otherwise).
+  BF_URL_REGEX.lastIndex = 0;
+  var keyN = 0;
+  while ((m = BF_URL_REGEX.exec(text)) !== null) {
+    var fullMatch = m[0];
+    var matchStart = m.index;
+    var matchEnd   = matchStart + fullMatch.length;
+    // Strip common trailing punctuation back into the surrounding text
+    var trimmed = fullMatch;
+    var tail    = "";
+    var tailMatch = /[.,;!?)\]]+$/.exec(trimmed);
+    if (tailMatch) {
+      tail    = tailMatch[0];
+      trimmed = trimmed.slice(0, trimmed.length - tail.length);
+    }
+    // Append the text BEFORE the URL match (if any)
+    if (matchStart > lastIdx) {
+      parts.push(text.slice(lastIdx, matchStart));
+    }
+    parts.push(
+      React.createElement("a", {
+        key:    "u" + (keyN++),
+        href:   trimmed,
+        target: pwa ? undefined : "_blank",
+        rel:    "noopener noreferrer",
+        onClick: function(e) { e.stopPropagation(); },
+        style:  {
+          color:          "#A78BFA",
+          textDecoration: "underline",
+          textUnderlineOffset: 2,
+          wordBreak:      "break-all",
+        },
+      }, trimmed)
+    );
+    if (tail) parts.push(tail);
+    lastIdx = matchEnd;
+  }
+  if (lastIdx < text.length) parts.push(text.slice(lastIdx));
+  return parts.length ? parts : text;
+}
+
+// Renders a post's link preview card. Uses post.linkImage when set,
+// otherwise a hash-derived gradient placeholder so every link ALWAYS
+// has a visual. Tapping opens the URL using the same iOS-aware logic
+// as the inline autolinks. Returns null when the post has no linkUrl.
+function LinkPreviewCard({ post, margin }) {
+  if (!post || !post.linkUrl) return null;
+  var host = "";
+  try { host = (new URL(post.linkUrl)).hostname.replace(/^www\./, ""); }
+  catch(_) { host = post.linkUrl; }
+  var displayLabel = (post.linkSiteName || host || "LINK").toUpperCase();
+  var palettes = [
+    { a: "#C026D3", b: "#7C3AED", c: "#3B82F6" },
+    { a: "#3B82F6", b: "#06B6D4", c: "#0EA5E9" },
+    { a: "#7C3AED", b: "#C026D3", c: "#EC4899" },
+    { a: "#06B6D4", b: "#3B82F6", c: "#7C3AED" },
+    { a: "#A855F7", b: "#6366F1", c: "#3B82F6" },
+    { a: "#EC4899", b: "#A855F7", c: "#6366F1" },
+  ];
+  var h = 0;
+  for (var i = 0; i < host.length; i++) { h = ((h << 5) - h + host.charCodeAt(i)) | 0; }
+  var pal = palettes[Math.abs(h) % palettes.length];
+  var initial = (host.replace(/[^a-z0-9]/gi, "")[0] || "?").toUpperCase();
+  var hasRealImage = !!post.linkImage;
+  var pwa = bfIsPWAiOS();
+  return (
+    <a href={post.linkUrl}
+      target={pwa ? undefined : "_blank"}
+      rel="noopener noreferrer"
+      onClick={function(e) { e.stopPropagation(); }}
+      style={{
+        display: "block", textDecoration: "none",
+        margin: margin || "0 14px 10px",
+        borderRadius: 12, overflow: "hidden",
+        background: "linear-gradient(165deg,#120b22 0%,#0a0a14 60%,#080812 100%)",
+        border: "1px solid rgba(124,58,237,0.25)",
+        cursor: "pointer", color: "inherit",
+        WebkitTapHighlightColor: "transparent",
+      }}>
+      {hasRealImage ? (
+        <img src={post.linkImage} alt=""
+          style={{ width: "100%", maxHeight: 200, objectFit: "cover", display: "block", background: "#000" }}
+          onError={function(e) {
+            var img = e.target;
+            var ph = img.parentNode && img.parentNode.querySelector(".bf-linkph");
+            if (ph) { img.style.display = "none"; ph.style.display = "flex"; }
+          }} />
+      ) : null}
+      <div className="bf-linkph"
+        style={{
+          display: hasRealImage ? "none" : "flex",
+          width: "100%", aspectRatio: "16/9", maxHeight: 200,
+          alignItems: "center", justifyContent: "center",
+          position: "relative", overflow: "hidden",
+          background: "linear-gradient(135deg," + pal.a + " 0%," + pal.b + " 55%," + pal.c + " 100%)",
+        }}>
+        <div style={{
+          position: "absolute", inset: 0,
+          background: "radial-gradient(circle at 20% 30%, rgba(255,255,255,0.18), transparent 50%), radial-gradient(circle at 80% 70%, rgba(0,0,0,0.25), transparent 60%)",
+        }} />
+        <div style={{
+          position: "relative", zIndex: 1,
+          fontSize: 56, fontWeight: 900, color: "white",
+          fontFamily: "'Bebas Neue',sans-serif",
+          textShadow: "0 4px 14px rgba(0,0,0,0.4)",
+          letterSpacing: 1,
+        }}>{initial}</div>
+        <div style={{
+          position: "absolute", bottom: 0, left: 0, right: 0,
+          padding: "6px 12px",
+          background: "linear-gradient(180deg,transparent,rgba(0,0,0,0.55))",
+          color: "white", fontSize: 11, fontWeight: 800,
+          letterSpacing: 0.6, textTransform: "uppercase",
+          textAlign: "center",
+          textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+        }}>{displayLabel}</div>
+      </div>
+      <div style={{ padding: "10px 12px" }}>
+        {post.linkSiteName && (
+          <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 3 }}>
+            {post.linkSiteName}
+          </div>
+        )}
+        <div style={{ color: "white", fontWeight: 800, fontSize: 13, lineHeight: 1.3, marginBottom: 3,
+          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+          {post.linkTitle || post.linkUrl}
+        </div>
+        {post.linkDescription && (
+          <div style={{ color: "#8b8b9a", fontSize: 12, lineHeight: 1.4,
+            display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+            {post.linkDescription}
+          </div>
+        )}
+      </div>
+    </a>
+  );
+}
+
+// =============================================================================
 // YOUTUBE - calls /api/youtube/search on your FastAPI backend
 // Backend makes the real googleapis.com call server-side (no CORS issues)
 // =============================================================================
@@ -4750,6 +4963,7 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
                       <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/>
                     </svg>
                     <span>Reposted by @{item.username}</span>
+                    <UserBadges username={item.username} plan={item.plan} compact={true} size={11} />
                   </div>
                 )}
                 {/* Header: avatar + username + time */}
@@ -4757,8 +4971,10 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
                   <Avatar url={post.user_avatar} username={post.username} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ color: "white", fontWeight: 800, fontSize: 13,
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      @{post.username}
+                      display: "flex", alignItems: "center", gap: 5,
+                      overflow: "hidden", whiteSpace: "nowrap" }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>@{post.username}</span>
+                      <UserBadges username={post.username} plan={post.plan} compact={true} />
                     </div>
                     <div style={{ color: "#666", fontSize: 10, marginTop: 1 }}>{timeAgo(post.created_at)}</div>
                   </div>
@@ -4813,141 +5029,18 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
                   )}
                 </div>
 
-                {/* Text */}
+                {/* Text — URLs autolinked + underlined */}
                 {post.text && (
                   <div style={{ padding: "0 14px 10px", color: "#ddd", fontSize: 14, lineHeight: 1.55,
                     whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                    {post.text}
+                    {renderTextWithLinks(post.text)}
                   </div>
                 )}
 
-                {/* Link preview card — rendered when the backend stored OG
-                    metadata for a URL in this post. Tapping opens in a new
-                    tab. We ALWAYS show a visual: either the fetched image,
-                    or a gradient placeholder seeded by the hostname so
-                    different sites get visually distinct cards. */}
-                {post.linkUrl && (() => {
-                  // Pick a gradient based on the hostname so the same site
-                  // always renders the same colour and different sites are
-                  // distinguishable at a glance. Six palettes total — all
-                  // on-brand purples/blues/cyans/magentas.
-                  var host = "";
-                  try { host = (new URL(post.linkUrl)).hostname.replace(/^www\./, ""); } catch(_) { host = post.linkUrl; }
-                  var displayLabel = (post.linkSiteName || host || "LINK").toUpperCase();
-                  var palettes = [
-                    { a: "#C026D3", b: "#7C3AED", c: "#3B82F6" },
-                    { a: "#3B82F6", b: "#06B6D4", c: "#0EA5E9" },
-                    { a: "#7C3AED", b: "#C026D3", c: "#EC4899" },
-                    { a: "#06B6D4", b: "#3B82F6", c: "#7C3AED" },
-                    { a: "#A855F7", b: "#6366F1", c: "#3B82F6" },
-                    { a: "#EC4899", b: "#A855F7", c: "#6366F1" },
-                  ];
-                  // Cheap deterministic hash of host → palette index
-                  var h = 0;
-                  for (var i = 0; i < host.length; i++) { h = ((h << 5) - h + host.charCodeAt(i)) | 0; }
-                  var pal = palettes[Math.abs(h) % palettes.length];
-                  // Big initial letter shown on the placeholder, e.g. "Y"
-                  // for youtube.com, "G" for github.com.
-                  var initial = (host.replace(/[^a-z0-9]/gi, "")[0] || "?").toUpperCase();
-                  // Show a real <img> if backend gave us one, otherwise
-                  // render the gradient placeholder.
-                  var hasRealImage = !!post.linkImage;
-                  // Decide how to open the link. On iOS PWA, target="_blank"
-                  // pops an in-app webview that often misbehaves (the blank
-                  // "Done" screen). Navigating the current tab instead lets
-                  // iOS's universal-link system hand off to the real app
-                  // (YouTube, Spotify, etc) while leaving the PWA running
-                  // in the background — so swiping back to BeatFinder
-                  // returns the user exactly where they were. On every
-                  // other platform we keep target="_blank" so users don't
-                  // lose the page they were reading.
-                  var isPWAiOS = false;
-                  try {
-                    var ua = navigator.userAgent || "";
-                    var isStandalone =
-                      (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
-                      window.navigator.standalone === true;
-                    isPWAiOS = isStandalone && /iPad|iPhone|iPod/.test(ua);
-                  } catch(_) {}
-                  return (
-                    <a href={post.linkUrl}
-                      target={isPWAiOS ? undefined : "_blank"}
-                      rel="noopener noreferrer"
-                      onClick={function(e) { e.stopPropagation(); }}
-                      style={{
-                        display: "block", textDecoration: "none",
-                        margin: "0 14px 10px", borderRadius: 12, overflow: "hidden",
-                        background: "linear-gradient(165deg,#120b22 0%,#0a0a14 60%,#080812 100%)",
-                        border: "1px solid rgba(124,58,237,0.25)",
-                        cursor: "pointer", color: "inherit",
-                        WebkitTapHighlightColor: "transparent",
-                      }}>
-                      {hasRealImage ? (
-                        <img src={post.linkImage} alt=""
-                          style={{ width: "100%", maxHeight: 200, objectFit: "cover", display: "block", background: "#000" }}
-                          onError={function(e) {
-                            // If the image fails to load (broken link,
-                            // CORS, etc.) swap in the placeholder so the
-                            // card still has something visual.
-                            var img = e.target;
-                            var ph = img.parentNode.querySelector(".bf-linkph");
-                            if (ph) { img.style.display = "none"; ph.style.display = "flex"; }
-                          }} />
-                      ) : null}
-                      {/* Gradient placeholder — hidden when there's a real
-                          image that loaded successfully, shown otherwise. */}
-                      <div className="bf-linkph"
-                        style={{
-                          display: hasRealImage ? "none" : "flex",
-                          width: "100%", aspectRatio: "16/9", maxHeight: 200,
-                          alignItems: "center", justifyContent: "center",
-                          position: "relative", overflow: "hidden",
-                          background: "linear-gradient(135deg," + pal.a + " 0%," + pal.b + " 55%," + pal.c + " 100%)",
-                        }}>
-                        {/* Subtle texture / depth */}
-                        <div style={{
-                          position: "absolute", inset: 0,
-                          background: "radial-gradient(circle at 20% 30%, rgba(255,255,255,0.18), transparent 50%), radial-gradient(circle at 80% 70%, rgba(0,0,0,0.25), transparent 60%)",
-                        }} />
-                        {/* Big initial */}
-                        <div style={{
-                          position: "relative", zIndex: 1,
-                          fontSize: 56, fontWeight: 900, color: "white",
-                          fontFamily: "'Bebas Neue',sans-serif",
-                          textShadow: "0 4px 14px rgba(0,0,0,0.4)",
-                          letterSpacing: 1,
-                        }}>{initial}</div>
-                        {/* Hostname strip across the bottom */}
-                        <div style={{
-                          position: "absolute", bottom: 0, left: 0, right: 0,
-                          padding: "6px 12px",
-                          background: "linear-gradient(180deg,transparent,rgba(0,0,0,0.55))",
-                          color: "white", fontSize: 11, fontWeight: 800,
-                          letterSpacing: 0.6, textTransform: "uppercase",
-                          textAlign: "center",
-                          textShadow: "0 1px 4px rgba(0,0,0,0.6)",
-                        }}>{displayLabel}</div>
-                      </div>
-                      <div style={{ padding: "10px 12px" }}>
-                        {post.linkSiteName && (
-                          <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 3 }}>
-                            {post.linkSiteName}
-                          </div>
-                        )}
-                        <div style={{ color: "white", fontWeight: 800, fontSize: 13, lineHeight: 1.3, marginBottom: 3,
-                          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                          {post.linkTitle || post.linkUrl}
-                        </div>
-                        {post.linkDescription && (
-                          <div style={{ color: "#8b8b9a", fontSize: 12, lineHeight: 1.4,
-                            display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                            {post.linkDescription}
-                          </div>
-                        )}
-                      </div>
-                    </a>
-                  );
-                })()}
+                {/* Link preview card — shared component, always shows
+                    a visual (real image if backend has one, else a gradient
+                    placeholder seeded by the hostname). */}
+                <LinkPreviewCard post={post} />
 
                 {/* Images */}
                 {post.images && post.images.length > 0 && (
@@ -12051,9 +12144,14 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
                         ? <img src={post.avatarUrl} alt={post.username} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                         : (post.username || "?")[0].toUpperCase()}
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ color: "white", fontWeight: 700, fontSize: 14 }}>@{post.username}</div>
-                      <div style={{ color: "#444", fontSize: 11 }}>{new Date(wrapper.createdAt).toLocaleDateString()}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: "white", fontWeight: 700, fontSize: 14,
+                        display: "flex", alignItems: "center", gap: 5,
+                        overflow: "hidden", whiteSpace: "nowrap" }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>@{post.username}</span>
+                        <UserBadges username={post.username} plan={post.plan} compact={true} />
+                      </div>
+                      <div style={{ color: "#666", fontSize: 11, marginTop: 1 }}>{bfTimeAgo(wrapper.createdAt)}</div>
                     </div>
                     {isOwner && (
                       <div style={{ position: "relative", flexShrink: 0 }}>
@@ -12081,10 +12179,16 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
                     )}
                   </div>
 
-                  {/* Status text */}
+                  {/* Status text — URLs autolinked + underlined */}
                   {post.text && (
-                    <div style={{ padding: "0 14px 10px", color: "#ddd", fontSize: 14, lineHeight: 1.6 }}>{post.text}</div>
+                    <div style={{ padding: "0 14px 10px", color: "#ddd", fontSize: 14, lineHeight: 1.6,
+                      whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                      {renderTextWithLinks(post.text)}
+                    </div>
                   )}
+
+                  {/* Link preview card — same as Feed */}
+                  <LinkPreviewCard post={post} />
 
                   {/* Images — tap to expand */}
                   {post.images && post.images.length > 0 && (
@@ -12361,6 +12465,9 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
   const [badgePopup,   setBadgePopup]   = useState(null);
   const [followList,   setFollowList]   = useState(null);
   const [nestedProfile,setNestedProfile]= useState(null);
+  // Tick every 10s so post-card timestamps update live ("5s ago" →
+  // "15s ago" → "25s ago"), matching the Feed's behaviour.
+  useLiveTick(10000);
   // Block-state for this profile, loaded once when profile mounts.
   // iBlockedThem  → the current user has blocked this profile
   // theyBlockedMe → this profile has blocked the current user (we hide content)
@@ -20410,6 +20517,46 @@ function VerifiedBadge({ size = 20 }) {
     </svg>
   );
 }
+
+
+// =============================================================================
+// USER BADGES — small, composed component that renders the right set of
+// badges next to a username depending on who it is and what plan they're on.
+// Mirrors the logic used on the public profile header (PublicProfileScreen
+// around line 12697) so post bylines stay visually consistent with profiles.
+//
+// Rules (kept in one place so they only need updating once):
+//   • Trelli (CEO) → gold seal + CEO chip
+//   • Mikez (Brand Ambassador) → green seal + B.A chip
+//   • Any user with plan "producer" or "artist" → blue/purple verified tick
+//
+// Pass `compact` for inline use in post bylines (smaller sizes, hides
+// the heavy chip components and just shows the seal icon).
+// =============================================================================
+function UserBadges({ username, plan, size, compact }) {
+  if (!username) return null;
+  var sz = size || (compact ? 13 : 18);
+  var isProd   = plan === "producer";
+  var isArtist = plan === "artist" || isProd;
+  var isPro    = isProd || isArtist;
+  return (
+    <React.Fragment>
+      {/* Pro plan → blue/purple tick. Special-case badges below replace
+          rather than stack with this one for the special users, so we
+          gate the tick on NOT being one of those special users. */}
+      {isPro && username !== "Trelli" && username !== "Mikez" && (
+        <VerifiedBadge size={sz} />
+      )}
+      {/* Trelli: gold seal + (if not compact) the CEO chip */}
+      {username === "Trelli" && <GoldVerifiedBadge size={sz + 2} />}
+      {username === "Trelli" && !compact && <CEOBadge />}
+      {/* Mikez: green seal + (if not compact) the B.A chip */}
+      {username === "Mikez" && <GreenVerifiedBadge size={sz + 2} />}
+      {username === "Mikez" && !compact && <BrandAmbassadorBadge />}
+    </React.Fragment>
+  );
+}
+
 
 
 // =============================================================================
