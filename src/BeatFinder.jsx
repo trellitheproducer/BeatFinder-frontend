@@ -23640,6 +23640,27 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     document.addEventListener("mouseup",   onUp);
   };
 
+  // ── STUDIO DIAGNOSTIC ──────────────────────────────────────────────
+  // Temporary instrumentation to figure out why ruler tap-to-seek
+  // doesn't work when audio is loaded. Captures every touch event
+  // with details about where it landed, what mode was chosen, and
+  // whether the tap-to-seek path fired. Viewable via the DBG button
+  // in the studio top bar.
+  const studioDbgLog = useRef([]);
+  const [showStudioDbg, setShowStudioDbg] = useState(false);
+  function dbgLog(label, data) {
+    try {
+      var entry = { t: performance.now().toFixed(1), label: label };
+      if (data && typeof data === "object") {
+        for (var k in data) {
+          if (Object.prototype.hasOwnProperty.call(data, k)) entry[k] = data[k];
+        }
+      }
+      studioDbgLog.current.push(entry);
+      if (studioDbgLog.current.length > 80) studioDbgLog.current.shift();
+    } catch(_) {}
+  }
+
   const handleRulerTouchStart = function (e) {
     e.preventDefault();
     e.stopPropagation();
@@ -23684,6 +23705,16 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       // for ≥4px movement.
       committed: mode !== "new",
     };
+    dbgLog("START", {
+      x: Math.round(e.touches[0].clientX),
+      y: Math.round(e.touches[0].clientY),
+      raw: raw.toFixed(2), snapped: t.toFixed(2),
+      mode: mode,
+      playing: !!isPlayingRef.current,
+      scrollL: scrollRef.current ? Math.round(scrollRef.current.scrollLeft) : "?",
+      loopOn: !!loopEnabled,
+      committed: rulerDragRef.current.committed,
+    });
   };
 
   const handleRulerTouchMove = function (e) {
@@ -23692,9 +23723,11 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     if (!rulerDragRef.current) return;
     const nt = snapToBar(rulerTimeFromClientX(e.touches[0].clientX));
     const dx = Math.abs(e.touches[0].clientX - (rulerDragRef.current.startX || 0));
+    const dy = Math.abs(e.touches[0].clientY - (rulerDragRef.current.startY || 0));
     if (!rulerDragRef.current.committed && dx > 4) {
       rulerDragRef.current.committed = true;
       if (rulerDragRef.current.mode === "new") { setLoopIn(rulerDragRef.current.startT); setLoopOut(snapToBar(rulerDragRef.current.startT + spb)); }
+      dbgLog("MOVE_COMMIT", { dx: Math.round(dx), dy: Math.round(dy), mode: rulerDragRef.current.mode });
     }
     if (!rulerDragRef.current.committed) return;
     if (rulerDragRef.current.mode === "moveLoop") {
@@ -23722,6 +23755,23 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // not a tap.
   const handleRulerTouchEnd = function (e) {
     const drag = rulerDragRef.current;
+    const isCancel = e.type === "touchcancel";
+    // First log: capture what we know about this end event
+    var endLog = {
+      type: e.type,
+      hadDrag: !!drag,
+      committed: drag ? drag.committed : null,
+      mode: drag ? drag.mode : null,
+    };
+    if (drag) {
+      try {
+        const tch = (e.changedTouches && e.changedTouches[0]) || null;
+        if (tch && drag.startX !== undefined && drag.startY !== undefined) {
+          endLog.dx = Math.round(Math.abs(tch.clientX - drag.startX));
+          endLog.dy = Math.round(Math.abs(tch.clientY - drag.startY));
+        }
+      } catch (_) {}
+    }
     // Tap-to-seek fires when:
     //   - The press never committed to a drag (no movement), AND
     //   - The press landed in "new" mode (i.e. NOT on a loop handle and
@@ -23742,6 +23792,9 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         }
       } catch (err) { /* fall through with movedFar=false */ }
 
+      endLog.movedFar = movedFar;
+      endLog.willSeek = !movedFar;
+
       if (!movedFar) {
         const wasPlaying = isPlayingRef.current;
         // Use the RAW (unsnapped) position so the playhead lands
@@ -23750,13 +23803,25 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         // user expects precise positioning. Falls back to startT for
         // legacy state objects without rawT.
         const seekT = (typeof drag.rawT === "number") ? drag.rawT : drag.startT;
+        endLog.seekT = seekT.toFixed(2);
+        endLog.wasPlaying = wasPlaying;
         syncUItoTime(seekT);
         if (wasPlaying) {
           setIsPlaying(false);
           doPlay(seekT).then(function() { setIsPlaying(true); });
         }
+      } else {
+        endLog.willSeek = false;
+        endLog.skipReason = "movedFar";
       }
+    } else if (drag && drag.committed) {
+      endLog.skipReason = "committed-to-drag";
+    } else if (drag && drag.mode !== "new") {
+      endLog.skipReason = "mode-not-new(" + drag.mode + ")";
+    } else if (!drag) {
+      endLog.skipReason = "no-drag-ref";
     }
+    dbgLog(isCancel ? "CANCEL" : "END", endLog);
     rulerDragRef.current = null;
     // RESUME AUTO-SCROLL
     // touchstart paused it by setting userScrolledAt. After tap-to-seek
@@ -25649,6 +25714,60 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         </div>
       )}
 
+      {/* TEMPORARY DIAGNOSTIC — ruler tap-to-seek log viewer */}
+      {showStudioDbg && (
+        <div onClick={function(){ setShowStudioDbg(false); }}
+          style={{
+            position:"fixed", inset:0, zIndex:99998,
+            background:"rgba(0,0,0,0.92)",
+            display:"flex", flexDirection:"column",
+            paddingTop:"calc(env(safe-area-inset-top) + 14px)",
+            paddingBottom:"calc(env(safe-area-inset-bottom) + 14px)",
+            paddingLeft:12, paddingRight:12,
+          }}>
+          <div onClick={function(e){ e.stopPropagation(); }}
+            style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0, gap:8 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+              <div style={{ color:"white", fontWeight:800, fontSize:14 }}>Ruler tap log</div>
+              <button onClick={function(){
+                studioDbgLog.current = [];
+                setShowStudioDbg(false);
+                setTimeout(function(){ setShowStudioDbg(true); }, 50);
+              }} style={{ background:"#241e30", border:"1px solid #2a2336", color:"#aaa", fontSize:11, fontWeight:700, borderRadius:6, padding:"5px 9px", cursor:"pointer" }}>
+                Clear
+              </button>
+              <button onClick={function(){ setShowStudioDbg(false); }}
+                style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", color:"white", fontSize:14, fontWeight:800, borderRadius:"50%", width:28, height:28, cursor:"pointer", padding:0 }}>×</button>
+            </div>
+            <div style={{ color:"#888", fontSize:11 }}>
+              Most recent at bottom. Tap & hold to select + copy. Send to me.
+            </div>
+            <textarea readOnly value={(function(){
+                try {
+                  return studioDbgLog.current.map(function(e){
+                    var parts = [e.t + " " + e.label];
+                    for (var k in e) {
+                      if (k === "t" || k === "label") continue;
+                      if (Object.prototype.hasOwnProperty.call(e, k)) {
+                        parts.push("  " + k + "=" + e[k]);
+                      }
+                    }
+                    return parts.join("\n");
+                  }).join("\n\n");
+                } catch(_) { return "log read error"; }
+              })()}
+              style={{
+                flex:1, minHeight:0,
+                background:"#0a0a0a", border:"1px solid #2a2a2a", borderRadius:8,
+                color:"#bbb", fontFamily:"ui-monospace, Menlo, monospace", fontSize:10,
+                padding:10, outline:"none", resize:"none",
+                whiteSpace:"pre", WebkitUserSelect:"text", userSelect:"text",
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {unsavedAlert && (
         <div style={{ position:"absolute",inset:0,zIndex:8000,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:"32px" }}>
           <div style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:320,textAlign:"center" }}>
@@ -26190,7 +26309,21 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         </button>
         {renamingProj
           ?<input autoFocus defaultValue={projectName} onBlur={function(e){ setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false); }} onKeyDown={function(e){ if(e.key==="Enter"){setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false);} }} style={{ background:"none",border:"none",borderBottom:"1px solid #C026D3",color:"white",fontSize:13,fontWeight:700,outline:"none",flex:1,padding:"0 0 2px" }} />
-          :<span style={{ color:"white",fontWeight:700,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{projectName}</span>
+          :<span
+              onClick={function(){
+                // TEMPORARY: triple-tap on project name opens the DBG panel.
+                if (!window.__bfDbgTaps) window.__bfDbgTaps = [];
+                var now = Date.now();
+                window.__bfDbgTaps.push(now);
+                window.__bfDbgTaps = window.__bfDbgTaps.filter(function(t){ return now - t < 700; });
+                if (window.__bfDbgTaps.length >= 3) {
+                  window.__bfDbgTaps = [];
+                  setShowStudioDbg(true);
+                }
+              }}
+              style={{ color:"white",fontWeight:700,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",cursor:"pointer" }}>
+              {projectName} <span style={{ color:"#C026D3", fontSize:9, fontWeight:800, letterSpacing:0.5, marginLeft:4 }}>[DBG]</span>
+            </span>
         }
         <button onClick={function(e){ e.stopPropagation();setShowProjMenu(function(v){return !v;});setShowSettings(false); }} style={{ background:showProjMenu?"rgba(192,38,211,0.15)":"#1a1a1a",border:"1px solid "+(showProjMenu?"rgba(192,38,211,0.4)":"#2a2a2a"),borderRadius:8,color:"#aaa",fontSize:13,fontWeight:700,padding:"5px 10px",cursor:"pointer",flexShrink:0,letterSpacing:2 }}>···</button>
         <button onClick={function(e){ e.stopPropagation();setShowProjMenu(false);setShowSettings(function(v){return !v;}); }} style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:8,color:"#888",fontSize:12,padding:"5px 8px",cursor:"pointer",flexShrink:0 }}>⚙</button>
