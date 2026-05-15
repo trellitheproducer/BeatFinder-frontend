@@ -30033,6 +30033,11 @@ function UsersManager() {
   var [error, setError]   = React.useState("");
   var [query, setQuery]   = React.useState("");
   var [debounced, setDebounced] = React.useState("");
+  var [filterBy, setFilterBy] = React.useState("");          // "", "active", "lifetime", "free", "admin", "payment_failing", "deleted"
+  var [showDeleted, setShowDeleted] = React.useState(false);
+  var [selectedUser, setSelectedUser] = React.useState(null); // user row clicked → shows action sheet
+  var [confirmDelete, setConfirmDelete] = React.useState(null); // user pending delete confirm
+  var [deleting, setDeleting] = React.useState(false);
   var PAGE_SIZE = 20;
 
   // Debounce the search input so we don't fire a query on every keystroke
@@ -30041,11 +30046,16 @@ function UsersManager() {
     return function() { clearTimeout(t); };
   }, [query]);
 
+  // Reset to page 0 whenever the filters change
+  React.useEffect(function() { setPage(0); }, [filterBy, showDeleted]);
+
   function load() {
     setLoading(true);
     setError("");
     var qs = "?skip=" + (page * PAGE_SIZE) + "&limit=" + PAGE_SIZE +
-             (debounced ? "&q=" + encodeURIComponent(debounced) : "");
+             (debounced ? "&q=" + encodeURIComponent(debounced) : "") +
+             (filterBy ? "&filter_by=" + encodeURIComponent(filterBy) : "") +
+             ((showDeleted || filterBy === "deleted") ? "&include_deleted=true" : "");
     apiFetch("/api/auth/admin/users" + qs)
       .then(function(r) {
         setUsers((r && r.users) || []);
@@ -30055,13 +30065,33 @@ function UsersManager() {
       .finally(function() { setLoading(false); });
   }
 
-  React.useEffect(load, [page, debounced]);
+  React.useEffect(load, [page, debounced, filterBy, showDeleted]);
+
+  function doDelete(u) {
+    setDeleting(true);
+    apiFetch("/api/auth/admin/users/" + encodeURIComponent(u.id) + "/delete", {
+      method: "POST",
+      body:   JSON.stringify({}),
+    })
+      .then(function() {
+        try { window.bfToast && window.bfToast.success("Account removed"); } catch (_) {}
+        setConfirmDelete(null);
+        setSelectedUser(null);
+        load();
+      })
+      .catch(function(e) {
+        try { window.bfToast && window.bfToast.error(e.message || "Couldn't remove account"); } catch (_) {}
+      })
+      .finally(function() { setDeleting(false); });
+  }
 
   var totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   function planChip(u) {
     var bg, border, color, label;
-    if (u.is_lifetime) {
+    if (u.deleted) {
+      bg = "#1a1a1a"; border = "#333"; color = "#666"; label = "DELETED";
+    } else if (u.is_lifetime) {
       bg = "linear-gradient(135deg,rgba(245,158,11,0.18),rgba(245,158,11,0.05))";
       border = "rgba(245,158,11,0.5)";
       color = "#F59E0B";
@@ -30116,8 +30146,57 @@ function UsersManager() {
         style={{
           width: "100%", background: "#0d0d0d", border: "1px solid #2a2a2a",
           borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 13,
-          outline: "none", boxSizing: "border-box", marginBottom: 12,
+          outline: "none", boxSizing: "border-box", marginBottom: 10,
         }} />
+
+      {/* Filter chips — horizontal scroll on small screens */}
+      <div style={{
+        display: "flex", gap: 6, marginBottom: 10,
+        overflowX: "auto", WebkitOverflowScrolling: "touch",
+        paddingBottom: 2, // space for scrollbar shadow
+      }}>
+        {[
+          { id: "",                 label: "All" },
+          { id: "active",           label: "Active" },
+          { id: "lifetime",         label: "Lifetime" },
+          { id: "free",             label: "Free" },
+          { id: "admin",            label: "Admin" },
+          { id: "payment_failing",  label: "⚠ Pay Fail" },
+          { id: "deleted",          label: "Deleted" },
+        ].map(function(c) {
+          var active = filterBy === c.id;
+          return (
+            <button
+              key={c.id || "all"}
+              onClick={function() { setFilterBy(c.id); }}
+              style={{
+                flex: "0 0 auto",
+                background: active ? "linear-gradient(135deg,#C026D3,#7C3AED)" : "#1a1a1a",
+                border: "1px solid " + (active ? "transparent" : "#2a2a2a"),
+                color: active ? "white" : "#aaa",
+                borderRadius: 16, padding: "5px 12px",
+                fontSize: 11, fontWeight: 700, letterSpacing: 0.3,
+                cursor: "pointer", whiteSpace: "nowrap",
+                boxShadow: active ? "0 0 12px rgba(192,38,211,0.4)" : "none",
+              }}>
+              {c.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Show deleted toggle — secondary, smaller */}
+      <label style={{
+        display: "flex", alignItems: "center", gap: 6, color: "#888", fontSize: 11,
+        marginBottom: 10, cursor: "pointer", userSelect: "none",
+      }}>
+        <input
+          type="checkbox"
+          checked={showDeleted}
+          onChange={function(e) { setShowDeleted(e.target.checked); }}
+          style={{ cursor: "pointer" }} />
+        Include deleted accounts in results
+      </label>
 
       {/* Total + refresh + page indicator */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 6 }}>
@@ -30184,17 +30263,25 @@ function UsersManager() {
       {/* User rows */}
       {!loading && users.map(function(u) {
         return (
-          <div key={u.id} style={{
-            background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 10,
-            padding: "10px 12px", marginBottom: 6,
-            display: "flex", gap: 10, alignItems: "flex-start",
-          }}>
+          <div
+            key={u.id}
+            onClick={function() { setSelectedUser(u); }}
+            style={{
+              background: u.deleted ? "#0a0a0a" : "#0d0d0d",
+              border: "1px solid " + (u.deleted ? "#1a1a1a" : "#2a2a2a"),
+              borderRadius: 10,
+              padding: "10px 12px", marginBottom: 6,
+              display: "flex", gap: 10, alignItems: "flex-start",
+              cursor: "pointer",
+              opacity: u.deleted ? 0.55 : 1,
+            }}>
             {/* Avatar */}
             <div style={{
               flex: "0 0 auto", width: 36, height: 36, borderRadius: "50%",
               background: u.avatarUrl ? ("#1a1a1a url(" + u.avatarUrl + ") center/cover") : "linear-gradient(135deg,#C026D3,#7C3AED)",
               display: "flex", alignItems: "center", justifyContent: "center",
               color: "white", fontWeight: 900, fontSize: 14,
+              filter: u.deleted ? "grayscale(1)" : "none",
             }}>
               {!u.avatarUrl && ((u.name || u.username || "?").charAt(0).toUpperCase())}
             </div>
@@ -30224,6 +30311,7 @@ function UsersManager() {
                 </span>
               </div>
             </div>
+            <div style={{ flex: "0 0 auto", color: "#444", fontSize: 16, alignSelf: "center" }}>›</div>
           </div>
         );
       })}
@@ -30231,6 +30319,197 @@ function UsersManager() {
       {!loading && users.length === 0 && !error && (
         <div style={{ color: "#555", fontSize: 12, padding: "20px 0", textAlign: "center", fontStyle: "italic" }}>
           {debounced ? "No users match \"" + debounced + "\"" : "No users yet"}
+        </div>
+      )}
+
+      {/* ── Action sheet for a selected user ───────────────────────── */}
+      {selectedUser && (
+        <div
+          onClick={function() { setSelectedUser(null); }}
+          style={{
+            position: "fixed", inset: 0, zIndex: 99990,
+            background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)",
+            display: "flex", alignItems: "flex-end", justifyContent: "center",
+          }}>
+          <div
+            onClick={function(e) { e.stopPropagation(); }}
+            style={{
+              width: "100%", maxWidth: 440,
+              background: "#0d0d0d",
+              borderTopLeftRadius: 18, borderTopRightRadius: 18,
+              padding: "20px 18px calc(env(safe-area-inset-bottom) + 24px)",
+              border: "1px solid #2a2a2a",
+              borderBottom: "none",
+              animation: "bf-fadein-up 0.22s cubic-bezier(0.22,1,0.36,1) both",
+            }}>
+            {/* Header */}
+            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 18 }}>
+              <div style={{
+                flex: "0 0 auto", width: 48, height: 48, borderRadius: "50%",
+                background: selectedUser.avatarUrl ? ("#1a1a1a url(" + selectedUser.avatarUrl + ") center/cover") : "linear-gradient(135deg,#C026D3,#7C3AED)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                color: "white", fontWeight: 900, fontSize: 18,
+                filter: selectedUser.deleted ? "grayscale(1)" : "none",
+              }}>
+                {!selectedUser.avatarUrl && ((selectedUser.name || selectedUser.username || "?").charAt(0).toUpperCase())}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: "white", fontWeight: 800, fontSize: 16, marginBottom: 2 }}>
+                  {selectedUser.name || selectedUser.username || "(no name)"}
+                </div>
+                {selectedUser.username && (
+                  <div style={{ color: "#888", fontSize: 12 }}>@{selectedUser.username}</div>
+                )}
+                <div style={{ color: "#666", fontSize: 11, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {selectedUser.email || "(no email)"}
+                </div>
+              </div>
+            </div>
+
+            {/* Quick info chips */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 18 }}>
+              {planChip(selectedUser)}
+              {selectedUser.is_admin && (
+                <span style={{
+                  background: "rgba(124,58,237,0.15)", border: "1px solid rgba(124,58,237,0.4)",
+                  color: "#A78BFA", borderRadius: 6, padding: "2px 7px",
+                  fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
+                }}>ADMIN</span>
+              )}
+              {selectedUser.payment_failing && (
+                <span style={{
+                  background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.4)",
+                  color: "#F87171", borderRadius: 6, padding: "2px 7px",
+                  fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
+                }}>⚠ PAY FAIL</span>
+              )}
+              {selectedUser.subscription_active && !selectedUser.is_lifetime && (
+                <span style={{
+                  background: "rgba(34,197,94,0.15)", border: "1px solid rgba(34,197,94,0.4)",
+                  color: "#22C55E", borderRadius: 6, padding: "2px 7px",
+                  fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
+                }}>SUBSCRIBED</span>
+              )}
+            </div>
+
+            {/* Metadata */}
+            <div style={{ background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: 10, padding: "10px 12px", marginBottom: 16, fontSize: 11, lineHeight: 1.6 }}>
+              <div style={{ color: "#888", marginBottom: 2 }}>Joined: <span style={{ color: "#ccc" }}>{formatDate(selectedUser.created_at)}</span></div>
+              {selectedUser.billing_interval && (
+                <div style={{ color: "#888" }}>Billing: <span style={{ color: "#ccc" }}>{selectedUser.billing_interval}</span></div>
+              )}
+            </div>
+
+            {/* Actions */}
+            {selectedUser.deleted ? (
+              <div style={{
+                background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 10,
+                padding: "12px 14px", color: "#888", fontSize: 12, textAlign: "center",
+              }}>
+                This account has already been removed.
+              </div>
+            ) : (
+              <button
+                onClick={function() { setConfirmDelete(selectedUser); }}
+                style={{
+                  width: "100%", background: "rgba(239,68,68,0.12)",
+                  border: "1px solid rgba(239,68,68,0.4)",
+                  color: "#F87171", borderRadius: 12, padding: "12px 14px",
+                  fontSize: 13, fontWeight: 800, letterSpacing: 0.3,
+                  cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/>
+                  <path d="M10 11v6M14 11v6"/>
+                  <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/>
+                </svg>
+                Remove account
+              </button>
+            )}
+
+            <button
+              onClick={function() { setSelectedUser(null); }}
+              style={{
+                width: "100%", marginTop: 8,
+                background: "transparent", border: "1px solid #2a2a2a",
+                color: "#888", borderRadius: 12, padding: "10px 14px",
+                fontSize: 12, fontWeight: 700, cursor: "pointer",
+              }}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirm delete modal ───────────────────────────────────── */}
+      {confirmDelete && (
+        <div
+          onClick={function() { if (!deleting) setConfirmDelete(null); }}
+          style={{
+            position: "fixed", inset: 0, zIndex: 99991,
+            background: "rgba(0,0,0,0.8)", backdropFilter: "blur(6px)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "20px",
+          }}>
+          <div
+            onClick={function(e) { e.stopPropagation(); }}
+            style={{
+              background: "linear-gradient(165deg,#1a0a14 0%,#0d0a14 60%,#0a0a0a 100%)",
+              border: "1px solid rgba(239,68,68,0.3)",
+              borderRadius: 16, padding: "22px 20px",
+              maxWidth: 360, width: "100%",
+              boxShadow: "0 24px 48px rgba(0,0,0,0.6), 0 0 32px rgba(239,68,68,0.2)",
+            }}>
+            <div style={{
+              width: 44, height: 44, borderRadius: "50%",
+              background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.4)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              margin: "0 auto 14px",
+            }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F87171" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+            </div>
+            <div style={{ color: "white", fontWeight: 800, fontSize: 17, textAlign: "center", marginBottom: 8 }}>
+              Remove this account?
+            </div>
+            <div style={{ color: "#aaa", fontSize: 13, lineHeight: 1.5, textAlign: "center", marginBottom: 4 }}>
+              You're about to remove
+            </div>
+            <div style={{ color: "white", fontWeight: 800, fontSize: 14, textAlign: "center", marginBottom: 14 }}>
+              {confirmDelete.name || confirmDelete.username || "(no name)"}
+              {confirmDelete.username && <span style={{ color: "#888", fontWeight: 600 }}> · @{confirmDelete.username}</span>}
+            </div>
+            <div style={{ color: "#888", fontSize: 11, lineHeight: 1.5, textAlign: "center", marginBottom: 18 }}>
+              The account will be anonymised, their beats hidden, and any lifetime grant revoked.
+              Lease records are kept for legal compliance.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={function() { if (!deleting) setConfirmDelete(null); }}
+                disabled={deleting}
+                style={{
+                  flex: 1, background: "transparent", border: "1px solid #333",
+                  color: "#aaa", borderRadius: 10, padding: "11px 14px",
+                  fontSize: 13, fontWeight: 700, cursor: deleting ? "not-allowed" : "pointer",
+                }}>Cancel</button>
+              <button
+                onClick={function() { doDelete(confirmDelete); }}
+                disabled={deleting}
+                style={{
+                  flex: 1,
+                  background: deleting ? "#3a1a1a" : "linear-gradient(135deg,#EF4444,#DC2626)",
+                  border: "1px solid rgba(239,68,68,0.5)",
+                  color: "white", borderRadius: 10, padding: "11px 14px",
+                  fontSize: 13, fontWeight: 800, cursor: deleting ? "not-allowed" : "pointer",
+                  boxShadow: deleting ? "none" : "0 4px 16px rgba(239,68,68,0.3)",
+                }}>{deleting ? "Removing…" : "Remove"}</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
