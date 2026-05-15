@@ -28467,6 +28467,32 @@ export default function BeatFinder() {
       if (isAppBlank()) safeReload();
     }
 
+    // After an in-app browser (SFSafariViewController) closes, iOS
+    // can briefly report env(safe-area-inset-top) as 0. Any element
+    // whose layout depends on it — page headers, sticky top bars —
+    // ends up shifted/collapsed: "FEED" title appearing on top of
+    // the iOS clock, the bell row pushed up under the status bar, etc.
+    // Even when the inset comes back to its real value, the browser
+    // sometimes fails to re-layout. Forcing a tiny style flip on
+    // <html> reliably nudges WebKit to recompute the inset values
+    // and reflow everything pinned to them. Cheap (no React re-render),
+    // safe (no visual side effects), and idempotent.
+    function forceSafeAreaReflow() {
+      try {
+        var html = document.documentElement;
+        // Apply a no-op transform, force a layout read, then remove.
+        // The read between writes is what guarantees a reflow rather
+        // than a coalesced no-op.
+        html.style.transform = "translateZ(0)";
+        // Touching offsetHeight forces synchronous layout
+        void html.offsetHeight;
+        html.style.transform = "";
+        // Also fire a resize so any component listening for it
+        // (e.g. things that cache window height in state) re-reads.
+        window.dispatchEvent(new Event("resize"));
+      } catch(e) {}
+    }
+
     // RAF-gap detection: when iOS opens an in-app web viewer / system browser
     // (Safari View Controller, the YouTube share-sheet preview, etc.) over the
     // top of BeatFinder, requestAnimationFrame pauses. As soon as the user
@@ -28478,7 +28504,13 @@ export default function BeatFinder() {
       var gap = now - lastRafTime;
       if (gap > 800) {
         // We were paused (likely backgrounded or covered by in-app viewer).
-        // Check several times in case the DOM hasn't re-rendered yet.
+        // First: force a safe-area reflow now and again shortly after —
+        // iOS sometimes needs a second nudge once it has settled the
+        // correct inset values (usually 100-300ms after resume).
+        forceSafeAreaReflow();
+        setTimeout(forceSafeAreaReflow, 150);
+        setTimeout(forceSafeAreaReflow, 500);
+        // Then: blank-check (last resort, in case the app actually died)
         setTimeout(checkAndRecover, 50);
         setTimeout(checkAndRecover, 250);
         setTimeout(checkAndRecover, 700);
@@ -28517,6 +28549,12 @@ export default function BeatFinder() {
 
     function onVisibilityChange() {
       if (document.visibilityState === "visible") {
+        // Force safe-area reflow on return — same fix as RAF-gap path,
+        // catches cases where iOS fires visibilitychange but doesn't
+        // produce a long enough RAF gap to trigger the other path.
+        forceSafeAreaReflow();
+        setTimeout(forceSafeAreaReflow, 150);
+        setTimeout(forceSafeAreaReflow, 500);
         // Multiple checks at different delays to catch slow restorations
         setTimeout(checkAndRecover, 50);
         setTimeout(checkAndRecover, 200);
@@ -28532,6 +28570,8 @@ export default function BeatFinder() {
     function onFocus() {
       // iOS sometimes fires focus before visibilitychange when returning
       // from an external link / YouTube suggested video tap
+      forceSafeAreaReflow();
+      setTimeout(forceSafeAreaReflow, 200);
       setTimeout(checkAndRecover, 100);
       setTimeout(checkAndRecover, 400);
     }
