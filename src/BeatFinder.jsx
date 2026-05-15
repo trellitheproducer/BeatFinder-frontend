@@ -16315,8 +16315,11 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               {/* ── Manage Subscription ── only for paid plans
                   Opens Stripe's hosted Customer Portal where users can
                   cancel their sub, update card, view invoices etc.
-                  No accordion needed — single tap → Stripe redirect. */}
-              {(user.plan === "artist" || user.plan === "producer") && (
+                  No accordion needed — single tap → Stripe redirect.
+                  Hidden for lifetime accounts (Trelli, Mikez, HMbarsdat)
+                  since they never paid through Stripe and have no
+                  subscription to manage. */}
+              {(user.plan === "artist" || user.plan === "producer") && user.billingInterval !== "lifetime" && (
                 <button
                   onClick={async () => {
                     setSettingsMsg("Opening subscription manager…");
@@ -16415,6 +16418,31 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                   {openSettingsSection === "debug" && (
                     <div style={{ padding: "14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
                       <DebugLogViewer />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Lifetime Accounts (admin only — manage who gets lifetime) ─── */}
+              {(user.is_admin === true || user.username === "Trelli") && (
+                <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                  <button onClick={() => setOpenSettingsSection(openSettingsSection === "lifetime" ? null : "lifetime")}
+                    style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "12px 14px", background: openSettingsSection === "lifetime" ? "#1a1a1a" : "#141414",
+                      border: "none", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ filter: "drop-shadow(0 0 4px rgba(124,58,237,0.6))" }}>
+                        <path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/>
+                      </svg>
+                      Lifetime Accounts
+                      <span style={{ color: "#A78BFA", fontSize: 9, fontWeight: 800, letterSpacing: 0.5, marginLeft: 2 }}>ADMIN</span>
+                    </span>
+                    <span style={{ color: "#666", fontSize: 12, transition: "transform 0.2s",
+                      transform: openSettingsSection === "lifetime" ? "rotate(180deg)" : "none" }}>▼</span>
+                  </button>
+                  {openSettingsSection === "lifetime" && (
+                    <div style={{ padding: "14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
+                      <LifetimeAccountsManager />
                     </div>
                   )}
                 </div>
@@ -29351,6 +29379,205 @@ function DebugLogViewer() {
               );
             })}
       </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// LIFETIME ACCOUNTS MANAGER (admin only)
+// =============================================================================
+// Lets the admin grant or revoke a lifetime subscription to any username.
+// Backed by /api/auth/admin/lifetime/{grant,revoke,list}.
+// Hardcoded permanent lifetimes (Trelli/Mikez/HMbarsdat) are shown but
+// cannot be revoked through this UI — those are managed in source code.
+function LifetimeAccountsManager() {
+  var [granted, setGranted]       = React.useState([]);
+  var [permanent, setPermanent]   = React.useState([]);
+  var [loading, setLoading]       = React.useState(true);
+  var [error, setError]           = React.useState("");
+  var [grantUsername, setGrantUsername] = React.useState("");
+  var [grantPlan, setGrantPlan]   = React.useState("artist");
+  var [grantBusy, setGrantBusy]   = React.useState(false);
+  var [actionMsg, setActionMsg]   = React.useState("");
+
+  function load() {
+    setLoading(true);
+    setError("");
+    apiFetch("/api/auth/admin/lifetime/list")
+      .then(function(r) {
+        setGranted((r && r.granted) || []);
+        setPermanent((r && r.permanent) || []);
+      })
+      .catch(function(e) {
+        setError("Couldn't load list: " + (e.message || ""));
+      })
+      .finally(function() { setLoading(false); });
+  }
+
+  React.useEffect(load, []);
+
+  function grant() {
+    var u = (grantUsername || "").trim();
+    if (!u) { setActionMsg("Enter a username first"); return; }
+    setGrantBusy(true);
+    setActionMsg("");
+    apiFetch("/api/auth/admin/lifetime/grant", {
+      method: "POST",
+      body: JSON.stringify({ username: u, plan: grantPlan }),
+    })
+      .then(function(r) {
+        if (r && r.ok) {
+          setActionMsg(
+            "✓ Granted " + grantPlan + " lifetime to @" + r.username +
+            (r.user_exists ? "" : " (note: user hasn't signed up yet)")
+          );
+          setGrantUsername("");
+          load();
+        } else {
+          setActionMsg("Couldn't grant — unknown response");
+        }
+      })
+      .catch(function(e) { setActionMsg("Error: " + (e.message || "couldn't grant")); })
+      .finally(function() { setGrantBusy(false); setTimeout(function(){ setActionMsg(""); }, 4000); });
+  }
+
+  function revoke(username) {
+    if (!window.confirm("Revoke lifetime access for @" + username + "?")) return;
+    apiFetch("/api/auth/admin/lifetime/revoke", {
+      method: "POST",
+      body: JSON.stringify({ username: username }),
+    })
+      .then(function(r) {
+        if (r && r.ok) {
+          setActionMsg("✓ Revoked @" + username);
+          load();
+        }
+      })
+      .catch(function(e) { setActionMsg("Error: " + (e.message || "couldn't revoke")); })
+      .finally(function() { setTimeout(function(){ setActionMsg(""); }, 4000); });
+  }
+
+  return (
+    <div style={{ color: "white", fontSize: 13 }}>
+      <div style={{ color: "#aaa", fontSize: 11, lineHeight: 1.5, marginBottom: 12 }}>
+        Grant lifetime Artist Pro or Producer Pro access to any username.
+        Users get the plan permanently with no Stripe subscription.
+      </div>
+
+      {/* Grant form */}
+      <div style={{ background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 10, padding: 12, marginBottom: 14 }}>
+        <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 800, letterSpacing: 1, marginBottom: 8 }}>
+          GRANT LIFETIME
+        </div>
+        <input value={grantUsername} onChange={function(e){ setGrantUsername(e.target.value); }}
+          placeholder="username (case-sensitive)"
+          autoCapitalize="none" autoCorrect="off" spellCheck={false}
+          style={{ width: "100%", background: "#111", border: "1px solid #333", borderRadius: 8,
+            padding: "10px 12px", color: "white", fontSize: 13, outline: "none",
+            boxSizing: "border-box", marginBottom: 8 }} />
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          {["artist", "producer"].map(function(p) {
+            var active = grantPlan === p;
+            return (
+              <button key={p} onClick={function(){ setGrantPlan(p); }}
+                style={{
+                  flex: 1, padding: "8px 0", border: "none", borderRadius: 8,
+                  background: active
+                    ? (p === "producer" ? "linear-gradient(135deg,#C026D3,#7C3AED)" : "#3B82F6")
+                    : "#1a1a1a",
+                  color: active ? "white" : "#888", fontWeight: 700, fontSize: 12,
+                  cursor: "pointer", textTransform: "uppercase", letterSpacing: 0.5,
+                }}>
+                {p === "artist" ? "Artist Pro" : "Producer Pro"}
+              </button>
+            );
+          })}
+        </div>
+        <button onClick={grant} disabled={grantBusy}
+          style={{ width: "100%", background: grantBusy ? "#555" : "#C026D3",
+            border: "none", borderRadius: 8, color: "white",
+            fontWeight: 800, fontSize: 13, padding: "10px",
+            cursor: grantBusy ? "wait" : "pointer", opacity: grantBusy ? 0.6 : 1 }}>
+          {grantBusy ? "Granting..." : "Grant Lifetime"}
+        </button>
+        {actionMsg && (
+          <div style={{
+            color: actionMsg.indexOf("Error") === 0 ? "#F87171" : "#10B981",
+            fontSize: 11, marginTop: 8, textAlign: "center", lineHeight: 1.4,
+          }}>{actionMsg}</div>
+        )}
+      </div>
+
+      {/* Granted lifetimes (revocable) */}
+      <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 800, letterSpacing: 1, marginBottom: 8 }}>
+        ADMIN-GRANTED ({granted.length})
+      </div>
+      {loading && <div style={{ color: "#666", fontSize: 12, padding: "8px 0" }}>Loading…</div>}
+      {error && <div style={{ color: "#F87171", fontSize: 12, padding: "8px 0" }}>{error}</div>}
+      {!loading && !error && granted.length === 0 && (
+        <div style={{ color: "#555", fontSize: 12, padding: "8px 0", fontStyle: "italic" }}>
+          No admin-granted lifetimes yet.
+        </div>
+      )}
+      {granted.map(function(g) {
+        return (
+          <div key={g.username} style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 8,
+            padding: "10px 12px", marginBottom: 6,
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: "white", fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                @{g.username}
+              </div>
+              <div style={{ color: "#888", fontSize: 10, marginTop: 2 }}>
+                {g.plan === "producer" ? "Producer Pro" : "Artist Pro"}
+                {g.granted_by ? " · by @" + g.granted_by : ""}
+              </div>
+            </div>
+            <button onClick={function(){ revoke(g.username); }}
+              style={{
+                background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+                color: "#F87171", fontSize: 11, fontWeight: 700,
+                padding: "6px 10px", borderRadius: 6, cursor: "pointer",
+              }}>
+              Revoke
+            </button>
+          </div>
+        );
+      })}
+
+      {/* Permanent lifetimes (read-only) */}
+      <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 800, letterSpacing: 1, marginTop: 14, marginBottom: 8 }}>
+        PERMANENT (CODE-MANAGED)
+      </div>
+      <div style={{ color: "#666", fontSize: 10, marginBottom: 8, fontStyle: "italic" }}>
+        These can't be revoked through the UI — edit the source code to change them.
+      </div>
+      {permanent.map(function(p) {
+        return (
+          <div key={p.username} style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            background: "#0a0a0a", border: "1px solid #1a1a1a", borderRadius: 8,
+            padding: "10px 12px", marginBottom: 6, opacity: 0.7,
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: "#ccc", fontWeight: 700, fontSize: 13 }}>
+                @{p.username}
+                {p.is_admin && (
+                  <span style={{ color: "#A78BFA", fontSize: 9, fontWeight: 800, marginLeft: 6, letterSpacing: 0.5 }}>
+                    ADMIN
+                  </span>
+                )}
+              </div>
+              <div style={{ color: "#666", fontSize: 10, marginTop: 2 }}>
+                {p.plan === "producer" ? "Producer Pro" : "Artist Pro"} · permanent
+              </div>
+            </div>
+            <div style={{ color: "#444", fontSize: 14 }}>🔒</div>
+          </div>
+        );
+      })}
     </div>
   );
 }
