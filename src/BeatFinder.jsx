@@ -14603,7 +14603,7 @@ function RootAuthScreen({ onLogin, startMode }) {
   );
 
   return (
-    <div style={{ padding: "0 24px 100px" }}>
+    <div style={{ padding: "0 24px max(140px, calc(env(safe-area-inset-bottom) + 120px))" }}>
       <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 2, marginBottom: 24 }}>
         {mode === "signup" ? "CREATE ACCOUNT" : "WELCOME BACK"}
       </div>
@@ -30498,6 +30498,8 @@ export default function BeatFinder() {
           position: "fixed", inset: 0, zIndex: 99999,
           background: "#0a0a0a",
           overflowY: "auto",
+          WebkitOverflowScrolling: "touch",   // iOS momentum scroll
+          overscrollBehavior: "contain",      // don't bubble bounce to <body>
           fontFamily: "'DM Sans',sans-serif",
           paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))",
         }}>
