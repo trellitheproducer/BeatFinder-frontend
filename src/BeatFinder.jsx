@@ -13031,7 +13031,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
             </div>
             {(isProd || isArtist) && <VerifiedBadge size={20} />}
             {profile.username === "Trelli" && <GoldVerifiedBadge size={22} />}
-            {profile.username === "Mikez"  && <GreenVerifiedBadge size={22} />}
+            {(profile.username === "Mikez" || profile.username === "HMbarsdat") && <GreenVerifiedBadge size={22} />}
           </div>
           {profile.username && <div style={{ color: "#666", fontSize: 14, marginTop: 2 }}>@{profile.username}</div>}
         </div>
@@ -13042,7 +13042,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
             {isProd && <span onClick={() => setBadgePopup({ icon:"producer", text:"This user is currently subscribed to Producer Pro" })} style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"2px 10px", color:"#C026D3", fontWeight:700, fontSize:11, cursor:"pointer" }}>Producer Pro</span>}
             {profile.username === "Trelli" && <CEOBadge onClick={() => setBadgePopup({ icon:"ceo", text:"Verified Chief Executive Officer of BeatFinder" })} />}
             {isArtist && !isProd && <span onClick={() => setBadgePopup({ icon:"artist", text:"This user is currently subscribed to Artist Pro" })} style={{ background:"rgba(245,158,11,0.15)", border:"1px solid #F59E0B", borderRadius:20, padding:"2px 10px", color:"#F59E0B", fontWeight:700, fontSize:11, cursor:"pointer" }}>Artist Pro</span>}
-            {profile.username === "Mikez" && <BrandAmbassadorBadge onClick={() => setBadgePopup({ icon:"brand_ambassador", text:"Verified Brand Ambassador of BeatFinder" })} />}
+            {(profile.username === "Mikez" || profile.username === "HMbarsdat") && <BrandAmbassadorBadge onClick={() => setBadgePopup({ icon:"brand_ambassador", text:"Verified Brand Ambassador of BeatFinder" })} />}
           </div>
         )}
 
@@ -21230,19 +21230,22 @@ function UserBadges({ username, plan, size, compact }) {
   var isProd   = plan === "producer";
   var isArtist = plan === "artist" || isProd;
   var isPro    = isProd || isArtist;
+  // Brand Ambassadors get the green seal + (when not compact) the B.A
+  // chip. Adding a new BA = add their username here.
+  var isBrandAmbassador = username === "Mikez" || username === "HMbarsdat";
   return (
     <React.Fragment>
       {/* Pro plan → blue/purple verified tick. Always shown for any
-          Pro user, including the special-badge holders (Trelli, Mikez)
-          since they're also Pro plan members. Their special seal sits
-          alongside the tick rather than replacing it. */}
+          Pro user, including the special-badge holders (Trelli, Mikez,
+          HMbarsdat) since they're also Pro plan members. Their special
+          seal sits alongside the tick rather than replacing it. */}
       {isPro && <VerifiedBadge size={sz} />}
       {/* Trelli: gold seal + (if not compact) the CEO chip */}
       {username === "Trelli" && <GoldVerifiedBadge size={sz + 2} />}
       {username === "Trelli" && !compact && <CEOBadge />}
-      {/* Mikez: green seal + (if not compact) the B.A chip */}
-      {username === "Mikez" && <GreenVerifiedBadge size={sz + 2} />}
-      {username === "Mikez" && !compact && <BrandAmbassadorBadge />}
+      {/* Brand Ambassadors: green seal + (if not compact) the B.A chip */}
+      {isBrandAmbassador && <GreenVerifiedBadge size={sz + 2} />}
+      {isBrandAmbassador && !compact && <BrandAmbassadorBadge />}
     </React.Fragment>
   );
 }
