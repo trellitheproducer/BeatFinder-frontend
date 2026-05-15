@@ -22384,42 +22384,52 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         }
       }
 
-      // ── 5-band parametric EQ — always built; bypass = unity gain when off ──
+      // ── 5-band parametric EQ — only built when on ──
+      // PERF: 5 biquad filters in series consume real audio-thread CPU
+      // per track. When EQ is OFF we skip them entirely; turning EQ on
+      // bumps fxSignature so the chain rebuilds with the filters
+      // inserted. Audible result is identical (the previous "bypass"
+      // mode set frequencies/gains to neutral but the biquads still
+      // processed audio).
       {
         const eq = fx.eq || {};
         const T  = 0.005;
         const eqOn = !!(fx.eq && fx.eq.on);
 
-        const hpf = actx.createBiquadFilter();
-        hpf.type = "highpass";
-        hpf.frequency.setTargetAtTime(eqOn ? (eq.hpfFreq||80)   : 20,    actx.currentTime, T);
-        hpf.Q.setTargetAtTime(        eqOn ? (eq.hpfQ||0.707)   : 0.001, actx.currentTime, T);
+        if (eqOn) {
+          const hpf = actx.createBiquadFilter();
+          hpf.type = "highpass";
+          hpf.frequency.setTargetAtTime(eq.hpfFreq||80,   actx.currentTime, T);
+          hpf.Q.setTargetAtTime(        eq.hpfQ||0.707,   actx.currentTime, T);
 
-        const low = actx.createBiquadFilter();
-        low.type = "lowshelf";
-        low.frequency.setTargetAtTime(eqOn ? (eq.lowFreq||200)  : 200,   actx.currentTime, T);
-        low.gain.setTargetAtTime(     eqOn ? (eq.low||0)        : 0,     actx.currentTime, T);
+          const low = actx.createBiquadFilter();
+          low.type = "lowshelf";
+          low.frequency.setTargetAtTime(eq.lowFreq||200,  actx.currentTime, T);
+          low.gain.setTargetAtTime(     eq.low||0,        actx.currentTime, T);
 
-        const mid = actx.createBiquadFilter();
-        mid.type = "peaking";
-        mid.frequency.setTargetAtTime(eqOn ? (eq.midFreq||1000) : 1000,  actx.currentTime, T);
-        mid.gain.setTargetAtTime(     eqOn ? (eq.mid||0)        : 0,     actx.currentTime, T);
-        mid.Q.setTargetAtTime(        eqOn ? (eq.midQ||1.0)     : 1.0,   actx.currentTime, T);
+          const mid = actx.createBiquadFilter();
+          mid.type = "peaking";
+          mid.frequency.setTargetAtTime(eq.midFreq||1000, actx.currentTime, T);
+          mid.gain.setTargetAtTime(     eq.mid||0,        actx.currentTime, T);
+          mid.Q.setTargetAtTime(        eq.midQ||1.0,     actx.currentTime, T);
 
-        const high = actx.createBiquadFilter();
-        high.type = "highshelf";
-        high.frequency.setTargetAtTime(eqOn ? (eq.highFreq||8000) : 8000, actx.currentTime, T);
-        high.gain.setTargetAtTime(     eqOn ? (eq.high||0)        : 0,    actx.currentTime, T);
+          const high = actx.createBiquadFilter();
+          high.type = "highshelf";
+          high.frequency.setTargetAtTime(eq.highFreq||8000, actx.currentTime, T);
+          high.gain.setTargetAtTime(     eq.high||0,        actx.currentTime, T);
 
-        const lpf = actx.createBiquadFilter();
-        lpf.type = "lowpass";
-        lpf.frequency.setTargetAtTime(eqOn ? (eq.lpfFreq||18000) : 22050, actx.currentTime, T);
-        lpf.Q.setTargetAtTime(        eqOn ? (eq.lpfQ||0.707)    : 0.001, actx.currentTime, T);
+          const lpf = actx.createBiquadFilter();
+          lpf.type = "lowpass";
+          lpf.frequency.setTargetAtTime(eq.lpfFreq||18000, actx.currentTime, T);
+          lpf.Q.setTargetAtTime(        eq.lpfQ||0.707,    actx.currentTime, T);
 
-        // Chain: hpf → low → mid → high → lpf → [rest of chain]
-        lpf.connect(node); high.connect(lpf); mid.connect(high); low.connect(mid); hpf.connect(low);
-        node = hpf;
-        liveNodes.eq = { hpf, low, mid, high, lpf };
+          // Chain: hpf → low → mid → high → lpf → [rest of chain]
+          lpf.connect(node); high.connect(lpf); mid.connect(high); low.connect(mid); hpf.connect(low);
+          node = hpf;
+          liveNodes.eq = { hpf, low, mid, high, lpf };
+        }
+        // else: EQ off — node passes through unchanged. liveNodes.eq
+        // is omitted; live-update code paths must null-check it.
       }
 
       // ── Compressor — always built; bypass when off via extreme settings ──
@@ -22469,10 +22479,6 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         const chorusFeedback = actx.createGain();
         chorusFeedback.gain.value = 0.18;
 
-        // connect chorus feedback loop (mild, avoids runaway)
-        chorusDelay.connect(chorusFeedback);
-        chorusFeedback.connect(chorusDelay);
-
         // Width: blend L vs R amount into merger
         const lWidthGain = actx.createGain(); lWidthGain.gain.value = 0.5 + width * 0.5;
         const rWidthGain = actx.createGain(); rWidthGain.gain.value = 0.5 + width * 0.5;
@@ -22485,21 +22491,31 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         // Entry gain (splits the signal)
         const doubEntry = actx.createGain(); doubEntry.gain.value = 1;
 
-        // Routing: entry → [dryGain→outMix] and [haasDelay→merger:0, chorusDelay→merger:1]
+        // Routing: entry → dryGain → outMix (always)
+        // When doubler is OFF, skip the wet path entirely. The two delay
+        // lines (plus chorus feedback loop) would otherwise process the
+        // signal even when the wet gain is 0, costing audio-thread CPU.
+        // Audible result is identical (wet would have been silent anyway).
         doubEntry.connect(dryGain);
         dryGain.connect(outMix);
 
-        doubEntry.connect(haasDelay);
-        doubEntry.connect(chorusDelay);
+        if (doubOn) {
+          // Chorus feedback loop — only wired when needed
+          chorusDelay.connect(chorusFeedback);
+          chorusFeedback.connect(chorusDelay);
 
-        haasDelay.connect(lWidthGain);
-        chorusDelay.connect(rWidthGain);
+          doubEntry.connect(haasDelay);
+          doubEntry.connect(chorusDelay);
 
-        lWidthGain.connect(wetMix);
-        rWidthGain.connect(wetMix);
+          haasDelay.connect(lWidthGain);
+          chorusDelay.connect(rWidthGain);
 
-        wetMix.connect(wetGain);
-        wetGain.connect(outMix);
+          lWidthGain.connect(wetMix);
+          rWidthGain.connect(wetMix);
+
+          wetMix.connect(wetGain);
+          wetGain.connect(outMix);
+        }
 
         outMix.connect(node);
         node = doubEntry;
@@ -22569,6 +22585,9 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         hdLoCut.Q.value = 0.5;
 
         // Analog saturation waveshaper (soft clip — bypassed when drive=0)
+        // PERF: oversample:"2x" doubles CPU on this stage (processes at
+        // 2× sample rate). Only enable when drive > 0 AND h-delay is on,
+        // so disabled tracks don't pay the cost.
         const hdSat = actx.createWaveShaper();
         const satCurve = (function() {
           const n = 256, c = new Float32Array(n);
@@ -22579,20 +22598,27 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
           return c;
         })();
         hdSat.curve = satCurve;
-        hdSat.oversample = "2x";
+        hdSat.oversample = (hdOn && drive > 0) ? "2x" : "none";
 
-        // Tape wow/flutter: LFO → delay modulation (only in tape mode)
+        // Tape wow/flutter: LFO → delay modulation (only in tape mode).
+        // PERF: an OscillatorNode runs at audio rate even at 0.001 Hz —
+        // each running LFO is a small but real CPU cost on the audio
+        // thread, multiplied across every track. Only START the LFO
+        // when it's actually needed (h-delay on AND tape mode). It can
+        // be lazily started later via the live-update path if mode
+        // changes to "tape" mid-session.
         const hdLfo   = actx.createOscillator();
         const hdLfoGain = actx.createGain();
         const modDepth = hdOn ? (hd.modDepth ?? 0.15) : 0;
         const modRate  = hd.modRate ?? 0.5;
         hdLfo.type = "sine";
-        hdLfo.frequency.value = mode === "tape" ? modRate : 0.001; // near-zero when not tape
-        // LFO modulation depth: up to ±15ms flutter in tape mode
+        hdLfo.frequency.value = mode === "tape" ? modRate : 0.001;
         hdLfoGain.gain.value = mode === "tape" ? modDepth * 0.015 : 0;
         hdLfo.connect(hdLfoGain);
         hdLfoGain.connect(hdDelay.delayTime);
-        hdLfo.start();
+        if (hdOn && mode === "tape") {
+          try { hdLfo.start(); } catch (e) {}
+        }
 
         // Feedback gain
         const hdFb    = actx.createGain(); hdFb.gain.value = feedback;
@@ -22613,28 +22639,35 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         // ── Routing ──
         // Main chain: hdEntry → hdDelay → hdHiCut → hdLoCut → hdSat → hdPan → hdWet → hdOut
         //             └─ feedback: hdSat → hdFb → hdDelay (loop)
+        // PERF: when h-delay is OFF, route through the dry path ONLY.
+        // The wet path's 2.1s delay buffer + biquads + waveshaper + LFO
+        // all consume audio-thread CPU even when their output gain is 0.
+        // Skipping the connection entirely saves all of that, with zero
+        // audible difference (wet output would be silent anyway).
         hdEntry.connect(hdDry);
         hdDry.connect(hdOut);
 
-        hdEntry.connect(hdDelay);
-        hdDelay.connect(hdHiCut);
-        hdHiCut.connect(hdLoCut);
-        hdLoCut.connect(hdSat);
-        hdSat.connect(hdPan);
-        hdPan.connect(hdWet);
-        // Feedback loop
-        hdSat.connect(hdFb);
-        hdFb.connect(hdDelay);
+        if (hdOn) {
+          hdEntry.connect(hdDelay);
+          hdDelay.connect(hdHiCut);
+          hdHiCut.connect(hdLoCut);
+          hdLoCut.connect(hdSat);
+          hdSat.connect(hdPan);
+          hdPan.connect(hdWet);
+          // Feedback loop
+          hdSat.connect(hdFb);
+          hdFb.connect(hdDelay);
 
-        // Ping-pong second copy (offset by half a delay period)
-        if (mode === "ping") {
-          hdSat.connect(hdFbFlip);
-          hdFbFlip.connect(hdDelayFlip);
-          hdDelayFlip.connect(hdPanFlip);
-          hdPanFlip.connect(hdWet);
+          // Ping-pong second copy (offset by half a delay period)
+          if (mode === "ping") {
+            hdSat.connect(hdFbFlip);
+            hdFbFlip.connect(hdDelayFlip);
+            hdDelayFlip.connect(hdPanFlip);
+            hdPanFlip.connect(hdWet);
+          }
+
+          hdWet.connect(hdOut);
         }
-
-        hdWet.connect(hdOut);
         hdOut.connect(node);
         node = hdEntry;
 
