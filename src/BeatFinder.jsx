@@ -3256,12 +3256,46 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
 // =============================================================================
 // PLAN PICKER — shared monthly/annual toggle used everywhere plans are shown
 // =============================================================================
-// Stripe price IDs — replace YEARLY_ placeholders with your real annual price IDs
-// from your Stripe dashboard once created.
+// PLAN_PRICES — Stripe price IDs.
+// These act as a FALLBACK. On app boot the frontend fetches /api/pricing
+// and mutates this object in-place with server-provided values, so we can
+// change pricing in one place (backend) without a frontend code deploy.
+// The values below are kept in sync as the last-known-good defaults so
+// the signup flow keeps working even if /api/pricing is briefly unavailable.
 var PLAN_PRICES = {
   artist:   { monthly: "price_1TQDoFFHyNSCxas89UpDKiro",  yearly: "price_1TW9CXFHyNSCxas8TM826ULo" },
   producer: { monthly: "price_1TQDpBFHyNSCxas8cktbqw1n", yearly: "price_1TW9BnFHyNSCxas8vHDrVwB6" },
 };
+
+// Fetched server pricing — exposed so PlanPicker can read display strings
+// straight from the API response (no hardcoded amounts on the frontend).
+// Populated by the boot-time fetch in BeatFinderInner.
+var SERVER_PRICING = null;
+
+// Mutate PLAN_PRICES with server values. Called once at app boot. We mutate
+// in place (not reassign) so existing references in components that already
+// closed over PLAN_PRICES see the new values.
+function applyServerPricing(serverData) {
+  try {
+    if (!serverData || !serverData.subscriptions) return;
+    var subs = serverData.subscriptions;
+    if (subs.artist && subs.artist.monthly && subs.artist.monthly.price_id) {
+      PLAN_PRICES.artist.monthly = subs.artist.monthly.price_id;
+    }
+    if (subs.artist && subs.artist.annual && subs.artist.annual.price_id) {
+      PLAN_PRICES.artist.yearly = subs.artist.annual.price_id;
+    }
+    if (subs.producer && subs.producer.monthly && subs.producer.monthly.price_id) {
+      PLAN_PRICES.producer.monthly = subs.producer.monthly.price_id;
+    }
+    if (subs.producer && subs.producer.annual && subs.producer.annual.price_id) {
+      PLAN_PRICES.producer.yearly = subs.producer.annual.price_id;
+    }
+    SERVER_PRICING = serverData;
+  } catch (_) {
+    // Swallow — fallback to hardcoded values, signup still works.
+  }
+}
 
 function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
   var [billing, setBilling] = React.useState("monthly"); // "monthly" | "yearly"
@@ -30167,6 +30201,23 @@ function BeatFinderInner() {
   // otherwise never trigger the per-button detection.
   React.useEffect(function() {
     installGlobalPopupProbe();
+  }, []);
+
+  // ── Boot-time pricing sync ────────────────────────────────────────
+  // Fetch /api/pricing once on app load and mutate PLAN_PRICES with
+  // the server's authoritative values. Hardcoded fallbacks remain in
+  // place so signup still works if the API hiccups during boot.
+  // No auth required — pricing is public.
+  React.useEffect(function() {
+    fetch(API_BASE + "/api/stripe/pricing")
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (data) applyServerPricing(data);
+      })
+      .catch(function() {
+        // Swallow — fallback values in PLAN_PRICES keep the signup flow
+        // working even if the pricing endpoint is unreachable.
+      });
   }, []);
 
   // ── Safe-area-inset stabilizer (minimal version) ─────────────────────
