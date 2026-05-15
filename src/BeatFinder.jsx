@@ -12711,12 +12711,18 @@ function FollowListScreen({ username, mode, onBack, onViewProfile, currentUser }
             </div>
             {/* Name + username */}
             <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontWeight:700, fontSize:14, color:"white", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{u.name || u.username}</div>
+              <div style={{ display:"flex", alignItems:"center", gap:6, minWidth:0 }}>
+                <span style={{ fontWeight:700, fontSize:14, color:"white", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                  {u.name || u.username}
+                </span>
+                {/* Real badges — Pro tick + any lifetime seals (Trelli's
+                    gold/CEO, Mikez+HMbarsdat's green/B.A). Compact mode
+                    skips the textual chips and just shows the icons so
+                    the row stays single-line. */}
+                <UserBadges username={u.username} plan={u.plan} compact size={13} />
+              </div>
               <div style={{ color:"#555", fontSize:12, marginTop:1 }}>@{u.username}</div>
             </div>
-            {/* Plan badge */}
-            {u.plan === "producer" && <span style={{ background:"rgba(192,38,211,0.15)", border:"1px solid #C026D3", borderRadius:20, padding:"3px 10px", color:"#C026D3", fontWeight:700, fontSize:10, flexShrink:0 }}>Pro</span>}
-            {u.plan === "artist"   && <span style={{ background:"rgba(245,158,11,0.15)",  border:"1px solid #F59E0B", borderRadius:20, padding:"3px 10px", color:"#F59E0B",  fontWeight:700, fontSize:10, flexShrink:0 }}>Artist</span>}
             {/* Follow / Unfollow button — hidden for own account */}
             {currentUser && !isOwnAccount && (
               <button
