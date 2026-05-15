@@ -12871,6 +12871,60 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
     setFollowLoading(false);
   };
 
+  // Profile sharing — opens the native iOS / Android share sheet via the
+  // Web Share API when available (mobile), and falls back to clipboard
+  // copy on desktop. The share URL deep-links to /profile/{username} so
+  // users get straight to the profile when the link is tapped.
+  const [shareCopied, setShareCopied] = useState(false);
+  const shareProfile = async () => {
+    if (!profile || !username) return;
+    var url = "https://beatfinder.co.uk/profile/" + encodeURIComponent(username);
+    var displayName = profile.name || ("@" + username);
+    var shareData = {
+      title:   displayName + " on BeatFinder",
+      text:    "Check out " + displayName + " on BeatFinder",
+      url:     url,
+    };
+    // Try native share first — iOS Safari, Android Chrome support this
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (e) {
+        // User cancelled or share unavailable in this context — fall
+        // through to clipboard copy. Don't swallow real errors though;
+        // AbortError is the cancellation signal we expect to ignore.
+        if (e && e.name !== "AbortError") {
+          // Some browsers throw for non-user-cancellation reasons; in
+          // that case clipboard fallback is still better than nothing.
+        } else {
+          return;
+        }
+      }
+    }
+    // Clipboard fallback — Web Share API absent (desktop, older mobile)
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareCopied(true);
+      setTimeout(function() { setShareCopied(false); }, 2000);
+    } catch (e) {
+      // Final fallback: legacy execCommand. Works in older Safari /
+      // when the page isn't served over HTTPS (though ours is).
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = url;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+        setShareCopied(true);
+        setTimeout(function() { setShareCopied(false); }, 2000);
+      } catch (_) {}
+    }
+  };
+
   if (loading) return (
     <div style={{ textAlign: "center", padding: "80px 24px", color: "#555" }}>
       <div style={{ marginBottom: 10 }}><AppIcon id="profile" size={36} /></div>
@@ -13097,6 +13151,22 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
                 Message
               </button>
             )}
+            {/* Share — opens native share sheet on mobile, copies link
+                on desktop. Icon-only to keep the action row compact. */}
+            <button onClick={shareProfile}
+              title="Share profile"
+              style={{
+                width: 38, height: 38, borderRadius: "50%",
+                background: "transparent", border: "1.5px solid #333",
+                color: "#aaa", cursor: "pointer", flexShrink: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+              </svg>
+            </button>
             {/* Overflow kebab — block/unblock and (future) report */}
             <button onClick={() => setOverflowOpen(v => !v)}
               style={{
@@ -13133,6 +13203,45 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* Share button on user's own profile — lets them share their
+            own profile link to friends / external apps. Single button
+            row since Follow/Message don't apply to oneself. */}
+        {isOwnProfile && (
+          <div style={{ display: "flex", marginBottom: 10 }}>
+            <button onClick={shareProfile}
+              style={{
+                flex: 1, padding: "10px 16px", borderRadius: 20,
+                fontWeight: 700, fontSize: 13, cursor: "pointer",
+                background: "transparent",
+                border: "1.5px solid #333", color: "#aaa",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+              </svg>
+              Share my profile
+            </button>
+          </div>
+        )}
+
+        {/* Copy-success toast — flashes briefly when the clipboard
+            fallback fires (no native share sheet available). */}
+        {shareCopied && (
+          <div style={{
+            position: "fixed", bottom: 90, left: "50%",
+            transform: "translateX(-50%)", zIndex: 99999,
+            background: "rgba(16,185,129,0.95)",
+            color: "white", fontSize: 13, fontWeight: 700,
+            padding: "10px 18px", borderRadius: 20,
+            boxShadow: "0 6px 24px rgba(0,0,0,0.5)",
+            pointerEvents: "none",
+          }}>
+            Link copied to clipboard
           </div>
         )}
 
