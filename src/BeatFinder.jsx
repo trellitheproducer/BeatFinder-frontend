@@ -28413,94 +28413,110 @@ export default function BeatFinder() {
     installGlobalPopupProbe();
   }, []);
 
-  // ── DIAGNOSTIC: capture viewport/display-mode state on transitions ───
-  // Temporary instrumentation to find the root cause of the "header
-  // sitting on top of the iOS status bar" bug after closing an in-app
-  // browser sheet. Captures three snapshots:
-  //   1. INITIAL — on app load
-  //   2. HIDDEN  — when the page becomes hidden (link tapped, sheet opens)
-  //   3. VISIBLE — when the page becomes visible again (sheet dismissed)
-  // Each snapshot records innerHeight, visualViewport.height, screen.height,
-  // display-mode media query state, computed safe-area-inset-top, and a
-  // bunch of other dimensions. Snapshots get appended to localStorage so
-  // they can be inspected via the on-screen "DBG" button on Home.
+  // ── Safe-area-inset stabilizer ────────────────────────────────────────
+  // FIXES: page header overlapping the iOS status bar after closing an
+  // in-app browser sheet (SFSafariViewController). Diagnostic capture
+  // (which has been removed) showed that on resume:
+  //
+  //   t=0ms:    visibility → visible
+  //             innerHeight=751, safe-area-inset-top=0     ← BAD VALUES
+  //   t=~50ms:  resize event, still bad values
+  //   t=~100ms: inset jumps to correct value (59), innerHeight to 795
+  //
+  // The ~50–100ms window of bad values is what poisons the layout. Any
+  // React render during that window pins headers at top:0. Even after
+  // iOS sends the correct values, WebKit doesn't always re-layout the
+  // already-rendered elements.
+  //
+  // Fix: when we detect we're in the bad state (safeTopPx === 0 right
+  // after a visibility/resize event), poll briefly until the value
+  // stabilizes at a non-zero number, then force a reflow at that point.
+  // Polling is bounded (600ms max) so this can't loop forever on a
+  // device that legitimately has no notch.
   React.useEffect(function() {
-    function snapshot(label) {
+    function measureSafeTop() {
       try {
-        var de = document.documentElement;
         var probe = document.createElement("div");
         probe.style.cssText = "position:fixed;top:env(safe-area-inset-top);left:0;width:1px;height:1px;pointer-events:none;opacity:0;";
         document.body.appendChild(probe);
-        var probeTop = probe.getBoundingClientRect().top;
+        var top = probe.getBoundingClientRect().top;
         probe.remove();
-
-        var s = {
-          t:           new Date().toISOString().slice(11, 23),
-          label:       label,
-          innerH:      window.innerHeight,
-          innerW:      window.innerWidth,
-          vvH:         window.visualViewport ? Math.round(window.visualViewport.height) : null,
-          vvW:         window.visualViewport ? Math.round(window.visualViewport.width)  : null,
-          vvOffTop:    window.visualViewport ? Math.round(window.visualViewport.offsetTop) : null,
-          vvScale:     window.visualViewport ? window.visualViewport.scale : null,
-          screenH:     window.screen ? window.screen.height : null,
-          screenW:     window.screen ? window.screen.width  : null,
-          docH:        de.clientHeight,
-          docW:        de.clientWidth,
-          safeTopPx:   Math.round(probeTop),
-          standalone:  !!(window.matchMedia("(display-mode: standalone)").matches),
-          browser:     !!(window.matchMedia("(display-mode: browser)").matches),
-          fullscreen:  !!(window.matchMedia("(display-mode: fullscreen)").matches),
-          navStand:    !!(navigator.standalone),
-          visibility:  document.visibilityState,
-        };
-        var arr;
-        try { arr = JSON.parse(localStorage.getItem("bf_diag") || "[]"); }
-        catch(_) { arr = []; }
-        arr.push(s);
-        if (arr.length > 40) arr = arr.slice(-40);
-        localStorage.setItem("bf_diag", JSON.stringify(arr));
-      } catch(e) {}
+        return Math.round(top);
+      } catch(_) { return 0; }
     }
 
-    setTimeout(function(){ snapshot("INITIAL"); }, 100);
+    function forceReflow() {
+      try {
+        var html = document.documentElement;
+        html.style.transform = "translateZ(0)";
+        void html.offsetHeight;
+        html.style.transform = "";
+        window.dispatchEvent(new Event("resize"));
+      } catch(_) {}
+    }
+
+    // Snapshot the device's "real" safe-top inset on first load. We use
+    // this as the truth — if a later measurement returns 0 when this
+    // says non-zero, we know iOS is lying to us.
+    var canonicalSafeTop = 0;
+    setTimeout(function() {
+      canonicalSafeTop = measureSafeTop();
+    }, 200);
+
+    var stabilizing = false;
+    function stabilize() {
+      // If the device doesn't HAVE a notch (canonical inset is 0), there's
+      // nothing to wait for — bail out.
+      if (canonicalSafeTop === 0) return;
+      if (stabilizing) return;
+      stabilizing = true;
+
+      var start = Date.now();
+      var pollMs = 30;
+      var maxMs = 600;
+
+      function poll() {
+        var now = measureSafeTop();
+        var elapsed = Date.now() - start;
+
+        if (now > 0) {
+          // Inset has come back. Force a reflow once now and once
+          // shortly after (iOS sometimes needs a second nudge).
+          forceReflow();
+          setTimeout(forceReflow, 50);
+          stabilizing = false;
+          return;
+        }
+        if (elapsed >= maxMs) {
+          // Gave up waiting. Still force a reflow — maybe the values
+          // came back between our polls.
+          forceReflow();
+          stabilizing = false;
+          return;
+        }
+        setTimeout(poll, pollMs);
+      }
+      poll();
+    }
 
     function onVis() {
-      if (document.visibilityState === "hidden") {
-        snapshot("HIDDEN");
-      } else {
-        snapshot("VISIBLE_t0");
-        setTimeout(function(){ snapshot("VISIBLE_t100"); }, 100);
-        setTimeout(function(){ snapshot("VISIBLE_t500"); }, 500);
-        setTimeout(function(){ snapshot("VISIBLE_t1500"); }, 1500);
+      if (document.visibilityState === "visible") {
+        // Don't trust the immediate values — poll until safeTop comes back.
+        stabilize();
       }
     }
-    function onResize() { snapshot("RESIZE"); }
-    function onVvResize() { snapshot("VV_RESIZE"); }
+    function onFocus() { stabilize(); }
+    function onPageShow() { stabilize(); }
 
     document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("resize", onResize);
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener("resize", onVvResize);
-    }
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("pageshow", onPageShow);
     return function() {
       document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("resize", onResize);
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener("resize", onVvResize);
-      }
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pageshow", onPageShow);
     };
   }, []);
-
-  // ── DIAGNOSTIC: floating "DBG" button + panel to view captured data ──
-  var [showDiag, setShowDiag] = React.useState(false);
-  var [diagData, setDiagData] = React.useState("");
-  React.useEffect(function() {
-    if (showDiag) {
-      try { setDiagData(localStorage.getItem("bf_diag") || "[]"); }
-      catch(_) { setDiagData("read-error"); }
-    }
-  }, [showDiag]);
 
   // ── External browser dismissal recovery ──────────────────────────────────
   // When BeatFinder navigates the user away to a social media / external URL
@@ -28556,32 +28572,6 @@ export default function BeatFinder() {
       if (isAppBlank()) safeReload();
     }
 
-    // After an in-app browser (SFSafariViewController) closes, iOS
-    // can briefly report env(safe-area-inset-top) as 0. Any element
-    // whose layout depends on it — page headers, sticky top bars —
-    // ends up shifted/collapsed: "FEED" title appearing on top of
-    // the iOS clock, the bell row pushed up under the status bar, etc.
-    // Even when the inset comes back to its real value, the browser
-    // sometimes fails to re-layout. Forcing a tiny style flip on
-    // <html> reliably nudges WebKit to recompute the inset values
-    // and reflow everything pinned to them. Cheap (no React re-render),
-    // safe (no visual side effects), and idempotent.
-    function forceSafeAreaReflow() {
-      try {
-        var html = document.documentElement;
-        // Apply a no-op transform, force a layout read, then remove.
-        // The read between writes is what guarantees a reflow rather
-        // than a coalesced no-op.
-        html.style.transform = "translateZ(0)";
-        // Touching offsetHeight forces synchronous layout
-        void html.offsetHeight;
-        html.style.transform = "";
-        // Also fire a resize so any component listening for it
-        // (e.g. things that cache window height in state) re-reads.
-        window.dispatchEvent(new Event("resize"));
-      } catch(e) {}
-    }
-
     // RAF-gap detection: when iOS opens an in-app web viewer / system browser
     // (Safari View Controller, the YouTube share-sheet preview, etc.) over the
     // top of BeatFinder, requestAnimationFrame pauses. As soon as the user
@@ -28593,13 +28583,10 @@ export default function BeatFinder() {
       var gap = now - lastRafTime;
       if (gap > 800) {
         // We were paused (likely backgrounded or covered by in-app viewer).
-        // First: force a safe-area reflow now and again shortly after —
-        // iOS sometimes needs a second nudge once it has settled the
-        // correct inset values (usually 100-300ms after resume).
-        forceSafeAreaReflow();
-        setTimeout(forceSafeAreaReflow, 150);
-        setTimeout(forceSafeAreaReflow, 500);
-        // Then: blank-check (last resort, in case the app actually died)
+        // Check several times in case the DOM hasn't re-rendered yet.
+        // The safe-area stabilizer effect handles the layout reflow on
+        // its own once iOS sends the correct insets — this just handles
+        // the blank-app case.
         setTimeout(checkAndRecover, 50);
         setTimeout(checkAndRecover, 250);
         setTimeout(checkAndRecover, 700);
@@ -28638,13 +28625,9 @@ export default function BeatFinder() {
 
     function onVisibilityChange() {
       if (document.visibilityState === "visible") {
-        // Force safe-area reflow on return — same fix as RAF-gap path,
-        // catches cases where iOS fires visibilitychange but doesn't
-        // produce a long enough RAF gap to trigger the other path.
-        forceSafeAreaReflow();
-        setTimeout(forceSafeAreaReflow, 150);
-        setTimeout(forceSafeAreaReflow, 500);
-        // Multiple checks at different delays to catch slow restorations
+        // Multiple checks at different delays to catch slow restorations.
+        // The safe-area stabilizer effect (separate useEffect) handles
+        // forcing a layout reflow once iOS sends correct inset values.
         setTimeout(checkAndRecover, 50);
         setTimeout(checkAndRecover, 200);
         setTimeout(checkAndRecover, 500);
@@ -28659,8 +28642,6 @@ export default function BeatFinder() {
     function onFocus() {
       // iOS sometimes fires focus before visibilitychange when returning
       // from an external link / YouTube suggested video tap
-      forceSafeAreaReflow();
-      setTimeout(forceSafeAreaReflow, 200);
       setTimeout(checkAndRecover, 100);
       setTimeout(checkAndRecover, 400);
     }
@@ -29917,72 +29898,6 @@ export default function BeatFinder() {
           );
         })}
       </div>
-
-      {/* ── DIAGNOSTIC — TEMPORARY: floating DBG button + viewer panel ── */}
-      <button
-        onClick={function() { setShowDiag(true); }}
-        style={{
-          position: "fixed",
-          top: "calc(env(safe-area-inset-top) + 6px)",
-          right: 6,
-          zIndex: 99999,
-          background: "rgba(192,38,211,0.85)",
-          color: "white", fontSize: 9, fontWeight: 800,
-          border: "none", borderRadius: 6,
-          padding: "3px 6px",
-          cursor: "pointer", letterSpacing: 0.5,
-          boxShadow: "0 0 8px rgba(0,0,0,0.4)",
-        }}>
-        DBG
-      </button>
-      {showDiag && (
-        <div onClick={function(){ setShowDiag(false); }}
-          style={{
-            position: "fixed", inset: 0, zIndex: 99998,
-            background: "rgba(0,0,0,0.92)",
-            display: "flex", flexDirection: "column",
-            paddingTop: "calc(env(safe-area-inset-top) + 14px)",
-            paddingBottom: "calc(env(safe-area-inset-bottom) + 14px)",
-            paddingLeft: 12, paddingRight: 12,
-          }}>
-          <div onClick={function(e){ e.stopPropagation(); }}
-            style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, gap: 8 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <div style={{ color: "white", fontWeight: 800, fontSize: 14 }}>Viewport diagnostic</div>
-              <button onClick={function(){
-                  try { localStorage.removeItem("bf_diag"); setDiagData("[]"); } catch(_){}
-                }} style={{ background: "#241e30", border: "1px solid #2a2336", color: "#aaa", fontSize: 11, fontWeight: 700, borderRadius: 6, padding: "5px 9px", cursor: "pointer" }}>
-                Clear
-              </button>
-              <button onClick={function(){ setShowDiag(false); }}
-                style={{ background: "#1a1a1a", border: "1px solid #2a2a2a", color: "white", fontSize: 14, fontWeight: 800, borderRadius: "50%", width: 28, height: 28, cursor: "pointer", padding: 0 }}>×</button>
-            </div>
-            <div style={{ color: "#888", fontSize: 11 }}>
-              Most recent on top. Tap & hold the JSON to copy. Send to me.
-            </div>
-            <textarea readOnly value={(function(){
-                try {
-                  var arr = JSON.parse(diagData || "[]");
-                  return arr.slice().reverse().map(function(s){
-                    return s.t + " " + s.label + "\n" +
-                      "  innerH=" + s.innerH + " vvH=" + s.vvH + " screenH=" + s.screenH + "\n" +
-                      "  safeTopPx=" + s.safeTopPx + " vvOffTop=" + s.vvOffTop + "\n" +
-                      "  standalone=" + s.standalone + " browser=" + s.browser + " navStand=" + s.navStand + "\n" +
-                      "  vis=" + s.visibility;
-                  }).join("\n\n");
-                } catch(_) { return "parse error"; }
-              })()}
-              style={{
-                flex: 1, minHeight: 0,
-                background: "#0a0a0a", border: "1px solid #2a2a2a", borderRadius: 8,
-                color: "#bbb", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 10,
-                padding: 10, outline: "none", resize: "none",
-                whiteSpace: "pre", WebkitUserSelect: "text", userSelect: "text",
-              }}
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
