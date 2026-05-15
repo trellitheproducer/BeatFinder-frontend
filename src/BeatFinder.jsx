@@ -31229,47 +31229,6 @@ function BeatFinderInner() {
       });
   }, []);
 
-  // ── Heartbeat / presence pinger ─────────────────────────────────
-  // Fires POST /api/auth/heartbeat every ~60s while the tab is open
-  // and visible, so the backend's last_seen_at stays fresh. Other
-  // users see a green "Online now" dot beside this user for the next
-  // 2 minutes.
-  //
-  // Visibility-aware: when the tab goes to the background (user
-  // switches apps, locks phone), we stop pinging. That conserves
-  // battery + saves bandwidth, AND correctly lets their online dot
-  // fade out 2 minutes after they actually stopped using the app.
-  // When the tab becomes visible again, we ping immediately so the
-  // dot pops back without waiting up to a minute.
-  React.useEffect(function() {
-    if (!user) return; // only ping when logged in
-    var stopped = false;
-    function ping() {
-      if (stopped) return;
-      if (typeof document !== "undefined" && document.hidden) return;
-      apiFetch("/api/auth/heartbeat", { method: "POST", body: JSON.stringify({}) })
-        .catch(function() { /* fire-and-forget, no UI surface */ });
-    }
-    // First ping immediately on login / app open
-    ping();
-    var interval = setInterval(ping, 60 * 1000);
-    function onVis() {
-      // When the tab becomes visible again, ping right away so the
-      // user shows online without waiting for the next interval.
-      if (typeof document !== "undefined" && !document.hidden) ping();
-    }
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", onVis);
-    }
-    return function() {
-      stopped = true;
-      clearInterval(interval);
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVis);
-      }
-    };
-  }, [user && user.id]);
-
   // ── Safe-area-inset stabilizer (minimal version) ─────────────────────
   // FIXES: page header overlapping the iOS status bar after closing an
   // in-app browser sheet (SFSafariViewController). Diagnostic data
@@ -31541,6 +31500,52 @@ function BeatFinderInner() {
     window.addEventListener("bf:auth-expired", onAuthExpired);
     return function() { window.removeEventListener("bf:auth-expired", onAuthExpired); };
   }, []);
+
+  // ── Heartbeat / presence pinger ─────────────────────────────────
+  // Fires POST /api/auth/heartbeat every ~60s while the tab is open
+  // and visible, so the backend's last_seen_at stays fresh. Other
+  // users see a green "Online now" dot beside this user for the next
+  // 2 minutes.
+  //
+  // Visibility-aware: when the tab goes to the background (user
+  // switches apps, locks phone), we stop pinging. That conserves
+  // battery + saves bandwidth, AND correctly lets their online dot
+  // fade out 2 minutes after they actually stopped using the app.
+  // When the tab becomes visible again, we ping immediately so the
+  // dot pops back without waiting up to a minute.
+  //
+  // NOTE: this effect MUST come after `user` is declared above. It
+  // previously sat near the top of the component which crashed at
+  // render time with a temporal-dead-zone ReferenceError (Sentry
+  // ID b6be2ae9... caught it within minutes of deploy).
+  React.useEffect(function() {
+    if (!user) return; // only ping when logged in
+    var stopped = false;
+    function ping() {
+      if (stopped) return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      apiFetch("/api/auth/heartbeat", { method: "POST", body: JSON.stringify({}) })
+        .catch(function() { /* fire-and-forget, no UI surface */ });
+    }
+    // First ping immediately on login / app open
+    ping();
+    var interval = setInterval(ping, 60 * 1000);
+    function onVis() {
+      // When the tab becomes visible again, ping right away so the
+      // user shows online without waiting for the next interval.
+      if (typeof document !== "undefined" && !document.hidden) ping();
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVis);
+    }
+    return function() {
+      stopped = true;
+      clearInterval(interval);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVis);
+      }
+    };
+  }, [user && user.id]);
   // Global lease cache — fetched once at login and refreshed on returning
   // from Stripe success. Every CompactBeatActionSheet reads from this instead
   // of issuing its own /my-leases request, which (a) makes sheet opens
