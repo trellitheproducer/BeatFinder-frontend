@@ -14352,6 +14352,9 @@ function RootAuthScreen({ onLogin, startMode }) {
   const [acceptTerms, setAcceptTerms] = useState(false);
   // Show the full T&Cs in a scrollable modal when the user taps the link.
   const [showTermsPreview, setShowTermsPreview] = useState(false);
+  // Signup-only: chosen username + live availability check
+  const [signupUsername,    setSignupUsername]    = useState("");
+  const [signupUsernameStatus, setSignupUsernameStatus] = useState("idle");
 
   useEffect(() => {
     try {
@@ -14359,6 +14362,32 @@ function RootAuthScreen({ onLogin, startMode }) {
       if (saved) { setEmail(saved); setRememberMe(true); }
     } catch {}
   }, []);
+
+  // Live username-availability check during signup. Debounced 400ms.
+  useEffect(() => {
+    var u = signupUsername.trim();
+    if (!u) { setSignupUsernameStatus("idle"); return; }
+    if (u.length < 3 || u.length > 30 || !/^[a-zA-Z0-9_.]+$/.test(u)) {
+      setSignupUsernameStatus("invalid");
+      return;
+    }
+    setSignupUsernameStatus("checking");
+    var cancelled = false;
+    var t = setTimeout(function() {
+      apiFetch("/api/auth/search?q=" + encodeURIComponent(u))
+        .then(function(matches) {
+          if (cancelled) return;
+          var taken = (matches || []).some(function(m) {
+            return (m.username || "").toLowerCase() === u.toLowerCase();
+          });
+          setSignupUsernameStatus(taken ? "taken" : "available");
+        })
+        .catch(function() {
+          if (!cancelled) setSignupUsernameStatus("idle");
+        });
+    }, 400);
+    return function() { cancelled = true; clearTimeout(t); };
+  }, [signupUsername]);
 
   const inp = {
     width: "100%", background: "#1a1a1a", border: "1px solid #333",
@@ -14391,6 +14420,36 @@ function RootAuthScreen({ onLogin, startMode }) {
         {mode === "signup" ? "CREATE ACCOUNT" : "WELCOME BACK"}
       </div>
       {mode === "signup" && <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" style={inp} />}
+      {mode === "signup" && (
+        <>
+          <input
+            value={signupUsername}
+            onChange={e => setSignupUsername(e.target.value)}
+            placeholder="Choose a username"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            style={{ ...inp, marginBottom: 4 }}
+          />
+          <div style={{ minHeight: 16, marginBottom: 16, paddingLeft: 4, fontSize: 11, lineHeight: "16px" }}>
+            {signupUsernameStatus === "idle" && (
+              <span style={{ color: "#555" }}>3–30 characters · letters, numbers, dots, underscores</span>
+            )}
+            {signupUsernameStatus === "invalid" && (
+              <span style={{ color: "#F87171" }}>Must be 3–30 characters · letters, numbers, dots, underscores only</span>
+            )}
+            {signupUsernameStatus === "checking" && (
+              <span style={{ color: "#888" }}>Checking availability…</span>
+            )}
+            {signupUsernameStatus === "available" && (
+              <span style={{ color: "#10B981", fontWeight: 700 }}>✓ @{signupUsername.trim()} is available</span>
+            )}
+            {signupUsernameStatus === "taken" && (
+              <span style={{ color: "#F87171", fontWeight: 700 }}>✗ @{signupUsername.trim()} is already taken</span>
+            )}
+          </div>
+        </>
+      )}
       <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email address" type="email" style={inp} />
       <input value={pw} onChange={e => setPw(e.target.value)} placeholder="Password" type="password" style={{ ...inp, marginBottom: 16 }} />
       {mode === "login" && (
@@ -14458,6 +14517,13 @@ function RootAuthScreen({ onLogin, startMode }) {
         onClick={async () => {
           setAuthErr("");
           if (mode === "signup" && !name.trim())  { setAuthErr("Please enter your name"); return; }
+          if (mode === "signup" && !signupUsername.trim()) { setAuthErr("Please choose a username"); return; }
+          if (mode === "signup" && signupUsernameStatus === "invalid") {
+            setAuthErr("Username must be 3–30 characters, letters/numbers/dots/underscores only"); return;
+          }
+          if (mode === "signup" && signupUsernameStatus === "taken") {
+            setAuthErr("That username is already taken"); return;
+          }
           if (mode === "signup" && !email.trim()) { setAuthErr("Please enter your email"); return; }
           if (mode === "signup" && !pw.trim())    { setAuthErr("Please enter a password"); return; }
           if (mode === "signup" && !acceptTerms)  { setAuthErr("Please accept the Terms & Conditions to continue"); return; }
@@ -14467,6 +14533,21 @@ function RootAuthScreen({ onLogin, startMode }) {
             const u = mode === "signup"
               ? await AuthAPI.register(name || email.split("@")[0], email, pw)
               : await AuthAPI.login(email, pw);
+            // Persist chosen username on the new account. See companion
+            // comment in ProfileScreen — without this call, new users
+            // end up with no public profile / no searchable handle.
+            if (mode === "signup" && u && signupUsername.trim()) {
+              const desired = signupUsername.trim();
+              try {
+                await apiFetch("/api/auth/set-username", {
+                  method: "POST",
+                  body: JSON.stringify({ username: desired }),
+                });
+                u.username = desired;
+              } catch (unameErr) {
+                setAuthErr("Account created, but username '" + desired + "' couldn't be set: " + (unameErr.message || "try a different one in Settings"));
+              }
+            }
             // Record T&Cs acceptance immediately on signup. We do this
             // right after the register call so the server has an audit
             // trail tying the accepted version to the new account at
@@ -15435,9 +15516,52 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   const [deleting,         setDeleting]         = useState(false);
   const [authErr,     setAuthErr]     = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  // Signup-only: username chosen as part of registration. We collect
+  // this on the signup form (not the login form) so new users always
+  // start with a public profile slug. Without it they end up
+  // unsearchable, untaggable, and with no profile URL.
+  const [signupUsername,    setSignupUsername]    = useState("");
+  // "idle" | "checking" | "available" | "taken" | "invalid"
+  // Drives the live availability hint shown below the username input.
+  const [signupUsernameStatus, setSignupUsernameStatus] = useState("idle");
   const [rememberMe,  setRememberMe]  = useState(() => {
     try { return localStorage.getItem("bf_remember") === "1"; } catch { return false; }
   });
+
+  // Live username-availability check during signup. Debounced 400ms
+  // so we don't hammer the search endpoint on every keystroke. The
+  // status drives a hint shown below the input ("available" / "taken"
+  // / "invalid" etc).
+  useEffect(() => {
+    var u = signupUsername.trim();
+    if (!u) { setSignupUsernameStatus("idle"); return; }
+    // Run the same validation rules as the backend's set-username
+    // endpoint so the user sees client-side feedback before any
+    // network call.
+    if (u.length < 3 || u.length > 30 || !/^[a-zA-Z0-9_.]+$/.test(u)) {
+      setSignupUsernameStatus("invalid");
+      return;
+    }
+    setSignupUsernameStatus("checking");
+    var cancelled = false;
+    var t = setTimeout(function() {
+      // /api/auth/search does a substring match; we filter to exact
+      // case-insensitive match so "trel" doesn't say "Trelli" is taken
+      // when in fact "trel" is free.
+      apiFetch("/api/auth/search?q=" + encodeURIComponent(u))
+        .then(function(matches) {
+          if (cancelled) return;
+          var taken = (matches || []).some(function(m) {
+            return (m.username || "").toLowerCase() === u.toLowerCase();
+          });
+          setSignupUsernameStatus(taken ? "taken" : "available");
+        })
+        .catch(function() {
+          if (!cancelled) setSignupUsernameStatus("idle");
+        });
+    }, 400);
+    return function() { cancelled = true; clearTimeout(t); };
+  }, [signupUsername]);
 
   const inp = {
     width: "100%", background: "#1a1a1a", border: "1px solid #333",
@@ -15556,6 +15680,38 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
           {mode === "signup" ? "CREATE ACCOUNT" : "WELCOME BACK"}
         </div>
         {mode === "signup" && <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" style={inp} />}
+        {mode === "signup" && (
+          <>
+            <input
+              value={signupUsername}
+              onChange={e => setSignupUsername(e.target.value)}
+              placeholder="Choose a username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              style={{ ...inp, marginBottom: 4 }}
+            />
+            {/* Live availability hint. Keeps the form compact — only
+                 occupies a single line below the input. */}
+            <div style={{ minHeight: 16, marginBottom: 12, paddingLeft: 4, fontSize: 11, lineHeight: "16px" }}>
+              {signupUsernameStatus === "idle" && (
+                <span style={{ color: "#555" }}>3–30 characters · letters, numbers, dots, underscores</span>
+              )}
+              {signupUsernameStatus === "invalid" && (
+                <span style={{ color: "#F87171" }}>Must be 3–30 characters · letters, numbers, dots, underscores only</span>
+              )}
+              {signupUsernameStatus === "checking" && (
+                <span style={{ color: "#888" }}>Checking availability…</span>
+              )}
+              {signupUsernameStatus === "available" && (
+                <span style={{ color: "#10B981", fontWeight: 700 }}>✓ @{signupUsername.trim()} is available</span>
+              )}
+              {signupUsernameStatus === "taken" && (
+                <span style={{ color: "#F87171", fontWeight: 700 }}>✗ @{signupUsername.trim()} is already taken</span>
+              )}
+            </div>
+          </>
+        )}
         <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email address" type="email" style={inp} />
         <input value={pw} onChange={e => setPw(e.target.value)} placeholder="Password" type="password" style={{ ...inp, marginBottom: 16 }} />
         {mode === "login" && (
@@ -15597,6 +15753,13 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
         <button disabled={authLoading} onClick={async () => {
           setAuthErr("");
           if (mode === "signup" && !name.trim())  { setAuthErr("Please enter your name"); return; }
+          if (mode === "signup" && !signupUsername.trim()) { setAuthErr("Please choose a username"); return; }
+          if (mode === "signup" && signupUsernameStatus === "invalid") {
+            setAuthErr("Username must be 3–30 characters, letters/numbers/dots/underscores only"); return;
+          }
+          if (mode === "signup" && signupUsernameStatus === "taken") {
+            setAuthErr("That username is already taken"); return;
+          }
           if (mode === "signup" && !email.trim()) { setAuthErr("Please enter your email"); return; }
           if (mode === "signup" && !pw.trim())    { setAuthErr("Please enter a password"); return; }
           if (mode === "signup" && !acceptTerms)  { setAuthErr("Please accept the Terms & Conditions to continue"); return; }
@@ -15606,6 +15769,29 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
             const u = mode === "signup"
               ? await AuthAPI.register(name || email.split("@")[0], email, pw)
               : await AuthAPI.login(email, pw);
+            // Persist the chosen username immediately after registration.
+            // The /register endpoint creates the user without a username
+            // — without this call new users would end up with no public
+            // profile, no searchable handle, no URL slug. We attach the
+            // username to the same local user object before setUser() so
+            // the UI doesn't briefly flash an empty handle.
+            if (mode === "signup" && u && signupUsername.trim()) {
+              const desired = signupUsername.trim();
+              try {
+                await apiFetch("/api/auth/set-username", {
+                  method: "POST",
+                  body: JSON.stringify({ username: desired }),
+                });
+                u.username = desired;
+              } catch (unameErr) {
+                // If the call fails (race condition where the name was
+                // taken between availability check and submit), surface
+                // a friendly error and ABORT before we proceed. The
+                // account exists but has no username yet — we leave the
+                // user logged in so they can retry from settings.
+                setAuthErr("Account created, but username '" + desired + "' couldn't be set: " + (unameErr.message || "try a different one in Settings"));
+              }
+            }
             // Record T&Cs acceptance immediately on signup
             if (mode === "signup" && u) {
               try {
@@ -27804,6 +27990,159 @@ function PrivacyContent({ compact }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// UsernameSetupModal
+// ─────────────────────────────────────────────────────────────────────────
+// Modal that pops up for logged-in users who don't yet have a username.
+// This catches two cases:
+//   1. Users who signed up before the signup form collected usernames
+//      (historic accounts with username === "")
+//   2. Edge cases where the signup form succeeded at registration but
+//      the /set-username call failed mid-flow
+//
+// Required modal — no dismiss button, no backdrop dismiss. Users must
+// set a username to continue, since without one they can't be searched
+// for, can't have a public profile, can't be tagged, etc.
+function UsernameSetupModal({ user, onSet }) {
+  var [input, setInput]   = React.useState("");
+  var [status, setStatus] = React.useState("idle");
+  var [error, setError]   = React.useState("");
+  var [saving, setSaving] = React.useState(false);
+
+  // Same live availability check as the signup form
+  React.useEffect(function() {
+    var u = input.trim();
+    if (!u) { setStatus("idle"); return; }
+    if (u.length < 3 || u.length > 30 || !/^[a-zA-Z0-9_.]+$/.test(u)) {
+      setStatus("invalid"); return;
+    }
+    setStatus("checking");
+    var cancelled = false;
+    var t = setTimeout(function() {
+      apiFetch("/api/auth/search?q=" + encodeURIComponent(u))
+        .then(function(matches) {
+          if (cancelled) return;
+          var taken = (matches || []).some(function(m) {
+            return (m.username || "").toLowerCase() === u.toLowerCase();
+          });
+          setStatus(taken ? "taken" : "available");
+        })
+        .catch(function() {
+          if (!cancelled) setStatus("idle");
+        });
+    }, 400);
+    return function() { cancelled = true; clearTimeout(t); };
+  }, [input]);
+
+  // Don't render until we know the user lacks a username
+  if (!user || user.username) return null;
+
+  function submit() {
+    var desired = input.trim();
+    if (!desired) { setError("Please choose a username"); return; }
+    if (status === "invalid") { setError("Must be 3–30 characters, letters/numbers/dots/underscores only"); return; }
+    if (status === "taken") { setError("That username is taken — pick another"); return; }
+    setSaving(true);
+    setError("");
+    apiFetch("/api/auth/set-username", {
+      method: "POST",
+      body: JSON.stringify({ username: desired }),
+    })
+      .then(function() {
+        setSaving(false);
+        onSet(desired);
+      })
+      .catch(function(e) {
+        setSaving(false);
+        setError(e.message || "Couldn't set username, try another");
+      });
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 99997,
+      background: "rgba(0,0,0,0.92)",
+      backdropFilter: "blur(6px)",
+      WebkitBackdropFilter: "blur(6px)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: 20, fontFamily: "'DM Sans',sans-serif",
+    }}>
+      <div style={{
+        background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+        border: "1px solid rgba(124,58,237,0.3)",
+        borderRadius: 18, maxWidth: 420, width: "100%",
+        padding: 28,
+        boxShadow: "0 16px 40px rgba(0,0,0,0.75), 0 0 24px rgba(124,58,237,0.15)",
+      }}>
+        <div style={{
+          color: "#A78BFA", fontSize: 11, fontWeight: 900, letterSpacing: 1.5,
+          marginBottom: 8,
+        }}>
+          ONE MORE THING
+        </div>
+        <div style={{
+          color: "white", fontFamily: "'Bebas Neue',sans-serif",
+          fontSize: 28, letterSpacing: 1.5, lineHeight: 1.1, marginBottom: 12,
+        }}>
+          CHOOSE YOUR USERNAME
+        </div>
+        <div style={{ color: "#888", fontSize: 13, lineHeight: 1.5, marginBottom: 18 }}>
+          This is how other producers and artists will find you on BeatFinder.
+          You can change it later from Settings.
+        </div>
+        <input
+          value={input}
+          onChange={function(e){ setInput(e.target.value); setError(""); }}
+          placeholder="username"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          autoFocus
+          style={{
+            width: "100%", background: "#1a1a1a", border: "1px solid #333",
+            borderRadius: 12, padding: "14px 16px", color: "white", fontSize: 15,
+            outline: "none", marginBottom: 6, boxSizing: "border-box",
+          }}
+        />
+        <div style={{ minHeight: 16, marginBottom: 14, paddingLeft: 4, fontSize: 11, lineHeight: "16px" }}>
+          {status === "idle" && (
+            <span style={{ color: "#555" }}>3–30 characters · letters, numbers, dots, underscores</span>
+          )}
+          {status === "invalid" && (
+            <span style={{ color: "#F87171" }}>Must be 3–30 characters · letters, numbers, dots, underscores only</span>
+          )}
+          {status === "checking" && (
+            <span style={{ color: "#888" }}>Checking availability…</span>
+          )}
+          {status === "available" && (
+            <span style={{ color: "#10B981", fontWeight: 700 }}>✓ @{input.trim()} is available</span>
+          )}
+          {status === "taken" && (
+            <span style={{ color: "#F87171", fontWeight: 700 }}>✗ @{input.trim()} is already taken</span>
+          )}
+        </div>
+        <button
+          onClick={submit}
+          disabled={saving || status === "checking" || status === "invalid" || status === "taken" || !input.trim()}
+          style={{
+            width: "100%",
+            background: (saving || status !== "available") ? "#555" : "#C026D3",
+            border: "none", borderRadius: 32,
+            color: "white", fontWeight: 800, padding: 14, fontSize: 15, cursor: "pointer",
+            opacity: (saving || status === "checking" || status === "invalid" || status === "taken" || !input.trim()) ? 0.5 : 1,
+          }}>
+          {saving ? "Setting username…" : "Set Username"}
+        </button>
+        {error && (
+          <div style={{ color: "#F87171", fontSize: 12, textAlign: "center", marginTop: 12 }}>
+            {error}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TermsModal({ user, onAccepted }) {
   // Three-state logic to prevent the modal flashing for logged-in users
   // while their session is being restored:
@@ -29485,6 +29824,14 @@ export default function BeatFinder() {
         // Mirror server response onto the in-memory user object so the
         // modal doesn't re-open on subsequent re-renders this session.
         if (user) setUser(Object.assign({}, user, { terms_accepted_version: version }));
+      }} />
+
+      {/* Username setup — required for any logged-in user without a
+          username. Catches historic accounts (pre-username-at-signup)
+          and edge cases where signup completed but set-username failed.
+          Modal handles its own visibility via user.username check. */}
+      <UsernameSetupModal user={user} onSet={function(username) {
+        if (user) setUser(Object.assign({}, user, { username: username }));
       }} />
 
       {showAuthPrompt && (
