@@ -20992,6 +20992,17 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
 
   // ── Ruler drag ref ───────────────────────────────────────────────────────
   const rulerDragRef = useRef(null); // { mode: "in"|"out"|"new", startX, startT }
+  // Direct ref to the ruler tap DOM element. We attach touch listeners
+  // imperatively in a useEffect below rather than via React's onTouchStart
+  // props because React's synthetic touch listeners are PASSIVE — meaning
+  // e.preventDefault() inside the handler is silently ignored. iOS Safari
+  // then sees the touch as ambiguous, decides it might become a scroll
+  // gesture, and cancels the touchend's tap-to-seek logic. This was the
+  // root cause of "tap-to-seek doesn't work once audio is loaded" — with
+  // a clip on the timeline, the content gets long enough that iOS's
+  // scroll-vs-tap heuristic flips the wrong way. Native non-passive
+  // listeners give preventDefault its teeth back.
+  const rulerElRef = useRef(null);
 
   // ── Clip/track selection state ───────────────────────────────────────────
   const [selectedTrackId, setSelectedTrackId] = useState(null); // which vocal track records into
@@ -23262,6 +23273,45 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     // RAF loop's auto-scroll branch (line ~21796) it can run again.
     userScrolledAt.current = null;
   };
+
+  // Attach the ruler's touch handlers IMPERATIVELY with passive:false.
+  // React's onTouchStart/Move/End props are passive by default since
+  // React 17, which silently disables preventDefault() inside the
+  // handler. With audio loaded, the timeline content gets wide enough
+  // that iOS treats the touch as a possible scroll gesture and aborts
+  // the touchend's tap-to-seek path. preventDefault() on touchstart
+  // resolves the ambiguity in our favour — but only works with a
+  // non-passive listener. Setting touchAction:"none" via CSS is not
+  // sufficient on iOS Safari in PWA mode.
+  //
+  // We use a "latest-handler" ref pattern so the native listeners
+  // always call the current render's handler closure (which has fresh
+  // state for loopIn/loopOut/effectivePPS/spb/etc.) rather than a stale
+  // closure captured at mount time.
+  const rulerHandlersRef = useRef({});
+  rulerHandlersRef.current = {
+    start:  handleRulerTouchStart,
+    move:   handleRulerTouchMove,
+    end:    handleRulerTouchEnd,
+  };
+  useEffect(function () {
+    const el = rulerElRef.current;
+    if (!el) return;
+    const ts = function (e) { rulerHandlersRef.current.start(e); };
+    const tm = function (e) { rulerHandlersRef.current.move(e); };
+    const te = function (e) { rulerHandlersRef.current.end(e); };
+    el.addEventListener("touchstart",  ts, { passive: false });
+    el.addEventListener("touchmove",   tm, { passive: false });
+    el.addEventListener("touchend",    te, { passive: false });
+    el.addEventListener("touchcancel", te, { passive: false });
+    return function () {
+      el.removeEventListener("touchstart",  ts);
+      el.removeEventListener("touchmove",   tm);
+      el.removeEventListener("touchend",    te);
+      el.removeEventListener("touchcancel", te);
+    };
+    // eslint-disable-next-line
+  }, []);
 
   const handleScroll = function (e) {
     // Vertical scroll syncs sidebar only
@@ -25854,14 +25904,15 @@ userPickedMicRef.current = true;
 
             {/* ── RULER ROW — sticky top ── */}
             <div style={{ position:"sticky", top:0, zIndex:25, height:RULER_H, background:"#0c0c0c", borderBottom:"1px solid #1a1a1a" }}>
-              {/* Ruler tick area — tap to seek */}
+              {/* Ruler tick area — tap to seek.
+                  Touch handlers are attached imperatively via useEffect
+                  (with passive:false) instead of via React's onTouch*
+                  props, which would be passive and silently break
+                  e.preventDefault() on iOS. */}
               <div
+                ref={rulerElRef}
                 style={{ position:"relative", height:"100%", cursor:"col-resize", touchAction:"none" }}
                 onMouseDown={handleRulerMouseDown}
-                onTouchStart={handleRulerTouchStart}
-                onTouchMove={handleRulerTouchMove}
-                onTouchEnd={handleRulerTouchEnd}
-                onTouchCancel={handleRulerTouchEnd}
               >
                 {Array.from({length:numBars}, function(_,bi){
                   const bx = bi * spBar * effectivePPS;
