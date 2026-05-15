@@ -3144,13 +3144,13 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
   return (
     <div>
       {/* Billing toggle */}
-      <div style={{ display: "flex", background: "#111", border: "1px solid #222", borderRadius: 30, padding: 3, marginBottom: 14, position: "relative" }}>
+      <div style={{ display: "flex", background: "#111", border: "1px solid #222", borderRadius: 24, padding: 2, marginBottom: 8, position: "relative" }}>
         {["monthly", "yearly"].map(function(b) {
           var isActive = billing === b;
           return (
             <button key={b} onClick={function() { setBilling(b); }}
               style={{
-                flex: 1, padding: "8px 0", borderRadius: 26, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13,
+                flex: 1, padding: "6px 0", borderRadius: 22, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 11,
                 background: isActive ? (b === "yearly" ? "linear-gradient(135deg,#C026D3,#7C3AED)" : "#1a1a1a") : "transparent",
                 color: isActive ? "white" : "#555",
                 transition: "all 0.18s",
@@ -3159,11 +3159,11 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
               {b === "monthly" ? "Monthly" : "Annual"}
               {b === "yearly" && (
                 <span style={{
-                  position: "absolute", top: -8, right: 6,
+                  position: "absolute", top: -7, right: 4,
                   background: "linear-gradient(135deg,#22C55E,#16A34A)",
-                  color: "white", fontSize: 8, fontWeight: 800, borderRadius: 20,
-                  padding: "2px 6px", letterSpacing: 0.5,
-                }}>SAVE UP TO 17%</span>
+                  color: "white", fontSize: 7, fontWeight: 800, borderRadius: 20,
+                  padding: "1px 5px", letterSpacing: 0.3,
+                }}>SAVE 17%</span>
               )}
             </button>
           );
@@ -3192,7 +3192,7 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
                   : "#111",
                 border: "1.5px solid " + (isSelected ? glowClr : (p.color + "55")),
                 borderRadius: 14,
-                padding: compact ? "10px 8px" : "14px 12px",
+                padding: compact ? "8px 6px" : "14px 12px",
                 textAlign: "left",
                 position: "relative",
                 overflow: "hidden",
@@ -3241,19 +3241,19 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
                 return (
                   <>
                     <div style={Object.assign({
-                      fontWeight: 800, fontSize: compact ? 11 : 13, marginBottom: 2,
+                      fontWeight: 800, fontSize: compact ? 10 : 13, marginBottom: 1,
                       color: isProducer ? "transparent" : "white",
                     }, gradientStyle || {})}>{p.label}</div>
                     <div style={Object.assign({
-                      fontWeight: 800, fontSize: compact ? 13 : 16,
-                      marginBottom: (!isFree && billing === "yearly") ? 2 : 10,
+                      fontWeight: 800, fontSize: compact ? 11 : 16,
+                      marginBottom: (!isFree && billing === "yearly") ? 1 : 6,
                       color: isProducer ? "transparent" : p.color,
                     }, gradientStyle || {})}>{priceStr}</div>
                   </>
                 );
               })()}
               {!isFree && billing === "yearly" && (
-                <div style={{ color: "#555", fontSize: 10, marginBottom: 10 }}>≈ £{(p.yearlyPrice / 12).toFixed(2)}/mo</div>
+                <div style={{ color: "#555", fontSize: 9, marginBottom: 6 }}>≈ £{(p.yearlyPrice / 12).toFixed(2)}/mo</div>
               )}
               {!compact && p.perks.map(function(perk) {
                 return (
@@ -3267,7 +3267,7 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
                 <button
                   onClick={function(e) { e.stopPropagation(); onSelectPlan(p.id, priceId, billing); }}
                   style={{
-                    width: "100%", marginTop: compact ? 8 : 12,
+                    width: "100%", marginTop: compact ? 5 : 12,
                     background: isSelected
                       ? "linear-gradient(135deg," + glowClr + " 0%," + glowClr2 + " 100%)"
                       : (isFree
@@ -3278,10 +3278,10 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
                     border: isSelected
                       ? ("1.5px solid " + glowClr)
                       : (isFree ? ("1.5px solid " + p.color) : "none"),
-                    borderRadius: 10,
+                    borderRadius: 8,
                     color: isSelected ? "white" : (isFree ? p.color : "white"),
-                    fontWeight: 900, fontSize: compact ? 11 : 13,
-                    padding: compact ? "7px 4px" : "11px",
+                    fontWeight: 900, fontSize: compact ? 10 : 13,
+                    padding: compact ? "5px 3px" : "11px",
                     cursor: "pointer",
                     letterSpacing: 0.5,
                     boxShadow: isSelected
@@ -14569,8 +14569,8 @@ function RootAuthScreen({ onLogin, startMode }) {
 
   const inp = {
     width: "100%", background: "#1a1a1a", border: "1px solid #333",
-    borderRadius: 12, padding: "14px 16px", color: "white",
-    fontSize: 16, outline: "none", marginBottom: 16, boxSizing: "border-box",
+    borderRadius: 10, padding: "9px 14px", color: "white",
+    fontSize: 14, outline: "none", marginBottom: 8, boxSizing: "border-box",
   };
 
   if (mode === "forgot") return <ForgotPasswordScreen onBack={() => setMode("login")} />;
@@ -14593,8 +14593,8 @@ function RootAuthScreen({ onLogin, startMode }) {
   );
 
   return (
-    <div style={{ padding: "0 24px 120px" }}>
-      <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 2, marginBottom: 24 }}>
+    <div style={{ padding: "0 20px 20px" }}>
+      <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, letterSpacing: 1.5, marginBottom: 12 }}>
         {mode === "signup" ? "CREATE ACCOUNT" : "WELCOME BACK"}
       </div>
       {mode === "signup" && <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" style={inp} />}
@@ -14609,7 +14609,7 @@ function RootAuthScreen({ onLogin, startMode }) {
             spellCheck={false}
             style={{ ...inp, marginBottom: 4 }}
           />
-          <div style={{ minHeight: 16, marginBottom: 16, paddingLeft: 4, fontSize: 11, lineHeight: "16px" }}>
+          <div style={{ minHeight: 12, marginBottom: 8, paddingLeft: 4, fontSize: 10, lineHeight: "12px" }}>
             {signupUsernameStatus === "idle" && (
               <span style={{ color: "#555" }}>3–30 characters · letters, numbers, dots, underscores</span>
             )}
@@ -14629,25 +14629,25 @@ function RootAuthScreen({ onLogin, startMode }) {
         </>
       )}
       <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email address" type="email" style={inp} />
-      <input value={pw} onChange={e => setPw(e.target.value)} placeholder="Password" type="password" style={{ ...inp, marginBottom: 16 }} />
+      <input value={pw} onChange={e => setPw(e.target.value)} placeholder="Password" type="password" style={{ ...inp, marginBottom: 10 }} />
       {mode === "login" && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
           <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} id="rm" />
           <label htmlFor="rm" style={{ color: "#888", fontSize: 13 }}>Remember my login</label>
         </div>
       )}
       {/* Plan picker — signup only */}
       {mode === "signup" && (
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ color: "#888", fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 10 }}>CHOOSE YOUR PLAN</div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>CHOOSE YOUR PLAN</div>
           <PlanPicker compact selectedPlanId={selectedPlan} onSelectPlan={function(planId, priceId) {
             setSelectedPlan(planId);
             setSelectedPriceId(priceId);
           }} />
-          <div style={{ color: "#444", fontSize: 11, marginTop: 8, textAlign: "center" }}>
+          <div style={{ color: "#444", fontSize: 9, marginTop: 4, textAlign: "center" }}>
             {selectedPlan === "free"
-              ? "You can browse + preview beats and save lyrics. Upgrade any time from your Profile."
-              : "You'll be taken to Stripe to complete payment after creating your account."}
+              ? "Upgrade any time from Profile."
+              : "You'll be taken to Stripe to complete payment."}
           </div>
         </div>
       )}
@@ -14658,15 +14658,15 @@ function RootAuthScreen({ onLogin, startMode }) {
           The acceptance is recorded server-side against the new account. */}
       {mode === "signup" && (
         <div style={{
-          marginBottom: 16,
-          padding: "12px 14px",
+          marginBottom: 10,
+          padding: "8px 10px",
           background: acceptTerms ? "rgba(124,58,237,0.08)" : "rgba(0,0,0,0.3)",
           border: "1px solid " + (acceptTerms ? "rgba(124,58,237,0.35)" : "rgba(124,58,237,0.18)"),
-          borderRadius: 12,
+          borderRadius: 10,
           transition: "background 0.15s, border 0.15s",
         }}>
           <label htmlFor="bf_accept_terms"
-            style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer",
+            style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer",
               userSelect: "none", WebkitUserSelect: "none" }}>
             <input
               id="bf_accept_terms"
@@ -14674,17 +14674,17 @@ function RootAuthScreen({ onLogin, startMode }) {
               checked={acceptTerms}
               onChange={e => setAcceptTerms(e.target.checked)}
               style={{
-                width: 18, height: 18, marginTop: 1, flexShrink: 0,
+                width: 16, height: 16, marginTop: 1, flexShrink: 0,
                 accentColor: "#7C3AED", cursor: "pointer",
               }}
             />
-            <span style={{ color: "#ccc", fontSize: 13, lineHeight: 1.5 }}>
-              I agree to BeatFinder's{" "}
+            <span style={{ color: "#ccc", fontSize: 11, lineHeight: 1.35 }}>
+              I agree to{" "}
               <span onClick={e => { e.preventDefault(); e.stopPropagation(); setShowTermsPreview(true); }}
                 style={{ color: "#A78BFA", fontWeight: 700, textDecoration: "underline", cursor: "pointer" }}>
                 Terms &amp; Conditions
               </span>
-              {" "}and Privacy Policy. I confirm I am at least 16 years old.
+              . I'm at least 16.
             </span>
           </label>
         </div>
@@ -14774,25 +14774,25 @@ function RootAuthScreen({ onLogin, startMode }) {
             setAuthLoading(false);
           }
         }}
-        style={{ width: "100%", background: authLoading ? "#555" : "#C026D3", border: "none", borderRadius: 32, color: "white", fontWeight: 800, padding: 16, fontSize: 16, cursor: "pointer", opacity: authLoading ? 0.6 : 1 }}>
+        style={{ width: "100%", background: authLoading ? "#555" : "#C026D3", border: "none", borderRadius: 28, color: "white", fontWeight: 800, padding: 11, fontSize: 14, cursor: "pointer", opacity: authLoading ? 0.6 : 1 }}>
         {authLoading
           ? "Please wait..."
           : mode === "signup"
             ? (selectedPlan === "free" ? "Create Free Account" : "Create Account & Subscribe")
             : "Log In"}
       </button>
-      {authErr && <div style={{ color: "#F87171", fontSize: 13, textAlign: "center", marginTop: 12 }}>{authErr}</div>}
-      <div style={{ textAlign: "center", marginTop: 20 }}>
-        <span style={{ color: "#888", fontSize: 14 }}>{mode === "signup" ? "Already have an account? " : "No account? "}</span>
+      {authErr && <div style={{ color: "#F87171", fontSize: 11, textAlign: "center", marginTop: 8 }}>{authErr}</div>}
+      <div style={{ textAlign: "center", marginTop: 10 }}>
+        <span style={{ color: "#888", fontSize: 12 }}>{mode === "signup" ? "Already have an account? " : "No account? "}</span>
         <button onClick={() => { setAuthErr(""); setAcceptTerms(false); setMode(mode === "signup" ? "login" : "signup"); }}
-          style={{ background: "none", border: "none", color: "#06B6D4", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+          style={{ background: "none", border: "none", color: "#06B6D4", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
           {mode === "signup" ? "Log In" : "Sign Up"}
         </button>
       </div>
       {mode === "login" && (
-        <div style={{ textAlign: "center", marginTop: 12 }}>
+        <div style={{ textAlign: "center", marginTop: 8 }}>
           <button onClick={e => { e.preventDefault(); e.stopPropagation(); setMode("forgot"); }}
-            style={{ background: "none", border: "none", color: "#666", fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>
+            style={{ background: "none", border: "none", color: "#666", fontSize: 12, cursor: "pointer", textDecoration: "underline" }}>
             Forgot your password?
           </button>
         </div>
@@ -30501,8 +30501,8 @@ export default function BeatFinder() {
         }}>
           <button
             onClick={function() { setShowAuthWall(false); }}
-            style={{ background: "none", border: "none", color: "white", fontSize: 26,
-              cursor: "pointer", padding: "16px 20px", display: "block" }}>
+            style={{ background: "none", border: "none", color: "white", fontSize: 22,
+              cursor: "pointer", padding: "10px 16px", display: "block" }}>
             ←
           </button>
           <RootAuthScreen startMode={authStartMode} onLogin={function(u) {
