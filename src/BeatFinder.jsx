@@ -16819,6 +16819,34 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 </div>
               )}
 
+              {/* ── What's New (changelog) — visible to all users ─────── */}
+              <button
+                onClick={function() {
+                  try { window.dispatchEvent(new CustomEvent("bf:openChangelog")); } catch (_) {}
+                  setSettingsOpen(false);
+                }}
+                style={{
+                  width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "12px 14px",
+                  background: "#141414",
+                  borderRadius: 10,
+                  border: "1px solid #2a2a2a",
+                  marginBottom: 8,
+                  cursor: "pointer",
+                  color: "white", fontWeight: 700, fontSize: 14,
+                }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="9" y1="15" x2="15" y2="15"/>
+                    <line x1="9" y1="11" x2="13" y2="11"/>
+                  </svg>
+                  What's New
+                </span>
+                <span style={{ color: "#555", fontSize: 14 }}>›</span>
+              </button>
+
               {/* ── Blocked Users ──────────────────────────────────────── */}
               <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
                 <button onClick={() => setOpenSettingsSection(openSettingsSection === "blocked" ? null : "blocked")}
@@ -29936,6 +29964,146 @@ function LifetimeAccountsManager() {
   );
 }
 
+// =============================================================================
+// CHANGELOG — public release notes
+// =============================================================================
+// Add new entries at the TOP of the array. Each entry is a small object;
+// the page renders them as a timeline so producers/artists can see the app
+// is being actively maintained. Builds trust + signals quality.
+//
+// Tags: "new", "improved", "fixed", "security". Use sparingly — fewer,
+// higher-impact bullets read better than long laundry lists.
+var CHANGELOG_ENTRIES = [
+  {
+    version: "1.1",
+    date:    "May 2026",
+    title:   "Post-launch polish",
+    items: [
+      { tag: "new",       text: "Manage Subscription button — cancel, update card, download invoices via Stripe's hosted portal." },
+      { tag: "new",       text: "Receipt emails after every beat lease purchase with licence terms attached." },
+      { tag: "new",       text: "Automated emails when card payments fail, with instructions to update payment method." },
+      { tag: "improved",  text: "Friendlier error messages across the app — no more 'Server returned 401'." },
+      { tag: "improved",  text: "Auto sign-out banner when your session expires, so you know what happened." },
+      { tag: "security",  text: "Error monitoring (Sentry) added — we now see crashes in real time and ship fixes faster." },
+    ],
+  },
+  {
+    version: "1.0",
+    date:    "May 2026",
+    title:   "BeatFinder is live",
+    items: [
+      { tag: "new", text: "Public launch — full beat marketplace with Basic + Premium exclusive licences." },
+      { tag: "new", text: "Producer profiles with Stripe Connect — keep up to 99% of every sale." },
+      { tag: "new", text: "Artist Pro + Producer Pro subscriptions, monthly or annual (save 17%)." },
+      { tag: "new", text: "Studio with multi-track recording, BPM-locked beat grid, and FX." },
+      { tag: "new", text: "Lyric notepad linked to beats — write straight from the player." },
+      { tag: "new", text: "Followers, posts, direct messages, share to socials." },
+    ],
+  },
+];
+
+function ChangelogScreen({ onBack }) {
+  function tagStyle(tag) {
+    var palette = {
+      "new":      { bg: "rgba(34,197,94,0.12)",  border: "rgba(34,197,94,0.4)",  color: "#22C55E", label: "NEW" },
+      "improved": { bg: "rgba(124,58,237,0.12)", border: "rgba(124,58,237,0.4)", color: "#A78BFA", label: "IMPROVED" },
+      "fixed":    { bg: "rgba(59,130,246,0.12)", border: "rgba(59,130,246,0.4)", color: "#60A5FA", label: "FIXED" },
+      "security": { bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.4)", color: "#F59E0B", label: "SECURITY" },
+    }[tag] || { bg: "#1a1a1a", border: "#333", color: "#888", label: tag.toUpperCase() };
+    return {
+      display: "inline-block", padding: "2px 8px", borderRadius: 8,
+      background: palette.bg, border: "1px solid " + palette.border, color: palette.color,
+      fontSize: 9, fontWeight: 800, letterSpacing: 0.5, marginRight: 8,
+      verticalAlign: "middle", flexShrink: 0,
+    };
+  }
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#0a0a0a", color: "white",
+      fontFamily: "'DM Sans',sans-serif",
+      paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))",
+      paddingBottom: "env(safe-area-inset-bottom)",
+    }}>
+      <div style={{
+        display: "flex", alignItems: "center", padding: "12px 16px",
+        borderBottom: "1px solid #1a1a1a",
+      }}>
+        {onBack && (
+          <button onClick={onBack} style={{
+            background: "none", border: "none", color: "white",
+            fontSize: 22, padding: "8px 12px 8px 0", cursor: "pointer",
+          }}>←</button>
+        )}
+        <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, letterSpacing: 2 }}>
+          CHANGELOG
+        </div>
+      </div>
+
+      <div style={{ padding: "20px 18px", maxWidth: 640, margin: "0 auto" }}>
+        <div style={{ color: "#aaa", fontSize: 13, marginBottom: 24, lineHeight: 1.6 }}>
+          What's new in BeatFinder. We ship updates regularly — bug fixes, new features,
+          and improvements based on what you tell us.
+        </div>
+
+        {CHANGELOG_ENTRIES.map(function(entry, idx) {
+          return (
+            <div key={entry.version} style={{
+              background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+              border: "1px solid rgba(124,58,237,0.18)",
+              borderRadius: 14, padding: "18px 18px 14px",
+              marginBottom: 14,
+              position: "relative", overflow: "hidden",
+            }}>
+              {/* LED top edge */}
+              <div style={{
+                position: "absolute", top: 0, left: 14, right: 14, height: 2,
+                background: idx === 0
+                  ? "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)"
+                  : "linear-gradient(90deg,transparent,#444,#666,#444,transparent)",
+                boxShadow: idx === 0 ? "0 0 8px rgba(124,58,237,0.5)" : "none",
+              }} />
+
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+                <div style={{
+                  fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, letterSpacing: 1.5,
+                  color: idx === 0 ? "#C026D3" : "#888",
+                }}>v{entry.version}</div>
+                <div style={{ color: "#555", fontSize: 11, fontWeight: 700, letterSpacing: 0.5 }}>
+                  {entry.date}
+                </div>
+              </div>
+              <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 12 }}>
+                {entry.title}
+              </div>
+
+              {entry.items.map(function(item, i) {
+                return (
+                  <div key={i} style={{
+                    display: "flex", alignItems: "flex-start", gap: 6,
+                    color: "#ccc", fontSize: 13, lineHeight: 1.6,
+                    marginBottom: 8,
+                  }}>
+                    <span style={tagStyle(item.tag)}>{({
+                      "new":"NEW","improved":"IMPROVED","fixed":"FIXED","security":"SECURITY"
+                    }[item.tag]) || item.tag.toUpperCase()}</span>
+                    <span style={{ flex: 1 }}>{item.text}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+
+        <div style={{ color: "#444", fontSize: 11, textAlign: "center", marginTop: 24, lineHeight: 1.6 }}>
+          Got feedback or a bug to report? Email <span style={{ color: "#A78BFA" }}>trellitheproducer@gmail.com</span>
+          <br />or tap the thumbs-down in any chat.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CookieBanner() {
   // PECR (UK cookie law) requires opt-in for non-essential cookies.
   // We show this banner once; choice is persisted in localStorage.
@@ -30466,6 +30634,15 @@ function BeatFinderInner() {
   // the user state and show this so they know what happened — much nicer
   // than features silently failing.
   const [authExpiredBanner, setAuthExpiredBanner] = useState(false);
+  // Public overlay screens triggered by global events (e.g. from Settings).
+  // Using events rather than prop threading because the trigger is deep
+  // inside ProfileScreen and the overlay is at app-root level.
+  const [showChangelog, setShowChangelog] = useState(false);
+  React.useEffect(function() {
+    function onOpen() { setShowChangelog(true); }
+    window.addEventListener("bf:openChangelog", onOpen);
+    return function() { window.removeEventListener("bf:openChangelog", onOpen); };
+  }, []);
   React.useEffect(function() {
     function onAuthExpired() {
       setUser(null);
@@ -31204,6 +31381,16 @@ function BeatFinderInner() {
       <DownloadToast />
       <BfToastHost />
       <PopupBlockedModal />
+
+      {/* Changelog overlay — opened via window event "bf:openChangelog" */}
+      {showChangelog && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 99996,
+          background: "#0a0a0a", overflowY: "auto", WebkitOverflowScrolling: "touch",
+        }}>
+          <ChangelogScreen onBack={function() { setShowChangelog(false); }} />
+        </div>
+      )}
 
       {/* Auth-expired toast — shown briefly when apiFetch detects a 401
           after a previously-valid token. Tells the user they've been
