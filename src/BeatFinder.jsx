@@ -3098,8 +3098,8 @@ function BeatCard({ beat, savedIds, onSave, onPlay, featured, exclusive }) {
 // Stripe price IDs — replace YEARLY_ placeholders with your real annual price IDs
 // from your Stripe dashboard once created.
 var PLAN_PRICES = {
-  artist:   { monthly: "price_1TQDoFFHyNSCxas89UpDKiro",  yearly: "price_artist_yearly_REPLACE" },
-  producer: { monthly: "price_1TQDpBFHyNSCxas8cktbqw1n", yearly: "price_producer_yearly_REPLACE" },
+  artist:   { monthly: "price_1TQDoFFHyNSCxas89UpDKiro",  yearly: "price_1TW9CXFHyNSCxas8TM826ULo" },
+  producer: { monthly: "price_1TQDpBFHyNSCxas8cktbqw1n", yearly: "price_1TW9BnFHyNSCxas8vHDrVwB6" },
 };
 
 function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
@@ -7305,14 +7305,14 @@ function FreeBeatCTA({ beat, user }) {
   return (
     <div style={{ padding: "0 0 16px" }}>
       <button onClick={function() {
-        // Free (signed-in unpaid) users can't download — show upgrade prompt
-        if (user && !user.isArtistPro && !user.isPro) {
-          requireUpgrade("download");
-          return;
-        }
-        // Guests get the upgrade prompt too, but they can sign in from there
+        // Free MP3 downloads: any signed-in user (Free, Artist Pro,
+        // Producer Pro) can grab them. Guests get a quick-signup modal
+        // first so we have a real account on the licence record.
         if (!user) {
-          alert("Sign up for a free or paid plan to download beats!");
+          window.dispatchEvent(new CustomEvent("bf:quickSignup", { detail: {
+            intent: "download", beat: beat,
+            resume: function() { setStep("contract"); },
+          }}));
           return;
         }
         setStep("contract");
@@ -7743,8 +7743,26 @@ function BeatLeaseCard({ beat, user, onViewProfile }) {
   // Contract-first flow: tapping Buy opens the preview sheet (CompactBeatActionSheet).
   // Stripe is only invoked when the user picks a tier inside the sheet.
   function handleBuy(tier) {
-    if (!user) { setErr("Please log in to purchase a lease"); return; }
-    if (!user.isArtistPro && !user.isPro) { requireUpgrade("buy"); return; }
+    // Premium leases require an Artist Pro or Producer Pro subscription.
+    // Guests trying to buy premium also get the upgrade prompt — they
+    // need to be signed in AND on a paid plan.
+    if (tier === "premium") {
+      if (!user || (!user.isArtistPro && !user.isPro)) {
+        requireUpgrade("buy");
+        return;
+      }
+    } else {
+      // Basic tier (£50): guests get the quick-signup modal so they can
+      // create an account and continue to Stripe. Free users can buy
+      // basic leases directly with no Pro requirement.
+      if (!user) {
+        window.dispatchEvent(new CustomEvent("bf:quickSignup", { detail: {
+          intent: "buyBasic", beat: beat,
+          resume: function() { handleBuy(tier); },
+        }}));
+        return;
+      }
+    }
     if (beat.premium_sold) {
       setErr("This beat has been bought exclusively and is no longer available.");
       return;
@@ -8052,8 +8070,20 @@ function TrendingScreen({ savedIds, onSave, onPlay, onViewProfile, user }) {
     // proper position:fixed (instead of being trapped inside the carousel's
     // scroll context, which iOS Safari treats as a non-viewport ancestor).
     function handleBuy(tier) {
-      if (!user) { setBuyErr("Log in to purchase"); return; }
-      if (!user.isArtistPro && !user.isPro) { requireUpgrade("buy"); return; }
+      if (tier === "premium") {
+        if (!user || (!user.isArtistPro && !user.isPro)) {
+          requireUpgrade("buy");
+          return;
+        }
+      } else {
+        if (!user) {
+          window.dispatchEvent(new CustomEvent("bf:quickSignup", { detail: {
+            intent: "buyBasic", beat: beat,
+            resume: function() { handleBuy(tier); },
+          }}));
+          return;
+        }
+      }
       if (beat.premium_sold) {
         setBuyErr("This beat has been bought exclusively and is no longer available.");
         return;
@@ -10121,8 +10151,20 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
   // Contract-first flow: tapping Buy opens the preview sheet (CompactBeatActionSheet).
   // Stripe is only invoked when the user picks a tier inside the sheet.
   function handleBuy(tier) {
-    if (!currentUser) { setBuyErr("Please log in to purchase"); return; }
-    if (!currentUser.isArtistPro && !currentUser.isPro) { requireUpgrade("buy"); return; }
+    if (tier === "premium") {
+      if (!currentUser || (!currentUser.isArtistPro && !currentUser.isPro)) {
+        requireUpgrade("buy");
+        return;
+      }
+    } else {
+      if (!currentUser) {
+        window.dispatchEvent(new CustomEvent("bf:quickSignup", { detail: {
+          intent: "buyBasic", beat: beat,
+          resume: function() { handleBuy(tier); },
+        }}));
+        return;
+      }
+    }
     if (beat.premium_sold) {
       setBuyErr("This beat has been bought exclusively and is no longer available.");
       return;
@@ -10349,9 +10391,16 @@ function ProfileBeatCard({ beat, currentUser, onViewProfile }) {
         <div style={{ padding: "0 16px 16px" }}>
           {currentUser
             ? <FreeBeatCTA beat={beat} user={currentUser} />
-            : <button onClick={function(){ alert("Sign up for a free or paid plan to download beats!"); }} style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #444", color: "#555", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2.5" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                Sign Up to Download
+            : <button onClick={function(){
+                window.dispatchEvent(new CustomEvent("bf:quickSignup", { detail: {
+                  intent: "download", beat: beat,
+                  // No resume — the next render with currentUser present
+                  // will swap this button for the FreeBeatCTA which has
+                  // its own download flow. They tap once more to start.
+                }}));
+              }} style={{ width: "100%", borderRadius: 14, padding: "15px", background: "transparent", border: "2px solid #C026D3", color: "#C026D3", fontWeight: 800, fontSize: 15, cursor: "pointer", letterSpacing: 0.5, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C026D3" strokeWidth="2.5" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Get Free Beat
               </button>
           }
         </div>
@@ -11011,16 +11060,25 @@ function CompactBeatActionSheet({ beat, user, onClose, compact }) {
 
   // Stripe buy flow for LICENSED beats — tier is "basic" or "premium"
   async function handleBuy(tier) {
-    if (!user) {
-      alert("Sign up and purchase a plan to buy beat leases!");
-      return;
+    var safeTier = (tier === "premium") ? "premium" : "basic";
+    if (safeTier === "premium") {
+      if (!user || (!user.isArtistPro && !user.isPro)) {
+        requireUpgrade("buy");
+        return;
+      }
+    } else {
+      if (!user) {
+        window.dispatchEvent(new CustomEvent("bf:quickSignup", { detail: {
+          intent: "buyBasic", beat: beat,
+          resume: function() { handleBuy(tier); },
+        }}));
+        return;
+      }
     }
-    if (!user.isArtistPro && !user.isPro) { requireUpgrade("buy"); return; }
     if (beat.premium_sold) {
       alert("This beat has been bought exclusively and is no longer available.");
       return;
     }
-    var safeTier = (tier === "premium") ? "premium" : "basic";
     setBuyLoading(true);
     try {
       // Do NOT mark signed before payment — only the server-confirmed lease
@@ -11227,7 +11285,16 @@ function CompactBeatActionSheet({ beat, user, onClose, compact }) {
               {isFree ? (
                 <>
                   <button onClick={function() {
-                    if (!user) { alert("Sign up for a free or paid plan to download beats!"); return; }
+                    if (!user) {
+                      window.dispatchEvent(new CustomEvent("bf:quickSignup", { detail: {
+                        intent: "download", beat: beat,
+                        resume: function() {
+                          markSigned();
+                          generateFreeLeaseContract(beat, user);
+                        },
+                      }}));
+                      return;
+                    }
                     markSigned();
                     generateFreeLeaseContract(beat, user);
                   }} style={{
@@ -11608,7 +11675,13 @@ function CompactBeatCard({ beat, currentUser }) {
         {/* Action button — both FREE and LICENSED open the contract sheet */}
         {isFree ? (
           <button onClick={function() {
-            if (!currentUser) { alert("Sign up for a free or paid plan to download beats!"); return; }
+            if (!currentUser) {
+              window.dispatchEvent(new CustomEvent("bf:quickSignup", { detail: {
+                intent: "download", beat: beat,
+                resume: function() { setSheetOpen(true); },
+              }}));
+              return;
+            }
             setSheetOpen(true);
           }} style={{
             background: "transparent", border: "1.5px solid " + (currentUser ? "#C026D3" : "#555"),
@@ -28163,6 +28236,213 @@ function PrivacyContent({ compact }) {
 //     to upload quickly and keep Cloudinary storage cheap.
 //   - Pinch-zoom uses two-finger distance ratio relative to the gesture
 //     start, matching Instagram-style image crops.
+// ─────────────────────────────────────────────────────────────────────────
+// QuickSignupModal
+// ─────────────────────────────────────────────────────────────────────────
+// One-screen account creation for guests who try to download a free beat
+// or purchase a basic lease. Collects the minimum needed fields (name,
+// username, email, password) and creates the account, sets the username,
+// and accepts T&Cs in one go. On success, calls onAccountCreated(newUser)
+// so the caller can resume the original action (download or checkout).
+//
+// Reused for two intents:
+//   intent="download"   → "Sign up to download" framing
+//   intent="buyBasic"   → "Sign up to checkout" framing
+function QuickSignupModal({ intent, beat, onClose, onAccountCreated }) {
+  var [name, setName]                     = React.useState("");
+  var [username, setUsername]             = React.useState("");
+  var [usernameStatus, setUsernameStatus] = React.useState("idle");
+  var [email, setEmail]                   = React.useState("");
+  var [pw, setPw]                         = React.useState("");
+  var [acceptTerms, setAcceptTerms]       = React.useState(false);
+  var [busy, setBusy]                     = React.useState(false);
+  var [err, setErr]                       = React.useState("");
+
+  // Live availability check (debounced 400ms) — same pattern as the
+  // main signup form's username field
+  React.useEffect(function() {
+    var u = username.trim();
+    if (!u) { setUsernameStatus("idle"); return; }
+    if (u.length < 3 || u.length > 30 || !/^[a-zA-Z0-9_.]+$/.test(u)) {
+      setUsernameStatus("invalid"); return;
+    }
+    setUsernameStatus("checking");
+    var cancelled = false;
+    var t = setTimeout(function() {
+      apiFetch("/api/auth/search?q=" + encodeURIComponent(u))
+        .then(function(matches) {
+          if (cancelled) return;
+          var taken = (matches || []).some(function(m) {
+            return (m.username || "").toLowerCase() === u.toLowerCase();
+          });
+          setUsernameStatus(taken ? "taken" : "available");
+        })
+        .catch(function() { if (!cancelled) setUsernameStatus("idle"); });
+    }, 400);
+    return function() { cancelled = true; clearTimeout(t); };
+  }, [username]);
+
+  async function submit() {
+    setErr("");
+    if (!name.trim())     { setErr("Please enter your name"); return; }
+    if (!username.trim()) { setErr("Please choose a username"); return; }
+    if (usernameStatus === "invalid") { setErr("Must be 3–30 chars · letters/numbers/dots/underscores"); return; }
+    if (usernameStatus === "taken")   { setErr("That username is taken — pick another"); return; }
+    if (!email.trim())    { setErr("Please enter your email"); return; }
+    if (!pw.trim() || pw.length < 6) { setErr("Password must be at least 6 characters"); return; }
+    if (!acceptTerms)     { setErr("Please accept the Terms & Conditions"); return; }
+
+    setBusy(true);
+    try {
+      var u = await AuthAPI.register(name.trim(), email.trim(), pw);
+      try {
+        await apiFetch("/api/auth/set-username", {
+          method: "POST",
+          body: JSON.stringify({ username: username.trim() }),
+        });
+        u.username = username.trim();
+      } catch (e) {
+        // Username race condition — abort so they retry with a different one
+        setBusy(false);
+        setErr("Username '" + username.trim() + "' was just taken — pick another");
+        return;
+      }
+      try {
+        await apiFetch("/api/auth/accept-terms", {
+          method: "POST",
+          body: JSON.stringify({ version: TERMS_VERSION }),
+        });
+        u.terms_accepted_version = TERMS_VERSION;
+      } catch (_) { /* non-fatal */ }
+      // Caller resumes whichever action triggered the signup
+      onAccountCreated(u);
+    } catch (e) {
+      setBusy(false);
+      setErr(e.message || "Could not create account");
+    }
+  }
+
+  var beatTitle = (beat && beat.title) || "this beat";
+  var heading, sub, cta;
+  if (intent === "buyBasic") {
+    heading = "CREATE ACCOUNT TO BUY";
+    sub     = "Quick signup so we can deliver your MP3 + contract for " +
+              beatTitle + " and let you re-download anytime.";
+    cta     = "Continue to Checkout →";
+  } else {
+    heading = "CREATE ACCOUNT TO DOWNLOAD";
+    sub     = "Quick signup so you can grab " + beatTitle + " and any" +
+              " other free beats you find on BeatFinder.";
+    cta     = "Continue to Download →";
+  }
+
+  return (
+    <div onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 99999,
+        background: "rgba(0,0,0,0.92)",
+        backdropFilter: "blur(6px)",
+        WebkitBackdropFilter: "blur(6px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 16, fontFamily: "'DM Sans',sans-serif",
+        overflowY: "auto",
+      }}>
+      <div onClick={function(e){ e.stopPropagation(); }}
+        style={{
+          background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+          border: "1px solid rgba(124,58,237,0.3)",
+          borderRadius: 18, maxWidth: 420, width: "100%",
+          padding: 24,
+          boxShadow: "0 16px 40px rgba(0,0,0,0.75), 0 0 24px rgba(124,58,237,0.15)",
+          maxHeight: "92vh", overflowY: "auto",
+        }}>
+        <div style={{
+          color: "#A78BFA", fontSize: 10, fontWeight: 900, letterSpacing: 1.5,
+          marginBottom: 6,
+        }}>
+          QUICK SIGNUP
+        </div>
+        <div style={{
+          color: "white", fontFamily: "'Bebas Neue',sans-serif",
+          fontSize: 24, letterSpacing: 1.2, lineHeight: 1.1, marginBottom: 6,
+        }}>
+          {heading}
+        </div>
+        <div style={{ color: "#888", fontSize: 12, lineHeight: 1.5, marginBottom: 16 }}>
+          {sub}
+        </div>
+
+        <input value={name} onChange={function(e){ setName(e.target.value); }}
+          placeholder="Your name"
+          style={qsInputStyle}
+        />
+        <input value={username} onChange={function(e){ setUsername(e.target.value); }}
+          placeholder="Username" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+          style={Object.assign({}, qsInputStyle, { marginBottom: 4 })}
+        />
+        <div style={{ minHeight: 14, marginBottom: 10, paddingLeft: 4, fontSize: 10.5, lineHeight: "14px" }}>
+          {usernameStatus === "idle"     && <span style={{ color: "#555" }}>3–30 characters · letters/numbers/dots/underscores</span>}
+          {usernameStatus === "invalid"  && <span style={{ color: "#F87171" }}>Must be 3–30 chars · letters/numbers/dots/underscores</span>}
+          {usernameStatus === "checking" && <span style={{ color: "#888" }}>Checking availability…</span>}
+          {usernameStatus === "available"&& <span style={{ color: "#10B981", fontWeight: 700 }}>✓ @{username.trim()} is available</span>}
+          {usernameStatus === "taken"    && <span style={{ color: "#F87171", fontWeight: 700 }}>✗ @{username.trim()} is taken</span>}
+        </div>
+
+        <input value={email} onChange={function(e){ setEmail(e.target.value); }}
+          placeholder="Email address" type="email" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+          style={qsInputStyle}
+        />
+        <input value={pw} onChange={function(e){ setPw(e.target.value); }}
+          placeholder="Password (6+ characters)" type="password"
+          style={Object.assign({}, qsInputStyle, { marginBottom: 14 })}
+        />
+
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 14, cursor: "pointer" }}>
+          <input type="checkbox" checked={acceptTerms}
+            onChange={function(e){ setAcceptTerms(e.target.checked); }}
+            style={{ marginTop: 3, accentColor: "#C026D3" }}
+          />
+          <span style={{ color: "#aaa", fontSize: 11, lineHeight: 1.5 }}>
+            I agree to the BeatFinder Terms & Conditions and confirm I'm at least 13 years old.
+          </span>
+        </label>
+
+        <button onClick={submit} disabled={busy}
+          style={{
+            width: "100%",
+            background: busy ? "#555" : "linear-gradient(135deg,#C026D3,#7C3AED)",
+            border: "none", borderRadius: 32,
+            color: "white", fontWeight: 800, padding: 13, fontSize: 14,
+            cursor: busy ? "not-allowed" : "pointer",
+            opacity: busy ? 0.5 : 1,
+            marginBottom: 10,
+          }}>
+          {busy ? "Creating account…" : cta}
+        </button>
+        <button onClick={onClose} disabled={busy}
+          style={{
+            width: "100%", background: "none", border: "none",
+            color: "#666", fontSize: 12, cursor: "pointer", padding: 6,
+          }}>
+          Cancel
+        </button>
+
+        {err && (
+          <div style={{ color: "#F87171", fontSize: 12, textAlign: "center", marginTop: 10 }}>
+            {err}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+var qsInputStyle = {
+  width: "100%", background: "#1a1a1a", border: "1px solid #333",
+  borderRadius: 10, padding: "11px 14px", color: "white", fontSize: 14,
+  outline: "none", marginBottom: 10, boxSizing: "border-box",
+};
+
 function HeaderCropModal({ file, onConfirm, onCancel }) {
   var [imgUrl, setImgUrl]   = React.useState("");
   var [imgDims, setImgDims] = React.useState(null); // {w, h}
@@ -29839,6 +30119,14 @@ export default function BeatFinder() {
   const [showGuestWarning, setShowGuestWarning] = useState(false);
   const [promptReason,   setPromptReason]   = useState("studio"); // "studio" | "profile" | "save" | "buy" | "download" | "rhymefinder" | "producer" | "expired"
 
+  // Quick-signup state for guests who try to download a free beat or buy
+  // a basic lease. Holds { intent, beat, resumeAction } — resumeAction
+  // is the function to call after the account is created so the user
+  // doesn't have to tap again.
+  //   intent="download"  → guest tapped download on a free beat
+  //   intent="buyBasic"  → guest tapped Buy on a basic-lease beat
+  const [quickSignup, setQuickSignup] = useState(null);
+
   // Listen for global upgrade-required events from anywhere in the tree
   React.useEffect(function() {
     function handler(e) {
@@ -29848,6 +30136,20 @@ export default function BeatFinder() {
     }
     window.addEventListener("bf:requireUpgrade", handler);
     return function() { window.removeEventListener("bf:requireUpgrade", handler); };
+  }, []);
+
+  // Listen for guest-quick-signup events from beat cards.
+  //   detail = { intent: "download"|"buyBasic", beat, resume: fn(user) }
+  // resume is invoked AFTER the new user is set, so the originating card
+  // can finish the action without the user having to tap again.
+  React.useEffect(function() {
+    function handler(e) {
+      var d = e.detail || {};
+      if (!d.intent || !d.beat) return;
+      setQuickSignup({ intent: d.intent, beat: d.beat, resume: d.resume || null });
+    }
+    window.addEventListener("bf:quickSignup", handler);
+    return function() { window.removeEventListener("bf:quickSignup", handler); };
   }, []);
 
   const toggleSave = useCallback(beat => {
@@ -30306,6 +30608,38 @@ export default function BeatFinder() {
       <UsernameSetupModal user={user} onSet={function(username) {
         if (user) setUser(Object.assign({}, user, { username: username }));
       }} />
+
+      {/* Quick signup for guests — fires when a guest tries to download
+          a free beat or purchase a basic lease. On success the new user
+          is set as the logged-in user, and the original action is
+          resumed (if a resume fn was provided). */}
+      {quickSignup && (
+        <QuickSignupModal
+          intent={quickSignup.intent}
+          beat={quickSignup.beat}
+          onClose={function() { setQuickSignup(null); }}
+          onAccountCreated={function(newUser) {
+            // Set the user with computed Pro flags so any gates that
+            // re-fire during the resume see the up-to-date account.
+            // (New free accounts have isPro/isArtistPro=false, but
+            // the resume actions here don't gate on Pro for basic-lease
+            // or free download.)
+            var fullUser = Object.assign({}, newUser, {
+              isPro:       newUser.plan === "producer",
+              isArtistPro: newUser.plan === "artist" || newUser.plan === "producer",
+            });
+            setUser(fullUser);
+            var resumeFn = quickSignup.resume;
+            setQuickSignup(null);
+            // Defer the resume so React commits the user state first.
+            // Otherwise the resume closure still sees the stale user=null
+            // and gates re-fire incorrectly.
+            if (resumeFn) {
+              setTimeout(function() { try { resumeFn(fullUser); } catch (_) {} }, 80);
+            }
+          }}
+        />
+      )}
 
       {showAuthPrompt && (
         <div style={{
