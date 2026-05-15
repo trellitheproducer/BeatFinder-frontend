@@ -2621,7 +2621,7 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
       position: "fixed", inset: 0, zIndex: 10001,
       background: "#0a0a0a", display: "flex",
       flexDirection: "column", fontFamily: "'DM Sans',sans-serif",
-      paddingTop: "env(safe-area-inset-top)",
+      paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))",
     }}>
       <div style={{
         background: "linear-gradient(180deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
@@ -2844,7 +2844,7 @@ function Player({ beat, onClose, savedIds, onSave, isArtistPro, onOpenLyrics, sa
         display: "flex", alignItems: "center", gap: 12,
         padding: "14px 16px", borderBottom: "1px solid #1a1a1a",
         background: "#0a0a0a", flexShrink: 0,
-        paddingTop: "calc(14px + env(safe-area-inset-top))",
+        paddingTop: "calc(14px + var(--bf-safe-top, env(safe-area-inset-top)))",
       }}>
         <button onClick={onClose} style={{
           background: "#1a1a1a", border: "1px solid #333", borderRadius: "50%",
@@ -3908,12 +3908,12 @@ function NotificationsPanel({ user, onClose, onJumpToFeed, onOpenPost }) {
         background: "linear-gradient(180deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
         borderLeft: "1px solid rgba(124,58,237,0.25)",
         display: "flex", flexDirection: "column",
-        paddingTop: "env(safe-area-inset-top)",
+        paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))",
         boxShadow: "-12px 0 32px rgba(0,0,0,0.5)",
       }}>
         {/* LED top edge */}
         <div style={{
-          position: "absolute", top: "env(safe-area-inset-top)", left: 0, right: 0, height: 1,
+          position: "absolute", top: "var(--bf-safe-top, env(safe-area-inset-top))", left: 0, right: 0, height: 1,
           background: "linear-gradient(90deg,transparent,rgba(192,38,211,0.4),rgba(124,58,237,0.4),rgba(59,130,246,0.4),transparent)",
         }} />
         {/* Header */}
@@ -4040,7 +4040,7 @@ function UserSearchOverlay({ onClose, onPickUser }) {
       backdropFilter:"blur(6px)",
       WebkitBackdropFilter:"blur(6px)",
       display:"flex", flexDirection:"column",
-      paddingTop:"calc(12px + env(safe-area-inset-top))",
+      paddingTop:"calc(12px + var(--bf-safe-top, env(safe-area-inset-top)))",
     }}>
       <div onClick={function(e) { e.stopPropagation(); }}
         style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
@@ -5390,7 +5390,7 @@ function FollowingFeed({ user, onPlay, savedIds, onSave, onViewProfile, onSearch
             onClick={function(e){ e.stopPropagation(); }}
           />
           <button onClick={function() { setLightbox(null); }} style={{
-            position: "absolute", top: "max(16px, env(safe-area-inset-top))", right: 16,
+            position: "absolute", top: "max(16px, var(--bf-safe-top, env(safe-area-inset-top)))", right: 16,
             background: "rgba(255,255,255,0.1)", border: "1px solid #333",
             color: "white", fontSize: 22, cursor: "pointer",
             width: 40, height: 40, borderRadius: "50%",
@@ -5870,8 +5870,8 @@ function ContractViewer({ html, onClose, filename, pdfDownloader }) {
       {/* Header bar */}
       <div style={{
         background: "#0a0a0a",
-        padding: "env(safe-area-inset-top, 14px) 16px 14px",
-        paddingTop: "max(env(safe-area-inset-top), 14px)",
+        padding: "var(--bf-safe-top, env(safe-area-inset-top, 14px)) 16px 14px",
+        paddingTop: "max(var(--bf-safe-top, env(safe-area-inset-top)), 14px)",
         display: "flex", alignItems: "center", justifyContent: "space-between",
         flexShrink: 0, gap: 12,
         borderBottom: "1px solid #1a1a1a",
@@ -6449,7 +6449,7 @@ function DownloadToast() {
       <style>{LOADER_STYLE + "@keyframes bf-toast-in{from{transform:translate(-50%,-20px);opacity:0}to{transform:translate(-50%,0);opacity:1}}@keyframes bf-glow-pulse{0%,100%{box-shadow:0 8px 32px rgba(0,0,0,0.6),0 0 0 1px " + borderColor + "44,0 0 20px " + glowColor + "}50%{box-shadow:0 8px 32px rgba(0,0,0,0.6),0 0 0 1px " + borderColor + "66,0 0 32px " + glowColor + "}}"}</style>
       <div style={{
         position: "fixed",
-        top: "max(env(safe-area-inset-top), 12px)",
+        top: "max(var(--bf-safe-top, env(safe-area-inset-top)), 12px)",
         left: "50%",
         transform: "translateX(-50%)",
         zIndex: 2147483646,
@@ -6561,7 +6561,7 @@ function PopupBlockedModal() {
           background: "rgba(0,0,0,0.78)",
           display: "flex", alignItems: "center", justifyContent: "center",
           padding: 20,
-          paddingTop: "max(env(safe-area-inset-top), 20px)",
+          paddingTop: "max(var(--bf-safe-top, env(safe-area-inset-top)), 20px)",
           paddingBottom: "max(env(safe-area-inset-bottom), 20px)",
         }}
       >
@@ -10540,7 +10540,7 @@ function ImageLightbox({ images, startIndex, onClose }) {
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
       {/* Close button */}
       <button onClick={onClose}
-        style={{ position: "absolute", top: "max(env(safe-area-inset-top),16px)", right: 16,
+        style={{ position: "absolute", top: "max(var(--bf-safe-top, env(safe-area-inset-top)),16px)", right: 16,
           background: "rgba(255,255,255,0.12)", border: "none", borderRadius: "50%",
           width: 36, height: 36, color: "white", fontSize: 18, cursor: "pointer",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1 }}>
@@ -12678,7 +12678,7 @@ function FollowListScreen({ username, mode, onBack, onViewProfile, currentUser }
       {/* Header — padded below iPhone status bar */}
       <div style={{
         display:"flex", alignItems:"center",
-        padding:"calc(env(safe-area-inset-top) + 12px) 16px 12px",
+        padding:"calc(var(--bf-safe-top, env(safe-area-inset-top)) + 12px) 16px 12px",
         borderBottom:"1px solid #1a1a1a", position:"sticky", top:0, background:"#0a0a0a", zIndex:10,
       }}>
         <button onClick={onBack} style={{ background:"none", border:"none", color:"white", fontSize:24, cursor:"pointer", padding:"4px 12px 4px 0", marginRight:4, lineHeight:1 }}>‹</button>
@@ -13475,7 +13475,7 @@ function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
       <div style={{ display: "flex", flexDirection: "column", height: "100dvh" }}
         onClick={() => holdMenu && setHoldMenu(null)}>
         {/* Thread header */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px", borderBottom: "1px solid #1a1a1a", flexShrink: 0, paddingTop: "calc(16px + env(safe-area-inset-top))", background: "#0a0a0a" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px", borderBottom: "1px solid #1a1a1a", flexShrink: 0, paddingTop: "calc(16px + var(--bf-safe-top, env(safe-area-inset-top)))", background: "#0a0a0a" }}>
           <button onClick={() => setActiveThread(null)} style={{ background: "none", border: "none", color: "white", fontSize: 22, cursor: "pointer", padding: 0, flexShrink: 0 }}>←</button>
           <button onClick={() => onViewProfile && onViewProfile(activeThread)}
             style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, flex: 1 }}>
@@ -13649,7 +13649,7 @@ function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
   const visibleList = tab === "requests" ? requests : conversations;
   return (
     <div style={{ paddingBottom: 100 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px", borderBottom: "1px solid #1a1a1a", paddingTop: "calc(16px + env(safe-area-inset-top))" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px", borderBottom: "1px solid #1a1a1a", paddingTop: "calc(16px + var(--bf-safe-top, env(safe-area-inset-top)))" }}>
         <button onClick={onBack} style={{ background: "none", border: "none", color: "white", fontSize: 22, cursor: "pointer", padding: 0 }}>←</button>
         <div style={{ color: "white", fontWeight: 800, fontSize: 18 }}>Messages</div>
       </div>
@@ -20517,7 +20517,7 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
   const eq5 = { hpfFreq:80,hpfQ:0.707,lowFreq:200,low:0,lowQ:0.707,midFreq:1000,mid:0,midQ:1.41,highFreq:8000,high:0,highQ:0.707,lpfFreq:18000,lpfQ:0.707,...fx.eq };
 
   return (
-    <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto", paddingTop:"env(safe-area-inset-top)", paddingBottom:"calc(80px + env(safe-area-inset-bottom))" }} onClick={function(e){ e.stopPropagation(); }} onTouchMove={function(e){ e.stopPropagation(); }}>
+    <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto", paddingTop:"var(--bf-safe-top, env(safe-area-inset-top))", paddingBottom:"calc(80px + env(safe-area-inset-bottom))" }} onClick={function(e){ e.stopPropagation(); }} onTouchMove={function(e){ e.stopPropagation(); }}>
       <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0, position:"sticky", top:0, zIndex:10 }}>
         <div style={{ width:8, height:8, borderRadius:"50%", background:trackColor, marginRight:8 }} />
         <span style={{ color:"white", fontWeight:800, fontSize:14, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{trackName} — Effects</span>
@@ -26164,7 +26164,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       )}
 
       {/* ══ TOP BAR ══════════════════════════════════════════════ */}
-      <div style={{ display:"flex",alignItems:"center",padding:"10px 12px",paddingTop:"calc(10px + env(safe-area-inset-top))",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:6,zIndex:50 }}>
+      <div style={{ display:"flex",alignItems:"center",padding:"10px 12px",paddingTop:"calc(10px + var(--bf-safe-top, env(safe-area-inset-top)))",borderBottom:"1px solid #141414",background:"#0a0a0a",flexShrink:0,gap:6,zIndex:50 }}>
         <button onClick={function(){
           if(!isSaved&&hasContent){
             setUnsavedAlert("exit");
@@ -27320,7 +27320,7 @@ userPickedMicRef.current = true;
               borderLeft: "1px solid rgba(124,58,237,0.3)",
               boxShadow: "-12px 0 40px rgba(0,0,0,0.7), 0 0 24px rgba(124,58,237,0.15)",
               display: "flex", flexDirection: "column",
-              paddingTop: "env(safe-area-inset-top)",
+              paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))",
               fontFamily: "'DM Sans',sans-serif",
             }}>
             {/* LED top edge */}
@@ -27619,7 +27619,7 @@ function WelcomeScreen({ onSignIn, onGuest }) {
       alignItems: "center", justifyContent: "center",
       padding: "40px 28px",
       fontFamily: "'DM Sans',sans-serif",
-      paddingTop: "calc(40px + env(safe-area-inset-top))",
+      paddingTop: "calc(40px + var(--bf-safe-top, env(safe-area-inset-top)))",
       paddingBottom: "calc(40px + env(safe-area-inset-bottom))",
     }}>
 
@@ -28426,13 +28426,23 @@ export default function BeatFinder() {
   // The ~50–100ms window of bad values is what poisons the layout. Any
   // React render during that window pins headers at top:0. Even after
   // iOS sends the correct values, WebKit doesn't always re-layout the
-  // already-rendered elements.
+  // already-rendered elements — trying to nudge it with transform
+  // toggles or display:none toggles FAILED (tested both, they didn't
+  // force WebKit to re-read env() values).
   //
-  // Fix: when we detect we're in the bad state (safeTopPx === 0 right
-  // after a visibility/resize event), poll briefly until the value
-  // stabilizes at a non-zero number, then force a reflow at that point.
-  // Polling is bounded (600ms max) so this can't loop forever on a
-  // device that legitimately has no notch.
+  // FIX: bypass env() entirely on resume. We use a CSS custom property
+  // --bf-safe-top set from JS. All layouts that previously used
+  // env(safe-area-inset-top) now use var(--bf-safe-top, env(...)).
+  // The fallback to env() preserves behavior on first paint and on
+  // non-PWA browsers. Setting the variable forces a relayout that
+  // WebKit DOES respect (CSS variable changes are part of the spec,
+  // not subject to the env() caching quirk).
+  //
+  // On first load we measure the canonical safe-top inset and set the
+  // variable. On visibility/focus, we re-assert the canonical value
+  // IMMEDIATELY (before iOS can repaint with bad env() values), then
+  // poll briefly to update if the inset legitimately changes (e.g.
+  // rotation).
   React.useEffect(function() {
     function measureSafeTop() {
       try {
@@ -28445,84 +28455,71 @@ export default function BeatFinder() {
       } catch(_) { return 0; }
     }
 
-    function forceReflow() {
-      // Full re-layout: briefly hide the app root, force the browser to
-      // recompute layout (which it does for hidden elements differently
-      // than for shown ones — children are detached from the layout
-      // tree), then restore. This is stronger than a transform toggle
-      // because it forces WebKit to re-read env() values from scratch
-      // when the element returns, rather than reusing cached layout.
-      //
-      // Two timing tricks:
-      //   • requestAnimationFrame ensures the display:none paint actually
-      //     happens before we restore (otherwise WebKit may coalesce the
-      //     two writes and skip the layout flush)
-      //   • Reading offsetHeight between writes forces a synchronous
-      //     layout, guaranteeing the browser observed the hidden state
+    // Set --bf-safe-top on :root once we have a trustworthy reading.
+    // All layouts now use var(--bf-safe-top, env(safe-area-inset-top))
+    // so they pick up this value instead of the (possibly broken)
+    // env() value WebKit is reporting at any given moment.
+    function setSafeTopVar(px) {
       try {
-        var roots = document.querySelectorAll('[data-bf-app="1"]');
-        if (!roots.length) return;
-        var i;
-        var prev = [];
-        for (i = 0; i < roots.length; i++) {
-          prev.push(roots[i].style.display);
-          roots[i].style.display = "none";
-        }
-        // Force layout while hidden — WebKit MUST observe the hidden state
-        void document.documentElement.offsetHeight;
-        // Restore on next frame so the hidden paint actually flushes
-        requestAnimationFrame(function() {
-          for (var j = 0; j < roots.length; j++) {
-            roots[j].style.display = prev[j] || "";
-          }
-          // One more layout read so the restored state is computed fresh
-          void document.documentElement.offsetHeight;
-          window.dispatchEvent(new Event("resize"));
-        });
+        document.documentElement.style.setProperty("--bf-safe-top", px + "px");
       } catch(_) {}
     }
 
-    // Snapshot the device's "real" safe-top inset on first load. We use
-    // this as the truth — if a later measurement returns 0 when this
-    // says non-zero, we know iOS is lying to us.
+    // Measure canonical safe-top on first load. We use this as the
+    // truth — if a later measurement returns 0 when this says non-zero,
+    // we know iOS is lying to us and we keep the canonical value.
     var canonicalSafeTop = 0;
     setTimeout(function() {
       canonicalSafeTop = measureSafeTop();
+      if (canonicalSafeTop > 0) setSafeTopVar(canonicalSafeTop);
     }, 200);
 
     var stabilizing = false;
     function stabilize() {
-      // If the device doesn't HAVE a notch (canonical inset is 0), there's
-      // nothing to wait for — bail out.
+      // If the device doesn't HAVE a notch (canonical inset is 0),
+      // nothing to do.
       if (canonicalSafeTop === 0) return;
       if (stabilizing) return;
       stabilizing = true;
 
+      // Re-measure with polling. Once env() comes back to the expected
+      // canonical value, refresh the variable (in case the canonical
+      // value has legitimately changed — e.g. rotation). If env() never
+      // comes back during the poll window, we keep the canonical value
+      // we set on first load. Either way, the variable stays correct
+      // and layouts don't break.
       var start = Date.now();
       var pollMs = 30;
-      var maxMs = 600;
+      var maxMs = 800;
 
       function poll() {
         var now = measureSafeTop();
         var elapsed = Date.now() - start;
 
         if (now > 0) {
-          // Inset has come back. Force a reflow once now and once
-          // shortly after (iOS sometimes needs a second nudge).
-          forceReflow();
-          setTimeout(forceReflow, 50);
+          // env() is reporting correct values again. Update the canonical
+          // and the variable to match (in case rotation changed it).
+          canonicalSafeTop = now;
+          setSafeTopVar(now);
           stabilizing = false;
           return;
         }
         if (elapsed >= maxMs) {
-          // Gave up waiting. Still force a reflow — maybe the values
-          // came back between our polls.
-          forceReflow();
+          // env() never came back. Make sure the variable is still set
+          // to the last known good value so the layout stays correct.
+          setSafeTopVar(canonicalSafeTop);
           stabilizing = false;
           return;
         }
         setTimeout(poll, pollMs);
       }
+      // First, AGGRESSIVELY re-assert the canonical value right away
+      // (before iOS can repaint with the bad layout). This is what
+      // actually fixes the bug — re-asserting the CSS variable forces
+      // a relayout that picks up the good value, even if env() is
+      // currently lying.
+      setSafeTopVar(canonicalSafeTop);
+      // Then poll in the background to update if env() comes back.
       poll();
     }
 
@@ -29425,7 +29422,7 @@ export default function BeatFinder() {
 
   if (resetToken) {
     return (
-      <div data-bf-app="1" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
+      <div data-bf-app="1" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))" }}>
         <DownloadToast />
         <PopupBlockedModal />
         <ResetPasswordScreen token={resetToken} onDone={() => { window.history.replaceState({}, "", "/"); window.location.reload(); }} />
@@ -29434,7 +29431,7 @@ export default function BeatFinder() {
   }
 
   return (
-    <div key="app-root" data-bf-app="1" id="bf-portrait-lock" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "env(safe-area-inset-top)" }}>
+    <div key="app-root" data-bf-app="1" id="bf-portrait-lock" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))" }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <DownloadToast />
       <PopupBlockedModal />
@@ -29456,7 +29453,7 @@ export default function BeatFinder() {
           background: "#0a0a0a",
           overflowY: "auto",
           fontFamily: "'DM Sans',sans-serif",
-          paddingTop: "env(safe-area-inset-top)",
+          paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))",
         }}>
           <button
             onClick={function() { setShowAuthWall(false); }}
@@ -29621,7 +29618,7 @@ export default function BeatFinder() {
       )}
 
       {showMessages && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "#0a0a0a", overflowY: "auto", overscrollBehavior: "none", paddingTop: "env(safe-area-inset-top)", fontFamily: "'DM Sans',sans-serif" }} onTouchMove={function(e){ e.stopPropagation(); }}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "#0a0a0a", overflowY: "auto", overscrollBehavior: "none", paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))", fontFamily: "'DM Sans',sans-serif" }} onTouchMove={function(e){ e.stopPropagation(); }}>
           <MessagesScreen user={user} onBack={() => { setShowMessages(false); setMessageThread(null); }} initialThread={messageThread} onViewProfile={u => { setShowMessages(false); setPublicProfile(u); }} />
         </div>
       )}
