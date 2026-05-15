@@ -15594,6 +15594,10 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   const [avatarUploading,  setAvatarUploading]  = useState(false);
   const [headerUrl,        setHeaderUrl]        = useState(user?.headerUrl || "");
   const [headerUploading,  setHeaderUploading]  = useState(false);
+  // Header crop flow: when the user picks a file we set headerCropFile to
+  // open the crop modal. The modal calls back with the cropped Blob which
+  // we upload via the same /api/auth/header endpoint.
+  const [headerCropFile,   setHeaderCropFile]   = useState(null);
   const avatarFileRef = React.useRef(null);
   const headerFileRef = React.useRef(null);
   const [tiktok,        setTiktok]        = useState(user?.tiktok || "");
@@ -16582,30 +16586,51 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
 
           {/* Hidden file inputs */}
           <input ref={headerFileRef} type="file" accept="image/*" style={{ display: "none" }}
-            onChange={async function(e) {
+            onChange={function(e) {
               const file = e.target.files && e.target.files[0];
+              e.target.value = "";  // allow re-selecting same file later
               if (!file) return;
               if (file.size > 10 * 1024 * 1024) { setBioMsg("Image too large - max 10MB"); return; }
-              setHeaderUploading(true);
-              try {
-                const fd = new FormData();
-                fd.append("file", file);
-                const token = getToken() || "";
-                const res = await fetch(API_BASE + "/api/auth/header", {
-                  method: "POST",
-                  headers: { Authorization: "Bearer " + token },
-                  body: fd,
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.detail || "Upload failed");
-                setHeaderUrl(data.headerUrl);
-                setUser(u => ({ ...u, headerUrl: data.headerUrl }));
-                setBioMsg("Header photo updated!");
-                setTimeout(() => setBioMsg(""), 2500);
-              } catch(err) { setBioMsg("Error: " + err.message); }
-              setHeaderUploading(false);
-              e.target.value = "";
+              // Open the crop modal — actual upload happens after the user
+              // confirms a crop region. See HeaderCropModal further down.
+              setHeaderCropFile(file);
             }} />
+
+          {/* Header crop modal — opens after the user picks a file. On
+              confirm, we upload the cropped blob via the same endpoint as
+              before. */}
+          {headerCropFile && (
+            <HeaderCropModal
+              file={headerCropFile}
+              onCancel={function() { setHeaderCropFile(null); }}
+              onConfirm={async function(blob) {
+                setHeaderUploading(true);
+                try {
+                  const fd = new FormData();
+                  // Backend expects a file param — give it a sensible name
+                  // and the JPEG mime our cropper outputs.
+                  fd.append("file", blob, "header.jpg");
+                  const token = getToken() || "";
+                  const res = await fetch(API_BASE + "/api/auth/header", {
+                    method: "POST",
+                    headers: { Authorization: "Bearer " + token },
+                    body: fd,
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.detail || "Upload failed");
+                  setHeaderUrl(data.headerUrl);
+                  setUser(u => ({ ...u, headerUrl: data.headerUrl }));
+                  setBioMsg("Header photo updated!");
+                  setTimeout(function(){ setBioMsg(""); }, 2500);
+                } catch(err) {
+                  setBioMsg("Error: " + err.message);
+                  setTimeout(function(){ setBioMsg(""); }, 3000);
+                }
+                setHeaderUploading(false);
+                setHeaderCropFile(null);
+              }}
+            />
+          )}
           <input ref={avatarFileRef} type="file" accept="image/*" style={{ display: "none" }}
             onChange={async function(e) {
               const file = e.target.files && e.target.files[0];
@@ -28006,6 +28031,336 @@ function PrivacyContent({ compact }) {
 // Required modal — no dismiss button, no backdrop dismiss. Users must
 // set a username to continue, since without one they can't be searched
 // for, can't have a public profile, can't be tagged, etc.
+// ─────────────────────────────────────────────────────────────────────────
+// HeaderCropModal
+// ─────────────────────────────────────────────────────────────────────────
+// Lets the user pan + pinch-zoom an image inside a fixed 16:9 crop frame
+// before uploading it as their profile header. On confirm, the visible
+// region inside the frame is drawn to an offscreen canvas and emitted as
+// a JPEG Blob via onConfirm.
+//
+// Implementation notes:
+//   - Position is held in refs (offsetX/Y, scale) and React only re-renders
+//     on actual transform updates via a tick counter. Touch handlers mutate
+//     the refs directly without re-render so panning is buttery-smooth.
+//   - The crop frame is 16:9 to match the profile's 240px-tall display.
+//   - Output resolution is 1280×720 — sharp on retina but small enough
+//     to upload quickly and keep Cloudinary storage cheap.
+//   - Pinch-zoom uses two-finger distance ratio relative to the gesture
+//     start, matching Instagram-style image crops.
+function HeaderCropModal({ file, onConfirm, onCancel }) {
+  var [imgUrl, setImgUrl]   = React.useState("");
+  var [imgDims, setImgDims] = React.useState(null); // {w, h}
+  var [busy, setBusy]       = React.useState(false);
+  var [err, setErr]         = React.useState("");
+  // Re-render trigger — handlers mutate the refs below and bump this to
+  // pull the latest values into the transform style.
+  var [tick, setTick] = React.useState(0);
+
+  // Crop frame size (constrained to viewport). We compute this once
+  // images are loaded.
+  var frameRef = React.useRef(null);
+  // Image transform state
+  var offset = React.useRef({ x: 0, y: 0 });
+  var scale  = React.useRef(1);
+  // Gesture state
+  var gesture = React.useRef(null);
+
+  // Load the file into a data URL we can render in an <img>
+  React.useEffect(function() {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function() { setImgUrl(reader.result); };
+    reader.onerror = function() { setErr("Couldn't read image file"); };
+    reader.readAsDataURL(file);
+  }, [file]);
+
+  // When image data URL is ready, measure natural dimensions
+  React.useEffect(function() {
+    if (!imgUrl) return;
+    var probe = new Image();
+    probe.onload = function() {
+      setImgDims({ w: probe.naturalWidth, h: probe.naturalHeight });
+    };
+    probe.onerror = function() { setErr("Couldn't load image"); };
+    probe.src = imgUrl;
+  }, [imgUrl]);
+
+  // Compute frame size — fit a 16:9 box inside ~92vw, no taller than 56vh
+  // so the buttons remain visible even on small phones in landscape.
+  function getFrameSize() {
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var maxW = Math.min(vw * 0.92, 460);
+    var w = maxW;
+    var h = w * 9 / 16;
+    var maxH = vh * 0.56;
+    if (h > maxH) { h = maxH; w = h * 16 / 9; }
+    return { w: Math.round(w), h: Math.round(h) };
+  }
+  var frameSize = getFrameSize();
+
+  // Compute the BASE scale: the smallest scale that still covers the
+  // frame. The image transform is then base * scaleMultiplier.
+  function getBaseScale() {
+    if (!imgDims) return 1;
+    var sx = frameSize.w / imgDims.w;
+    var sy = frameSize.h / imgDims.h;
+    return Math.max(sx, sy); // cover, not contain
+  }
+
+  function clampOffset(x, y, currentScale) {
+    if (!imgDims) return { x: x, y: y };
+    var dispW = imgDims.w * currentScale;
+    var dispH = imgDims.h * currentScale;
+    // Limit pan so image edges can't move inside the frame
+    var maxX = Math.max(0, (dispW - frameSize.w) / 2);
+    var maxY = Math.max(0, (dispH - frameSize.h) / 2);
+    return {
+      x: Math.max(-maxX, Math.min(maxX, x)),
+      y: Math.max(-maxY, Math.min(maxY, y)),
+    };
+  }
+
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      gesture.current = {
+        kind: "pan",
+        startX: e.touches[0].clientX,
+        startY: e.touches[0].clientY,
+        baseOffset: { x: offset.current.x, y: offset.current.y },
+      };
+    } else if (e.touches.length === 2) {
+      var dx = e.touches[0].clientX - e.touches[1].clientX;
+      var dy = e.touches[0].clientY - e.touches[1].clientY;
+      gesture.current = {
+        kind: "pinch",
+        startDist: Math.sqrt(dx*dx + dy*dy),
+        baseScale: scale.current,
+      };
+    }
+  }
+  function onTouchMove(e) {
+    e.preventDefault();
+    if (!gesture.current) return;
+    if (gesture.current.kind === "pan" && e.touches.length === 1) {
+      var nx = gesture.current.baseOffset.x + (e.touches[0].clientX - gesture.current.startX);
+      var ny = gesture.current.baseOffset.y + (e.touches[0].clientY - gesture.current.startY);
+      var c = clampOffset(nx, ny, getBaseScale() * scale.current);
+      offset.current = c;
+      setTick(function(t){ return t + 1; });
+    } else if (gesture.current.kind === "pinch" && e.touches.length === 2) {
+      var dx2 = e.touches[0].clientX - e.touches[1].clientX;
+      var dy2 = e.touches[0].clientY - e.touches[1].clientY;
+      var dist = Math.sqrt(dx2*dx2 + dy2*dy2);
+      var ratio = dist / gesture.current.startDist;
+      var nextScale = Math.max(1, Math.min(4, gesture.current.baseScale * ratio));
+      scale.current = nextScale;
+      // Re-clamp offset after scale change so edges still cover
+      var c2 = clampOffset(offset.current.x, offset.current.y, getBaseScale() * nextScale);
+      offset.current = c2;
+      setTick(function(t){ return t + 1; });
+    }
+  }
+  function onTouchEnd(e) {
+    e.preventDefault();
+    if (e.touches.length === 0) gesture.current = null;
+  }
+
+  // Mouse fallback (desktop testing / drag)
+  function onMouseDown(e) {
+    e.preventDefault();
+    gesture.current = {
+      kind: "pan",
+      startX: e.clientX,
+      startY: e.clientY,
+      baseOffset: { x: offset.current.x, y: offset.current.y },
+    };
+    function move(ev) {
+      if (!gesture.current) return;
+      var nx = gesture.current.baseOffset.x + (ev.clientX - gesture.current.startX);
+      var ny = gesture.current.baseOffset.y + (ev.clientY - gesture.current.startY);
+      var c = clampOffset(nx, ny, getBaseScale() * scale.current);
+      offset.current = c;
+      setTick(function(t){ return t + 1; });
+    }
+    function up() {
+      gesture.current = null;
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    }
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  }
+
+  function onWheel(e) {
+    if (!imgDims) return;
+    e.preventDefault();
+    var delta = -e.deltaY * 0.002;
+    var nextScale = Math.max(1, Math.min(4, scale.current * (1 + delta)));
+    scale.current = nextScale;
+    var c = clampOffset(offset.current.x, offset.current.y, getBaseScale() * nextScale);
+    offset.current = c;
+    setTick(function(t){ return t + 1; });
+  }
+
+  function confirmCrop() {
+    if (!imgDims || busy) return;
+    setBusy(true);
+    setErr("");
+    try {
+      // Map the on-screen crop frame back to source-image coordinates.
+      // The transform we use is: image is drawn at natural size, then
+      // scaled by (base * scaleMultiplier), then offset by (offset.x, y).
+      // The visible region of the image inside the frame is therefore:
+      var displayScale = getBaseScale() * scale.current;
+      // Source-pixel coordinates of the frame's top-left corner
+      var srcCenterX = imgDims.w / 2 - offset.current.x / displayScale;
+      var srcCenterY = imgDims.h / 2 - offset.current.y / displayScale;
+      var srcW = frameSize.w / displayScale;
+      var srcH = frameSize.h / displayScale;
+      var srcX = srcCenterX - srcW / 2;
+      var srcY = srcCenterY - srcH / 2;
+
+      var OUT_W = 1280;
+      var OUT_H = 720;
+      var canvas = document.createElement("canvas");
+      canvas.width = OUT_W;
+      canvas.height = OUT_H;
+      var ctx = canvas.getContext("2d");
+      var img = new Image();
+      img.onload = function() {
+        ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, OUT_W, OUT_H);
+        canvas.toBlob(function(blob) {
+          if (!blob) {
+            setBusy(false);
+            setErr("Couldn't process image");
+            return;
+          }
+          onConfirm(blob);
+        }, "image/jpeg", 0.9);
+      };
+      img.onerror = function() {
+        setBusy(false);
+        setErr("Couldn't process image");
+      };
+      img.src = imgUrl;
+    } catch (e) {
+      setBusy(false);
+      setErr(e.message || "Couldn't process image");
+    }
+  }
+
+  // Don't render the frame until we have image dimensions
+  var baseScale = getBaseScale();
+  var totalScale = baseScale * scale.current;
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 99999,
+      background: "rgba(0,0,0,0.96)",
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      padding: 16, fontFamily: "'DM Sans',sans-serif",
+    }}>
+      <div style={{
+        color: "#A78BFA", fontSize: 11, fontWeight: 900, letterSpacing: 1.5,
+        marginBottom: 8,
+      }}>
+        CROP YOUR HEADER
+      </div>
+      <div style={{ color: "#888", fontSize: 12, marginBottom: 16, textAlign: "center" }}>
+        Drag to reposition · pinch to zoom
+      </div>
+
+      <div ref={frameRef}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+        onMouseDown={onMouseDown}
+        onWheel={onWheel}
+        style={{
+          position: "relative",
+          width: frameSize.w, height: frameSize.h,
+          overflow: "hidden",
+          borderRadius: 12,
+          border: "2px solid rgba(192,38,211,0.5)",
+          background: "#0a0a0a",
+          touchAction: "none",
+          WebkitUserSelect: "none", userSelect: "none",
+          boxShadow: "0 0 24px rgba(124,58,237,0.25)",
+        }}>
+        {imgUrl && imgDims && (
+          <img
+            src={imgUrl}
+            alt=""
+            draggable={false}
+            style={{
+              position: "absolute",
+              left: "50%", top: "50%",
+              width: imgDims.w, height: imgDims.h,
+              // Transform order matters in CSS — rightmost applies first.
+              // We want:
+              //   1. translate image so its CENTER is at the frame center
+              //      (translate(-50%,-50%) does this in image-local pixels)
+              //   2. scale around that centered point
+              //   3. translate by the user's pan in SCREEN pixels (must be
+              //      OUTSIDE the scale so it isn't divided by it)
+              transform:
+                "translate(" + offset.current.x + "px," + offset.current.y + "px) " +
+                "scale(" + totalScale + ") " +
+                "translate(-50%,-50%)",
+              transformOrigin: "0 0",
+              pointerEvents: "none",
+            }}
+          />
+        )}
+        {!imgUrl && (
+          <div style={{ color: "#666", fontSize: 13,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            width: "100%", height: "100%" }}>
+            Loading…
+          </div>
+        )}
+      </div>
+
+      {err && (
+        <div style={{ color: "#F87171", fontSize: 12, marginTop: 12, textAlign: "center" }}>
+          {err}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, marginTop: 18, width: "100%", maxWidth: frameSize.w }}>
+        <button onClick={onCancel} disabled={busy}
+          style={{
+            flex: 1, padding: "14px",
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 12,
+            color: "#ccc", fontWeight: 700, fontSize: 14,
+            cursor: "pointer", letterSpacing: 0.3,
+            opacity: busy ? 0.5 : 1,
+          }}>
+          Cancel
+        </button>
+        <button onClick={confirmCrop} disabled={busy || !imgDims}
+          style={{
+            flex: 1, padding: "14px",
+            background: (busy || !imgDims) ? "#555" : "#C026D3",
+            border: "none", borderRadius: 12,
+            color: "white", fontWeight: 800, fontSize: 14,
+            cursor: "pointer", letterSpacing: 0.3,
+            opacity: (busy || !imgDims) ? 0.5 : 1,
+          }}>
+          {busy ? "Uploading…" : "Use this crop"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function UsernameSetupModal({ user, onSet }) {
   var [input, setInput]   = React.useState("");
   var [status, setStatus] = React.useState("idle");
