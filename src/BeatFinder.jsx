@@ -16847,6 +16847,33 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 <span style={{ color: "#555", fontSize: 14 }}>›</span>
               </button>
 
+              {/* ── About BeatFinder — visible to all users ─────────── */}
+              <button
+                onClick={function() {
+                  try { window.dispatchEvent(new CustomEvent("bf:openAbout")); } catch (_) {}
+                  setSettingsOpen(false);
+                }}
+                style={{
+                  width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "12px 14px",
+                  background: "#141414",
+                  borderRadius: 10,
+                  border: "1px solid #2a2a2a",
+                  marginBottom: 8,
+                  cursor: "pointer",
+                  color: "white", fontWeight: 700, fontSize: 14,
+                }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="16" x2="12" y2="12"/>
+                    <line x1="12" y1="8" x2="12.01" y2="8"/>
+                  </svg>
+                  About BeatFinder
+                </span>
+                <span style={{ color: "#555", fontSize: 14 }}>›</span>
+              </button>
+
               {/* ── Blocked Users ──────────────────────────────────────── */}
               <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
                 <button onClick={() => setOpenSettingsSection(openSettingsSection === "blocked" ? null : "blocked")}
@@ -30104,6 +30131,218 @@ function ChangelogScreen({ onBack }) {
   );
 }
 
+// =============================================================================
+// ABOUT SCREEN — public "who's behind BeatFinder" page
+// =============================================================================
+// Trust-building page that shows the founder, location, contact info,
+// and the platform's mission. Linked from Settings → "About BeatFinder".
+function AboutScreen({ onBack }) {
+  function openExternal(url) {
+    try {
+      var a = document.createElement("a");
+      a.href = url;
+      a.target = bfIsPWAiOS() ? "_self" : "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (_) {
+      try { window.location.href = url; } catch (_) {}
+    }
+  }
+
+  function Row({ icon, label, value, href }) {
+    return (
+      <div
+        onClick={href ? function() { openExternal(href); } : undefined}
+        style={{
+          display: "flex", alignItems: "center", gap: 12,
+          padding: "12px 14px",
+          background: "#0d0d0d",
+          border: "1px solid #2a2a2a",
+          borderRadius: 10,
+          marginBottom: 8,
+          cursor: href ? "pointer" : "default",
+        }}>
+        <div style={{
+          flex: "0 0 auto", width: 32, height: 32, borderRadius: 8,
+          background: "rgba(124,58,237,0.12)",
+          border: "1px solid rgba(124,58,237,0.3)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          color: "#A78BFA",
+        }}>
+          {icon}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 0.8, marginBottom: 2 }}>
+            {label}
+          </div>
+          <div style={{ color: "white", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {value}
+          </div>
+        </div>
+        {href && <div style={{ color: "#555", fontSize: 16, flex: "0 0 auto" }}>↗</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#0a0a0a", color: "white",
+      fontFamily: "'DM Sans',sans-serif",
+      paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))",
+      paddingBottom: "env(safe-area-inset-bottom)",
+    }}>
+      <div style={{
+        display: "flex", alignItems: "center", padding: "12px 16px",
+        borderBottom: "1px solid #1a1a1a",
+      }}>
+        {onBack && (
+          <button onClick={onBack} style={{
+            background: "none", border: "none", color: "white",
+            fontSize: 22, padding: "8px 12px 8px 0", cursor: "pointer",
+          }}>←</button>
+        )}
+        <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, letterSpacing: 2 }}>
+          ABOUT
+        </div>
+      </div>
+
+      <div style={{ padding: "24px 18px", maxWidth: 540, margin: "0 auto" }}>
+        <div style={{ textAlign: "center", marginBottom: 24, padding: "20px 0" }}>
+          <div style={{
+            fontFamily: "'Bebas Neue',sans-serif", fontSize: 42, letterSpacing: 6,
+            background: "linear-gradient(135deg,#C026D3 0%,#A855F7 50%,#3B82F6 100%)",
+            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+            backgroundClip: "text",
+            filter: "drop-shadow(0 0 12px rgba(192,38,211,0.4))",
+            marginBottom: 4,
+          }}>
+            BEATFINDER
+          </div>
+          <div style={{ color: "#666", fontSize: 11, fontWeight: 700, letterSpacing: 2 }}>
+            EST. MAY 2026 · LONDON, UK
+          </div>
+        </div>
+
+        <div style={{
+          background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
+          border: "1px solid rgba(124,58,237,0.18)",
+          borderRadius: 14, padding: "18px",
+          marginBottom: 20,
+          position: "relative", overflow: "hidden",
+        }}>
+          <div style={{
+            position: "absolute", top: 0, left: 14, right: 14, height: 2,
+            background: "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)",
+            boxShadow: "0 0 8px rgba(124,58,237,0.5)",
+          }} />
+          <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 800, letterSpacing: 1.5, marginBottom: 10 }}>
+            MISSION
+          </div>
+          <div style={{ color: "#ddd", fontSize: 14, lineHeight: 1.7 }}>
+            BeatFinder is a producer-led marketplace built so artists and producers keep
+            more of what they earn. No 50/50 splits. No exploitative middleman terms.
+            Producers connect their own Stripe account and receive payouts directly —
+            we take a 1% platform fee, full stop.
+          </div>
+        </div>
+
+        <div style={{ color: "#A78BFA", fontSize: 11, fontWeight: 800, letterSpacing: 1.5, marginBottom: 10, paddingLeft: 4 }}>
+          THE TEAM
+        </div>
+        <div style={{
+          background: "#0d0d0d",
+          border: "1px solid #2a2a2a",
+          borderRadius: 14, padding: "18px",
+          marginBottom: 20,
+          display: "flex", gap: 14, alignItems: "center",
+        }}>
+          <div style={{
+            flex: "0 0 auto", width: 64, height: 64, borderRadius: "50%",
+            background: "linear-gradient(135deg,#C026D3,#7C3AED,#3B82F6)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 1,
+            color: "white",
+            boxShadow: "0 4px 16px rgba(192,38,211,0.4), inset 0 1px 0 rgba(255,255,255,0.25)",
+          }}>
+            T
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: "white", fontWeight: 800, fontSize: 17, marginBottom: 2 }}>
+              Trelli
+            </div>
+            <div style={{ color: "#888", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, marginBottom: 6 }}>
+              FOUNDER · PRODUCER
+            </div>
+            <div style={{ color: "#aaa", fontSize: 12, lineHeight: 1.5 }}>
+              Built BeatFinder to give producers and artists the platform we always
+              wanted — fair splits, real licences, no fluff.
+            </div>
+          </div>
+        </div>
+
+        <div style={{ color: "#A78BFA", fontSize: 11, fontWeight: 800, letterSpacing: 1.5, marginBottom: 10, paddingLeft: 4 }}>
+          GET IN TOUCH
+        </div>
+
+        <Row
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>}
+          label="EMAIL"
+          value="trellitheproducer@gmail.com"
+          href="mailto:trellitheproducer@gmail.com"
+        />
+        <Row
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>}
+          label="INSTAGRAM"
+          value="@trelliofficial"
+          href="https://instagram.com/trelliofficial"
+        />
+        <Row
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5.8 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1.84-.1z"/></svg>}
+          label="TIKTOK"
+          value="@trelliofficial"
+          href="https://tiktok.com/@trelliofficial"
+        />
+
+        <div style={{ marginTop: 24, marginBottom: 20 }}>
+          <div style={{ color: "#A78BFA", fontSize: 11, fontWeight: 800, letterSpacing: 1.5, marginBottom: 10, paddingLeft: 4 }}>
+            HOW IT WORKS
+          </div>
+          <div style={{
+            background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 14,
+            padding: "16px 18px",
+          }}>
+            <div style={{ color: "#ddd", fontSize: 13, lineHeight: 1.8 }}>
+              <div style={{ marginBottom: 8 }}>
+                <span style={{ color: "#22C55E", fontWeight: 900, marginRight: 6 }}>•</span>
+                Producers keep <strong style={{ color: "white" }}>up to 99%</strong> of every sale (1% platform fee).
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <span style={{ color: "#3B82F6", fontWeight: 900, marginRight: 6 }}>•</span>
+                Payouts go straight to your Stripe account — never held by us.
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <span style={{ color: "#A855F7", fontWeight: 900, marginRight: 6 }}>•</span>
+                Two licence tiers: <strong style={{ color: "white" }}>Basic £50</strong> (non-exclusive) and <strong style={{ color: "white" }}>Premium £100–£500</strong> (exclusive).
+              </div>
+              <div>
+                <span style={{ color: "#C026D3", fontWeight: 900, marginRight: 6 }}>•</span>
+                Every purchase ships a written licence — no handshake deals.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ color: "#444", fontSize: 11, textAlign: "center", marginTop: 18, lineHeight: 1.6 }}>
+          © 2026 BeatFinder · London, UK<br />
+          Built with care for producers and artists.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CookieBanner() {
   // PECR (UK cookie law) requires opt-in for non-essential cookies.
   // We show this banner once; choice is persisted in localStorage.
@@ -30638,10 +30877,16 @@ function BeatFinderInner() {
   // Using events rather than prop threading because the trigger is deep
   // inside ProfileScreen and the overlay is at app-root level.
   const [showChangelog, setShowChangelog] = useState(false);
+  const [showAbout,     setShowAbout]     = useState(false);
   React.useEffect(function() {
-    function onOpen() { setShowChangelog(true); }
-    window.addEventListener("bf:openChangelog", onOpen);
-    return function() { window.removeEventListener("bf:openChangelog", onOpen); };
+    function onChangelog() { setShowChangelog(true); }
+    function onAbout()     { setShowAbout(true); }
+    window.addEventListener("bf:openChangelog", onChangelog);
+    window.addEventListener("bf:openAbout",     onAbout);
+    return function() {
+      window.removeEventListener("bf:openChangelog", onChangelog);
+      window.removeEventListener("bf:openAbout",     onAbout);
+    };
   }, []);
   React.useEffect(function() {
     function onAuthExpired() {
@@ -31389,6 +31634,16 @@ function BeatFinderInner() {
           background: "#0a0a0a", overflowY: "auto", WebkitOverflowScrolling: "touch",
         }}>
           <ChangelogScreen onBack={function() { setShowChangelog(false); }} />
+        </div>
+      )}
+
+      {/* About overlay — opened via window event "bf:openAbout" */}
+      {showAbout && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 99996,
+          background: "#0a0a0a", overflowY: "auto", WebkitOverflowScrolling: "touch",
+        }}>
+          <AboutScreen onBack={function() { setShowAbout(false); }} />
         </div>
       )}
 
