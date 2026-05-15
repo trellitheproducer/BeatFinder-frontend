@@ -99,6 +99,7 @@ const LOADER_STYLE = `
   @keyframes bf-scale-in  { from { opacity:0; transform:scale(0.96); } to { opacity:1; transform:scale(1); } }
   @keyframes bf-play-pulse { 0%,100% { box-shadow:0 0 0 0 rgba(192,38,211,0.4); } 70% { box-shadow:0 0 0 10px rgba(192,38,211,0); } }
   @keyframes bf-tab-in     { from { opacity:0; transform:translateX(8px); } to { opacity:1; transform:translateX(0); } }
+  @keyframes bf-pulse-dot  { 0%,100% { box-shadow:0 0 0 2px rgba(34,197,94,0.18), 0 0 6px rgba(34,197,94,0.6); } 50% { box-shadow:0 0 0 4px rgba(34,197,94,0.08), 0 0 10px rgba(34,197,94,0.8); } }
   .bf-page    { animation: bf-fadein-up 0.28s cubic-bezier(0.22,1,0.36,1) both; }
   .bf-card    { animation: bf-scale-in  0.22s cubic-bezier(0.22,1,0.36,1) both; }
   .bf-tab-in  { animation: bf-tab-in   0.22s cubic-bezier(0.22,1,0.36,1) both; }
@@ -6691,6 +6692,40 @@ function DownloadToast() {
     return toast;
   }
   return ReactDOM.createPortal(toast, document.body);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// ONLINE PRESENCE INDICATOR
+// ─────────────────────────────────────────────────────────────────────
+// Tiny green pulsing dot shown next to a user's name/avatar to signal
+// they were active in the last 2 minutes. The "is_online" flag comes
+// from the backend, calculated from last_seen_at.
+//
+// This is Deploy 1 of 3 — component only, not used anywhere yet.
+// Deploy 2 will add a heartbeat pinger + show the dot in the admin
+// Users panel. Deploy 3 will extend to other surfaces (profile,
+// search, followers/following). Each step verified before the next.
+function OnlineDot({ size = 9, label = false, style = {} }) {
+  var dotSize = Math.max(6, size);
+  return (
+    <span style={Object.assign({
+      display: "inline-flex", alignItems: "center", gap: label ? 6 : 0,
+      verticalAlign: "middle",
+    }, style)}>
+      <span style={{
+        display: "inline-block",
+        width: dotSize, height: dotSize, borderRadius: "50%",
+        background: "#22C55E",
+        boxShadow: "0 0 0 2px rgba(34,197,94,0.18), 0 0 6px rgba(34,197,94,0.6)",
+        animation: "bf-pulse-dot 1.8s ease-in-out infinite",
+      }} />
+      {label && (
+        <span style={{ color: "#22C55E", fontSize: 11, fontWeight: 700, letterSpacing: 0.3 }}>
+          Online now
+        </span>
+      )}
+    </span>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────
