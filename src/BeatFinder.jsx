@@ -14603,9 +14603,10 @@ function RootAuthScreen({ onLogin, startMode }) {
   );
 
   return (
-    <div style={{ padding: "0 24px max(140px, calc(env(safe-area-inset-bottom) + 120px))" }}>
+    <div style={{ padding: "0 24px 50vh" }}>
       <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 2, marginBottom: 24 }}>
         {mode === "signup" ? "CREATE ACCOUNT" : "WELCOME BACK"}
+        <span style={{ fontSize: 10, color: "#22C55E", marginLeft: 8, verticalAlign: "middle" }}>v5</span>
       </div>
       {mode === "signup" && <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" style={inp} />}
       {mode === "signup" && (
