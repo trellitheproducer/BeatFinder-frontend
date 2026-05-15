@@ -17185,6 +17185,18 @@ function WheelPicker({ items, value, onChange, onClose, title, inline, label }) 
 // =============================================================================
 function WaveformCanvas({ audioBuffer, color, width, height, playedFraction, dim, trimStart, trimEnd }) {
   const ref = useRef(null);
+  // Cache the per-pixel peaks array between renders. Computing peaks
+  // means iterating through every audio sample to find amplitude max
+  // per pixel — for a 3-minute file that's ~8M samples. Doing that
+  // 10× per second (as setCurrentTime fires during playback) was
+  // pinning the main thread and breaking touch input.
+  // We now recompute peaks ONLY when the audio data or visible
+  // dimensions change. playedFraction updates are then just a cheap
+  // re-fill of cached peak rectangles — fast enough to redraw on
+  // every state tick without any perf cost.
+  const peaksRef = useRef(null);
+  const peaksKeyRef = useRef("");
+
   useEffect(function () {
     const cv = ref.current;
     if (!cv) return;
@@ -17200,40 +17212,55 @@ function WaveformCanvas({ audioBuffer, color, width, height, playedFraction, dim
       ctx.strokeStyle = color + "44";
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
+      peaksRef.current = null;
+      peaksKeyRef.current = "";
       return;
     }
 
-    // Downsample to at most 4096 points first — makes peak compute instant
-    // regardless of file length (a 3-min file at 44.1kHz = 8M samples; capped at 4096).
-    const nc  = audioBuffer.numberOfChannels;
-    const totalLen = audioBuffer.length;
-    const MAX_PTS = 4096;
-    const step = Math.max(1, Math.floor(totalLen / MAX_PTS));
-    const dsLen = Math.ceil(totalLen / step);
-    const raw = new Float32Array(dsLen);
-    for (let c = 0; c < nc; c++) {
-      const ch = audioBuffer.getChannelData(c);
-      for (let i = 0; i < dsLen; i++) {
-        const idx = Math.min(i * step, ch.length - 1);
-        raw[i] += Math.abs(ch[idx]) / nc;
+    // Build a cache key from everything that affects the peak array.
+    // playedFraction and dim are NOT in the key — they only change
+    // the fill colours, not the shape of the waveform.
+    const key = [
+      audioBuffer.length, audioBuffer.sampleRate, W,
+      trimStart || 0, trimEnd === undefined ? -1 : trimEnd,
+    ].join("|");
+
+    let peaks = peaksRef.current;
+    if (!peaks || peaksKeyRef.current !== key) {
+      // Downsample to at most 4096 points first — makes peak compute instant
+      // regardless of file length (a 3-min file at 44.1kHz = 8M samples; capped at 4096).
+      const nc  = audioBuffer.numberOfChannels;
+      const totalLen = audioBuffer.length;
+      const MAX_PTS = 4096;
+      const step = Math.max(1, Math.floor(totalLen / MAX_PTS));
+      const dsLen = Math.ceil(totalLen / step);
+      const raw = new Float32Array(dsLen);
+      for (let c = 0; c < nc; c++) {
+        const ch = audioBuffer.getChannelData(c);
+        for (let i = 0; i < dsLen; i++) {
+          const idx = Math.min(i * step, ch.length - 1);
+          raw[i] += Math.abs(ch[idx]) / nc;
+        }
       }
-    }
 
-    // Only draw the trimmed region of the downsampled buffer
-    const dur = audioBuffer.duration;
-    const tS = Math.max(0, Math.floor(((trimStart || 0) / dur) * dsLen));
-    const tE = Math.min(dsLen, Math.ceil((((trimEnd !== undefined && trimEnd !== null) ? trimEnd : dur) / dur) * dsLen));
-    const regionLen = Math.max(1, tE - tS);
-    const spp = regionLen / W;
+      // Only draw the trimmed region of the downsampled buffer
+      const dur = audioBuffer.duration;
+      const tS = Math.max(0, Math.floor(((trimStart || 0) / dur) * dsLen));
+      const tE = Math.min(dsLen, Math.ceil((((trimEnd !== undefined && trimEnd !== null) ? trimEnd : dur) / dur) * dsLen));
+      const regionLen = Math.max(1, tE - tS);
+      const spp = regionLen / W;
 
-    // Pre-compute peaks from the downsampled region
-    const peaks = new Float32Array(W);
-    for (let px = 0; px < W; px++) {
-      const s = Math.floor(tS + px * spp);
-      const e = Math.min(Math.floor(tS + (px + 1) * spp) + 1, tE);
-      let pk = 0;
-      for (let i = s; i < e; i++) { if (raw[i] > pk) pk = raw[i]; }
-      peaks[px] = pk;
+      // Pre-compute peaks from the downsampled region
+      peaks = new Float32Array(W);
+      for (let px = 0; px < W; px++) {
+        const s = Math.floor(tS + px * spp);
+        const e = Math.min(Math.floor(tS + (px + 1) * spp) + 1, tE);
+        let pk = 0;
+        for (let i = s; i < e; i++) { if (raw[i] > pk) pk = raw[i]; }
+        peaks[px] = pk;
+      }
+      peaksRef.current = peaks;
+      peaksKeyRef.current = key;
     }
 
     const playedPx = Math.floor(W * Math.min(1, Math.max(0, playedFraction)));
