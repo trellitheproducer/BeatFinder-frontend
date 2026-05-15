@@ -28413,36 +28413,23 @@ export default function BeatFinder() {
     installGlobalPopupProbe();
   }, []);
 
-  // ── Safe-area-inset stabilizer ────────────────────────────────────────
+  // ── Safe-area-inset stabilizer (minimal version) ─────────────────────
   // FIXES: page header overlapping the iOS status bar after closing an
-  // in-app browser sheet (SFSafariViewController). Diagnostic capture
-  // (which has been removed) showed that on resume:
+  // in-app browser sheet (SFSafariViewController). Diagnostic data
+  // showed that after the sheet dismisses, iOS reports
+  // env(safe-area-inset-top) as 0 for ~100ms — layouts pinned to env()
+  // get stuck at the wrong position.
   //
-  //   t=0ms:    visibility → visible
-  //             innerHeight=751, safe-area-inset-top=0     ← BAD VALUES
-  //   t=~50ms:  resize event, still bad values
-  //   t=~100ms: inset jumps to correct value (59), innerHeight to 795
+  // FIX: pin all layouts to a CSS variable --bf-safe-top that we set
+  // ONCE from JS on first load. The variable wins over env(), so iOS
+  // can't poison the layout during the bad-values window.
   //
-  // The ~50–100ms window of bad values is what poisons the layout. Any
-  // React render during that window pins headers at top:0. Even after
-  // iOS sends the correct values, WebKit doesn't always re-layout the
-  // already-rendered elements — trying to nudge it with transform
-  // toggles or display:none toggles FAILED (tested both, they didn't
-  // force WebKit to re-read env() values).
-  //
-  // FIX: bypass env() entirely on resume. We use a CSS custom property
-  // --bf-safe-top set from JS. All layouts that previously used
-  // env(safe-area-inset-top) now use var(--bf-safe-top, env(...)).
-  // The fallback to env() preserves behavior on first paint and on
-  // non-PWA browsers. Setting the variable forces a relayout that
-  // WebKit DOES respect (CSS variable changes are part of the spec,
-  // not subject to the env() caching quirk).
-  //
-  // On first load we measure the canonical safe-top inset and set the
-  // variable. On visibility/focus, we re-assert the canonical value
-  // IMMEDIATELY (before iOS can repaint with bad env() values), then
-  // poll briefly to update if the inset legitimately changes (e.g.
-  // rotation).
+  // Why this version is minimal — earlier attempts polled on visibility
+  // change and re-measured on every event, which created a feedback
+  // loop: the probe insertion itself fired resize events, which
+  // re-triggered the stabilizer. Now we just measure once at startup
+  // and never touch it again. Trade-off: phone rotation won't update
+  // the value, but the resize-loop bug is much worse.
   React.useEffect(function() {
     function measureSafeTop() {
       try {
@@ -28455,91 +28442,28 @@ export default function BeatFinder() {
       } catch(_) { return 0; }
     }
 
-    // Set --bf-safe-top on :root once we have a trustworthy reading.
-    // All layouts now use var(--bf-safe-top, env(safe-area-inset-top))
-    // so they pick up this value instead of the (possibly broken)
-    // env() value WebKit is reporting at any given moment.
     function setSafeTopVar(px) {
       try {
         document.documentElement.style.setProperty("--bf-safe-top", px + "px");
       } catch(_) {}
     }
 
-    // Measure canonical safe-top on first load. We use this as the
-    // truth — if a later measurement returns 0 when this says non-zero,
-    // we know iOS is lying to us and we keep the canonical value.
-    var canonicalSafeTop = 0;
+    // Measure the canonical safe-top once at startup and pin the
+    // variable to it. We do NOT update this on visibility/focus/resize
+    // because that creates a feedback loop on iOS — the probe insertion
+    // itself fires resize events, which re-trigger the stabilizer, which
+    // re-inserts the probe... ad infinitum. Setting it once on a stable
+    // post-load tick avoids all that.
+    //
+    // The trade-off: rotation won't change the variable, so a phone
+    // rotated mid-session will have slightly stale safe-top. We accept
+    // that — the alternative (the resize loop) is much worse.
     setTimeout(function() {
-      canonicalSafeTop = measureSafeTop();
-      if (canonicalSafeTop > 0) setSafeTopVar(canonicalSafeTop);
+      var v = measureSafeTop();
+      if (v > 0) setSafeTopVar(v);
     }, 200);
 
-    var stabilizing = false;
-    function stabilize() {
-      // If the device doesn't HAVE a notch (canonical inset is 0),
-      // nothing to do.
-      if (canonicalSafeTop === 0) return;
-      if (stabilizing) return;
-      stabilizing = true;
-
-      // Re-measure with polling. Once env() comes back to the expected
-      // canonical value, refresh the variable (in case the canonical
-      // value has legitimately changed — e.g. rotation). If env() never
-      // comes back during the poll window, we keep the canonical value
-      // we set on first load. Either way, the variable stays correct
-      // and layouts don't break.
-      var start = Date.now();
-      var pollMs = 30;
-      var maxMs = 800;
-
-      function poll() {
-        var now = measureSafeTop();
-        var elapsed = Date.now() - start;
-
-        if (now > 0) {
-          // env() is reporting correct values again. Update the canonical
-          // and the variable to match (in case rotation changed it).
-          canonicalSafeTop = now;
-          setSafeTopVar(now);
-          stabilizing = false;
-          return;
-        }
-        if (elapsed >= maxMs) {
-          // env() never came back. Make sure the variable is still set
-          // to the last known good value so the layout stays correct.
-          setSafeTopVar(canonicalSafeTop);
-          stabilizing = false;
-          return;
-        }
-        setTimeout(poll, pollMs);
-      }
-      // First, AGGRESSIVELY re-assert the canonical value right away
-      // (before iOS can repaint with the bad layout). This is what
-      // actually fixes the bug — re-asserting the CSS variable forces
-      // a relayout that picks up the good value, even if env() is
-      // currently lying.
-      setSafeTopVar(canonicalSafeTop);
-      // Then poll in the background to update if env() comes back.
-      poll();
-    }
-
-    function onVis() {
-      if (document.visibilityState === "visible") {
-        // Don't trust the immediate values — poll until safeTop comes back.
-        stabilize();
-      }
-    }
-    function onFocus() { stabilize(); }
-    function onPageShow() { stabilize(); }
-
-    document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("pageshow", onPageShow);
-    return function() {
-      document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("pageshow", onPageShow);
-    };
+    // No event listeners. No polling. No teardown needed.
   }, []);
 
   // ── External browser dismissal recovery ──────────────────────────────────
