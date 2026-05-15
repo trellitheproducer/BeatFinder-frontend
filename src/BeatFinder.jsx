@@ -23059,6 +23059,10 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
 
   const handleRulerMouseDown = function (e) {
     e.preventDefault();
+    // Pause RAF auto-scroll for the duration of the click — same reason
+    // as the touch handler. While playing, the RAF loop's per-frame
+    // scrollLeft writes can disrupt click handling. Cleared on mouseup.
+    userScrolledAt.current = performance.now();
     const raw = rulerTimeFromClientX(e.clientX);
     const t   = snapToBar(raw);
     // Grab threshold: half a beat (so handles feel magnetic near beat boundaries)
@@ -23124,6 +23128,8 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         }
       }
       rulerDragRef.current = null;
+      // Resume RAF auto-scroll — see handleRulerMouseDown for context.
+      userScrolledAt.current = null;
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup",   onUp);
     };
@@ -23134,6 +23140,17 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   const handleRulerTouchStart = function (e) {
     e.preventDefault();
     e.stopPropagation();
+    // PAUSE AUTO-SCROLL DURING THE GESTURE
+    // The RAF playback loop writes `scrollRef.current.scrollLeft = ...`
+    // on every frame to keep the playhead pinned at 75% of the viewport.
+    // iOS Safari treats those programmatic scroll mutations as scroll
+    // activity and cancels any touch sequence in progress, which means
+    // tap-to-seek silently fails while audio is playing. Setting
+    // userScrolledAt to "now" reuses the existing manual-scroll-pause
+    // mechanism: the RAF loop checks this ref every frame and skips
+    // auto-scroll while it's non-null. We clear it in touchend so
+    // auto-scroll resumes after the gesture completes.
+    userScrolledAt.current = performance.now();
     const raw = rulerTimeFromClientX(e.touches[0].clientX);
     const t   = snapToBar(raw);
     const grabThresh = Math.max(0.15, spb * 0.5);
@@ -23238,6 +23255,12 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }
     }
     rulerDragRef.current = null;
+    // RESUME AUTO-SCROLL
+    // touchstart paused it by setting userScrolledAt. After tap-to-seek
+    // we want the playhead-follow behaviour to resume immediately so the
+    // newly-seeked position pins correctly. Clearing the ref tells the
+    // RAF loop's auto-scroll branch (line ~21796) it can run again.
+    userScrolledAt.current = null;
   };
 
   const handleScroll = function (e) {
