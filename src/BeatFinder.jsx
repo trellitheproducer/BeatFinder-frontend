@@ -1365,6 +1365,65 @@ function clearToken() {
   try { localStorage.removeItem("bf_token"); } catch {}
 }
 
+// Custom error class for API failures. Carries the HTTP status so callers
+// can branch on it (e.g. `if (e.status === 401) ...`). The .message is
+// always a user-friendly string ready to show in the UI.
+class ApiError extends Error {
+  constructor(message, status, raw) {
+    super(message);
+    this.name   = "ApiError";
+    this.status = status;
+    this.raw    = raw;  // original server response, useful for debugging
+  }
+}
+
+// Map common HTTP status codes to friendly default messages. The server's
+// own `detail` is preferred when it looks user-friendly (sentence-case
+// English, not a code path). Backend devs sometimes return raw tracebacks
+// or jargon like "Could not validate credentials" — we replace those.
+function bfFriendlyErrorMessage(status, serverDetail) {
+  // If server detail is short, looks like a real sentence, and isn't a
+  // known unfriendly pattern, prefer it — backend devs know context.
+  var unfriendlyPatterns = [
+    /could not validate credentials/i,
+    /token.*expired/i,
+    /jwt/i,
+    /traceback/i,
+    /500.*internal/i,
+    /unauthoriz/i,
+    /forbidden/i,
+    /^http \d+/i,
+    /^api error/i,
+    /^\{/, // raw JSON
+  ];
+  var detail = (serverDetail || "").trim();
+  var detailIsFriendly =
+    detail &&
+    detail.length > 0 &&
+    detail.length < 250 &&
+    !unfriendlyPatterns.some(function(p) { return p.test(detail); });
+
+  if (detailIsFriendly) return detail;
+
+  // Fall back to a friendly default keyed by status.
+  switch (status) {
+    case 0:   return "Connection problem — check your internet and try again.";
+    case 400: return "Something wasn't quite right with that request. Try again.";
+    case 401: return "You've been signed out. Please sign back in to continue.";
+    case 403: return "You don't have access to that.";
+    case 404: return "We couldn't find that — it may have been deleted.";
+    case 409: return "That action couldn't complete — the item changed before your request finished. Refresh and try again.";
+    case 413: return "That file is too large to upload.";
+    case 422: return "Some of those details aren't valid. Please double-check and try again.";
+    case 429: return "Slow down — too many requests at once. Try again in a moment.";
+    case 500:
+    case 502:
+    case 503:
+    case 504: return "Something went wrong on our end. We've been notified — please try again in a moment.";
+    default:  return "Couldn't complete that — please try again.";
+  }
+}
+
 // Generic authenticated fetch helper
 async function apiFetch(path, options = {}) {
   const token = getToken();
@@ -1373,10 +1432,47 @@ async function apiFetch(path, options = {}) {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers || {}),
   };
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  } catch (networkErr) {
+    // fetch() throws on actual network failures (no connection, DNS
+    // problem, request aborted, CORS preflight failure). Translate to
+    // a friendly ApiError with status 0 so callers can handle it the
+    // same way as a regular HTTP failure.
+    throw new ApiError(
+      bfFriendlyErrorMessage(0, ""),
+      0,
+      networkErr && networkErr.message ? networkErr.message : "network error"
+    );
+  }
+
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || "API error");
+    const raw = await res.json().catch(() => ({ detail: res.statusText }));
+    const serverDetail = raw && (raw.detail || raw.message || raw.error) || "";
+
+    // Special-case 401: token is invalid/expired. Clear it so the next
+    // app load lands the user back at the sign-in screen cleanly rather
+    // than retrying with a stale token. Only do this when we ACTUALLY
+    // sent a token (no false-positive sign-outs for endpoints that just
+    // need auth and the user happened to be a guest). Fire an event so
+    // the UI can react (show a banner / redirect to sign-in) instead of
+    // silently breaking.
+    if (res.status === 401 && token) {
+      try { clearToken(); } catch (_) {}
+      try {
+        window.dispatchEvent(new CustomEvent("bf:auth-expired", {
+          detail: { path: path }
+        }));
+      } catch (_) {}
+    }
+
+    throw new ApiError(
+      bfFriendlyErrorMessage(res.status, serverDetail),
+      res.status,
+      serverDetail
+    );
   }
   return res.json();
 }
@@ -30090,6 +30186,21 @@ function BeatFinderInner() {
   const [searchInitialTab, setSearchInitialTab] = useState(null);
   const [artist,  setArtist]  = useState(null); // kept for compatibility
   const [user,    setUser]    = useState(null);
+  // Brief banner shown when the user's token expires mid-session. Triggered
+  // by apiFetch dispatching a bf:auth-expired event after a 401. We clear
+  // the user state and show this so they know what happened — much nicer
+  // than features silently failing.
+  const [authExpiredBanner, setAuthExpiredBanner] = useState(false);
+  React.useEffect(function() {
+    function onAuthExpired() {
+      setUser(null);
+      setAuthExpiredBanner(true);
+      // Auto-dismiss after 6s in case they ignore it
+      setTimeout(function() { setAuthExpiredBanner(false); }, 6000);
+    }
+    window.addEventListener("bf:auth-expired", onAuthExpired);
+    return function() { window.removeEventListener("bf:auth-expired", onAuthExpired); };
+  }, []);
   // Global lease cache — fetched once at login and refreshed on returning
   // from Stripe success. Every CompactBeatActionSheet reads from this instead
   // of issuing its own /my-leases request, which (a) makes sheet opens
@@ -30817,6 +30928,41 @@ function BeatFinderInner() {
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <DownloadToast />
       <PopupBlockedModal />
+
+      {/* Auth-expired toast — shown briefly when apiFetch detects a 401
+          after a previously-valid token. Tells the user they've been
+          signed out and how to fix it without leaving them confused
+          about why features stopped working. */}
+      {authExpiredBanner && (
+        <div onClick={function() { setAuthExpiredBanner(false); }} style={{
+          position: "fixed",
+          top: "calc(var(--bf-safe-top, env(safe-area-inset-top)) + 12px)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 99998,
+          background: "linear-gradient(135deg,#1a0a14,#0d0a14)",
+          border: "1px solid rgba(239,68,68,0.4)",
+          borderRadius: 12,
+          padding: "12px 16px",
+          maxWidth: 360, width: "calc(100vw - 32px)",
+          color: "white",
+          fontSize: 13,
+          fontFamily: "'DM Sans',sans-serif",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.6), 0 0 16px rgba(239,68,68,0.2)",
+          display: "flex", alignItems: "center", gap: 10,
+          cursor: "pointer",
+        }}>
+          <div style={{ flex: "0 0 auto", width: 24, height: 24, borderRadius: "50%",
+            background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.4)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "#F87171", fontWeight: 900, fontSize: 14 }}>!</div>
+          <div style={{ flex: 1, lineHeight: 1.4 }}>
+            <div style={{ fontWeight: 700, marginBottom: 2 }}>You've been signed out</div>
+            <div style={{ color: "#aaa", fontSize: 11 }}>Sign back in to continue.</div>
+          </div>
+          <div style={{ color: "#555", fontSize: 16 }}>×</div>
+        </div>
+      )}
 
       {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
 
