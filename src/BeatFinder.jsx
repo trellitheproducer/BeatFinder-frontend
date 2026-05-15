@@ -28413,6 +28413,95 @@ export default function BeatFinder() {
     installGlobalPopupProbe();
   }, []);
 
+  // ── DIAGNOSTIC: capture viewport/display-mode state on transitions ───
+  // Temporary instrumentation to find the root cause of the "header
+  // sitting on top of the iOS status bar" bug after closing an in-app
+  // browser sheet. Captures three snapshots:
+  //   1. INITIAL — on app load
+  //   2. HIDDEN  — when the page becomes hidden (link tapped, sheet opens)
+  //   3. VISIBLE — when the page becomes visible again (sheet dismissed)
+  // Each snapshot records innerHeight, visualViewport.height, screen.height,
+  // display-mode media query state, computed safe-area-inset-top, and a
+  // bunch of other dimensions. Snapshots get appended to localStorage so
+  // they can be inspected via the on-screen "DBG" button on Home.
+  React.useEffect(function() {
+    function snapshot(label) {
+      try {
+        var de = document.documentElement;
+        var probe = document.createElement("div");
+        probe.style.cssText = "position:fixed;top:env(safe-area-inset-top);left:0;width:1px;height:1px;pointer-events:none;opacity:0;";
+        document.body.appendChild(probe);
+        var probeTop = probe.getBoundingClientRect().top;
+        probe.remove();
+
+        var s = {
+          t:           new Date().toISOString().slice(11, 23),
+          label:       label,
+          innerH:      window.innerHeight,
+          innerW:      window.innerWidth,
+          vvH:         window.visualViewport ? Math.round(window.visualViewport.height) : null,
+          vvW:         window.visualViewport ? Math.round(window.visualViewport.width)  : null,
+          vvOffTop:    window.visualViewport ? Math.round(window.visualViewport.offsetTop) : null,
+          vvScale:     window.visualViewport ? window.visualViewport.scale : null,
+          screenH:     window.screen ? window.screen.height : null,
+          screenW:     window.screen ? window.screen.width  : null,
+          docH:        de.clientHeight,
+          docW:        de.clientWidth,
+          safeTopPx:   Math.round(probeTop),
+          standalone:  !!(window.matchMedia("(display-mode: standalone)").matches),
+          browser:     !!(window.matchMedia("(display-mode: browser)").matches),
+          fullscreen:  !!(window.matchMedia("(display-mode: fullscreen)").matches),
+          navStand:    !!(navigator.standalone),
+          visibility:  document.visibilityState,
+        };
+        var arr;
+        try { arr = JSON.parse(localStorage.getItem("bf_diag") || "[]"); }
+        catch(_) { arr = []; }
+        arr.push(s);
+        if (arr.length > 40) arr = arr.slice(-40);
+        localStorage.setItem("bf_diag", JSON.stringify(arr));
+      } catch(e) {}
+    }
+
+    setTimeout(function(){ snapshot("INITIAL"); }, 100);
+
+    function onVis() {
+      if (document.visibilityState === "hidden") {
+        snapshot("HIDDEN");
+      } else {
+        snapshot("VISIBLE_t0");
+        setTimeout(function(){ snapshot("VISIBLE_t100"); }, 100);
+        setTimeout(function(){ snapshot("VISIBLE_t500"); }, 500);
+        setTimeout(function(){ snapshot("VISIBLE_t1500"); }, 1500);
+      }
+    }
+    function onResize() { snapshot("RESIZE"); }
+    function onVvResize() { snapshot("VV_RESIZE"); }
+
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("resize", onResize);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", onVvResize);
+    }
+    return function() {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("resize", onResize);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener("resize", onVvResize);
+      }
+    };
+  }, []);
+
+  // ── DIAGNOSTIC: floating "DBG" button + panel to view captured data ──
+  var [showDiag, setShowDiag] = React.useState(false);
+  var [diagData, setDiagData] = React.useState("");
+  React.useEffect(function() {
+    if (showDiag) {
+      try { setDiagData(localStorage.getItem("bf_diag") || "[]"); }
+      catch(_) { setDiagData("read-error"); }
+    }
+  }, [showDiag]);
+
   // ── External browser dismissal recovery ──────────────────────────────────
   // When BeatFinder navigates the user away to a social media / external URL
   // (YouTube, Instagram, TikTok, Spotify, Apple Music etc.), iOS Safari may
@@ -29828,6 +29917,72 @@ export default function BeatFinder() {
           );
         })}
       </div>
+
+      {/* ── DIAGNOSTIC — TEMPORARY: floating DBG button + viewer panel ── */}
+      <button
+        onClick={function() { setShowDiag(true); }}
+        style={{
+          position: "fixed",
+          top: "calc(env(safe-area-inset-top) + 6px)",
+          right: 6,
+          zIndex: 99999,
+          background: "rgba(192,38,211,0.85)",
+          color: "white", fontSize: 9, fontWeight: 800,
+          border: "none", borderRadius: 6,
+          padding: "3px 6px",
+          cursor: "pointer", letterSpacing: 0.5,
+          boxShadow: "0 0 8px rgba(0,0,0,0.4)",
+        }}>
+        DBG
+      </button>
+      {showDiag && (
+        <div onClick={function(){ setShowDiag(false); }}
+          style={{
+            position: "fixed", inset: 0, zIndex: 99998,
+            background: "rgba(0,0,0,0.92)",
+            display: "flex", flexDirection: "column",
+            paddingTop: "calc(env(safe-area-inset-top) + 14px)",
+            paddingBottom: "calc(env(safe-area-inset-bottom) + 14px)",
+            paddingLeft: 12, paddingRight: 12,
+          }}>
+          <div onClick={function(e){ e.stopPropagation(); }}
+            style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <div style={{ color: "white", fontWeight: 800, fontSize: 14 }}>Viewport diagnostic</div>
+              <button onClick={function(){
+                  try { localStorage.removeItem("bf_diag"); setDiagData("[]"); } catch(_){}
+                }} style={{ background: "#241e30", border: "1px solid #2a2336", color: "#aaa", fontSize: 11, fontWeight: 700, borderRadius: 6, padding: "5px 9px", cursor: "pointer" }}>
+                Clear
+              </button>
+              <button onClick={function(){ setShowDiag(false); }}
+                style={{ background: "#1a1a1a", border: "1px solid #2a2a2a", color: "white", fontSize: 14, fontWeight: 800, borderRadius: "50%", width: 28, height: 28, cursor: "pointer", padding: 0 }}>×</button>
+            </div>
+            <div style={{ color: "#888", fontSize: 11 }}>
+              Most recent on top. Tap & hold the JSON to copy. Send to me.
+            </div>
+            <textarea readOnly value={(function(){
+                try {
+                  var arr = JSON.parse(diagData || "[]");
+                  return arr.slice().reverse().map(function(s){
+                    return s.t + " " + s.label + "\n" +
+                      "  innerH=" + s.innerH + " vvH=" + s.vvH + " screenH=" + s.screenH + "\n" +
+                      "  safeTopPx=" + s.safeTopPx + " vvOffTop=" + s.vvOffTop + "\n" +
+                      "  standalone=" + s.standalone + " browser=" + s.browser + " navStand=" + s.navStand + "\n" +
+                      "  vis=" + s.visibility;
+                  }).join("\n\n");
+                } catch(_) { return "parse error"; }
+              })()}
+              style={{
+                flex: 1, minHeight: 0,
+                background: "#0a0a0a", border: "1px solid #2a2a2a", borderRadius: 8,
+                color: "#bbb", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 10,
+                padding: 10, outline: "none", resize: "none",
+                whiteSpace: "pre", WebkitUserSelect: "text", userSelect: "text",
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
