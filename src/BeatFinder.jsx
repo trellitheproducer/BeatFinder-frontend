@@ -99,7 +99,6 @@ const LOADER_STYLE = `
   @keyframes bf-scale-in  { from { opacity:0; transform:scale(0.96); } to { opacity:1; transform:scale(1); } }
   @keyframes bf-play-pulse { 0%,100% { box-shadow:0 0 0 0 rgba(192,38,211,0.4); } 70% { box-shadow:0 0 0 10px rgba(192,38,211,0); } }
   @keyframes bf-tab-in     { from { opacity:0; transform:translateX(8px); } to { opacity:1; transform:translateX(0); } }
-  @keyframes bf-pulse-dot  { 0%,100% { box-shadow:0 0 0 2px rgba(34,197,94,0.18), 0 0 6px rgba(34,197,94,0.6); } 50% { box-shadow:0 0 0 4px rgba(34,197,94,0.08), 0 0 10px rgba(34,197,94,0.8); } }
   .bf-page    { animation: bf-fadein-up 0.28s cubic-bezier(0.22,1,0.36,1) both; }
   .bf-card    { animation: bf-scale-in  0.22s cubic-bezier(0.22,1,0.36,1) both; }
   .bf-tab-in  { animation: bf-tab-in   0.22s cubic-bezier(0.22,1,0.36,1) both; }
@@ -4318,27 +4317,16 @@ function UserSearchOverlay({ onClose, onPickUser }) {
                   }}>
                   {/* Avatar */}
                   <div style={{
-                    position: "relative", flexShrink: 0,
+                    width:44, height:44, borderRadius:"50%", flexShrink:0,
+                    background: u.avatarUrl ? "#222" : "linear-gradient(135deg,#6B21A8,#C026D3)",
+                    overflow:"hidden",
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    color:"white", fontWeight:800, fontSize:16,
                   }}>
-                    <div style={{
-                      width:44, height:44, borderRadius:"50%",
-                      background: u.avatarUrl ? "#222" : "linear-gradient(135deg,#6B21A8,#C026D3)",
-                      overflow:"hidden",
-                      display:"flex", alignItems:"center", justifyContent:"center",
-                      color:"white", fontWeight:800, fontSize:16,
-                    }}>
-                      {u.avatarUrl
-                        ? <img src={u.avatarUrl} alt={u.username}
-                            style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-                        : initial}
-                    </div>
-                    {u.is_online && (
-                      <div style={{ position: "absolute", bottom: 0, right: 0,
-                        borderRadius: "50%", padding: 2, background: "#0a0a0a",
-                      }}>
-                        <OnlineDot size={9} />
-                      </div>
-                    )}
+                    {u.avatarUrl
+                      ? <img src={u.avatarUrl} alt={u.username}
+                          style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                      : initial}
                   </div>
                   {/* Name + handle + plan */}
                   <div style={{ flex:1, minWidth:0 }}>
@@ -6703,43 +6691,6 @@ function DownloadToast() {
     return toast;
   }
   return ReactDOM.createPortal(toast, document.body);
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// ONLINE PRESENCE INDICATOR
-// ─────────────────────────────────────────────────────────────────────
-// Tiny green pulsing dot shown next to a user's name/avatar to signal
-// they were active in the last 2 minutes. The "is_online" flag comes
-// from the backend, calculated from last_seen_at. We don't compute it
-// locally because client clocks lie.
-//
-// Usage:
-//   {user.is_online && <OnlineDot />}
-//   {user.is_online && <OnlineDot label />}
-//
-// The `label` prop adds an "Online now" text label beside the dot
-// (for profile headers / DM headers). Default = just the dot.
-function OnlineDot({ size = 9, label = false, style = {} }) {
-  var dotSize = Math.max(6, size);
-  return (
-    <span style={Object.assign({
-      display: "inline-flex", alignItems: "center", gap: label ? 6 : 0,
-      verticalAlign: "middle",
-    }, style)}>
-      <span style={{
-        display: "inline-block",
-        width: dotSize, height: dotSize, borderRadius: "50%",
-        background: "#22C55E",
-        boxShadow: "0 0 0 2px rgba(34,197,94,0.18), 0 0 6px rgba(34,197,94,0.6)",
-        animation: "bf-pulse-dot 1.8s ease-in-out infinite",
-      }} />
-      {label && (
-        <span style={{ color: "#22C55E", fontSize: 11, fontWeight: 700, letterSpacing: 0.3 }}>
-          Online now
-        </span>
-      )}
-    </span>
-  );
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -13245,22 +13196,13 @@ function FollowListScreen({ username, mode, onBack, onViewProfile, currentUser }
           <div key={u.username} onClick={() => setViewingUser(u.username)}
             style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #111", cursor:"pointer", gap:12 }}>
             {/* Avatar */}
-            <div style={{ position: "relative", flexShrink: 0 }}>
-              <div style={{ width:48, height:48, borderRadius:"50%", overflow:"hidden",
-                background:"linear-gradient(135deg,#6B21A8,#C026D3)",
-                display:"flex", alignItems:"center", justifyContent:"center" }}>
-                {u.avatarUrl
-                  ? <img src={u.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-                  : <span style={{ color:"white", fontWeight:800, fontSize:18 }}>{(u.username || "?")[0].toUpperCase()}</span>
-                }
-              </div>
-              {u.is_online && (
-                <div style={{ position: "absolute", bottom: 0, right: 0,
-                  borderRadius: "50%", padding: 2, background: "#0a0a0a",
-                }}>
-                  <OnlineDot size={10} />
-                </div>
-              )}
+            <div style={{ width:48, height:48, borderRadius:"50%", overflow:"hidden", flexShrink:0,
+              background:"linear-gradient(135deg,#6B21A8,#C026D3)",
+              display:"flex", alignItems:"center", justifyContent:"center" }}>
+              {u.avatarUrl
+                ? <img src={u.avatarUrl} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                : <span style={{ color:"white", fontWeight:800, fontSize:18 }}>{(u.username || "?")[0].toUpperCase()}</span>
+              }
             </div>
             {/* Name + username */}
             <div style={{ flex:1, minWidth:0 }}>
@@ -13646,12 +13588,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
             {profile.username === "Trelli" && <GoldVerifiedBadge size={22} />}
             {(profile.username === "Mikez" || profile.username === "HMbarsdat") && <GreenVerifiedBadge size={22} />}
           </div>
-          {profile.username && (
-            <div style={{ color: "#666", fontSize: 14, marginTop: 2, display: "flex", alignItems: "center", gap: 8 }}>
-              <span>@{profile.username}</span>
-              {profile.is_online && <OnlineDot label />}
-            </div>
-          )}
+          {profile.username && <div style={{ color: "#666", fontSize: 14, marginTop: 2 }}>@{profile.username}</div>}
         </div>
 
         {/* Plan tags */}
@@ -30220,7 +30157,6 @@ function UsersManager() {
       }}>
         {[
           { id: "",                 label: "All" },
-          { id: "online",           label: "● Online" },
           { id: "active",           label: "Active" },
           { id: "lifetime",         label: "Lifetime" },
           { id: "free",             label: "Free" },
@@ -30340,23 +30276,14 @@ function UsersManager() {
               opacity: u.deleted ? 0.55 : 1,
             }}>
             {/* Avatar */}
-            <div style={{ position: "relative", flex: "0 0 auto" }}>
-              <div style={{
-                width: 36, height: 36, borderRadius: "50%",
-                background: u.avatarUrl ? ("#1a1a1a url(" + u.avatarUrl + ") center/cover") : "linear-gradient(135deg,#C026D3,#7C3AED)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                color: "white", fontWeight: 900, fontSize: 14,
-                filter: u.deleted ? "grayscale(1)" : "none",
-              }}>
-                {!u.avatarUrl && ((u.name || u.username || "?").charAt(0).toUpperCase())}
-              </div>
-              {u.is_online && !u.deleted && (
-                <div style={{ position: "absolute", bottom: -1, right: -1,
-                  borderRadius: "50%", padding: 2, background: "#0d0d0d",
-                }}>
-                  <OnlineDot size={8} />
-                </div>
-              )}
+            <div style={{
+              flex: "0 0 auto", width: 36, height: 36, borderRadius: "50%",
+              background: u.avatarUrl ? ("#1a1a1a url(" + u.avatarUrl + ") center/cover") : "linear-gradient(135deg,#C026D3,#7C3AED)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "white", fontWeight: 900, fontSize: 14,
+              filter: u.deleted ? "grayscale(1)" : "none",
+            }}>
+              {!u.avatarUrl && ((u.name || u.username || "?").charAt(0).toUpperCase())}
             </div>
             {/* Info */}
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -31500,52 +31427,6 @@ function BeatFinderInner() {
     window.addEventListener("bf:auth-expired", onAuthExpired);
     return function() { window.removeEventListener("bf:auth-expired", onAuthExpired); };
   }, []);
-
-  // ── Heartbeat / presence pinger ─────────────────────────────────
-  // Fires POST /api/auth/heartbeat every ~60s while the tab is open
-  // and visible, so the backend's last_seen_at stays fresh. Other
-  // users see a green "Online now" dot beside this user for the next
-  // 2 minutes.
-  //
-  // Visibility-aware: when the tab goes to the background (user
-  // switches apps, locks phone), we stop pinging. That conserves
-  // battery + saves bandwidth, AND correctly lets their online dot
-  // fade out 2 minutes after they actually stopped using the app.
-  // When the tab becomes visible again, we ping immediately so the
-  // dot pops back without waiting up to a minute.
-  //
-  // NOTE: this effect MUST come after `user` is declared above. It
-  // previously sat near the top of the component which crashed at
-  // render time with a temporal-dead-zone ReferenceError (Sentry
-  // ID b6be2ae9... caught it within minutes of deploy).
-  React.useEffect(function() {
-    if (!user) return; // only ping when logged in
-    var stopped = false;
-    function ping() {
-      if (stopped) return;
-      if (typeof document !== "undefined" && document.hidden) return;
-      apiFetch("/api/auth/heartbeat", { method: "POST", body: JSON.stringify({}) })
-        .catch(function() { /* fire-and-forget, no UI surface */ });
-    }
-    // First ping immediately on login / app open
-    ping();
-    var interval = setInterval(ping, 60 * 1000);
-    function onVis() {
-      // When the tab becomes visible again, ping right away so the
-      // user shows online without waiting for the next interval.
-      if (typeof document !== "undefined" && !document.hidden) ping();
-    }
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", onVis);
-    }
-    return function() {
-      stopped = true;
-      clearInterval(interval);
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVis);
-      }
-    };
-  }, [user && user.id]);
   // Global lease cache — fetched once at login and refreshed on returning
   // from Stripe success. Every CompactBeatActionSheet reads from this instead
   // of issuing its own /my-leases request, which (a) makes sheet opens
