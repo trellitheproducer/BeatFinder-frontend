@@ -16802,6 +16802,34 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 </div>
               )}
 
+              {/* ── Users (admin only — list of everyone who joined) ─── */}
+              {(user.is_admin === true || user.username === "Trelli") && (
+                <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                  <button onClick={() => setOpenSettingsSection(openSettingsSection === "users" ? null : "users")}
+                    style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "12px 14px", background: openSettingsSection === "users" ? "#1a1a1a" : "#141414",
+                      border: "none", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ filter: "drop-shadow(0 0 4px rgba(124,58,237,0.6))" }}>
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                      </svg>
+                      Users
+                      <span style={{ color: "#A78BFA", fontSize: 9, fontWeight: 800, letterSpacing: 0.5, marginLeft: 2 }}>ADMIN</span>
+                    </span>
+                    <span style={{ color: "#666", fontSize: 12, transition: "transform 0.2s",
+                      transform: openSettingsSection === "users" ? "rotate(180deg)" : "none" }}>▼</span>
+                  </button>
+                  {openSettingsSection === "users" && (
+                    <div style={{ padding: "14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
+                      <UsersManager />
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* ── Beat Artwork (Producer Pro only) ──────────────────── */}
               {user.isPro && (
                 <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
@@ -29987,6 +30015,224 @@ function LifetimeAccountsManager() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// =============================================================================
+// USERS MANAGER (admin only) — list of all users who've joined
+// =============================================================================
+// Paginated table of every user in the database. Admin can search by
+// name / username / email and see plan, signup date, payment status, etc.
+// Backed by GET /api/auth/admin/users.
+function UsersManager() {
+  var [page, setPage]     = React.useState(0);
+  var [users, setUsers]   = React.useState([]);
+  var [total, setTotal]   = React.useState(0);
+  var [loading, setLoading] = React.useState(true);
+  var [error, setError]   = React.useState("");
+  var [query, setQuery]   = React.useState("");
+  var [debounced, setDebounced] = React.useState("");
+  var PAGE_SIZE = 20;
+
+  // Debounce the search input so we don't fire a query on every keystroke
+  React.useEffect(function() {
+    var t = setTimeout(function() { setDebounced(query.trim()); setPage(0); }, 300);
+    return function() { clearTimeout(t); };
+  }, [query]);
+
+  function load() {
+    setLoading(true);
+    setError("");
+    var qs = "?skip=" + (page * PAGE_SIZE) + "&limit=" + PAGE_SIZE +
+             (debounced ? "&q=" + encodeURIComponent(debounced) : "");
+    apiFetch("/api/auth/admin/users" + qs)
+      .then(function(r) {
+        setUsers((r && r.users) || []);
+        setTotal((r && r.total) || 0);
+      })
+      .catch(function(e) { setError(e.message || "Couldn't load users"); })
+      .finally(function() { setLoading(false); });
+  }
+
+  React.useEffect(load, [page, debounced]);
+
+  var totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  function planChip(u) {
+    var bg, border, color, label;
+    if (u.is_lifetime) {
+      bg = "linear-gradient(135deg,rgba(245,158,11,0.18),rgba(245,158,11,0.05))";
+      border = "rgba(245,158,11,0.5)";
+      color = "#F59E0B";
+      label = (u.plan === "producer" ? "PROD" : "ARTIST") + " · LIFETIME";
+    } else if (u.plan === "producer") {
+      bg = "linear-gradient(135deg,rgba(192,38,211,0.18),rgba(124,58,237,0.05))";
+      border = "rgba(192,38,211,0.5)";
+      color = "#C026D3";
+      label = "PRODUCER PRO";
+    } else if (u.plan === "artist") {
+      bg = "rgba(59,130,246,0.12)";
+      border = "rgba(59,130,246,0.5)";
+      color = "#3B82F6";
+      label = "ARTIST PRO";
+    } else {
+      bg = "#1a1a1a";
+      border = "#333";
+      color = "#888";
+      label = "FREE";
+    }
+    return (
+      <span style={{
+        display: "inline-block", padding: "2px 7px", borderRadius: 6,
+        background: bg, border: "1px solid " + border, color: color,
+        fontSize: 9, fontWeight: 800, letterSpacing: 0.4, whiteSpace: "nowrap",
+      }}>{label}</span>
+    );
+  }
+
+  function formatDate(iso) {
+    if (!iso) return "—";
+    try {
+      var d = new Date(iso);
+      return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+    } catch (_) { return "—"; }
+  }
+
+  return (
+    <div style={{ color: "white", fontSize: 13 }}>
+      <div style={{ color: "#aaa", fontSize: 11, lineHeight: 1.5, marginBottom: 12 }}>
+        Every account that's joined BeatFinder. Search by name, username, or email.
+      </div>
+
+      {/* Search */}
+      <input
+        value={query}
+        onChange={function(e) { setQuery(e.target.value); }}
+        placeholder="Search by name, @username, or email..."
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+        style={{
+          width: "100%", background: "#0d0d0d", border: "1px solid #2a2a2a",
+          borderRadius: 10, padding: "10px 14px", color: "white", fontSize: 13,
+          outline: "none", boxSizing: "border-box", marginBottom: 12,
+        }} />
+
+      {/* Total + refresh + page indicator */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 6 }}>
+        <div style={{ color: "#888", fontSize: 11, flex: 1, minWidth: 0 }}>
+          {loading ? "Loading…" : (
+            total === 0
+              ? "No users found"
+              : (debounced
+                ? total + " match" + (total === 1 ? "" : "es")
+                : total + " total user" + (total === 1 ? "" : "s"))
+          )}
+        </div>
+        <button
+          onClick={load}
+          disabled={loading}
+          title="Refresh"
+          style={{
+            background: loading ? "#1a1a1a" : "#2a1a3a",
+            border: "1px solid " + (loading ? "#222" : "rgba(124,58,237,0.4)"),
+            color: loading ? "#444" : "#A78BFA",
+            borderRadius: 6, padding: "4px 8px", fontSize: 11, fontWeight: 700,
+            cursor: loading ? "not-allowed" : "pointer",
+            display: "inline-flex", alignItems: "center", gap: 4,
+          }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            style={loading ? { animation: "bf-spin 0.7s linear infinite" } : null}>
+            <polyline points="23 4 23 10 17 10"/>
+            <polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+          <span>Refresh</span>
+        </button>
+        {totalPages > 1 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button
+              onClick={function() { if (page > 0) setPage(page - 1); }}
+              disabled={page === 0}
+              style={{
+                background: page === 0 ? "#1a1a1a" : "#2a1a3a",
+                border: "1px solid " + (page === 0 ? "#222" : "rgba(124,58,237,0.4)"),
+                color: page === 0 ? "#444" : "#A78BFA",
+                borderRadius: 6, padding: "4px 8px", fontSize: 11, fontWeight: 700,
+                cursor: page === 0 ? "not-allowed" : "pointer",
+              }}>‹</button>
+            <span style={{ color: "#888", fontSize: 11, fontWeight: 700, minWidth: 40, textAlign: "center" }}>
+              {page + 1} / {totalPages}
+            </span>
+            <button
+              onClick={function() { if (page < totalPages - 1) setPage(page + 1); }}
+              disabled={page >= totalPages - 1}
+              style={{
+                background: page >= totalPages - 1 ? "#1a1a1a" : "#2a1a3a",
+                border: "1px solid " + (page >= totalPages - 1 ? "#222" : "rgba(124,58,237,0.4)"),
+                color: page >= totalPages - 1 ? "#444" : "#A78BFA",
+                borderRadius: 6, padding: "4px 8px", fontSize: 11, fontWeight: 700,
+                cursor: page >= totalPages - 1 ? "not-allowed" : "pointer",
+              }}>›</button>
+          </div>
+        )}
+      </div>
+
+      {error && <div style={{ color: "#F87171", fontSize: 12, padding: "8px 0" }}>{error}</div>}
+
+      {/* User rows */}
+      {!loading && users.map(function(u) {
+        return (
+          <div key={u.id} style={{
+            background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 10,
+            padding: "10px 12px", marginBottom: 6,
+            display: "flex", gap: 10, alignItems: "flex-start",
+          }}>
+            {/* Avatar */}
+            <div style={{
+              flex: "0 0 auto", width: 36, height: 36, borderRadius: "50%",
+              background: u.avatarUrl ? ("#1a1a1a url(" + u.avatarUrl + ") center/cover") : "linear-gradient(135deg,#C026D3,#7C3AED)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "white", fontWeight: 900, fontSize: 14,
+            }}>
+              {!u.avatarUrl && ((u.name || u.username || "?").charAt(0).toUpperCase())}
+            </div>
+            {/* Info */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                <div style={{ color: "white", fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {u.name || u.username || "(no name)"}
+                </div>
+                {u.is_admin && (
+                  <span style={{ color: "#A78BFA", fontSize: 8, fontWeight: 900, letterSpacing: 0.5 }}>ADMIN</span>
+                )}
+                {u.payment_failing && (
+                  <span style={{ color: "#F87171", fontSize: 8, fontWeight: 900, letterSpacing: 0.5 }}>⚠ PAY FAIL</span>
+                )}
+              </div>
+              {u.username && (
+                <div style={{ color: "#888", fontSize: 11, marginBottom: 4 }}>@{u.username}</div>
+              )}
+              <div style={{ color: "#666", fontSize: 10, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {u.email || "(no email)"}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                {planChip(u)}
+                <span style={{ color: "#555", fontSize: 10 }}>
+                  joined {formatDate(u.created_at)}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {!loading && users.length === 0 && !error && (
+        <div style={{ color: "#555", fontSize: 12, padding: "20px 0", textAlign: "center", fontStyle: "italic" }}>
+          {debounced ? "No users match \"" + debounced + "\"" : "No users yet"}
+        </div>
+      )}
     </div>
   );
 }
