@@ -25661,27 +25661,23 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
             background:"rgba(0,0,0,0.78)",
             backdropFilter:"blur(4px)",
             WebkitBackdropFilter:"blur(4px)",
-            display:"flex", alignItems:"flex-end", justifyContent:"center",
+            display:"flex", alignItems:"center", justifyContent:"center",
+            padding:"16px",
           }}>
           <div
             onClick={function(e){ e.stopPropagation(); }}
             style={{
               width:"100%", maxWidth:520,
               background:"linear-gradient(180deg,#141118 0%,#0d0c12 100%)",
-              borderRadius:"24px 24px 0 0",
+              borderRadius:24,
               border:"1px solid rgba(124,58,237,0.18)",
-              borderBottom:"none",
-              boxShadow:"0 -10px 40px rgba(0,0,0,0.6)",
+              boxShadow:"0 20px 60px rgba(0,0,0,0.7)",
               maxHeight:"82vh",
               display:"flex", flexDirection:"column",
-              paddingBottom:"calc(24px + env(safe-area-inset-bottom))",
+              overflow:"hidden",
             }}>
-            {/* Drag handle pill */}
-            <div style={{ display:"flex", justifyContent:"center", padding:"10px 0 6px" }}>
-              <div style={{ width:38, height:4, borderRadius:2, background:"#2a2a2a" }} />
-            </div>
             {/* Sheet header */}
-            <div style={{ padding:"6px 20px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <div style={{ padding:"20px 20px 14px", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
               <div>
                 <div style={{ color:"white", fontWeight:800, fontSize:18, letterSpacing:0.2 }}>Saved Projects</div>
                 <div style={{ color:"#666", fontSize:11, marginTop:2 }}>
@@ -25698,7 +25694,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                 }}>✕</button>
             </div>
             {/* Scrollable list */}
-            <div style={{ flex:1, overflowY:"auto", padding:"0 16px 8px", WebkitOverflowScrolling:"touch" }}>
+            <div style={{ flex:1, overflowY:"auto", padding:"0 16px 20px", WebkitOverflowScrolling:"touch" }}>
               {savedProjects.length === 0 ? (
                 <div style={{ color:"#555", fontSize:14, textAlign:"center", padding:"48px 20px" }}>
                   <div style={{ fontSize:32, marginBottom:10, opacity:0.4 }}>📂</div>
