@@ -3148,7 +3148,20 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
         {["monthly", "yearly"].map(function(b) {
           var isActive = billing === b;
           return (
-            <button key={b} onClick={function() { setBilling(b); }}
+            <button key={b} onClick={function() {
+              setBilling(b);
+              // Re-fire onSelectPlan with the new price ID for the
+              // currently selected plan so the parent's selectedPriceId
+              // updates to match the new billing cycle. Without this,
+              // toggling Annual after picking a plan would visually
+              // highlight Annual but still submit the monthly price ID.
+              if (onSelectPlan && selectedPlanId && selectedPlanId !== "free") {
+                var newPriceId = PLAN_PRICES[selectedPlanId]
+                  ? PLAN_PRICES[selectedPlanId][b]
+                  : null;
+                onSelectPlan(selectedPlanId, newPriceId, b);
+              }
+            }}
               style={{
                 flex: 1, padding: "6px 0", borderRadius: 22, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 11,
                 background: isActive ? (b === "yearly" ? "linear-gradient(135deg,#C026D3,#7C3AED)" : "#1a1a1a") : "transparent",
