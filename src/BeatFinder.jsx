@@ -3216,16 +3216,6 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
                     background: "radial-gradient(circle," + glowClr2 + "55 0%,transparent 70%)",
                     pointerEvents: "none",
                   }} />
-                  {/* SELECTED badge — top right corner */}
-                  <div style={{
-                    position: "absolute", top: 6, right: 6,
-                    background: "linear-gradient(135deg," + glowClr + "," + glowClr2 + ")",
-                    color: "white", fontSize: 8, fontWeight: 900,
-                    padding: "3px 7px", borderRadius: 20,
-                    letterSpacing: 0.8,
-                    boxShadow: "0 0 12px " + glowClr + "88",
-                    zIndex: 2,
-                  }}>✓ SELECTED</div>
                 </>
               )}
               {!isFree && billing === "yearly" && (
@@ -3300,7 +3290,7 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
                     textShadow: isSelected || p.id === "producer" ? "0 1px 2px rgba(0,0,0,0.3)" : "none",
                     transition: "all 0.18s ease",
                   }}>
-                  {isSelected ? "✓ SELECTED" : (isFree ? "Start Free" : "Subscribe")}
+                  {isFree ? "Start Free" : "Subscribe"}
                 </button>
               )}
             </div>
@@ -14603,10 +14593,9 @@ function RootAuthScreen({ onLogin, startMode }) {
   );
 
   return (
-    <div style={{ padding: "0 24px 50vh" }}>
+    <div style={{ padding: "0 24px 120px" }}>
       <div style={{ color: "white", fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 2, marginBottom: 24 }}>
         {mode === "signup" ? "CREATE ACCOUNT" : "WELCOME BACK"}
-        <span style={{ fontSize: 10, color: "#22C55E", marginLeft: 8, verticalAlign: "middle" }}>v5</span>
       </div>
       {mode === "signup" && <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" style={inp} />}
       {mode === "signup" && (
@@ -30493,14 +30482,20 @@ export default function BeatFinder() {
         />
       )}
 
-      {/* Auth wall — full-screen login/signup, no app behind it */}
+      {/* Auth wall — full-screen login/signup, no app behind it.
+          Use dvh (dynamic viewport height) instead of inset:0 because
+          iOS Safari's bottom toolbar doesn't reduce the viewport for
+          fixed-positioned elements; dvh accounts for the toolbar. */}
       {splashDone && showAuthWall && !welcomeDone && (
         <div style={{
-          position: "fixed", inset: 0, zIndex: 99999,
+          position: "fixed",
+          top: 0, left: 0, right: 0,
+          height: "100dvh",
+          zIndex: 99999,
           background: "#0a0a0a",
           overflowY: "auto",
-          WebkitOverflowScrolling: "touch",   // iOS momentum scroll
-          overscrollBehavior: "contain",      // don't bubble bounce to <body>
+          WebkitOverflowScrolling: "touch",
+          overscrollBehavior: "contain",
           fontFamily: "'DM Sans',sans-serif",
           paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))",
         }}>
