@@ -1,6 +1,71 @@
 /* eslint-disable */
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import ReactDOM from "react-dom";
+import * as Sentry from "@sentry/react";
+
+// =============================================================================
+// SENTRY ERROR MONITORING
+// =============================================================================
+// Captures uncaught JS errors and unhandled promise rejections and ships them
+// to Sentry with stack traces + breadcrumbs (network requests, console logs,
+// click events) so we can debug real user issues without needing them to
+// describe what happened.
+//
+// Free Developer-tier limit: 5,000 errors/month. We dial down the noise:
+//   - sampleRate: 1.0  → capture 100% of errors (we want them all)
+//   - tracesSampleRate: 0.05 → only 5% of transactions for perf monitoring
+//     (otherwise we'd burn the quota on routine page loads)
+//   - replaysSessionSampleRate: 0 → no session replays (PII concerns + cost)
+//   - environment: prod vs dev so we can filter in the dashboard
+//
+// We deliberately don't ship sourcemaps to Sentry yet — that's a separate
+// build-time step. Stack traces will reference the minified bundle for now,
+// which is still useful (line + col numbers map back to source via the
+// browser devtools' "Show original" feature if you have local source).
+try {
+  Sentry.init({
+    dsn: "https://4ff40f11676086583dad8edbcae24408@o4511395146825728.ingest.us.sentry.io/4511395165110272",
+    environment: (typeof window !== "undefined" && window.location && /beatfinder\.co\.uk/.test(window.location.hostname)) ? "production" : "development",
+    integrations: [
+      Sentry.browserTracingIntegration(),
+    ],
+    // Performance monitoring sample rate — keep low to stay under the free
+    // tier's transaction limit. Errors are sampled at 100% (default).
+    tracesSampleRate: 0.05,
+    // Don't send default PII like IP addresses — we have a privacy policy
+    // to honour. Stack traces alone are enough.
+    sendDefaultPii: false,
+    // Ignore noisy errors that come from browser extensions / ad-blockers
+    // and aren't actionable. Add to this list as patterns emerge.
+    ignoreErrors: [
+      "ResizeObserver loop limit exceeded",
+      "ResizeObserver loop completed with undelivered notifications",
+      "Non-Error promise rejection captured",
+      "Network request failed",
+      // Safari iOS specific noise
+      "Load failed",
+      // Ad-blocker / extension noise
+      /chrome-extension:\/\//,
+      /safari-extension:\/\//,
+      /^moz-extension:\/\//,
+    ],
+    // Strip noisy breadcrumbs that don't help debug user-facing issues.
+    beforeBreadcrumb: function(breadcrumb) {
+      // Skip "info" level console messages — only keep warnings + errors
+      if (breadcrumb.category === "console" && breadcrumb.level === "log") {
+        return null;
+      }
+      return breadcrumb;
+    },
+  });
+} catch (e) {
+  // If Sentry itself fails to init, swallow it — we never want monitoring
+  // to break the actual app.
+  if (typeof console !== "undefined" && console.warn) {
+    console.warn("[Sentry] init failed:", e && e.message);
+  }
+}
+
 // =============================================================================
 // PREMIUM LOADER COMPONENT
 // =============================================================================
@@ -16247,6 +16312,47 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 )}
               </div>
 
+              {/* ── Manage Subscription ── only for paid plans
+                  Opens Stripe's hosted Customer Portal where users can
+                  cancel their sub, update card, view invoices etc.
+                  No accordion needed — single tap → Stripe redirect. */}
+              {(user.plan === "artist" || user.plan === "producer") && (
+                <button
+                  onClick={async () => {
+                    setSettingsMsg("Opening subscription manager…");
+                    try {
+                      const r = await apiFetch("/api/stripe/customer-portal", { method: "POST" });
+                      if (r && r.portal_url) {
+                        window.location.href = r.portal_url;
+                      } else {
+                        setSettingsMsg("Couldn't open subscription manager");
+                      }
+                    } catch (e) {
+                      setSettingsMsg("Error: " + (e.message || "couldn't open"));
+                      setTimeout(() => setSettingsMsg(""), 3500);
+                    }
+                  }}
+                  style={{
+                    width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "12px 14px",
+                    background: "#141414",
+                    borderRadius: 10,
+                    border: "1px solid rgba(124,58,237,0.25)",
+                    marginBottom: 8,
+                    cursor: "pointer",
+                    color: "white", fontWeight: 700, fontSize: 14,
+                  }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="2" y="5" width="20" height="14" rx="2"/>
+                      <line x1="2" y1="10" x2="22" y2="10"/>
+                    </svg>
+                    Manage Subscription
+                  </span>
+                  <span style={{ color: "#555", fontSize: 14 }}>›</span>
+                </button>
+              )}
+
               {/* ── Change Password accordion ── */}
               <div style={{ borderRadius: 10, border: "1px solid #222", marginBottom: 8, overflow: "hidden" }}>
                 <button onClick={() => setOpenSettingsSection(openSettingsSection === "password" ? null : "password")}
@@ -29506,7 +29612,7 @@ function InstallPrompt() {
   );
 }
 
-export default function BeatFinder() {
+function BeatFinderInner() {
   // ── Install the global pop-up block detector once ────────────────────────
   // Runs on the very first user tap anywhere on the page (after this effect
   // mounts). This guarantees the warning banner appears for users who
@@ -31020,5 +31126,52 @@ export default function BeatFinder() {
         })}
       </div>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sentry ErrorBoundary wrapper for the root export.
+// If anything in the React tree throws during render, Sentry catches the
+// error with full component stack + we show a graceful fallback UI instead
+// of a white screen.
+// ─────────────────────────────────────────────────────────────────────────
+function BeatFinderErrorFallback({ error, resetError }) {
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#0a0a0a", color: "white",
+      fontFamily: "'DM Sans',sans-serif",
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      padding: 24, textAlign: "center",
+    }}>
+      <div style={{
+        fontFamily: "'Bebas Neue',sans-serif", fontSize: 32, letterSpacing: 2,
+        marginBottom: 12, color: "#C026D3",
+      }}>
+        SOMETHING BROKE
+      </div>
+      <div style={{ color: "#aaa", fontSize: 14, lineHeight: 1.6, maxWidth: 360, marginBottom: 24 }}>
+        We've been notified and are looking into it. Try reloading the page —
+        if it keeps happening, drop us a line at support@beatfinder.co.uk.
+      </div>
+      <button onClick={function() {
+        try { resetError && resetError(); } catch (_) {}
+        try { window.location.reload(); } catch (_) {}
+      }} style={{
+        background: "#C026D3", border: "none", borderRadius: 28,
+        color: "white", fontWeight: 800, fontSize: 14,
+        padding: "12px 28px", cursor: "pointer",
+      }}>
+        Reload App
+      </button>
+    </div>
+  );
+}
+
+export default function BeatFinder(props) {
+  return (
+    <Sentry.ErrorBoundary fallback={BeatFinderErrorFallback}>
+      <BeatFinderInner {...props} />
+    </Sentry.ErrorBoundary>
   );
 }
