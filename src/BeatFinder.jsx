@@ -17042,14 +17042,32 @@ const AudioDB = (function () {
     });
   }
 
-  // Save a WAV ArrayBuffer under a clip key
+  // Save a WAV ArrayBuffer under a clip key.
+  // Returns a Promise that resolves only after the IDB transaction has
+  // FULLY committed. Rejects on quota errors / aborted transactions
+  // (callers want a real failure signal so they can surface it to the
+  // user rather than silently saving nothing).
   async function saveClip(clipId, wavArrayBuffer) {
     const db = await openDB();
     return new Promise(function (resolve, reject) {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      tx.objectStore(STORE_NAME).put(wavArrayBuffer, clipId);
-      tx.oncomplete = resolve;
-      tx.onerror    = function (e) { reject(e.target.error); };
+      let tx;
+      try {
+        tx = db.transaction(STORE_NAME, "readwrite");
+      } catch (e) { reject(e); return; }
+      const req = tx.objectStore(STORE_NAME).put(wavArrayBuffer, clipId);
+      // The request completing is necessary but not sufficient — wait
+      // for tx.oncomplete to know the write is durably flushed.
+      req.onerror = function (e) {
+        // Surface quota / encoding errors here
+        reject(e.target.error || new Error("IndexedDB put failed"));
+      };
+      tx.oncomplete = function () { resolve(); };
+      tx.onerror    = function (e) {
+        reject(e.target.error || new Error("IndexedDB transaction failed"));
+      };
+      tx.onabort    = function (e) {
+        reject(e.target.error || new Error("IndexedDB transaction aborted (often quota)"));
+      };
     });
   }
 
@@ -24574,6 +24592,12 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       const existingIdx = list.findIndex(function(p){ return p.name===projectName; });
       const projId = (existingIdx >= 0 && list[existingIdx].id) ? list[existingIdx].id : Date.now();
 
+      // Track per-clip save outcomes so we can surface real failures to
+      // the user (instead of saying "Saved! ✓" when half the audio was
+      // silently dropped on quota / IDB errors).
+      let clipsFailed = 0;
+      let clipsAttempted = 0;
+
       // ── 1. Save each clip's audio into IndexedDB (no size limit) ──────────
       const savedTracks = await Promise.all(tracks.map(async function(t){
         const savedClips = await Promise.all((t.clips||[]).map(async function(cl){
@@ -24582,7 +24606,13 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
           if (cl.audioBuffer) {
             // Convert AudioBuffer → WAV ArrayBuffer and store in IndexedDB
             const wavBuf = audioBufferToWav(cl.audioBuffer);
-            try { await AudioDB.saveClip(idbKey, wavBuf); } catch(e) { console.warn("IDB save clip failed", e); }
+            clipsAttempted++;
+            try {
+              await AudioDB.saveClip(idbKey, wavBuf);
+            } catch(e) {
+              clipsFailed++;
+              console.warn("IDB save clip failed", idbKey, e);
+            }
           }
           // Return clip metadata only — no audio blobs in localStorage
           return { ...cl, audioBuffer:null, url:null, blob:null, audioB64:null, idbKey };
@@ -24592,7 +24622,13 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         const trackIdbKey = "proj_" + projId + "_track_" + t.id;
         if (t.audioBuffer) {
           const wavBuf = audioBufferToWav(t.audioBuffer);
-          try { await AudioDB.saveClip(trackIdbKey, wavBuf); } catch(e) {}
+          clipsAttempted++;
+          try {
+            await AudioDB.saveClip(trackIdbKey, wavBuf);
+          } catch(e) {
+            clipsFailed++;
+            console.warn("IDB save track failed", trackIdbKey, e);
+          }
         }
 
         return { ...t, audioBuffer:null, url:null, blob:null, audioB64:null, trackIdbKey, clips:savedClips };
@@ -24609,8 +24645,25 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         localStorage.setItem("bf_studio_projects", JSON.stringify(list));
       }
 
-      setSavedProjects(list); setIsSaved(true);
-      setSaveStatus("Saved! ✓"); setTimeout(function(){ setSaveStatus(""); }, 2500);
+      setSavedProjects(list);
+
+      if (clipsFailed > 0 && clipsFailed === clipsAttempted) {
+        // EVERY clip failed — almost certainly quota / IDB unavailable.
+        // Don't mark the project saved because reloading it would
+        // restore an empty session.
+        setIsSaved(false);
+        setSaveStatus("");
+        setError("Couldn't save audio — your browser's storage may be full. Project metadata saved but clips will be lost. Try removing other saved projects.");
+        setTimeout(function(){ setError(""); }, 8000);
+      } else if (clipsFailed > 0) {
+        setIsSaved(true);
+        setSaveStatus("");
+        setError("Saved with " + clipsFailed + " of " + clipsAttempted + " clips missing — storage may be near full.");
+        setTimeout(function(){ setError(""); }, 6000);
+      } else {
+        setIsSaved(true);
+        setSaveStatus("Saved! ✓"); setTimeout(function(){ setSaveStatus(""); }, 2500);
+      }
     } catch(e){
       console.error("[BeatFinder] saveProject error:", e);
       setSaveStatus("Save failed — " + (e.message || "unknown error"));
@@ -25022,6 +25075,14 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
 
 
   // ── Export ────────────────────────────────────────────────────
+  // Render an AudioBuffer to a WAV-format ArrayBuffer.
+  // RETURNS AN ArrayBuffer (NOT a Blob) so it can be stored directly in
+  // IndexedDB. iOS Safari has historically been broken at persisting
+  // Blob values across IndexedDB transactions — Blobs would either
+  // silently fail to persist OR persist but come back empty on read.
+  // ArrayBuffers are persisted reliably. Callers that need a Blob
+  // (e.g. exportMix for the download href) wrap with `new Blob([wav])`
+  // themselves at the point of use.
   const audioBufferToWav = function (buf) {
     const nc=buf.numberOfChannels,sr=buf.sampleRate,len=buf.length,bl=len*nc*2;
     const ab=new ArrayBuffer(44+bl),dv=new DataView(ab);
@@ -25035,7 +25096,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       const s=Math.max(-1,Math.min(1,buf.getChannelData(c)[i]));
       dv.setInt16(off,s<0?s*0x8000:s*0x7FFF,true);off+=2;
     }
-    return new Blob([ab],{type:"audio/wav"});
+    return ab;
   };
 
   const exportMix = async function () {
@@ -25062,8 +25123,10 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }
       setExportMsg("Rendering...");
       const rendered=await oc.startRendering();
-      const wav=audioBufferToWav(rendered);
-      const a=document.createElement("a");a.href=URL.createObjectURL(wav);a.download=(projectName||"project")+" - mix.wav";a.click();
+      const wavBuf=audioBufferToWav(rendered);
+      // audioBufferToWav now returns an ArrayBuffer; wrap for download
+      const wavBlob=new Blob([wavBuf],{type:"audio/wav"});
+      const a=document.createElement("a");a.href=URL.createObjectURL(wavBlob);a.download=(projectName||"project")+" - mix.wav";a.click();
       setExportMsg("Done!");setTimeout(function(){setExporting(false);setExportMsg("");},2500);
     }catch(e){setExportMsg("Failed.");setTimeout(function(){setExporting(false);setExportMsg("");},3000);}
   };
@@ -25591,23 +25654,101 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       )}
 
       {showProjects && (
-        <div style={{ position:"absolute",inset:0,zIndex:900,background:"rgba(0,0,0,0.7)" }} onClick={function(){ setShowProjects(false); }}>
-          <div style={{ position:"absolute",bottom:0,left:0,right:0,background:"#111",borderRadius:"20px 20px 0 0",padding:"20px 16px 40px",maxHeight:"70vh",overflowY:"auto" }} onClick={function(e){ e.stopPropagation(); }}>
-            <div style={{ color:"white",fontWeight:800,fontSize:16,marginBottom:16 }}>Saved Projects</div>
-            {savedProjects.length===0
-              ?<div style={{ color:"#444",fontSize:14,textAlign:"center",padding:"20px 0" }}>No saved projects</div>
-              :savedProjects.map(function(p){
-                return(
-                  <div key={p.id} style={{ background:"#1a1a1a",borderRadius:12,padding:"12px 14px",marginBottom:10,display:"flex",alignItems:"center" }}>
-                    <div onClick={function(){ loadProject(p); }} style={{ flex:1,cursor:"pointer" }}>
-                      <div style={{ color:"white",fontWeight:700,fontSize:14 }}>{p.name}</div>
-                      <div style={{ color:"#555",fontSize:11,marginTop:2 }}>{p.tracks.length} tracks · {p.bpm||120} BPM</div>
+        <div
+          onClick={function(){ setShowProjects(false); }}
+          style={{
+            position:"fixed", inset:0, zIndex:9000,
+            background:"rgba(0,0,0,0.78)",
+            backdropFilter:"blur(4px)",
+            WebkitBackdropFilter:"blur(4px)",
+            display:"flex", alignItems:"flex-end", justifyContent:"center",
+          }}>
+          <div
+            onClick={function(e){ e.stopPropagation(); }}
+            style={{
+              width:"100%", maxWidth:520,
+              background:"linear-gradient(180deg,#141118 0%,#0d0c12 100%)",
+              borderRadius:"24px 24px 0 0",
+              border:"1px solid rgba(124,58,237,0.18)",
+              borderBottom:"none",
+              boxShadow:"0 -10px 40px rgba(0,0,0,0.6)",
+              maxHeight:"82vh",
+              display:"flex", flexDirection:"column",
+              paddingBottom:"calc(24px + env(safe-area-inset-bottom))",
+            }}>
+            {/* Drag handle pill */}
+            <div style={{ display:"flex", justifyContent:"center", padding:"10px 0 6px" }}>
+              <div style={{ width:38, height:4, borderRadius:2, background:"#2a2a2a" }} />
+            </div>
+            {/* Sheet header */}
+            <div style={{ padding:"6px 20px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <div>
+                <div style={{ color:"white", fontWeight:800, fontSize:18, letterSpacing:0.2 }}>Saved Projects</div>
+                <div style={{ color:"#666", fontSize:11, marginTop:2 }}>
+                  {savedProjects.length} {savedProjects.length === 1 ? "project" : "projects"}
+                </div>
+              </div>
+              <button
+                onClick={function(){ setShowProjects(false); }}
+                style={{
+                  background:"#1a1a1a", border:"1px solid #2a2a2a",
+                  borderRadius:"50%", width:32, height:32, color:"#888",
+                  fontSize:16, cursor:"pointer", display:"flex",
+                  alignItems:"center", justifyContent:"center", padding:0,
+                }}>✕</button>
+            </div>
+            {/* Scrollable list */}
+            <div style={{ flex:1, overflowY:"auto", padding:"0 16px 8px", WebkitOverflowScrolling:"touch" }}>
+              {savedProjects.length === 0 ? (
+                <div style={{ color:"#555", fontSize:14, textAlign:"center", padding:"48px 20px" }}>
+                  <div style={{ fontSize:32, marginBottom:10, opacity:0.4 }}>📂</div>
+                  <div style={{ fontWeight:700, color:"#888", marginBottom:4 }}>No saved projects</div>
+                  <div style={{ fontSize:12, color:"#444" }}>Save a project from the ••• menu to see it here.</div>
+                </div>
+              ) : (
+                savedProjects.map(function(p){
+                  const savedAt = p.savedAt ? new Date(p.savedAt) : null;
+                  const dateStr = savedAt
+                    ? (savedAt.toLocaleDateString(undefined, { day:"numeric", month:"short" }) +
+                       " · " + savedAt.toLocaleTimeString(undefined, { hour:"2-digit", minute:"2-digit" }))
+                    : "";
+                  return (
+                    <div key={p.id} style={{
+                      background:"#15131c",
+                      borderRadius:14,
+                      padding:"14px 14px",
+                      marginBottom:10,
+                      display:"flex", alignItems:"center", gap:10,
+                      border:"1px solid #1f1c28",
+                    }}>
+                      <div
+                        onClick={function(){ loadProject(p); }}
+                        style={{ flex:1, minWidth:0, cursor:"pointer" }}>
+                        <div style={{
+                          color:"white", fontWeight:700, fontSize:14, marginBottom:4,
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                        }}>{p.name}</div>
+                        <div style={{ color:"#777", fontSize:11, display:"flex", flexWrap:"wrap", gap:"4px 8px" }}>
+                          <span>{(p.tracks||[]).length} {((p.tracks||[]).length === 1) ? "track" : "tracks"}</span>
+                          <span style={{ color:"#333" }}>·</span>
+                          <span>{p.bpm||120} BPM</span>
+                          {dateStr && <span style={{ color:"#333" }}>·</span>}
+                          {dateStr && <span>{dateStr}</span>}
+                        </div>
+                      </div>
+                      <button
+                        onClick={function(e){ e.stopPropagation(); deleteProject(p.id); }}
+                        style={{
+                          background:"#1f1a26", border:"1px solid #2a2336",
+                          borderRadius:8, width:32, height:32, color:"#777",
+                          fontSize:13, cursor:"pointer", flexShrink:0,
+                          display:"flex", alignItems:"center", justifyContent:"center", padding:0,
+                        }}>✕</button>
                     </div>
-                    <button onClick={function(){ deleteProject(p.id); }} style={{ background:"none",border:"none",color:"#444",fontSize:16,cursor:"pointer",padding:"4px 8px" }}>✕</button>
-                  </div>
-                );
-              })
-            }
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
       )}
