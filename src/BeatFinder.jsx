@@ -28446,12 +28446,39 @@ export default function BeatFinder() {
     }
 
     function forceReflow() {
+      // Full re-layout: briefly hide the app root, force the browser to
+      // recompute layout (which it does for hidden elements differently
+      // than for shown ones — children are detached from the layout
+      // tree), then restore. This is stronger than a transform toggle
+      // because it forces WebKit to re-read env() values from scratch
+      // when the element returns, rather than reusing cached layout.
+      //
+      // Two timing tricks:
+      //   • requestAnimationFrame ensures the display:none paint actually
+      //     happens before we restore (otherwise WebKit may coalesce the
+      //     two writes and skip the layout flush)
+      //   • Reading offsetHeight between writes forces a synchronous
+      //     layout, guaranteeing the browser observed the hidden state
       try {
-        var html = document.documentElement;
-        html.style.transform = "translateZ(0)";
-        void html.offsetHeight;
-        html.style.transform = "";
-        window.dispatchEvent(new Event("resize"));
+        var roots = document.querySelectorAll('[data-bf-app="1"]');
+        if (!roots.length) return;
+        var i;
+        var prev = [];
+        for (i = 0; i < roots.length; i++) {
+          prev.push(roots[i].style.display);
+          roots[i].style.display = "none";
+        }
+        // Force layout while hidden — WebKit MUST observe the hidden state
+        void document.documentElement.offsetHeight;
+        // Restore on next frame so the hidden paint actually flushes
+        requestAnimationFrame(function() {
+          for (var j = 0; j < roots.length; j++) {
+            roots[j].style.display = prev[j] || "";
+          }
+          // One more layout read so the restored state is computed fresh
+          void document.documentElement.offsetHeight;
+          window.dispatchEvent(new Event("resize"));
+        });
       } catch(_) {}
     }
 
