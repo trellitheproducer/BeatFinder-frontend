@@ -6659,6 +6659,230 @@ function DownloadToast() {
   return ReactDOM.createPortal(toast, document.body);
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// SHARED LOADING UI HELPERS
+// ─────────────────────────────────────────────────────────────────────
+// Tiny spinner + button wrapper to standardise the loading states
+// across async actions (buy, subscribe, follow, upload, etc.). Using
+// these avoids "user taps button → nothing happens for 2s → user
+// taps again → duplicate request → bug" patterns.
+function BfSpinner({ size = 16, color = "currentColor", strokeWidth = 2 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24"
+      style={{ animation: "bf-spin 0.7s linear infinite", display: "inline-block", verticalAlign: "middle" }}>
+      <circle cx="12" cy="12" r="9"
+        fill="none" stroke={color} strokeOpacity="0.25"
+        strokeWidth={strokeWidth} />
+      <path d="M12 3 a9 9 0 0 1 9 9"
+        fill="none" stroke={color}
+        strokeWidth={strokeWidth} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// Drop-in button that handles its own loading state for async handlers.
+// Usage:
+//   <BfButton onClick={async () => await something()}>Save</BfButton>
+//
+// While the handler is in-flight, the button is disabled, shows a
+// spinner, and is visually dimmed. Double-clicks during in-flight state
+// are no-ops. Falls back to a regular button if onClick is synchronous.
+function BfButton({
+  children,
+  onClick,
+  loadingText,
+  disabled,
+  style,
+  type = "button",
+  ...rest
+}) {
+  var [busy, setBusy] = React.useState(false);
+
+  async function handle(e) {
+    if (busy || disabled || !onClick) return;
+    var result;
+    try {
+      result = onClick(e);
+    } catch (err) {
+      // Sync throw — let it bubble
+      throw err;
+    }
+    // Detect async handlers via duck-typing on the returned promise
+    if (result && typeof result.then === "function") {
+      setBusy(true);
+      try {
+        await result;
+      } catch (err) {
+        // Swallow — the handler should have surfaced this itself via
+        // bfToast / inline error state. Re-throwing here would crash
+        // the React tree, defeating the safety net.
+        try {
+          if (window.bfToast && err && err.message) {
+            window.bfToast.error(err.message);
+          }
+        } catch (_) {}
+      } finally {
+        setBusy(false);
+      }
+    }
+  }
+
+  var mergedStyle = Object.assign({
+    cursor: (busy || disabled) ? "not-allowed" : "pointer",
+    opacity: (busy || disabled) ? 0.6 : 1,
+    transition: "opacity 0.15s ease",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  }, style || {});
+
+  return (
+    <button type={type} onClick={handle} disabled={busy || disabled} style={mergedStyle} {...rest}>
+      {busy ? (
+        <>
+          <BfSpinner size={14} />
+          <span>{loadingText || "Loading..."}</span>
+        </>
+      ) : children}
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// GLOBAL TOAST NOTIFICATION SYSTEM
+// ─────────────────────────────────────────────────────────────────────
+// One-shot success / error / info messages. Mount <BfToastHost /> once at
+// the app root, then anywhere in the codebase call:
+//
+//   window.bfToast.success("Saved!");
+//   window.bfToast.error("Couldn't save");
+//   window.bfToast.info("Heads up — this beat has a premium licence");
+//
+// Toasts auto-dismiss after ~4s, tap-to-dismiss, stack top-right.
+// Designed to gradually replace scattered alert()/setBioMsg patterns
+// without forcing a big-bang migration — existing patterns keep working.
+//
+// Subscribers (BfToastHost) listen on the bf:toast custom event. The
+// queue lives entirely in state; no localStorage involved.
+
+(function installBfToast() {
+  if (typeof window === "undefined" || window.bfToast) return;
+  function emit(kind, message, opts) {
+    try {
+      var ev = new CustomEvent("bf:toast", {
+        detail: {
+          kind:     kind,        // "success" | "error" | "info"
+          message:  String(message || ""),
+          duration: (opts && opts.duration) || 4000,
+          id:       Math.random().toString(36).slice(2) + Date.now(),
+        }
+      });
+      window.dispatchEvent(ev);
+    } catch (_) {}
+  }
+  window.bfToast = {
+    success: function(msg, opts) { emit("success", msg, opts); },
+    error:   function(msg, opts) { emit("error",   msg, opts); },
+    info:    function(msg, opts) { emit("info",    msg, opts); },
+  };
+})();
+
+function BfToastHost() {
+  var [toasts, setToasts] = React.useState([]);
+
+  React.useEffect(function() {
+    function onToast(e) {
+      var t = e.detail || {};
+      if (!t.message) return;
+      setToasts(function(curr) { return curr.concat([t]); });
+      // Schedule dismissal
+      setTimeout(function() {
+        setToasts(function(curr) { return curr.filter(function(x) { return x.id !== t.id; }); });
+      }, t.duration || 4000);
+    }
+    window.addEventListener("bf:toast", onToast);
+    return function() { window.removeEventListener("bf:toast", onToast); };
+  }, []);
+
+  if (toasts.length === 0) return null;
+
+  function dismiss(id) {
+    setToasts(function(curr) { return curr.filter(function(x) { return x.id !== id; }); });
+  }
+
+  var host = (
+    <div style={{
+      position: "fixed",
+      top: "calc(var(--bf-safe-top, env(safe-area-inset-top)) + 12px)",
+      right: 12,
+      zIndex: 99997,  // below auth-expired (99998), above app
+      display: "flex", flexDirection: "column", gap: 8,
+      pointerEvents: "none",  // wrapper passes through; cards re-enable
+      maxWidth: "calc(100vw - 24px)",
+      fontFamily: "'DM Sans',sans-serif",
+    }}>
+      {toasts.map(function(t) {
+        var palette = (t.kind === "error") ? {
+          border: "rgba(239,68,68,0.4)",
+          glow:   "rgba(239,68,68,0.2)",
+          accent: "#F87171",
+          bg:     "linear-gradient(135deg,#1a0a14,#0d0a14)",
+          icon:   "!",
+        } : (t.kind === "success") ? {
+          border: "rgba(34,197,94,0.4)",
+          glow:   "rgba(34,197,94,0.2)",
+          accent: "#22C55E",
+          bg:     "linear-gradient(135deg,#0a1a12,#0a140d)",
+          icon:   "✓",
+        } : {
+          border: "rgba(124,58,237,0.4)",
+          glow:   "rgba(124,58,237,0.2)",
+          accent: "#A78BFA",
+          bg:     "linear-gradient(135deg,#100a1a,#0a0a14)",
+          icon:   "i",
+        };
+        return (
+          <div
+            key={t.id}
+            onClick={function() { dismiss(t.id); }}
+            style={{
+              background:    palette.bg,
+              border:        "1px solid " + palette.border,
+              borderRadius:  12,
+              padding:       "12px 16px",
+              minWidth:      240,
+              maxWidth:      360,
+              color:         "white",
+              fontSize:      13,
+              lineHeight:    1.4,
+              boxShadow:     "0 8px 24px rgba(0,0,0,0.6), 0 0 16px " + palette.glow,
+              display:       "flex",
+              alignItems:    "center",
+              gap:           10,
+              cursor:        "pointer",
+              pointerEvents: "auto",
+              animation:     "bf-fadein-up 0.22s cubic-bezier(0.22,1,0.36,1) both",
+            }}>
+            <div style={{
+              flex: "0 0 auto", width: 22, height: 22, borderRadius: "50%",
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid " + palette.border,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: palette.accent, fontWeight: 900, fontSize: 12,
+            }}>{palette.icon}</div>
+            <div style={{ flex: 1, wordBreak: "break-word" }}>{t.message}</div>
+            <div style={{ color: "#555", fontSize: 14, flex: "0 0 auto" }}>×</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  if (typeof document === "undefined" || !document.body) return host;
+  return ReactDOM.createPortal(host, document.body);
+}
+
 // ── Popup-blocker explainer modal ──────────────────────────────────
 // Some users have Safari → Settings → "Block Pop-ups" enabled, which
 // silently kills the new-tab navigation we use for MP3 downloads.
@@ -30927,6 +31151,7 @@ function BeatFinderInner() {
     <div key="app-root" data-bf-app="1" id="bf-portrait-lock" style={{ maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#0a0a0a", fontFamily: "'DM Sans',sans-serif", paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))" }}>
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
       <DownloadToast />
+      <BfToastHost />
       <PopupBlockedModal />
 
       {/* Auth-expired toast — shown briefly when apiFetch detects a 401
