@@ -3984,7 +3984,178 @@ function NotificationsPanel({ user, onClose, onJumpToFeed, onOpenPost }) {
   );
 }
 
-function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric, onGoTrending, onGoStudio, onGoArtists, onShowProducerPrompt, onOpenMessages, onViewOwnProfile, onOpenPost, onOpenNotifications, unreadMessages, unreadNotifications }) {
+// ─────────────────────────────────────────────────────────────────────────
+// UserSearchOverlay
+// ─────────────────────────────────────────────────────────────────────────
+// Quick-find users by username from the top bar. Opens as a full-screen
+// modal with a sticky search input at the top + live results below. As
+// the person types we debounce ~250ms then hit /api/auth/search?q=...
+// which already exists and returns up to 20 matches with username, name,
+// plan, bio, avatarUrl. Tapping a result fires onPickUser(username) and
+// closes the overlay — the parent decides what to do (open public
+// profile, typically). Designed to feel like Twitter's user-search
+// dropdown: a tiny input, fast feedback, large tap targets per row.
+function UserSearchOverlay({ onClose, onPickUser }) {
+  const [q, setQ]               = React.useState("");
+  const [results, setResults]   = React.useState([]);
+  const [loading, setLoading]   = React.useState(false);
+  const inputRef                = React.useRef(null);
+
+  // Auto-focus the input as soon as the overlay opens so the user can
+  // start typing without an extra tap.
+  React.useEffect(function() {
+    var t = setTimeout(function() {
+      if (inputRef.current) inputRef.current.focus();
+    }, 80);
+    return function() { clearTimeout(t); };
+  }, []);
+
+  // Debounced search — fire after the user pauses typing for 250ms.
+  // Backend requires q.length >= 2 (returns [] otherwise), so we don't
+  // bother making the network call until we've got that.
+  React.useEffect(function() {
+    var query = q.trim();
+    if (query.length < 2) { setResults([]); setLoading(false); return; }
+    setLoading(true);
+    var cancelled = false;
+    var t = setTimeout(function() {
+      apiFetch("/api/auth/search?q=" + encodeURIComponent(query))
+        .then(function(data) {
+          if (cancelled) return;
+          setResults(Array.isArray(data) ? data : []);
+          setLoading(false);
+        })
+        .catch(function() {
+          if (cancelled) return;
+          setResults([]); setLoading(false);
+        });
+    }, 250);
+    return function() { cancelled = true; clearTimeout(t); };
+  }, [q]);
+
+  return (
+    <div onClick={onClose} style={{
+      position:"fixed", inset:0, zIndex:9500,
+      background:"rgba(0,0,0,0.85)",
+      backdropFilter:"blur(6px)",
+      WebkitBackdropFilter:"blur(6px)",
+      display:"flex", flexDirection:"column",
+      paddingTop:"calc(12px + env(safe-area-inset-top))",
+    }}>
+      <div onClick={function(e) { e.stopPropagation(); }}
+        style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
+        {/* Search header */}
+        <div style={{ padding:"4px 14px 10px", display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{
+            flex:1, position:"relative",
+            background:"#15131c",
+            border:"1px solid #2a2336",
+            borderRadius:14,
+            display:"flex", alignItems:"center", padding:"0 12px",
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="#777" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              style={{ flexShrink:0 }}>
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input
+              ref={inputRef}
+              value={q}
+              onChange={function(e) { setQ(e.target.value); }}
+              placeholder="Search users by username"
+              autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              style={{
+                flex:1, background:"transparent", border:"none", outline:"none",
+                color:"white", fontSize:15, padding:"12px 10px",
+                fontFamily:"inherit",
+              }}
+            />
+            {q && (
+              <button onClick={function() { setQ(""); }}
+                style={{
+                  background:"#241e30", border:"none", color:"#888",
+                  borderRadius:"50%", width:22, height:22, cursor:"pointer",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  padding:0, fontSize:11, flexShrink:0,
+                }}>✕</button>
+            )}
+          </div>
+          <button onClick={onClose}
+            style={{
+              background:"transparent", border:"none", color:"#A78BFA",
+              fontSize:14, fontWeight:700, cursor:"pointer", padding:"8px 4px",
+            }}>Cancel</button>
+        </div>
+
+        {/* Results */}
+        <div style={{ flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch", padding:"4px 0 24px" }}>
+          {q.trim().length < 2 ? (
+            <div style={{ color:"#555", fontSize:13, textAlign:"center", padding:"60px 30px", lineHeight:1.5 }}>
+              <div style={{ fontSize:30, marginBottom:10, opacity:0.5 }}>🔍</div>
+              <div style={{ color:"#888", fontWeight:700, marginBottom:4 }}>Find people on BeatFinder</div>
+              <div style={{ color:"#555", fontSize:12 }}>Type a username to start searching.</div>
+            </div>
+          ) : loading ? (
+            <div style={{ color:"#555", fontSize:13, textAlign:"center", padding:"40px 0" }}>Searching...</div>
+          ) : results.length === 0 ? (
+            <div style={{ color:"#555", fontSize:13, textAlign:"center", padding:"40px 30px", lineHeight:1.5 }}>
+              <div style={{ color:"#888", fontWeight:700, marginBottom:4 }}>No matches for "{q.trim()}"</div>
+              <div style={{ color:"#444", fontSize:12 }}>Try a different spelling.</div>
+            </div>
+          ) : (
+            results.map(function(u) {
+              var initial = (u.username || u.name || "?")[0].toUpperCase();
+              return (
+                <button key={u.username}
+                  onClick={function() { onPickUser(u.username); }}
+                  style={{
+                    width:"100%", display:"flex", alignItems:"center", gap:12,
+                    padding:"10px 16px", background:"transparent",
+                    border:"none", borderBottom:"1px solid #15131c",
+                    cursor:"pointer", textAlign:"left",
+                  }}>
+                  {/* Avatar */}
+                  <div style={{
+                    width:44, height:44, borderRadius:"50%", flexShrink:0,
+                    background: u.avatarUrl ? "#222" : "linear-gradient(135deg,#6B21A8,#C026D3)",
+                    overflow:"hidden",
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    color:"white", fontWeight:800, fontSize:16,
+                  }}>
+                    {u.avatarUrl
+                      ? <img src={u.avatarUrl} alt={u.username}
+                          style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                      : initial}
+                  </div>
+                  {/* Name + handle + plan */}
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+                      <span style={{
+                        color:"white", fontWeight:800, fontSize:14,
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                      }}>{u.name || u.username}</span>
+                      <UserBadges username={u.username} plan={u.plan} compact={true} size={11} />
+                    </div>
+                    <div style={{ color:"#666", fontSize:12, marginTop:1,
+                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      @{u.username}
+                      {u.bio && <span style={{ color:"#444" }}>{" · " + u.bio.slice(0, 60)}</span>}
+                    </div>
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, onGenreSearch, savedLyrics, onEditLyric, onGoTrending, onGoStudio, onGoArtists, onShowProducerPrompt, onOpenMessages, onViewOwnProfile, onOpenPost, onOpenNotifications, onOpenUserSearch, unreadMessages, unreadNotifications }) {
   const [heroIndex, setHeroIndex] = useState(0);
 
   const HERO_SLIDES = [
@@ -4139,6 +4310,18 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
                   {unreadNotifications > 9 ? "9+" : unreadNotifications}
                 </div>
               )}
+            </button>
+          )}
+          {/* User search icon — opens a quick-find overlay to look up
+              other users by username. Available to signed-in users only
+              (the API requires auth for /api/auth/search). */}
+          {user && (
+            <button onClick={onOpenUserSearch} aria-label="Search users"
+              style={{ background: "none", border: "none", padding: 8, cursor: "pointer", position: "relative" }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                stroke="#aaa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
             </button>
           )}
           {/* Messages icon */}
@@ -12564,6 +12747,11 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState(null);
   const [following,    setFollowing]    = useState(false);
+  // Does THIS profile follow the current user back? Set from the
+  // profile-auth response (server adds isFollowedBy). Used together
+  // with `following` to gate the Message button: DMs require BOTH
+  // directions of a follow ("mutual follow only").
+  const [followedBy,   setFollowedBy]   = useState(false);
   const [followLoading,setFollowLoading]= useState(false);
   const [badgePopup,   setBadgePopup]   = useState(null);
   const [followList,   setFollowList]   = useState(null);
@@ -12646,7 +12834,7 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
           // that don't have tier data baked in already.
           console.warn("[Profile] Could not enrich beats with tier prices:", mergeErr);
         }
-        setProfile(d); setFollowing(d.isFollowing || false); setLoading(false);
+        setProfile(d); setFollowing(d.isFollowing || false); setFollowedBy(d.isFollowedBy || false); setLoading(false);
       })
       .catch(e => { setError(e.message); setLoading(false); });
   }, [username, currentUser?.id]);
@@ -13086,8 +13274,20 @@ function PublicProfileScreen({ username, onBack, onPlay, savedIds, onSave, curre
 // =============================================================================
 function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
   const [conversations, setConversations] = useState([]);
+  // Pending request threads (Instagram-style "Message Requests" folder).
+  // Held separately from inbox so the two tabs render different lists.
+  // Loaded once on mount and refreshed when user accepts/declines a
+  // request or follows back the sender.
+  const [requests,      setRequests]      = useState([]);
+  // "inbox" or "requests" — controls which list is visible
+  const [tab,           setTab]           = useState("inbox");
   const [loading,       setLoading]       = useState(true);
   const [activeThread,  setActiveThread]  = useState(initialThread || null);
+  // Whether the currently-open thread is in MY inbox vs a pending
+  // request. When true, we show the normal composer. When false,
+  // we show an Accept/Decline banner above the composer (the user
+  // shouldn't be able to reply without first accepting the request).
+  const [threadInInbox, setThreadInInbox] = useState(true);
   const [threadAvatar,  setThreadAvatar]  = useState("");
   const [messages,      setMessages]      = useState([]);
   const [msgInput,      setMsgInput]      = useState("");
@@ -13098,27 +13298,44 @@ function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
   const pollRef    = React.useRef(null);
   const latestMsgAt = React.useRef(null);
 
-  // Load conversations list
+  // Load conversations + requests in parallel
   useEffect(() => {
     if (!user) { setLoading(false); return; }
-    apiFetch("/api/messages/conversations")
-      .then(d => { setConversations(d || []); setLoading(false); })
-      .catch(() => setLoading(false));
+    Promise.all([
+      apiFetch("/api/messages/conversations").catch(function(){ return []; }),
+      apiFetch("/api/messages/requests").catch(function(){ return []; }),
+    ]).then(function(results) {
+      setConversations(results[0] || []);
+      setRequests(results[1] || []);
+      setLoading(false);
+    });
   }, [user]);
 
   // Load thread + start polling for read receipts & new messages
   useEffect(() => {
     if (!activeThread || !user) { clearInterval(pollRef.current); return; }
     setConversations(prev => prev.map(c => c.username === activeThread ? { ...c, unread: 0 } : c));
+    setRequests(prev => prev.map(c => c.username === activeThread ? { ...c, unread: 0 } : c));
 
-    // Find avatar from conversations
-    const conv = conversations.find(c => c.username === activeThread);
+    // Find avatar from either list
+    const conv = conversations.find(c => c.username === activeThread)
+              || requests.find(c => c.username === activeThread);
     if (conv?.avatarUrl) setThreadAvatar(conv.avatarUrl);
 
     apiFetch("/api/messages/thread/" + encodeURIComponent(activeThread))
       .then(d => {
-        const msgs = d || [];
+        // Response is now { messages, inInbox } (was a flat array).
+        // Backward-compat: if d is an array, treat as old shape and
+        // assume inbox=true (legacy behaviour).
+        var msgs, inInbox;
+        if (Array.isArray(d)) {
+          msgs = d; inInbox = true;
+        } else {
+          msgs = (d && d.messages) || [];
+          inInbox = !!(d && d.inInbox);
+        }
         setMessages(msgs);
+        setThreadInInbox(inInbox);
         if (msgs.length > 0) latestMsgAt.current = msgs[msgs.length - 1].createdAt;
       })
       .catch(() => {});
@@ -13185,7 +13402,51 @@ function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
     setConfirmDelete(null);
     await apiFetch("/api/messages/thread/" + encodeURIComponent(username), { method: "DELETE" }).catch(() => {});
     setConversations(prev => prev.filter(c => c.username !== username));
+    setRequests(prev => prev.filter(c => c.username !== username));
     if (activeThread === username) setActiveThread(null);
+  };
+
+  // Accept a pending message request — moves the thread from
+  // Requests into Inbox. Refreshes both lists locally so the UI
+  // reflects the change without a full reload.
+  const acceptRequest = async (otherUsername) => {
+    try {
+      await apiFetch("/api/messages/requests/" + encodeURIComponent(otherUsername) + "/accept", { method: "POST" });
+    } catch(e) {
+      // Surface the error but don't crash — user can try again
+      console.warn("[Messages] accept failed:", e.message);
+      return;
+    }
+    // Move the conversation from requests → inbox in local state
+    var moved = null;
+    setRequests(function(prev) {
+      var next = [];
+      prev.forEach(function(c) {
+        if (c.username === otherUsername) { moved = c; } else { next.push(c); }
+      });
+      return next;
+    });
+    setConversations(function(prev) {
+      if (!moved) return prev;
+      // De-dupe in case it was already in the list
+      var filtered = prev.filter(function(c) { return c.username !== otherUsername; });
+      return [moved].concat(filtered);
+    });
+    setThreadInInbox(true);
+  };
+
+  // Decline a pending request — deletes the thread entirely.
+  // Same destructive flow as deleteThread but no confirmation dialog
+  // because Instagram doesn't confirm requests-decline either.
+  const declineRequest = async (otherUsername) => {
+    try {
+      await apiFetch("/api/messages/requests/" + encodeURIComponent(otherUsername), { method: "DELETE" });
+    } catch(e) {
+      console.warn("[Messages] decline failed:", e.message);
+      return;
+    }
+    setRequests(function(prev) { return prev.filter(function(c) { return c.username !== otherUsername; }); });
+    if (activeThread === otherUsername) setActiveThread(null);
   };
 
   function Avatar({ src, name, size }) {
@@ -13326,22 +13587,66 @@ function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
           <div ref={msgEndRef} />
         </div>
 
-        {/* Input */}
-        <div style={{ padding: "10px 16px", paddingBottom: "calc(10px + env(safe-area-inset-bottom))", borderTop: "1px solid #1a1a1a", display: "flex", gap: 8, flexShrink: 0, background: "#0a0a0a" }}>
-          <input value={msgInput} onChange={e => setMsgInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && sendMessage()}
-            placeholder="Send a message..."
-            style={{ ...inp, flex: 1 }} />
-          <button onClick={sendMessage} disabled={sending || !msgInput.trim()}
-            style={{ background: "#C026D3", border: "none", borderRadius: 22, color: "white", fontWeight: 700, fontSize: 13, padding: "12px 18px", cursor: "pointer", opacity: !msgInput.trim() ? 0.4 : 1, flexShrink: 0 }}>
-            Send
-          </button>
-        </div>
+        {/* Input — OR Accept/Decline banner if this is a pending request.
+            Instagram pattern: when you open a request thread, the message
+            input is locked behind an Accept gate. Tapping Accept moves
+            the thread into your inbox and reveals the composer. Decline
+            deletes the thread entirely. */}
+        {threadInInbox ? (
+          <div style={{ padding: "10px 16px", paddingBottom: "calc(10px + env(safe-area-inset-bottom))", borderTop: "1px solid #1a1a1a", display: "flex", gap: 8, flexShrink: 0, background: "#0a0a0a" }}>
+            <input value={msgInput} onChange={e => setMsgInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && sendMessage()}
+              placeholder="Send a message..."
+              style={{ ...inp, flex: 1 }} />
+            <button onClick={sendMessage} disabled={sending || !msgInput.trim()}
+              style={{ background: "#C026D3", border: "none", borderRadius: 22, color: "white", fontWeight: 700, fontSize: 13, padding: "12px 18px", cursor: "pointer", opacity: !msgInput.trim() ? 0.4 : 1, flexShrink: 0 }}>
+              Send
+            </button>
+          </div>
+        ) : (
+          <div style={{
+            padding: "14px 16px",
+            paddingBottom: "calc(14px + env(safe-area-inset-bottom))",
+            borderTop: "1px solid #1a1a1a",
+            background: "#0a0a0a",
+            flexShrink: 0,
+          }}>
+            <div style={{ color: "#888", fontSize: 12, textAlign: "center", marginBottom: 10, lineHeight: 1.4 }}>
+              @{activeThread} isn't in your inbox yet. Accept to reply, or decline to delete this conversation.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => declineRequest(activeThread)}
+                style={{
+                  flex: 1, background: "transparent",
+                  border: "1.5px solid #2a2a2a", borderRadius: 22,
+                  color: "#888", fontWeight: 700, fontSize: 13,
+                  padding: "12px 18px", cursor: "pointer",
+                }}>
+                Decline
+              </button>
+              <button onClick={() => acceptRequest(activeThread)}
+                style={{
+                  flex: 1, background: "#C026D3",
+                  border: "none", borderRadius: 22,
+                  color: "white", fontWeight: 800, fontSize: 13,
+                  padding: "12px 18px", cursor: "pointer",
+                }}>
+                Accept
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
   // ── Conversations list ────────────────────────────────────────────────────
+  // The list view at the top of the Messages screen.
+  // Two tabs: Inbox (accepted conversations) and Requests (pending DMs
+  // from people you don't follow). Tab state is local to this component.
+  // The Requests tab shows the pending count as a pink badge so users
+  // notice new requests without needing to leave the inbox view.
+  const visibleList = tab === "requests" ? requests : conversations;
   return (
     <div style={{ paddingBottom: 100 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px", borderBottom: "1px solid #1a1a1a", paddingTop: "calc(16px + env(safe-area-inset-top))" }}>
@@ -13358,8 +13663,48 @@ function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
           <div style={{ fontSize: 13, color: "#333" }}>Create an account to send direct messages to other users</div>
         </div>
       )}
+
+      {/* Tabs — only render for signed-in users with at least one
+          conversation or pending request. Hidden during loading and
+          for empty-state to keep the screen calm. */}
+      {user && !loading && (conversations.length > 0 || requests.length > 0) && (
+        <div style={{ display: "flex", borderBottom: "1px solid #1a1a1a" }}>
+          <button onClick={() => setTab("inbox")}
+            style={{
+              flex: 1, padding: "14px 0", background: "none", border: "none",
+              cursor: "pointer", position: "relative",
+              color: tab === "inbox" ? "white" : "#666",
+              fontWeight: tab === "inbox" ? 800 : 600, fontSize: 14,
+              borderBottom: tab === "inbox" ? "2px solid #C026D3" : "2px solid transparent",
+            }}>
+            Inbox
+          </button>
+          <button onClick={() => setTab("requests")}
+            style={{
+              flex: 1, padding: "14px 0", background: "none", border: "none",
+              cursor: "pointer", position: "relative",
+              color: tab === "requests" ? "white" : "#666",
+              fontWeight: tab === "requests" ? 800 : 600, fontSize: 14,
+              borderBottom: tab === "requests" ? "2px solid #C026D3" : "2px solid transparent",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            }}>
+            Requests
+            {requests.length > 0 && (
+              <span style={{
+                background: "#C026D3", color: "white",
+                fontSize: 11, fontWeight: 800,
+                padding: "1px 7px", borderRadius: 10,
+                minWidth: 18, textAlign: "center",
+              }}>
+                {requests.length > 99 ? "99+" : requests.length}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
+
       {user && loading && <div style={{ textAlign: "center", padding: "60px 24px", color: "#555", fontSize: 14 }}>Loading...</div>}
-      {user && !loading && conversations.length === 0 && (
+      {user && !loading && visibleList.length === 0 && tab === "inbox" && requests.length === 0 && (
         <div style={{ textAlign: "center", padding: "60px 24px", color: "#555" }}>
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: 12 }}>
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -13368,7 +13713,19 @@ function MessagesScreen({ user, onBack, initialThread, onViewProfile }) {
           <div style={{ fontSize: 13, color: "#333" }}>Visit a user's profile and tap Message to start a conversation</div>
         </div>
       )}
-      {user && !loading && conversations.map(c => (
+      {user && !loading && visibleList.length === 0 && tab === "inbox" && requests.length > 0 && (
+        <div style={{ textAlign: "center", padding: "60px 24px", color: "#555" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#666", marginBottom: 6 }}>No conversations yet</div>
+          <div style={{ fontSize: 13, color: "#444" }}>You have {requests.length} pending request{requests.length === 1 ? "" : "s"} — tap Requests above to view.</div>
+        </div>
+      )}
+      {user && !loading && visibleList.length === 0 && tab === "requests" && (
+        <div style={{ textAlign: "center", padding: "60px 24px", color: "#555" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#666", marginBottom: 6 }}>No pending requests</div>
+          <div style={{ fontSize: 13, color: "#444" }}>Messages from people you don't follow appear here.</div>
+        </div>
+      )}
+      {user && !loading && visibleList.map(c => (
         <button key={c.username} onClick={() => { setThreadAvatar(c.avatarUrl || ""); setActiveThread(c.username); }}
           style={{ width: "100%", display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
             background: "none", border: "none", borderBottom: "1px solid #111", cursor: "pointer", textAlign: "left" }}>
@@ -28522,12 +28879,32 @@ export default function BeatFinder() {
     function fetchUnread() {
       // Skip polling when the tab is hidden — saves Render request quota
       if (document.hidden) return;
-      apiFetch("/api/notifications/unread-count")
-        .then(function(d) {
-          setUnreadMessages(d.messages || 0);
-          setUnreadNotifications(d.notifications || 0);
-        })
-        .catch(function() {});
+      // Two parallel calls:
+      //   • notifications/unread-count for the notifications bell
+      //   • messages/summary for INBOX-only message count
+      // The top-bar message badge counts only accepted-inbox messages,
+      // NOT pending requests. Requests get their own indicator inside
+      // the Messages screen itself (Instagram-style behaviour). The
+      // older notifications endpoint also returns a `messages` field
+      // but it counts ALL unread including pending requests — by using
+      // messages/summary instead we get the cleaner number.
+      Promise.all([
+        apiFetch("/api/notifications/unread-count").catch(function(){ return null; }),
+        apiFetch("/api/messages/summary").catch(function(){ return null; }),
+      ]).then(function(results) {
+        var notifData = results[0];
+        var msgData   = results[1];
+        if (msgData && typeof msgData.inboxUnread === "number") {
+          setUnreadMessages(msgData.inboxUnread);
+        } else if (notifData) {
+          // Fallback if messages/summary not deployed yet — use the
+          // legacy total. Slightly inflated but won't break the UI.
+          setUnreadMessages(notifData.messages || 0);
+        }
+        if (notifData) {
+          setUnreadNotifications(notifData.notifications || 0);
+        }
+      });
     }
     fetchUnread();
     var interval = setInterval(fetchUnread, 15000);
@@ -28850,6 +29227,11 @@ export default function BeatFinder() {
   const [highlightPostId,    setHighlightPostId]    = useState(null);
   const [messageThread,      setMessageThread]      = useState(null);
   const [showNotifications,  setShowNotifications]  = useState(false);
+  // Global "find a user" overlay — opened from the magnifying-glass
+  // icon in the top bar. Lets users search by username from anywhere
+  // on the Home screen and jump straight to that user's public
+  // profile.
+  const [showUserSearch,     setShowUserSearch]     = useState(false);
   const [unreadMessages,     setUnreadMessages]     = useState(0);
   const [unreadNotifications,setUnreadNotifications]= useState(0);
   const [savedLyrics,   setSavedLyrics]   = useState(() => {
@@ -29125,7 +29507,7 @@ export default function BeatFinder() {
           }}
           onTouchMove={t !== "studio" ? function(e){ e.stopPropagation(); } : undefined}
           >
-            {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => openMessages(null)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} onOpenPost={() => setShowPost(true)} onOpenNotifications={openNotifications} unreadMessages={unreadMessages} unreadNotifications={unreadNotifications} />}
+            {t === "home"      && <HomeScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} user={user} onGoMembers={() => goTab("exclusive")} onGoProfile={() => goTab("profile")} onGenreSearch={q => { setSearchQuery(q); goTab("search"); }} savedLyrics={savedLyrics} onEditLyric={handleEditLyric} onGoTrending={() => goTab("trending")} onGoStudio={() => goTab("studio")} onGoArtists={() => goTab("artists")} onShowProducerPrompt={() => { setPromptReason("producer"); setShowAuthPrompt(true); }} onOpenMessages={() => openMessages(null)} onViewOwnProfile={() => user ? setPublicProfile(user.username) : goTab("profile")} onOpenPost={() => setShowPost(true)} onOpenNotifications={openNotifications} onOpenUserSearch={() => setShowUserSearch(true)} unreadMessages={unreadMessages} unreadNotifications={unreadNotifications} />}
             {t === "artists"   && <ArtistsScreen onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} resetKey={artistsResetKey} />}
             {t === "feed"      && <FollowingFeed user={user} onPlay={handlePlay} savedIds={savedIds} onSave={toggleSave} onViewProfile={function(u) { setPublicProfile(u); }} onSearchPeople={function() { setSearchInitialTab("people"); goTab("search"); }} onOpenPost={() => setShowPost(true)} refreshKey={feedRefreshKey} highlightPostId={highlightPostId} onHighlightConsumed={() => setHighlightPostId(null)} />}
             {t === "trending"  && <TrendingScreen savedIds={savedIds} onSave={toggleSave} onPlay={handlePlay} onViewProfile={function(u) { setPublicProfile(u); }} user={user} />}
@@ -29193,6 +29575,19 @@ export default function BeatFinder() {
             setHighlightPostId(postId);
             goTab("feed");
             setShowNotifications(false);
+          }} />
+      )}
+
+      {showUserSearch && (
+        <UserSearchOverlay
+          onClose={() => setShowUserSearch(false)}
+          onPickUser={function(username) {
+            // Close the overlay and jump straight to the user's public
+            // profile. Using setPublicProfile (rather than setSearchProfile)
+            // gives them the same back-stack as following an avatar from
+            // the Feed.
+            setShowUserSearch(false);
+            setPublicProfile(username);
           }} />
       )}
 
