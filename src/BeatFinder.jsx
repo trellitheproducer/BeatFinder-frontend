@@ -30323,7 +30323,10 @@ function UsersManager() {
       )}
 
       {/* ── Action sheet for a selected user ───────────────────────── */}
-      {selectedUser && (
+      {/* Rendered via createPortal so it escapes iOS Safari's bug where
+          position:fixed gets re-anchored to any ancestor with a transform,
+          filter, or backdrop-filter (which the Settings overlay has). */}
+      {selectedUser && typeof document !== "undefined" && ReactDOM.createPortal((
         <div
           onClick={function() { setSelectedUser(null); }}
           style={{
@@ -30441,10 +30444,11 @@ function UsersManager() {
             </button>
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {/* ── Confirm delete modal ───────────────────────────────────── */}
-      {confirmDelete && (
+      {/* Same portal trick as the action sheet above. */}
+      {confirmDelete && typeof document !== "undefined" && ReactDOM.createPortal((
         <div
           onClick={function() { if (!deleting) setConfirmDelete(null); }}
           style={{
@@ -30511,7 +30515,7 @@ function UsersManager() {
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 }
