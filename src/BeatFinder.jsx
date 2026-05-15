@@ -11704,6 +11704,10 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
   var [posts, setPosts]         = React.useState([]);
   var [openPostSheet, setOpenPostSheet] = React.useState(null);
   var [postLikes, setPostLikes] = React.useState({});
+  // Per-post repost state — true when current user has reposted this
+  // post. Mirrors the Feed's postReposts ref so the Repost icon
+  // renders filled/coloured for the user's own reposts.
+  var [postReposts, setPostReposts] = React.useState({});
   var [postComments, setPostComments] = React.useState({});
   var [lightbox, setLightbox] = React.useState(null);
   var [openMenu, setOpenMenu] = React.useState(null);
@@ -11739,6 +11743,13 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
               .then(function(r) {
                 setPostLikes(function(prev) { var n = Object.assign({}, prev); n[p.id] = r.liked; return n; });
               }).catch(function() {});
+            // Reposted-state — endpoint mirrors /liked. Tells us if the
+            // current user has already reposted this post so the icon
+            // can render as active.
+            apiFetch("/api/posts/" + p.id + "/reposted")
+              .then(function(r) {
+                setPostReposts(function(prev) { var n = Object.assign({}, prev); n[p.id] = !!(r && r.reposted); return n; });
+              }).catch(function() {});
           });
         }
       }).catch(function() { setLoading(false); });
@@ -11761,6 +11772,35 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
     apiFetch("/api/posts/" + id + "/like", { method: "POST" })
       .then(function(r) { setPostLikes(function(prev) { var n = Object.assign({}, prev); n[id] = r.liked; return n; }); })
       .catch(function() { setPostLikes(function(prev) { var n = Object.assign({}, prev); n[id] = wasLiked; return n; }); });
+  }
+
+  // Toggle a post repost. Same pattern as toggleLike — optimistic
+  // local state flip, then POST or DELETE against the API and
+  // reconcile with the server's response. Mirrors the Feed's
+  // togglePostRepost so behaviour is consistent across both views.
+  function togglePostRepost(id) {
+    if (!currentUser) return;
+    var wasReposted = !!postReposts[id];
+    setPostReposts(function(prev) { var n = Object.assign({}, prev); n[id] = !wasReposted; return n; });
+    setPosts(function(prev) { return prev.map(function(p) {
+      return p.id === id
+        ? Object.assign({}, p, { repostCount: Math.max(0, (p.repostCount || 0) + (!wasReposted ? 1 : -1)) })
+        : p;
+    }); });
+    var method = wasReposted ? "DELETE" : "POST";
+    apiFetch("/api/posts/" + id + "/repost", { method: method })
+      .then(function(r) {
+        setPostReposts(function(prev) { var n = Object.assign({}, prev); n[id] = !!(r && r.reposted); return n; });
+      })
+      .catch(function() {
+        // Revert on failure
+        setPostReposts(function(prev) { var n = Object.assign({}, prev); n[id] = wasReposted; return n; });
+        setPosts(function(prev) { return prev.map(function(p) {
+          return p.id === id
+            ? Object.assign({}, p, { repostCount: Math.max(0, (p.repostCount || 0) + (wasReposted ? 1 : -1)) })
+            : p;
+        }); });
+      });
   }
 
   function submitPostComment(postId, text, parentId, onSuccess, onError) {
@@ -12285,7 +12325,7 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
                     <div style={{ padding: "8px 14px 4px", color: "#aaa", fontSize: 13 }}>{post.caption}</div>
                   )}
 
-                  {/* Like + comment */}
+                  {/* Like + comment + repost */}
                   <div style={{ padding: "8px 14px 12px", display: "flex", gap: 16, alignItems: "center" }}>
                     <button onClick={function() { togglePostLike(post.id); }}
                       style={{ background: "none", border: "none", cursor: currentUser ? "pointer" : "default",
@@ -12306,6 +12346,23 @@ function ContentTabs({ username, profile, currentUser, onPlay, savedIds, onSave,
                       </svg>
                       <span style={{ fontSize: 13 }}>{post.commentCount || 0}</span>
                     </button>
+                    {/* Repost button — hidden on the user's own posts
+                        (can't repost yourself). Mirrors the Feed's
+                        behaviour, including the active-state green
+                        colour for consistency. */}
+                    {currentUser && currentUser.username !== post.username && (
+                      <button onClick={function() { togglePostRepost(post.id); }}
+                        style={{ background: "none", border: "none", cursor: "pointer", padding: 0,
+                          display: "flex", alignItems: "center", gap: 5,
+                          color: postReposts[post.id] ? "#10B981" : "#555" }}>
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                          stroke={postReposts[post.id] ? "#10B981" : "#555"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/>
+                          <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/>
+                        </svg>
+                        <span style={{ fontSize: 13 }}>{post.repostCount || 0}</span>
+                      </button>
+                    )}
                     {post.type === "music" && post.spotifyUrl && (
                       <button onClick={function() { openExternalLink(post.spotifyUrl); }}
                         style={{ marginLeft: "auto", background: "#1DB954", border: "none", borderRadius: 20,
