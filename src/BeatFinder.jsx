@@ -23679,13 +23679,21 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     const t   = snapToBar(raw);
     const grabThresh = Math.max(0.15, spb * 0.5);
     let mode = "new";
-    if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
-    else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
-    // ── Move-region: touch landed strictly between the handles ──
-    // (and there IS a region to move, i.e. loopOut > loopIn).
-    // Drags the entire loop bar left/right, preserving its length.
-    else if (loopOut > loopIn && raw > loopIn + grabThresh && raw < loopOut - grabThresh) {
-      mode = "moveLoop";
+    // Only classify the tap as a loop-region interaction if the loop
+    // is actually enabled. When loop is off, loopIn/loopOut may still
+    // hold leftover values (e.g. 0 and a large number from a previous
+    // session) — without this guard, ANY tap was being classified as
+    // "moveLoop" because it fell inside the invisible region, which
+    // meant tap-to-seek silently never fired.
+    if (loopEnabled) {
+      if (Math.abs(raw - loopIn)  < grabThresh) mode = "in";
+      else if (Math.abs(raw - loopOut) < grabThresh) mode = "out";
+      // ── Move-region: touch landed strictly between the handles ──
+      // (and there IS a region to move, i.e. loopOut > loopIn).
+      // Drags the entire loop bar left/right, preserving its length.
+      else if (loopOut > loopIn && raw > loopIn + grabThresh && raw < loopOut - grabThresh) {
+        mode = "moveLoop";
+      }
     }
     rulerDragRef.current = {
       mode,
