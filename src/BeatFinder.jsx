@@ -26307,23 +26307,14 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         <button onClick={redoTracks} disabled={!canRedo} title="Redo" style={{ background:"#141414",border:"1px solid #222",borderRadius:7,color:canRedo?"#aaa":"#333",width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",cursor:canRedo?"pointer":"not-allowed",flexShrink:0 }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 7H10a5 5 0 0 0 0 10h7"/><polyline points="17 3 21 7 17 11"/></svg>
         </button>
+        {/* TEMPORARY DIAGNOSTIC — clickable pink DBG button (always visible) */}
+        <button onClick={function(e){ e.stopPropagation(); setShowStudioDbg(true); }}
+          style={{ background:"#C026D3",border:"none",borderRadius:6,color:"white",fontSize:10,fontWeight:800,padding:"5px 8px",cursor:"pointer",flexShrink:0,letterSpacing:0.5 }}>
+          DBG
+        </button>
         {renamingProj
           ?<input autoFocus defaultValue={projectName} onBlur={function(e){ setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false); }} onKeyDown={function(e){ if(e.key==="Enter"){setProjectName(e.target.value||projectName);setRenamingProj(false);setIsSaved(false);} }} style={{ background:"none",border:"none",borderBottom:"1px solid #C026D3",color:"white",fontSize:13,fontWeight:700,outline:"none",flex:1,padding:"0 0 2px" }} />
-          :<span
-              onClick={function(){
-                // TEMPORARY: triple-tap on project name opens the DBG panel.
-                if (!window.__bfDbgTaps) window.__bfDbgTaps = [];
-                var now = Date.now();
-                window.__bfDbgTaps.push(now);
-                window.__bfDbgTaps = window.__bfDbgTaps.filter(function(t){ return now - t < 700; });
-                if (window.__bfDbgTaps.length >= 3) {
-                  window.__bfDbgTaps = [];
-                  setShowStudioDbg(true);
-                }
-              }}
-              style={{ color:"white",fontWeight:700,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",cursor:"pointer" }}>
-              {projectName} <span style={{ color:"#C026D3", fontSize:9, fontWeight:800, letterSpacing:0.5, marginLeft:4 }}>[DBG]</span>
-            </span>
+          :<span style={{ color:"white",fontWeight:700,fontSize:12,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{projectName}</span>
         }
         <button onClick={function(e){ e.stopPropagation();setShowProjMenu(function(v){return !v;});setShowSettings(false); }} style={{ background:showProjMenu?"rgba(192,38,211,0.15)":"#1a1a1a",border:"1px solid "+(showProjMenu?"rgba(192,38,211,0.4)":"#2a2a2a"),borderRadius:8,color:"#aaa",fontSize:13,fontWeight:700,padding:"5px 10px",cursor:"pointer",flexShrink:0,letterSpacing:2 }}>···</button>
         <button onClick={function(e){ e.stopPropagation();setShowProjMenu(false);setShowSettings(function(v){return !v;}); }} style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:8,color:"#888",fontSize:12,padding:"5px 8px",cursor:"pointer",flexShrink:0 }}>⚙</button>
