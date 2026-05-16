@@ -31153,15 +31153,18 @@ function ChangelogScreen({ onBack }) {
 
   return (
     <div style={{
-      // iOS Safari scroll fix — when this is inside a position:fixed
-      // overlay with overflowY:auto, setting minHeight:100vh on the
-      // child pins the scroll height to viewport size and prevents
-      // long content from being scrollable. Letting content size
-      // itself naturally allows the wrapper's overflow:auto to kick in.
+      // The page itself is the scroll container — height:100vh constrains
+      // it to viewport, and overflowY:auto on THIS element scrolls its
+      // contents. Avoids nested-scroll issues we hit when relying on a
+      // parent overlay wrapper to scroll on iOS Safari.
+      height: "100vh",
+      overflowY: "auto",
+      WebkitOverflowScrolling: "touch",
+      overscrollBehavior: "contain",
       background: "#0a0a0a", color: "white",
       fontFamily: "'DM Sans',sans-serif",
       paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))",
-      paddingBottom: "calc(env(safe-area-inset-bottom) + 24px)",
+      paddingBottom: "calc(env(safe-area-inset-bottom) + 40px)",
     }}>
       <div style={{
         display: "flex", alignItems: "center", padding: "12px 16px",
@@ -31299,15 +31302,18 @@ function AboutScreen({ onBack }) {
 
   return (
     <div style={{
-      // iOS Safari scroll fix — when this is inside a position:fixed
-      // overlay with overflowY:auto, setting minHeight:100vh on the
-      // child pins the scroll height to viewport size and prevents
-      // long content from being scrollable. Letting content size
-      // itself naturally allows the wrapper's overflow:auto to kick in.
+      // The page itself is the scroll container — height:100vh constrains
+      // it to viewport, and overflowY:auto on THIS element scrolls its
+      // contents. Avoids nested-scroll issues we hit when relying on a
+      // parent overlay wrapper to scroll on iOS Safari.
+      height: "100vh",
+      overflowY: "auto",
+      WebkitOverflowScrolling: "touch",
+      overscrollBehavior: "contain",
       background: "#0a0a0a", color: "white",
       fontFamily: "'DM Sans',sans-serif",
       paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))",
-      paddingBottom: "calc(env(safe-area-inset-bottom) + 24px)",
+      paddingBottom: "calc(env(safe-area-inset-bottom) + 40px)",
     }}>
       <div style={{
         display: "flex", alignItems: "center", padding: "12px 16px",
@@ -32763,8 +32769,12 @@ function BeatFinderInner() {
       {/* Changelog overlay — opened via window event "bf:openChangelog" */}
       {showChangelog && (
         <div style={{
+          // Just the fixed-overlay frame — the inner page (ChangelogScreen
+          // / AboutScreen) is its own scroll container now. Don't add
+          // overflow here too; nested scroll containers fight each other
+          // on iOS Safari and the inner one wins inconsistently.
           position: "fixed", inset: 0, zIndex: 99996,
-          background: "#0a0a0a", overflowY: "auto", WebkitOverflowScrolling: "touch",
+          background: "#0a0a0a",
         }}>
           <ChangelogScreen onBack={function() { setShowChangelog(false); }} />
         </div>
@@ -32773,8 +32783,12 @@ function BeatFinderInner() {
       {/* About overlay — opened via window event "bf:openAbout" */}
       {showAbout && (
         <div style={{
+          // Just the fixed-overlay frame — the inner page (ChangelogScreen
+          // / AboutScreen) is its own scroll container now. Don't add
+          // overflow here too; nested scroll containers fight each other
+          // on iOS Safari and the inner one wins inconsistently.
           position: "fixed", inset: 0, zIndex: 99996,
-          background: "#0a0a0a", overflowY: "auto", WebkitOverflowScrolling: "touch",
+          background: "#0a0a0a",
         }}>
           <AboutScreen onBack={function() { setShowAbout(false); }} />
         </div>
