@@ -25200,6 +25200,18 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     if (newEffectsForLive.autotune) {
       setAutoPitch(function(prev) { return Object.assign({}, prev, newEffectsForLive.autotune); });
     }
+    // Presets always change chain topology (different plugins ON/OFF
+    // than before). If playback is active, stop so it can rebuild
+    // with the new chain on the next Play press.
+    if (isPlayingRef.current) {
+      try { stopAll(); } catch (_) {}
+      setIsPlaying(false);
+      try {
+        if (typeof window !== "undefined" && window.bfToast && window.bfToast.info) {
+          window.bfToast.info("Press Play to apply preset");
+        }
+      } catch (_) {}
+    }
   };
 
   const addTrackObj = function (obj) {
@@ -28326,8 +28338,17 @@ userPickedMicRef.current = true;
         // Keep ref current every render so FxPanel's stable onUpd always has latest data
         fxUpdRef.current = function(section, patch, rawValue){
           let newEffects;
+          // Track whether this update changes the chain TOPOLOGY (which
+          // plugins are present + their ON state). Topology changes
+          // require rebuilding the Web Audio graph — applyFxLive can
+          // only tweak parameters of nodes that already exist, not
+          // add/remove nodes mid-playback.
+          let changesTopology = false;
+
           if (section === "pluginChain") {
             newEffects = { ...t.effects, pluginChain: rawValue };
+            // Add / move / reorder always counts as topology change.
+            changesTopology = true;
           } else if (section === "__remove") {
             // Atomic: remove from chain AND force plugin section off so audio bypasses
             const pluginKey = rawValue;
@@ -28337,11 +28358,36 @@ userPickedMicRef.current = true;
               pluginChain: newChain,
               [pluginKey]: { ...(t.effects[pluginKey] || {}), on: false },
             };
+            changesTopology = true;
           } else {
             newEffects = { ...t.effects, [section]:{ ...(t.effects[section]||{}), ...patch } };
+            // Per-effect ON/OFF toggle = topology change (the node may
+            // not exist in the current chain — buildChain conditionally
+            // allocates based on `on`). Other parameter tweaks are fine
+            // to apply live.
+            const oldOn = !!(t.effects[section] && t.effects[section].on);
+            const newOn = !!(newEffects[section] && newEffects[section].on);
+            if (oldOn !== newOn) changesTopology = true;
           }
+
           updateTrack(t.id, { effects: newEffects });
           applyFxLive(t.id, newEffects);
+
+          // If this changed chain topology AND playback is active, stop
+          // playback. The chain will rebuild on the next Play press with
+          // the new topology — that's the architecture, and rebuilding
+          // mid-playback would risk audio dropouts or clicks. Tell the
+          // user via a brief toast so they know why.
+          if (changesTopology && isPlayingRef.current) {
+            try { stopAll(); } catch (_) {}
+            setIsPlaying(false);
+            try {
+              if (typeof window !== "undefined" && window.bfToast && window.bfToast.info) {
+                window.bfToast.info("Press Play to apply FX changes");
+              }
+            } catch (_) {}
+          }
+
           // Sync autotune fx changes to autoPitch monitoring state so the
           // live worklet node parameters update without restarting monitoring
           if (section === "autotune" && newEffects.autotune) {
