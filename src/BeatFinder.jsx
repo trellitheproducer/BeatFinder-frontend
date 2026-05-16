@@ -26588,6 +26588,63 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }}
     >
       {/* ── Overlays ── */}
+      {/* CPU-load warning — Web Audio on iOS Safari struggles past ~4 channels
+          with active FX. Warning is informational; doesn't block anything.
+          Shows once per session (auto-dismissed by tap or X). */}
+      {(function() {
+        if (typeof window === "undefined") return null;
+        if (window.__bfStudioFxWarnDismissed) return null;
+        var loadedFxTracks = (tracks || []).filter(function(t) {
+          var fx = t && t.effects;
+          if (!fx) return false;
+          return !!(
+            (fx.autotune  && fx.autotune.on)  ||
+            (fx.reverb    && fx.reverb.on)    ||
+            (fx.delay     && fx.delay.on)     ||
+            (fx.eq        && fx.eq.on)        ||
+            (fx.compressor && fx.compressor.on) ||
+            (fx.noiseGate && fx.noiseGate.on)
+          );
+        }).length;
+        if (loadedFxTracks < 4) return null;
+        return (
+          <div style={{
+            position: "absolute",
+            top: "calc(env(safe-area-inset-top) + 56px)",
+            left: 12, right: 12,
+            zIndex: 5000,
+            background: "linear-gradient(135deg,#2a1a08 0%,#1a1208 100%)",
+            border: "1px solid rgba(245,158,11,0.45)",
+            borderRadius: 12,
+            padding: "10px 14px",
+            color: "#FBBF24",
+            fontSize: 12, lineHeight: 1.45, fontFamily: "'DM Sans',sans-serif",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.5), 0 0 12px rgba(245,158,11,0.15)",
+            display: "flex", gap: 10, alignItems: "flex-start",
+          }}>
+            <div style={{ flex: "0 0 auto", fontSize: 16, lineHeight: 1 }}>⚠️</div>
+            <div style={{ flex: 1, color: "#FCD34D" }}>
+              <strong style={{ color: "#FDE68A" }}>Heads up:</strong> using FX on
+              {" "}{loadedFxTracks} tracks may glitch or crash on iPhone — Web Audio
+              has tight CPU limits on mobile. Mute or disable FX on tracks you
+              aren't actively using. <em style={{ color: "#A78BFA" }}>(known issue, working on a fix)</em>
+            </div>
+            <div
+              onClick={function(e) {
+                e.stopPropagation();
+                try { window.__bfStudioFxWarnDismissed = true; } catch (_) {}
+                // Force re-render so the warning disappears
+                try {
+                  var ev = new CustomEvent("bf:studio-warn-dismissed");
+                  window.dispatchEvent(ev);
+                } catch (_) {}
+              }}
+              style={{ flex: "0 0 auto", color: "#FBBF24", fontSize: 16, cursor: "pointer", padding: 2 }}>
+              ×
+            </div>
+          </div>
+        );
+      })()}
       {exporting && (
         <div style={{ position:"absolute",inset:0,zIndex:9000,background:"rgba(0,0,0,0.9)",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:20 }}>
           <div style={{ width:52,height:52,borderRadius:"50%",border:"3px solid rgba(192,38,211,0.3)",borderTop:"3px solid #C026D3",animation:"bf-spin 0.8s linear infinite" }} />
