@@ -1789,10 +1789,13 @@ async function fetchBeats(artistName, page, filterTitle, maxResults, extraQuerie
 // AUTH API - register / login / me / upgrade plan
 // =============================================================================
 const AuthAPI = {
-  async register(name, email, password) {
+  async register(name, email, password, marketingOptIn) {
     const data = await apiFetch("/api/auth/register", {
       method: "POST",
-      body: JSON.stringify({ name, email, password }),
+      // marketing_opt_in defaults to false (GDPR-safe). The signup form
+      // surfaces an unticked checkbox; backend records the value + a
+      // timestamp for audit purposes.
+      body: JSON.stringify({ name, email, password, marketing_opt_in: !!marketingOptIn }),
     });
     saveToken(data.access_token);
     const u = data.user;
@@ -15133,6 +15136,8 @@ function RootAuthScreen({ onLogin, startMode }) {
   // Signup-only — user must tick this to agree to T&Cs. Reset whenever
   // the user toggles between login and signup so the state can't leak.
   const [acceptTerms, setAcceptTerms] = useState(false);
+  // Marketing opt-in — GDPR-strict default OFF. User must explicitly tick.
+  const [marketingOptIn, setMarketingOptIn] = useState(false);
   // Show the full T&Cs in a scrollable modal when the user taps the link.
   const [showTermsPreview, setShowTermsPreview] = useState(false);
   // Signup-only: chosen username + live availability check
@@ -15292,6 +15297,26 @@ function RootAuthScreen({ onLogin, startMode }) {
               . I'm at least 16.
             </span>
           </label>
+          {/* Marketing opt-in — defaults OFF (GDPR). No legal implication
+              of leaving it unticked; user can still receive transactional
+              emails (receipts, password resets). */}
+          <label htmlFor="bf_marketing_optin"
+            style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer",
+              userSelect: "none", WebkitUserSelect: "none", marginTop: 10 }}>
+            <input
+              id="bf_marketing_optin"
+              type="checkbox"
+              checked={marketingOptIn}
+              onChange={e => setMarketingOptIn(e.target.checked)}
+              style={{
+                width: 16, height: 16, marginTop: 1, flexShrink: 0,
+                accentColor: "#7C3AED", cursor: "pointer",
+              }}
+            />
+            <span style={{ color: "#888", fontSize: 11, lineHeight: 1.35 }}>
+              Send me occasional updates about BeatFinder (new features, beats, producer spotlights).
+            </span>
+          </label>
         </div>
       )}
 
@@ -15314,7 +15339,7 @@ function RootAuthScreen({ onLogin, startMode }) {
           setAuthLoading(true);
           try {
             const u = mode === "signup"
-              ? await AuthAPI.register(name || email.split("@")[0], email, pw)
+              ? await AuthAPI.register(name || email.split("@")[0], email, pw, marketingOptIn)
               : await AuthAPI.login(email, pw);
             // Persist chosen username on the new account. See companion
             // comment in ProfileScreen — without this call, new users
@@ -16262,6 +16287,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
   // T&Cs acceptance — signup-only in this in-profile auth form too.
   const [acceptTerms,        setAcceptTerms]        = useState(false);
   const [showTermsPreview,   setShowTermsPreview]   = useState(false);
+  const [marketingOptIn,     setMarketingOptIn]     = useState(false);
   const [email,       setEmail]       = useState(() => {
     try { return localStorage.getItem("bf_remember") === "1" ? (localStorage.getItem("bf_saved_email") || "") : ""; } catch { return ""; }
   });
@@ -16535,6 +16561,24 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                 {" "}and Privacy Policy. I confirm I am at least 16 years old.
               </span>
             </label>
+            {/* Marketing opt-in checkbox — defaults OFF */}
+            <label htmlFor="bf_marketing_optin_2"
+              style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer",
+                userSelect: "none", WebkitUserSelect: "none", marginTop: 10 }}>
+              <input
+                id="bf_marketing_optin_2"
+                type="checkbox"
+                checked={marketingOptIn}
+                onChange={e => setMarketingOptIn(e.target.checked)}
+                style={{
+                  width: 16, height: 16, marginTop: 1, flexShrink: 0,
+                  accentColor: "#7C3AED", cursor: "pointer",
+                }}
+              />
+              <span style={{ color: "#888", fontSize: 11, lineHeight: 1.35 }}>
+                Send me occasional updates about BeatFinder.
+              </span>
+            </label>
           </div>
         )}
         <button disabled={authLoading} onClick={async () => {
@@ -16554,7 +16598,7 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
           setAuthLoading(true);
           try {
             const u = mode === "signup"
-              ? await AuthAPI.register(name || email.split("@")[0], email, pw)
+              ? await AuthAPI.register(name || email.split("@")[0], email, pw, marketingOptIn)
               : await AuthAPI.login(email, pw);
             // Persist the chosen username immediately after registration.
             // The /register endpoint creates the user without a username
@@ -16998,6 +17042,32 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
                   {openSettingsSection === "users" && (
                     <div style={{ padding: "14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
                       <UsersManager />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Email List (admin only — marketing exports) ───────── */}
+              {(user.is_admin === true || user.username === "Trelli") && (
+                <div style={{ background: "#111", border: "1px solid #2a2a2a", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                  <button onClick={() => setOpenSettingsSection(openSettingsSection === "emaillist" ? null : "emaillist")}
+                    style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "12px 14px", background: openSettingsSection === "emaillist" ? "#1a1a1a" : "#141414",
+                      border: "none", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ filter: "drop-shadow(0 0 4px rgba(124,58,237,0.6))" }}>
+                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                        <polyline points="22,6 12,13 2,6"/>
+                      </svg>
+                      Email List
+                      <span style={{ color: "#A78BFA", fontSize: 9, fontWeight: 800, letterSpacing: 0.5, marginLeft: 2 }}>ADMIN</span>
+                    </span>
+                    <span style={{ color: "#666", fontSize: 12, transition: "transform 0.2s",
+                      transform: openSettingsSection === "emaillist" ? "rotate(180deg)" : "none" }}>▼</span>
+                  </button>
+                  {openSettingsSection === "emaillist" && (
+                    <div style={{ padding: "14px", background: "#1a1a1a", borderTop: "1px solid #222" }}>
+                      <EmailListExport />
                     </div>
                   )}
                 </div>
@@ -29194,6 +29264,7 @@ function QuickSignupModal({ intent, beat, onClose, onAccountCreated }) {
   var [email, setEmail]                   = React.useState("");
   var [pw, setPw]                         = React.useState("");
   var [acceptTerms, setAcceptTerms]       = React.useState(false);
+  var [marketingOptIn, setMarketingOptIn] = React.useState(false);
   var [busy, setBusy]                     = React.useState(false);
   var [err, setErr]                       = React.useState("");
 
@@ -29233,7 +29304,7 @@ function QuickSignupModal({ intent, beat, onClose, onAccountCreated }) {
 
     setBusy(true);
     try {
-      var u = await AuthAPI.register(name.trim(), email.trim(), pw);
+      var u = await AuthAPI.register(name.trim(), email.trim(), pw, marketingOptIn);
       try {
         await apiFetch("/api/auth/set-username", {
           method: "POST",
@@ -29343,6 +29414,17 @@ function QuickSignupModal({ intent, beat, onClose, onAccountCreated }) {
           />
           <span style={{ color: "#aaa", fontSize: 11, lineHeight: 1.5 }}>
             I agree to the BeatFinder Terms & Conditions and confirm I'm at least 13 years old.
+          </span>
+        </label>
+
+        {/* Marketing opt-in — defaults OFF, GDPR-safe */}
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 14, cursor: "pointer" }}>
+          <input type="checkbox" checked={marketingOptIn}
+            onChange={function(e){ setMarketingOptIn(e.target.checked); }}
+            style={{ marginTop: 3, accentColor: "#C026D3" }}
+          />
+          <span style={{ color: "#888", fontSize: 11, lineHeight: 1.5 }}>
+            Send me occasional updates about BeatFinder.
           </span>
         </label>
 
@@ -30180,6 +30262,136 @@ function DebugLogViewer() {
                 </div>
               );
             })}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// EMAIL LIST EXPORT (admin only)
+// =============================================================================
+// Shows opt-in counts and offers a CSV export of opted-in users for
+// importing into a marketing email tool (Mailchimp, Resend, ConvertKit etc.).
+//
+// Two consent categories in the export:
+//   • "explicit" — user ticked the marketing-opt-in box at signup
+//   • "soft"     — existing pre-checkbox user (PECR soft opt-in basis)
+//
+// Use the consent_type column in your mailing tool to send safer-first to
+// the EU users via "explicit" only if you want to be extra cautious.
+function EmailListExport() {
+  var [stats, setStats] = React.useState(null);
+  var [loading, setLoading] = React.useState(true);
+  var [downloading, setDownloading] = React.useState(false);
+  var [err, setErr] = React.useState("");
+
+  function loadStats() {
+    setLoading(true);
+    setErr("");
+    apiFetch("/api/auth/admin/email-stats")
+      .then(function(r) { setStats(r); })
+      .catch(function(e) { setErr("Couldn't load stats: " + (e.message || "")); })
+      .finally(function() { setLoading(false); });
+  }
+
+  React.useEffect(function() { loadStats(); }, []);
+
+  function download() {
+    // Use fetch directly so we can grab the blob and trigger a download.
+    setDownloading(true);
+    var token;
+    try { token = localStorage.getItem("bf_token"); } catch (_) {}
+    fetch(API_BASE + "/api/auth/admin/export-emails", {
+      headers: { "Authorization": "Bearer " + (token || "") },
+    })
+      .then(function(r) {
+        if (!r.ok) throw new Error("Export failed (HTTP " + r.status + ")");
+        return r.blob();
+      })
+      .then(function(blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        var stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+        a.href = url;
+        a.download = "beatfinder-emails-" + stamp + ".csv";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      })
+      .catch(function(e) { setErr("Download failed: " + (e.message || "")); })
+      .finally(function() { setDownloading(false); });
+  }
+
+  if (loading) {
+    return <div style={{ color: "#888", fontSize: 12 }}>Loading…</div>;
+  }
+
+  return (
+    <div>
+      {err && (
+        <div style={{ color: "#F87171", fontSize: 12, marginBottom: 10 }}>{err}</div>
+      )}
+
+      <div style={{ color: "#888", fontSize: 11, lineHeight: 1.5, marginBottom: 14 }}>
+        Export a CSV of users who can receive marketing emails. The export
+        includes anyone who explicitly opted in at signup OR existed before
+        the opt-in checkbox shipped (under PECR soft opt-in). Anyone who
+        actively opted out is excluded.
+      </div>
+
+      {stats && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+          {[
+            { label: "EXPLICIT OPT-IN", value: stats.explicit_opt_in,  color: "#22C55E" },
+            { label: "SOFT OPT-IN",      value: stats.soft_opt_in,      color: "#A78BFA" },
+            { label: "OPTED OUT",        value: stats.explicit_opt_out, color: "#888" },
+            { label: "EXPORTABLE TOTAL", value: stats.exportable_total, color: "#FBBF24" },
+          ].map(function(stat, i) {
+            return (
+              <div key={i} style={{
+                background: "#0d0d0d", border: "1px solid #222",
+                borderRadius: 8, padding: "10px 12px",
+              }}>
+                <div style={{ color: stat.color, fontSize: 9, fontWeight: 800, letterSpacing: 0.5, marginBottom: 4 }}>
+                  {stat.label}
+                </div>
+                <div style={{ color: "white", fontSize: 20, fontWeight: 800 }}>
+                  {stat.value.toLocaleString()}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <button
+        onClick={download}
+        disabled={downloading || !stats || stats.exportable_total === 0}
+        style={{
+          width: "100%",
+          background: (downloading || !stats || stats.exportable_total === 0)
+            ? "#222"
+            : "linear-gradient(135deg,#C026D3,#7C3AED)",
+          color: "white", border: "none",
+          borderRadius: 10, padding: "12px 16px",
+          fontSize: 13, fontWeight: 800, letterSpacing: 0.5,
+          cursor: (downloading || !stats || stats.exportable_total === 0) ? "not-allowed" : "pointer",
+          marginBottom: 10,
+        }}>
+        {downloading ? "Downloading…" : "Download CSV (" + ((stats && stats.exportable_total) || 0) + " users)"}
+      </button>
+
+      <div style={{
+        background: "rgba(245,158,11,0.06)",
+        border: "1px solid rgba(245,158,11,0.2)",
+        borderRadius: 8, padding: "10px 12px",
+        color: "#FCD34D", fontSize: 10, lineHeight: 1.5,
+      }}>
+        <strong style={{ color: "#FDE68A" }}>Compliance reminder:</strong> every marketing
+        email you send MUST include an unsubscribe link. When users unsubscribe,
+        update their <code style={{ color: "#FBBF24" }}>marketing_opt_in</code> to false
+        so they're suppressed from future exports.
       </div>
     </div>
   );
