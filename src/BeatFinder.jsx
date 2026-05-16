@@ -26624,10 +26624,13 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
           }}>
             <div style={{ flex: "0 0 auto", fontSize: 16, lineHeight: 1 }}>⚠️</div>
             <div style={{ flex: 1, color: "#FCD34D" }}>
-              <strong style={{ color: "#FDE68A" }}>Heads up:</strong> using FX on
-              {" "}{loadedFxTracks} tracks may glitch or crash on iPhone — Web Audio
-              has tight CPU limits on mobile. Mute or disable FX on tracks you
-              aren't actively using. <em style={{ color: "#A78BFA" }}>(known issue, working on a fix)</em>
+              <strong style={{ color: "#FDE68A" }}>Beta — heads up:</strong> BeatFinder is currently a beta web app.
+              Using FX on {loadedFxTracks} tracks may glitch or crash on iPhone — Web Audio
+              has tight CPU limits on mobile browsers. Mute or disable FX on tracks you
+              aren't actively using, and <strong style={{ color: "#FDE68A" }}>save your work often</strong>.
+              <em style={{ color: "#A78BFA", display: "block", marginTop: 4 }}>
+                A native iOS app with better Studio performance is on the way.
+              </em>
             </div>
             <div
               onClick={function(e) {
@@ -28785,6 +28788,26 @@ function SplashScreen({ onDone }) {
           display: "block",
         }}
       />
+      {/* BETA tag — small chip in the top-right corner. Sets the
+          expectation that this is an early version of the product,
+          so users are forgiving of rough edges + occasional issues. */}
+      <div style={{
+        position: "absolute",
+        top: "calc(env(safe-area-inset-top) + 16px)",
+        right: 16,
+        background: "linear-gradient(135deg,#C026D3 0%,#7C3AED 100%)",
+        color: "white",
+        fontFamily: "'Bebas Neue',sans-serif",
+        fontSize: 13,
+        fontWeight: 700,
+        letterSpacing: 2,
+        padding: "4px 10px",
+        borderRadius: 10,
+        boxShadow: "0 4px 12px rgba(192,38,211,0.4), 0 0 16px rgba(124,58,237,0.3)",
+        border: "1px solid rgba(255,255,255,0.15)",
+      }}>
+        BETA
+      </div>
     </div>
   );
 }
@@ -30841,8 +30864,25 @@ function AboutScreen({ onBack }) {
           }}>
             BEATFINDER
           </div>
-          <div style={{ color: "#666", fontSize: 11, fontWeight: 700, letterSpacing: 2 }}>
+          <div style={{ color: "#666", fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 8 }}>
             EST. MAY 2026 · LONDON, UK
+          </div>
+          {/* BETA chip — same subtle treatment as splash. Reinforces
+              "early product, more coming" messaging without screaming
+              it in the user's face. */}
+          <div style={{
+            display: "inline-block",
+            background: "linear-gradient(135deg,rgba(192,38,211,0.18),rgba(124,58,237,0.12))",
+            border: "1px solid rgba(192,38,211,0.4)",
+            color: "#E9D5FF",
+            fontFamily: "'Bebas Neue',sans-serif",
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: 2,
+            padding: "3px 10px",
+            borderRadius: 8,
+          }}>
+            BETA · WEB APP
           </div>
         </div>
 
