@@ -3268,6 +3268,56 @@ var PLAN_PRICES = {
   producer: { monthly: "price_1TQDpBFHyNSCxas8cktbqw1n", yearly: "price_1TW9BnFHyNSCxas8vHDrVwB6" },
 };
 
+// =============================================================================
+// CURRENCY DISPLAY (subscription pricing only — Deploy 1)
+// =============================================================================
+// We charge in GBP everywhere via Stripe. For international users who'd
+// rather see prices in their currency at-a-glance, we display an APPROXIMATE
+// conversion with a "charged in GBP" disclaimer.
+//
+// Important: this is DISPLAY ONLY. The actual Stripe charge is GBP. The
+// user's bank converts to their currency at THEIR bank's FX rate, which
+// may differ slightly from what we show. The disclaimer + "≈" prefix tell
+// them this.
+//
+// FX rates are static here — refresh manually every few months. Live FX
+// APIs add a network dependency we don't need for a beta launch.
+// Rates last updated: May 2026
+var CURRENCIES = {
+  GBP: { code: "GBP", symbol: "£", rate: 1.00, label: "GBP" },
+  USD: { code: "USD", symbol: "$", rate: 1.26, label: "USD" },
+  EUR: { code: "EUR", symbol: "€", rate: 1.17, label: "EUR" },
+};
+
+function bfGetCurrencyPref() {
+  try {
+    var saved = localStorage.getItem("bf_currency");
+    if (saved && CURRENCIES[saved]) return saved;
+  } catch (_) {}
+  return "GBP";
+}
+
+function bfSetCurrencyPref(code) {
+  try { localStorage.setItem("bf_currency", code); } catch (_) {}
+}
+
+// Convert a GBP price to display string in chosen currency.
+// Examples:
+//   bfFormatPrice(4.99, "GBP", "/mo")  → "£4.99/mo"
+//   bfFormatPrice(4.99, "USD", "/mo")  → "≈ $6.29/mo"
+//   bfFormatPrice(49.99, "EUR", "/yr") → "≈ €58.49/yr"
+// Free (0) is always shown plainly without currency, no symbol — looks cleanest.
+function bfFormatPrice(gbpAmount, code, suffix) {
+  if (!gbpAmount || gbpAmount === 0) return "Free";
+  var c = CURRENCIES[code] || CURRENCIES.GBP;
+  var converted = gbpAmount * c.rate;
+  var amountStr = converted.toFixed(2);
+  // Strip trailing .00 for clean look (e.g. £5 not £5.00)
+  if (amountStr.endsWith(".00")) amountStr = amountStr.slice(0, -3);
+  var prefix = (code === "GBP") ? "" : "≈ ";
+  return prefix + c.symbol + amountStr + (suffix || "");
+}
+
 // Fetched server pricing — exposed so PlanPicker can read display strings
 // straight from the API response (no hardcoded amounts on the frontend).
 // Populated by the boot-time fetch in BeatFinderInner.
@@ -3300,6 +3350,23 @@ function applyServerPricing(serverData) {
 
 function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
   var [billing, setBilling] = React.useState("monthly"); // "monthly" | "yearly"
+  // Currency preference — defaults to GBP. Stored in localStorage so it
+  // sticks across sessions. Pure display: Stripe still charges in GBP.
+  var [currency, setCurrency] = React.useState(function() { return bfGetCurrencyPref(); });
+  function changeCurrency(code) {
+    setCurrency(code);
+    bfSetCurrencyPref(code);
+  }
+
+  // Compute price strings dynamically based on chosen currency. We keep
+  // the GBP amounts in `monthlyPrice`/`yearlyPrice` as the source of truth
+  // and convert at render time. Saving is calculated in the same currency.
+  var artistMonthly  = bfFormatPrice(4.99,  currency, "/mo");
+  var artistYearly   = bfFormatPrice(49.99, currency, "/yr");
+  var artistSaving   = bfFormatPrice(4.99 * 12 - 49.99, currency, "");
+  var producerMonthly = bfFormatPrice(8.99,  currency, "/mo");
+  var producerYearly  = bfFormatPrice(89.99, currency, "/yr");
+  var producerSaving  = bfFormatPrice(8.99 * 12 - 89.99, currency, "");
 
   var plans = [
     {
@@ -3308,8 +3375,8 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
       color: "#6B7280",
       monthlyPrice: 0,
       yearlyPrice:  0,
-      monthlyStr: "£0",
-      yearlyStr:  "£0",
+      monthlyStr: "Free",
+      yearlyStr:  "Free",
       saving:     "",
       perks: ["Browse all beats", "Preview 45 seconds", "Follow producers", "Write & save lyrics"],
     },
@@ -3319,9 +3386,9 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
       color: "#A855F7",
       monthlyPrice: 4.99,
       yearlyPrice:  49.99,
-      monthlyStr: "£4.99/mo",
-      yearlyStr:  "£49.99/yr",
-      saving:     "Save £9.89",
+      monthlyStr: artistMonthly,
+      yearlyStr:  artistYearly,
+      saving:     "Save " + artistSaving,
       perks: ["Rhyme Finder tool", "Studio recording mode", "Your own profile", "Write lyrics to beats", "Save unlimited beats", "Exclusive member beats", "Download MP3s", "Purchase leases"],
     },
     {
@@ -3330,9 +3397,9 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
       color: "#C026D3",
       monthlyPrice: 8.99,
       yearlyPrice:  89.99,
-      monthlyStr: "£8.99/mo",
-      yearlyStr:  "£89.99/yr",
-      saving:     "Save £17.89",
+      monthlyStr: producerMonthly,
+      yearlyStr:  producerYearly,
+      saving:     "Save " + producerSaving,
       perks: ["Everything in Artist Pro", "Upload & sell beats", "Sell MP3 leases", "Download stats", "Verified badge", "Featured in rotation"],
     },
   ];
@@ -3377,6 +3444,35 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
             </button>
           );
         })}
+      </div>
+
+      {/* Currency picker — display only, Stripe still charges in GBP.
+          Compact pill row showing GBP / USD / EUR. Active one glows. */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+        marginBottom: 6, padding: "0 2px",
+      }}>
+        <span style={{ color: "#666", fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}>
+          DISPLAY CURRENCY
+        </span>
+        <div style={{ display: "flex", gap: 4 }}>
+          {Object.keys(CURRENCIES).map(function(code) {
+            var active = currency === code;
+            return (
+              <button key={code}
+                onClick={function() { changeCurrency(code); }}
+                style={{
+                  background: active ? "linear-gradient(135deg,rgba(192,38,211,0.18),rgba(124,58,237,0.08))" : "transparent",
+                  border: "1px solid " + (active ? "rgba(192,38,211,0.45)" : "#2a2a2a"),
+                  color: active ? "#E9D5FF" : "#888",
+                  fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
+                  padding: "3px 7px", borderRadius: 6,
+                  cursor: "pointer",
+                }}>
+                {CURRENCIES[code].symbol} {code}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Plan cards */}
@@ -3506,6 +3602,23 @@ function PlanPicker({ onSelectPlan, compact, selectedPlanId }) {
           );
         })}
       </div>
+
+      {/* FX disclaimer — only shown when user is viewing non-GBP prices.
+          Critical for trust: their bank statement will show the GBP charge
+          converted at the bank's own rate, which may differ slightly from
+          what we show here. */}
+      {currency !== "GBP" && (
+        <div style={{
+          marginTop: 8, padding: "8px 10px",
+          background: "rgba(124,58,237,0.06)",
+          border: "1px solid rgba(124,58,237,0.18)",
+          borderRadius: 8,
+          color: "#A78BFA", fontSize: 10, lineHeight: 1.4,
+          fontFamily: "'DM Sans',sans-serif",
+        }}>
+          Approximate conversion shown. <strong style={{ color: "#C4B5FD" }}>Charged in GBP</strong> at checkout — your bank converts at its own rate.
+        </div>
+      )}
     </div>
   );
 }
