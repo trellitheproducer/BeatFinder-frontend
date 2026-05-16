@@ -31181,10 +31181,9 @@ function ChangelogScreen({ onBack }) {
         </div>
       </div>
 
-      <div style={{ padding: "20px 18px", maxWidth: 640, margin: "0 auto" }}>
-        <div style={{ color: "#aaa", fontSize: 13, marginBottom: 24, lineHeight: 1.6 }}>
-          What's new in BeatFinder. We ship updates regularly — bug fixes, new features,
-          and improvements based on what you tell us.
+      <div style={{ padding: "10px 14px", maxWidth: 640, margin: "0 auto" }}>
+        <div style={{ color: "#aaa", fontSize: 11, marginBottom: 10, lineHeight: 1.4 }}>
+          What's new in BeatFinder. We ship updates regularly.
         </div>
 
         {CHANGELOG_ENTRIES.map(function(entry, idx) {
@@ -31192,29 +31191,29 @@ function ChangelogScreen({ onBack }) {
             <div key={entry.version} style={{
               background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
               border: "1px solid rgba(124,58,237,0.18)",
-              borderRadius: 14, padding: "18px 18px 14px",
-              marginBottom: 14,
+              borderRadius: 12, padding: "10px 12px",
+              marginBottom: 8,
               position: "relative", overflow: "hidden",
             }}>
               {/* LED top edge */}
               <div style={{
-                position: "absolute", top: 0, left: 14, right: 14, height: 2,
+                position: "absolute", top: 0, left: 12, right: 12, height: 2,
                 background: idx === 0
                   ? "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)"
                   : "linear-gradient(90deg,transparent,#444,#666,#444,transparent)",
                 boxShadow: idx === 0 ? "0 0 8px rgba(124,58,237,0.5)" : "none",
               }} />
 
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 2 }}>
                 <div style={{
-                  fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, letterSpacing: 1.5,
+                  fontFamily: "'Bebas Neue',sans-serif", fontSize: 16, letterSpacing: 1.2,
                   color: idx === 0 ? "#C026D3" : "#888",
                 }}>v{entry.version}</div>
-                <div style={{ color: "#555", fontSize: 11, fontWeight: 700, letterSpacing: 0.5 }}>
+                <div style={{ color: "#555", fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}>
                   {entry.date}
                 </div>
               </div>
-              <div style={{ color: "white", fontWeight: 700, fontSize: 15, marginBottom: 12 }}>
+              <div style={{ color: "white", fontWeight: 700, fontSize: 12, marginBottom: 6 }}>
                 {entry.title}
               </div>
 
@@ -31222,11 +31221,11 @@ function ChangelogScreen({ onBack }) {
                 return (
                   <div key={i} style={{
                     display: "flex", alignItems: "flex-start", gap: 6,
-                    color: "#ccc", fontSize: 13, lineHeight: 1.6,
-                    marginBottom: 8,
+                    color: "#ccc", fontSize: 11, lineHeight: 1.35,
+                    marginBottom: 4,
                   }}>
                     <span style={tagStyle(item.tag)}>{({
-                      "new":"NEW","improved":"IMPROVED","fixed":"FIXED","security":"SECURITY"
+                      "new":"NEW","improved":"IMPR","fixed":"FIX","security":"SEC"
                     }[item.tag]) || item.tag.toUpperCase()}</span>
                     <span style={{ flex: 1 }}>{item.text}</span>
                   </div>
@@ -31236,9 +31235,8 @@ function ChangelogScreen({ onBack }) {
           );
         })}
 
-        <div style={{ color: "#444", fontSize: 11, textAlign: "center", marginTop: 24, lineHeight: 1.6 }}>
-          Got feedback or a bug to report? Email <span style={{ color: "#A78BFA" }}>trellitheproducer@gmail.com</span>
-          <br />or tap the thumbs-down in any chat.
+        <div style={{ color: "#444", fontSize: 9, textAlign: "center", marginTop: 8, lineHeight: 1.4 }}>
+          Feedback? <span style={{ color: "#A78BFA" }}>trellitheproducer@gmail.com</span>
         </div>
       </div>
     </div>
@@ -31270,16 +31268,16 @@ function AboutScreen({ onBack }) {
       <div
         onClick={href ? function() { openExternal(href); } : undefined}
         style={{
-          display: "flex", alignItems: "center", gap: 12,
-          padding: "12px 14px",
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "8px 12px",
           background: "#0d0d0d",
           border: "1px solid #2a2a2a",
           borderRadius: 10,
-          marginBottom: 8,
+          marginBottom: 6,
           cursor: href ? "pointer" : "default",
         }}>
         <div style={{
-          flex: "0 0 auto", width: 32, height: 32, borderRadius: 8,
+          flex: "0 0 auto", width: 26, height: 26, borderRadius: 6,
           background: "rgba(124,58,237,0.12)",
           border: "1px solid rgba(124,58,237,0.3)",
           display: "flex", alignItems: "center", justifyContent: "center",
@@ -31287,15 +31285,15 @@ function AboutScreen({ onBack }) {
         }}>
           {icon}
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 0.8, marginBottom: 2 }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ color: "#888", fontSize: 9, fontWeight: 700, letterSpacing: 0.8, flex: "0 0 auto" }}>
             {label}
-          </div>
-          <div style={{ color: "white", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          </span>
+          <span style={{ color: "white", fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {value}
-          </div>
+          </span>
         </div>
-        {href && <div style={{ color: "#555", fontSize: 16, flex: "0 0 auto" }}>↗</div>}
+        {href && <div style={{ color: "#555", fontSize: 13, flex: "0 0 auto" }}>↗</div>}
       </div>
     );
   }
@@ -31330,35 +31328,32 @@ function AboutScreen({ onBack }) {
         </div>
       </div>
 
-      <div style={{ padding: "24px 18px", maxWidth: 540, margin: "0 auto" }}>
-        <div style={{ textAlign: "center", marginBottom: 24, padding: "20px 0" }}>
+      <div style={{ padding: "12px 14px", maxWidth: 540, margin: "0 auto" }}>
+        <div style={{ textAlign: "center", marginBottom: 12, padding: "8px 0" }}>
           <div style={{
-            fontFamily: "'Bebas Neue',sans-serif", fontSize: 42, letterSpacing: 6,
+            fontFamily: "'Bebas Neue',sans-serif", fontSize: 28, letterSpacing: 4,
             background: "linear-gradient(135deg,#C026D3 0%,#A855F7 50%,#3B82F6 100%)",
             WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
             backgroundClip: "text",
-            filter: "drop-shadow(0 0 12px rgba(192,38,211,0.4))",
-            marginBottom: 4,
+            filter: "drop-shadow(0 0 10px rgba(192,38,211,0.4))",
+            marginBottom: 2,
           }}>
             BEATFINDER
           </div>
-          <div style={{ color: "#666", fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 8 }}>
+          <div style={{ color: "#666", fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 6 }}>
             EST. MAY 2026 · LONDON, UK
           </div>
-          {/* BETA chip — same subtle treatment as splash. Reinforces
-              "early product, more coming" messaging without screaming
-              it in the user's face. */}
           <div style={{
             display: "inline-block",
             background: "linear-gradient(135deg,rgba(192,38,211,0.18),rgba(124,58,237,0.12))",
             border: "1px solid rgba(192,38,211,0.4)",
             color: "#E9D5FF",
             fontFamily: "'Bebas Neue',sans-serif",
-            fontSize: 11,
+            fontSize: 9,
             fontWeight: 700,
-            letterSpacing: 2,
-            padding: "3px 10px",
-            borderRadius: 8,
+            letterSpacing: 1.5,
+            padding: "2px 8px",
+            borderRadius: 6,
           }}>
             BETA · WEB APP
           </div>
@@ -31367,8 +31362,8 @@ function AboutScreen({ onBack }) {
         <div style={{
           background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
           border: "1px solid rgba(124,58,237,0.18)",
-          borderRadius: 14, padding: "18px",
-          marginBottom: 20,
+          borderRadius: 12, padding: "12px 14px",
+          marginBottom: 12,
           position: "relative", overflow: "hidden",
         }}>
           <div style={{
@@ -31376,52 +31371,50 @@ function AboutScreen({ onBack }) {
             background: "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)",
             boxShadow: "0 0 8px rgba(124,58,237,0.5)",
           }} />
-          <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 800, letterSpacing: 1.5, marginBottom: 10 }}>
+          <div style={{ color: "#A78BFA", fontSize: 9, fontWeight: 800, letterSpacing: 1.5, marginBottom: 6 }}>
             MISSION
           </div>
-          <div style={{ color: "#ddd", fontSize: 14, lineHeight: 1.7 }}>
-            BeatFinder is a producer-led marketplace built so artists and producers keep
-            more of what they earn. No 50/50 splits. No exploitative middleman terms.
-            Producers connect their own Stripe account and receive payouts directly —
-            we take a 1% platform fee, full stop.
+          <div style={{ color: "#ddd", fontSize: 12, lineHeight: 1.5 }}>
+            A producer-led marketplace built so artists and producers keep more of what they earn.
+            No 50/50 splits, no middleman holding the money. Producers connect Stripe and get paid direct
+            — we take a 1% platform fee, full stop.
           </div>
         </div>
 
-        <div style={{ color: "#A78BFA", fontSize: 11, fontWeight: 800, letterSpacing: 1.5, marginBottom: 10, paddingLeft: 4 }}>
+        <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 800, letterSpacing: 1.5, marginBottom: 6, paddingLeft: 4 }}>
           THE TEAM
         </div>
         <div style={{
           background: "#0d0d0d",
           border: "1px solid #2a2a2a",
-          borderRadius: 14, padding: "18px",
-          marginBottom: 20,
-          display: "flex", gap: 14, alignItems: "center",
+          borderRadius: 12, padding: "10px 12px",
+          marginBottom: 12,
+          display: "flex", gap: 10, alignItems: "center",
         }}>
           <div style={{
-            flex: "0 0 auto", width: 64, height: 64, borderRadius: "50%",
+            flex: "0 0 auto", width: 44, height: 44, borderRadius: "50%",
             background: "linear-gradient(135deg,#C026D3,#7C3AED,#3B82F6)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            fontFamily: "'Bebas Neue',sans-serif", fontSize: 30, letterSpacing: 1,
+            fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, letterSpacing: 1,
             color: "white",
             boxShadow: "0 4px 16px rgba(192,38,211,0.4), inset 0 1px 0 rgba(255,255,255,0.25)",
           }}>
             T
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ color: "white", fontWeight: 800, fontSize: 17, marginBottom: 2 }}>
+            <div style={{ color: "white", fontWeight: 800, fontSize: 14 }}>
               Trelli
             </div>
-            <div style={{ color: "#888", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, marginBottom: 6 }}>
+            <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 0.5, marginBottom: 3 }}>
               FOUNDER · PRODUCER
             </div>
-            <div style={{ color: "#aaa", fontSize: 12, lineHeight: 1.5 }}>
-              Built BeatFinder to give producers and artists the platform we always
-              wanted — fair splits, real licences, no fluff.
+            <div style={{ color: "#aaa", fontSize: 11, lineHeight: 1.4 }}>
+              Built BeatFinder to give producers and artists the platform we always wanted.
             </div>
           </div>
         </div>
 
-        <div style={{ color: "#A78BFA", fontSize: 11, fontWeight: 800, letterSpacing: 1.5, marginBottom: 10, paddingLeft: 4 }}>
+        <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 800, letterSpacing: 1.5, marginBottom: 6, paddingLeft: 4 }}>
           GET IN TOUCH
         </div>
 
@@ -31444,38 +31437,37 @@ function AboutScreen({ onBack }) {
           href="https://tiktok.com/@trelliofficial"
         />
 
-        <div style={{ marginTop: 24, marginBottom: 20 }}>
-          <div style={{ color: "#A78BFA", fontSize: 11, fontWeight: 800, letterSpacing: 1.5, marginBottom: 10, paddingLeft: 4 }}>
+        <div style={{ marginTop: 12, marginBottom: 12 }}>
+          <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 800, letterSpacing: 1.5, marginBottom: 6, paddingLeft: 4 }}>
             HOW IT WORKS
           </div>
           <div style={{
-            background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 14,
-            padding: "16px 18px",
+            background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 12,
+            padding: "10px 12px",
           }}>
-            <div style={{ color: "#ddd", fontSize: 13, lineHeight: 1.8 }}>
-              <div style={{ marginBottom: 8 }}>
+            <div style={{ color: "#ddd", fontSize: 11, lineHeight: 1.5 }}>
+              <div style={{ marginBottom: 4 }}>
                 <span style={{ color: "#22C55E", fontWeight: 900, marginRight: 6 }}>•</span>
-                Producers keep <strong style={{ color: "white" }}>up to 99%</strong> of every sale (1% platform fee).
+                Producers keep <strong style={{ color: "white" }}>up to 99%</strong> (1% platform fee).
               </div>
-              <div style={{ marginBottom: 8 }}>
+              <div style={{ marginBottom: 4 }}>
                 <span style={{ color: "#3B82F6", fontWeight: 900, marginRight: 6 }}>•</span>
-                Payouts go straight to your Stripe account — never held by us.
+                Payouts direct to Stripe — never held by us.
               </div>
-              <div style={{ marginBottom: 8 }}>
+              <div style={{ marginBottom: 4 }}>
                 <span style={{ color: "#A855F7", fontWeight: 900, marginRight: 6 }}>•</span>
-                Two licence tiers: <strong style={{ color: "white" }}>Basic £50</strong> (non-exclusive) and <strong style={{ color: "white" }}>Premium £100–£500</strong> (exclusive).
+                <strong style={{ color: "white" }}>Basic £50</strong> (non-exclusive) or <strong style={{ color: "white" }}>Premium £100–£500</strong> (exclusive).
               </div>
               <div>
                 <span style={{ color: "#C026D3", fontWeight: 900, marginRight: 6 }}>•</span>
-                Every purchase ships a written licence — no handshake deals.
+                Every purchase ships a written licence — no handshakes.
               </div>
             </div>
           </div>
         </div>
 
-        <div style={{ color: "#444", fontSize: 11, textAlign: "center", marginTop: 18, lineHeight: 1.6 }}>
-          © 2026 BeatFinder · London, UK<br />
-          Built with care for producers and artists.
+        <div style={{ color: "#444", fontSize: 10, textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>
+          © 2026 BeatFinder · London, UK
         </div>
       </div>
     </div>
