@@ -28883,7 +28883,7 @@ userPickedMicRef.current = true;
                     fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, lineHeight: 1,
                   }}>LYRICS</div>
                   <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>
-                    Write while you record
+                    Read & Write while you record
                   </div>
                 </div>
               </div>
