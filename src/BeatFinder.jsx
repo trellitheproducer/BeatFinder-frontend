@@ -2718,65 +2718,78 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
     if (node) node.scrollTop = 0;
   }, []);
   const isEditing = initialLyric !== undefined && initialLyric !== null;
-  const autoSaveTimer = React.useRef(null);
 
-  // Autosave lyrics 3 seconds after the user stops typing
-  React.useEffect(function() {
-    if (!text.trim()) return;
-    clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(function() {
-      var lyric = {
-        id:        isEditing ? initialLyric.id : ("lyric_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8)),
-        title:     title.trim() || (beat ? beat.title : "Untitled"),
-        text:      text.trim(),
-        beatTitle:   beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
-        beatId:      beat ? beat.videoId : (initialLyric ? initialLyric.beatId : ""),
-        beatChannel: beat ? (beat.channel || beat.channelTitle || "") : (initialLyric ? (initialLyric.beatChannel || "") : ""),
-        beat:        beat || (initialLyric ? initialLyric.beat : null),
-        savedAt:   isEditing ? initialLyric.savedAt : new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      onSaveLyric(lyric, isEditing ? lyricIndex : null);
-    }, 3000);
-    return function() { clearTimeout(autoSaveTimer.current); };
-  }, [text, title]);
+  // ── Unsaved-changes tracking ──────────────────────────────────────
+  // We KILLED the previous autosave (every 3s + on-close) because it
+  // was generating new IDs each fire, producing duplicate lyric entries
+  // every time the user typed. Now: explicit Save button only.
+  //
+  // To protect users from losing work, we track whether the editor has
+  // unsaved changes since the last save (or since open). When they try
+  // to close with unsaved text, we show a 3-button modal:
+  //   • Save & Close
+  //   • Discard
+  //   • Cancel (stay in editor)
+  // Lyrics are local-only until Save is pressed.
+  var [showCloseConfirm, setShowCloseConfirm] = React.useState(false);
+  var initialTextRef     = React.useRef(initialLyric ? (initialLyric.text || "") : "");
+  var initialTitleRef    = React.useRef(initialLyric ? (initialLyric.title || "") : "");
+  var hasUnsavedChanges = (text.trim() !== initialTextRef.current.trim())
+                       || (title.trim() !== initialTitleRef.current.trim());
 
-  // Also save immediately when user closes the notepad
-  var closeSaving = React.useRef(false);
-  var handleClose = function() {
-    if (text.trim() && !closeSaving.current) {
-      closeSaving.current = true;
-      clearTimeout(autoSaveTimer.current);
-      var lyric = {
-        id:        isEditing ? initialLyric.id : ("lyric_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8)),
-        title:     title.trim() || (beat ? beat.title : "Untitled"),
-        text:      text.trim(),
-        beatTitle:   beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
-        beatId:      beat ? beat.videoId : (initialLyric ? initialLyric.beatId : ""),
-        beatChannel: beat ? (beat.channel || beat.channelTitle || "") : (initialLyric ? (initialLyric.beatChannel || "") : ""),
-        beat:        beat || (initialLyric ? initialLyric.beat : null),
-        savedAt:   isEditing ? initialLyric.savedAt : new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      onSaveLyric(lyric, isEditing ? lyricIndex : null);
+  // Build the lyric object from current state. We assign an ID ONLY
+  // ONCE per editor instance (when saving for the first time on a new
+  // lyric), and reuse it on subsequent saves. This prevents the
+  // duplicate-on-every-save bug we had with autosave.
+  var lyricIdRef = React.useRef(isEditing ? initialLyric.id : null);
+  function buildLyric() {
+    if (!lyricIdRef.current) {
+      lyricIdRef.current = "lyric_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
     }
-    onClose();
-  };
-
-  const handleSave = () => {
-    if (!text.trim()) return;
-    const lyric = {
-      id:        isEditing ? initialLyric.id : ("lyric_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8)),
-      title:     title.trim() || (beat ? beat.title : "Untitled"),
-      text:      text.trim(),
+    return {
+      id:          lyricIdRef.current,
+      title:       title.trim() || (beat ? beat.title : "Untitled"),
+      text:        text.trim(),
       beatTitle:   beat ? beat.title : (initialLyric ? initialLyric.beatTitle : ""),
       beatId:      beat ? beat.videoId : (initialLyric ? initialLyric.beatId : ""),
       beatChannel: beat ? (beat.channel || beat.channelTitle || "") : (initialLyric ? (initialLyric.beatChannel || "") : ""),
       beat:        beat || (initialLyric ? initialLyric.beat : null),
       savedAt:     isEditing ? initialLyric.savedAt : new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      updatedAt:   new Date().toISOString(),
     };
-    onSaveLyric(lyric, isEditing ? lyricIndex : null);
+  }
+
+  // Close attempt — shows confirm modal if there are unsaved changes,
+  // otherwise closes cleanly. Empty editor (no text typed) always
+  // closes without prompt.
+  var handleClose = function() {
+    if (text.trim() && hasUnsavedChanges) {
+      setShowCloseConfirm(true);
+      return;
+    }
+    onClose();
+  };
+
+  // From the close-confirm modal: "Save & Close"
+  function confirmSaveAndClose() {
+    if (!text.trim()) { onClose(); return; }
+    onSaveLyric(buildLyric(), isEditing ? lyricIndex : null);
+    setShowCloseConfirm(false);
+    onClose();
+  }
+  // From the close-confirm modal: "Discard"
+  function confirmDiscardAndClose() {
+    setShowCloseConfirm(false);
+    onClose();
+  }
+
+  const handleSave = () => {
+    if (!text.trim()) return;
+    onSaveLyric(buildLyric(), isEditing ? lyricIndex : null);
+    // Mark current state as "clean" so the close prompt doesn't fire
+    // again unless they type something new after saving.
+    initialTextRef.current  = text;
+    initialTitleRef.current = title;
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -2788,6 +2801,75 @@ function LyricsNotepad({ beat, onClose, onSaveLyric, initialLyric, lyricIndex, u
       flexDirection: "column", fontFamily: "'DM Sans',sans-serif",
       paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))",
     }}>
+      {/* Unsaved-changes confirm modal — shown when closing with dirty
+          text. Three options: Save & Close, Discard, Cancel. Rendered
+          inside this fixed container so it overlays everything. */}
+      {showCloseConfirm && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 10100,
+          background: "rgba(0,0,0,0.82)", backdropFilter: "blur(6px)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 20,
+        }}>
+          <div style={{
+            background: "linear-gradient(165deg,#1a0f1f 0%,#0f0a1f 50%,#0a0a14 100%)",
+            border: "1px solid rgba(192,38,211,0.35)",
+            borderRadius: 16, padding: "22px 20px 18px",
+            maxWidth: 360, width: "100%",
+            boxShadow: "0 24px 48px rgba(0,0,0,0.7), 0 0 32px rgba(192,38,211,0.18)",
+          }}>
+            <div style={{
+              fontFamily: "'Bebas Neue',sans-serif", fontSize: 20, letterSpacing: 1.5,
+              color: "white", textAlign: "center", marginBottom: 6,
+            }}>UNSAVED CHANGES</div>
+            <div style={{
+              color: "#ccc", fontSize: 13, lineHeight: 1.5,
+              textAlign: "center", marginBottom: 16,
+            }}>
+              You have unsaved lyrics. What would you like to do?
+            </div>
+            <button
+              onClick={confirmSaveAndClose}
+              style={{
+                width: "100%", marginBottom: 8,
+                background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+                color: "white", border: "none",
+                borderRadius: 10, padding: "12px 14px",
+                fontSize: 13, fontWeight: 800, letterSpacing: 0.3,
+                cursor: "pointer",
+                boxShadow: "0 4px 16px rgba(192,38,211,0.4)",
+              }}>
+              Save &amp; Close
+            </button>
+            <button
+              onClick={confirmDiscardAndClose}
+              style={{
+                width: "100%", marginBottom: 8,
+                background: "transparent",
+                color: "#F87171",
+                border: "1px solid rgba(248,113,113,0.4)",
+                borderRadius: 10, padding: "11px 14px",
+                fontSize: 13, fontWeight: 700,
+                cursor: "pointer",
+              }}>
+              Discard Changes
+            </button>
+            <button
+              onClick={function() { setShowCloseConfirm(false); }}
+              style={{
+                width: "100%",
+                background: "transparent",
+                color: "#888",
+                border: "1px solid #2a2a2a",
+                borderRadius: 10, padding: "11px 14px",
+                fontSize: 13, fontWeight: 700,
+                cursor: "pointer",
+              }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       <div style={{
         background: "linear-gradient(180deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
         flexShrink: 0,
