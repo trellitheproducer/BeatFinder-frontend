@@ -4496,6 +4496,31 @@ function HomeScreen({ savedIds, onSave, onPlay, user, onGoMembers, onGoProfile, 
         </button>
 
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          {/* BETA chip — always visible in home top bar, signals to users
+              that the app is in early-access state. Matches the splash
+              and About-page chip visually. Tappable: opens the About
+              page so curious users learn more about the project. */}
+          <button
+            onClick={function() {
+              try { window.dispatchEvent(new CustomEvent("bf:openAbout")); } catch (_) {}
+            }}
+            style={{
+              background: "linear-gradient(135deg,rgba(192,38,211,0.22),rgba(124,58,237,0.16))",
+              border: "1px solid rgba(192,38,211,0.45)",
+              color: "#E9D5FF",
+              fontFamily: "'Bebas Neue',sans-serif",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: 1.6,
+              padding: "3px 8px",
+              borderRadius: 7,
+              cursor: "pointer",
+              marginRight: 4,
+            }}
+            aria-label="Beta — tap for info"
+          >
+            BETA
+          </button>
           {/* Bell notifications icon */}
           {user && (
             <button onClick={onOpenNotifications} style={{ background: "none", border: "none", padding: 8, cursor: "pointer", position: "relative" }}>
@@ -22196,6 +22221,23 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // from the App; tapping a saved lyric opens the full editor.
   const [lyricsPanelOpen, setLyricsPanelOpen] = useState(false);
 
+  // ── Studio welcome modal — first open per session ─────────────
+  // Shows once when Studio opens to set expectations about beta
+  // status + iOS Web Audio limits. Dismissed for the session via
+  // a window-level flag (not localStorage — we want users to see
+  // it each new session as a reminder).
+  const [showStudioWelcome, setShowStudioWelcome] = useState(function() {
+    try {
+      if (typeof window === "undefined") return false;
+      return !window.__bfStudioWelcomeShown;
+    } catch (_) { return false; }
+  });
+  useEffect(function() {
+    if (showStudioWelcome) {
+      try { window.__bfStudioWelcomeShown = true; } catch (_) {}
+    }
+  }, [showStudioWelcome]);
+
   // ── Playback ──────────────────────────────────────────────────
   const [isPlaying,    setIsPlaying]    = useState(false);
   const [isRecording,  setIsRecording]  = useState(false);
@@ -26588,6 +26630,101 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }}
     >
       {/* ── Overlays ── */}
+      {/* Studio welcome modal — shows once per session on first open.
+          Sets expectations about beta status + iOS Web Audio limits
+          before the user dives in and potentially loses work. */}
+      {showStudioWelcome && (
+        <div
+          onClick={function() { setShowStudioWelcome(false); }}
+          style={{
+            position: "fixed", inset: 0, zIndex: 9500,
+            background: "rgba(0,0,0,0.82)", backdropFilter: "blur(6px)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 20, fontFamily: "'DM Sans',sans-serif",
+          }}>
+          <div
+            onClick={function(e) { e.stopPropagation(); }}
+            style={{
+              background: "linear-gradient(165deg,#1a0f1f 0%,#0f0a1f 50%,#0a0a14 100%)",
+              border: "1px solid rgba(192,38,211,0.35)",
+              borderRadius: 16,
+              padding: "24px 22px 20px",
+              maxWidth: 380, width: "100%",
+              boxShadow: "0 24px 48px rgba(0,0,0,0.7), 0 0 32px rgba(192,38,211,0.18)",
+              position: "relative",
+            }}>
+            {/* LED top edge */}
+            <div style={{
+              position: "absolute", top: 0, left: 16, right: 16, height: 2,
+              background: "linear-gradient(90deg,transparent,#C026D3,#7C3AED,#3B82F6,transparent)",
+              boxShadow: "0 0 8px rgba(124,58,237,0.5)",
+            }} />
+
+            {/* BETA chip */}
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+              <span style={{
+                display: "inline-block",
+                background: "linear-gradient(135deg,rgba(192,38,211,0.22),rgba(124,58,237,0.16))",
+                border: "1px solid rgba(192,38,211,0.45)",
+                color: "#E9D5FF",
+                fontFamily: "'Bebas Neue',sans-serif",
+                fontSize: 11, fontWeight: 700, letterSpacing: 2,
+                padding: "3px 10px", borderRadius: 8,
+              }}>
+                BETA · WEB APP
+              </span>
+            </div>
+
+            <div style={{
+              fontFamily: "'Bebas Neue',sans-serif",
+              fontSize: 22, letterSpacing: 1.5, color: "white",
+              textAlign: "center", marginBottom: 8,
+            }}>
+              WELCOME TO STUDIO
+            </div>
+
+            <div style={{ color: "#ccc", fontSize: 13, lineHeight: 1.55, marginBottom: 14 }}>
+              BeatFinder Studio is a full multi-track DAW running entirely in your
+              browser. Powerful — but mobile browsers have limits.
+            </div>
+
+            <div style={{
+              background: "rgba(245,158,11,0.08)",
+              border: "1px solid rgba(245,158,11,0.3)",
+              borderRadius: 10, padding: "12px 14px", marginBottom: 14,
+            }}>
+              <div style={{ color: "#FCD34D", fontSize: 11, fontWeight: 800, letterSpacing: 0.5, marginBottom: 6 }}>
+                ⚠ THINGS TO KNOW
+              </div>
+              <ul style={{ margin: 0, padding: "0 0 0 16px", color: "#FDE68A", fontSize: 12, lineHeight: 1.6 }}>
+                <li>Using FX on 4+ tracks may glitch or crash on iPhone</li>
+                <li><strong>Save your work often</strong> — Web Audio is fragile on mobile</li>
+                <li>Disable FX on tracks you aren't actively monitoring</li>
+                <li>For best results: wired headphones, not Bluetooth</li>
+              </ul>
+            </div>
+
+            <div style={{ color: "#A78BFA", fontSize: 12, lineHeight: 1.5, marginBottom: 18, textAlign: "center", fontStyle: "italic" }}>
+              A native iOS app with better Studio performance is on the way.
+            </div>
+
+            <button
+              onClick={function() { setShowStudioWelcome(false); }}
+              style={{
+                width: "100%",
+                background: "linear-gradient(135deg,#C026D3,#7C3AED)",
+                color: "white", border: "none",
+                borderRadius: 12, padding: "13px 18px",
+                fontSize: 14, fontWeight: 800, letterSpacing: 0.5,
+                cursor: "pointer",
+                boxShadow: "0 4px 16px rgba(192,38,211,0.4)",
+              }}>
+              Got it — let's make beats
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* CPU-load warning — Web Audio on iOS Safari struggles past ~4 channels
           with active FX. Warning is informational; doesn't block anything.
           Shows once per session (auto-dismissed by tap or X). */}
