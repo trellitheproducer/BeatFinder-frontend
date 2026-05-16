@@ -31153,10 +31153,15 @@ function ChangelogScreen({ onBack }) {
 
   return (
     <div style={{
-      minHeight: "100vh", background: "#0a0a0a", color: "white",
+      // iOS Safari scroll fix — when this is inside a position:fixed
+      // overlay with overflowY:auto, setting minHeight:100vh on the
+      // child pins the scroll height to viewport size and prevents
+      // long content from being scrollable. Letting content size
+      // itself naturally allows the wrapper's overflow:auto to kick in.
+      background: "#0a0a0a", color: "white",
       fontFamily: "'DM Sans',sans-serif",
       paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))",
-      paddingBottom: "env(safe-area-inset-bottom)",
+      paddingBottom: "calc(env(safe-area-inset-bottom) + 24px)",
     }}>
       <div style={{
         display: "flex", alignItems: "center", padding: "12px 16px",
@@ -31294,10 +31299,15 @@ function AboutScreen({ onBack }) {
 
   return (
     <div style={{
-      minHeight: "100vh", background: "#0a0a0a", color: "white",
+      // iOS Safari scroll fix — when this is inside a position:fixed
+      // overlay with overflowY:auto, setting minHeight:100vh on the
+      // child pins the scroll height to viewport size and prevents
+      // long content from being scrollable. Letting content size
+      // itself naturally allows the wrapper's overflow:auto to kick in.
+      background: "#0a0a0a", color: "white",
       fontFamily: "'DM Sans',sans-serif",
       paddingTop: "var(--bf-safe-top, env(safe-area-inset-top))",
-      paddingBottom: "env(safe-area-inset-bottom)",
+      paddingBottom: "calc(env(safe-area-inset-bottom) + 24px)",
     }}>
       <div style={{
         display: "flex", alignItems: "center", padding: "12px 16px",
