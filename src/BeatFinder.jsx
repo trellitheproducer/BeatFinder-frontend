@@ -32766,32 +32766,35 @@ function BeatFinderInner() {
       <BfToastHost />
       <PopupBlockedModal />
 
-      {/* Changelog overlay — opened via window event "bf:openChangelog" */}
-      {showChangelog && (
-        <div style={{
-          // Just the fixed-overlay frame — the inner page (ChangelogScreen
-          // / AboutScreen) is its own scroll container now. Don't add
-          // overflow here too; nested scroll containers fight each other
-          // on iOS Safari and the inner one wins inconsistently.
-          position: "fixed", inset: 0, zIndex: 99996,
-          background: "#0a0a0a",
-        }}>
-          <ChangelogScreen onBack={function() { setShowChangelog(false); }} />
-        </div>
+      {/* Changelog overlay — opened via window event "bf:openChangelog"
+          Rendered via portal to document.body so it escapes the
+          maxWidth:430 phone-frame ancestor. Otherwise position:fixed
+          can get trapped on iOS Safari when an ancestor has constraints
+          like maxWidth/margin auto, leaving the overlay with the wrong
+          scroll viewport. */}
+      {showChangelog && typeof document !== "undefined" && document.body && ReactDOM.createPortal(
+        (
+          <div style={{
+            position: "fixed", inset: 0, zIndex: 99996,
+            background: "#0a0a0a",
+          }}>
+            <ChangelogScreen onBack={function() { setShowChangelog(false); }} />
+          </div>
+        ),
+        document.body
       )}
 
-      {/* About overlay — opened via window event "bf:openAbout" */}
-      {showAbout && (
-        <div style={{
-          // Just the fixed-overlay frame — the inner page (ChangelogScreen
-          // / AboutScreen) is its own scroll container now. Don't add
-          // overflow here too; nested scroll containers fight each other
-          // on iOS Safari and the inner one wins inconsistently.
-          position: "fixed", inset: 0, zIndex: 99996,
-          background: "#0a0a0a",
-        }}>
-          <AboutScreen onBack={function() { setShowAbout(false); }} />
-        </div>
+      {/* About overlay — same portal treatment as Changelog above. */}
+      {showAbout && typeof document !== "undefined" && document.body && ReactDOM.createPortal(
+        (
+          <div style={{
+            position: "fixed", inset: 0, zIndex: 99996,
+            background: "#0a0a0a",
+          }}>
+            <AboutScreen onBack={function() { setShowAbout(false); }} />
+          </div>
+        ),
+        document.body
       )}
 
       {/* Auth-expired toast — shown briefly when apiFetch detects a 401
