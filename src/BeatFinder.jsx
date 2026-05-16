@@ -26719,7 +26719,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                 cursor: "pointer",
                 boxShadow: "0 4px 16px rgba(192,38,211,0.4)",
               }}>
-              Got it — let's make beats
+              Continue to Studio
             </button>
           </div>
         </div>
