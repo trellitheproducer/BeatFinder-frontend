@@ -26104,11 +26104,19 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       // ── Start the recorder and stamp the clock as tightly as possible ──────
       mr.start(100); // 100ms chunks — reliable across iOS Safari + Chrome; 50ms causes gaps
       const startActxTime = actx.currentTime;
-      const inputLatency  = actx.inputLatency || 0;
+      // Chrome exposes actx.inputLatency; Safari does not (it's undefined).
+      // On Safari the fallback `|| 0` meant we did no compensation, so vocal
+      // recordings landed ~80-100ms LATE relative to the beat. Add a static
+      // estimate when inputLatency is missing — 80ms is the middle of the
+      // typical iPhone + earbuds range. If users still need fine-tuning,
+      // a per-device slider can be added later.
+      const inputLatency      = actx.inputLatency || 0;
+      const safariFallbackSec = (typeof actx.inputLatency === "undefined") ? 0.08 : 0;
+      const totalLatency      = inputLatency + safariFallbackSec;
 
       // Timeline position = where the playhead was + how far actx has advanced since masterStart
       const trueStartTime = Math.max(0,
-        headPos + (startActxTime - masterStart) - inputLatency
+        headPos + (startActxTime - masterStart) - totalLatency
       );
       recStartTimeRef.current = trueStartTime;
 
