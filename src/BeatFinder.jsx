@@ -23008,6 +23008,29 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   const fxTrackIdRef = useRef(null);
   React.useEffect(function(){ fxTrackIdRef.current = fxTrackId; }, [fxTrackId]);
   const [masterVolume, setMasterVolume]  = useState(1); // independent master fader 0..1.5
+  // Manual recording offset in milliseconds. Default 80 (the previous
+  // hardcoded Safari latency compensation). Adjustable -200..+200ms in
+  // 10ms steps. Persisted to localStorage so it survives reloads.
+  //   POSITIVE value = subtracts from clip start time = clip moves EARLIER
+  //   NEGATIVE value = adds to clip start time = clip moves LATER
+  // If your recordings come in early, REDUCE this value.
+  // If your recordings come in late, INCREASE this value.
+  const [recOffsetMs, setRecOffsetMs] = useState(function(){
+    try {
+      var raw = localStorage.getItem("bf_rec_offset_ms");
+      if (raw === null) return 80;
+      var n = parseInt(raw, 10);
+      if (isNaN(n)) return 80;
+      return Math.max(-200, Math.min(200, n));
+    } catch(e) { return 80; }
+  });
+  // Mirror to a ref so the recording flow (closure captured deeper) reads
+  // the live value without us having to wire it through every callback.
+  const recOffsetMsRef = useRef(80);
+  React.useEffect(function(){
+    recOffsetMsRef.current = recOffsetMs;
+    try { localStorage.setItem("bf_rec_offset_ms", String(recOffsetMs)); } catch(e) {}
+  }, [recOffsetMs]);
   const fxUpdRef = useRef(null); // stable ref so memoized FX panel always calls latest upd
   const applyPresetRef = useRef(null); // stable ref so memoized FX panel always calls latest preset applier
   // FX-internal transport callbacks. The challenge: FxPanel is memo'd,
@@ -26332,14 +26355,17 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       mr.start(100); // 100ms chunks — reliable across iOS Safari + Chrome; 50ms causes gaps
       const startActxTime = actx.currentTime;
       // Chrome exposes actx.inputLatency; Safari does not (it's undefined).
-      // On Safari the fallback `|| 0` meant we did no compensation, so vocal
-      // recordings landed ~80-100ms LATE relative to the beat. Add a static
-      // estimate when inputLatency is missing — 80ms is the middle of the
-      // typical iPhone + earbuds range. If users still need fine-tuning,
-      // a per-device slider can be added later.
+      // On Safari, we apply a user-configurable recording offset (default 80ms)
+      // via the Studio settings slider. The offset compensates for mic + monitor
+      // hardware delay PLUS any audio-graph latency added by FX plugins on
+      // other tracks. If recordings drift, the user can adjust the slider.
+      // Chrome devices use the platform-reported inputLatency (typically more
+      // accurate) and ignore the manual offset.
       const inputLatency      = actx.inputLatency || 0;
-      const safariFallbackSec = (typeof actx.inputLatency === "undefined") ? 0.08 : 0;
-      const totalLatency      = inputLatency + safariFallbackSec;
+      const manualOffsetSec   = (typeof actx.inputLatency === "undefined")
+                                  ? ((recOffsetMsRef.current || 0) / 1000)
+                                  : 0;
+      const totalLatency      = inputLatency + manualOffsetSec;
 
       // Timeline position = where the playhead was + how far actx has advanced since masterStart
       const trueStartTime = Math.max(0,
@@ -28175,7 +28201,9 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
 
       {showSettings && (
         <div style={{ position:"absolute",inset:0,zIndex:700,background:"rgba(0,0,0,0.85)" }} onClick={function(){ setShowSettings(false); }}>
-          <div style={{ position:"absolute",bottom:0,left:0,right:0,background:"#111",borderRadius:"20px 20px 0 0",maxHeight:"88vh",overflowY:"auto" }} onClick={function(e){ e.stopPropagation(); }}>
+          <div style={{ position:"absolute",bottom:0,left:0,right:0,background:"#111",borderRadius:"20px 20px 0 0",maxHeight:"88vh",overflowY:"auto",WebkitOverflowScrolling:"touch" }}
+            onClick={function(e){ e.stopPropagation(); }}
+            onTouchMove={function(e){ e.stopPropagation(); }}>
             <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"18px 20px 12px" }}>
               <span style={{ color:"white",fontWeight:800,fontSize:16 }}>Project Settings</span>
               <button onClick={function(){ setShowSettings(false); }} style={{ background:"none",border:"none",color:"#555",fontSize:20,cursor:"pointer" }}>✕</button>
@@ -28463,6 +28491,38 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                   <span style={{ color:"#444",fontSize:10,fontFamily:"monospace" }}>0 dB</span>
                   <span style={{ color:"#444",fontSize:10,fontFamily:"monospace" }}>+12 dB</span>
                 </div>
+              </div>
+            </div>
+            {/* ── Recording Offset slider ──
+                Compensates for the delay between when audio reaches your ears
+                (after the audio graph processes it) and when the mic captures
+                your voice. If recordings come in EARLY, REDUCE this value.
+                If recordings come in LATE, INCREASE it. Default 80ms is a
+                middle-of-the-road starting point. */}
+            <div style={{ margin:"0 16px 32px",background:"#1a1a1a",borderRadius:14 }}>
+              <div style={{ padding:"14px 16px 10px" }}>
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10 }}>
+                  <div>
+                    <div style={{ color:"white",fontWeight:700,fontSize:13 }}>Recording Offset</div>
+                    <div style={{ color:"#555",fontSize:11,marginTop:2,lineHeight:1.4 }}>If vocals come in early, reduce. If late, increase.</div>
+                  </div>
+                  <span style={{ fontSize:12,fontWeight:800,fontFamily:"monospace",color:"#C026D3",minWidth:48,textAlign:"right" }}>
+                    {recOffsetMs > 0 ? "+" : ""}{recOffsetMs} ms
+                  </span>
+                </div>
+                <input type="range" min={-200} max={200} step={10} value={recOffsetMs}
+                  title={"Recording offset: " + recOffsetMs + " ms (default = 80 ms)"}
+                  onChange={function(e){ setRecOffsetMs(parseInt(e.target.value, 10)); }}
+                  style={{ width:"100%",accentColor:"#C026D3" }} />
+                <div style={{ display:"flex",justifyContent:"space-between",marginTop:4 }}>
+                  <span style={{ color:"#444",fontSize:10,fontFamily:"monospace" }}>−200</span>
+                  <span style={{ color:"#444",fontSize:10,fontFamily:"monospace" }}>0</span>
+                  <span style={{ color:"#444",fontSize:10,fontFamily:"monospace" }}>+200</span>
+                </div>
+                <button onClick={function(){ setRecOffsetMs(80); }}
+                  style={{ marginTop:10,background:"none",border:"1px solid #2a2a2a",borderRadius:6,color:"#666",fontSize:10,padding:"4px 10px",cursor:"pointer" }}>
+                  Reset to default (80 ms)
+                </button>
               </div>
             </div>
           </div>
