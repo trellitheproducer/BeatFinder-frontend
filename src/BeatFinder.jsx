@@ -29385,7 +29385,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                     {recOffsetMs > 0 ? "+" : ""}{recOffsetMs} ms
                   </span>
                 </div>
-                <input type="range" min={-200} max={200} step={10} value={recOffsetMs}
+                <input type="range" min={-200} max={200} step={5} value={recOffsetMs}
                   title={"Recording offset: " + recOffsetMs + " ms (default = 80 ms)"}
                   onChange={function(e){ setRecOffsetMs(parseInt(e.target.value, 10)); }}
                   style={{ width:"100%",accentColor:"#C026D3" }} />
@@ -29406,7 +29406,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                 different values (depends on headphones, FX chain length,
                 worklet latency). Use the Calibrate button for a guided
                 first-time setup. */}
-            <div style={{ margin:"0 16px 32px",background:"#1a1a1a",borderRadius:14 }}>
+            <div style={{ margin:"0 16px 80px",background:"#1a1a1a",borderRadius:14 }}>
               <div style={{ padding:"14px 16px 10px" }}>
                 <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10 }}>
                   <div>
@@ -29417,7 +29417,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                     {fxRecOffsetMs > 0 ? "+" : ""}{fxRecOffsetMs} ms
                   </span>
                 </div>
-                <input type="range" min={-300} max={300} step={10} value={fxRecOffsetMs}
+                <input type="range" min={-300} max={300} step={5} value={fxRecOffsetMs}
                   title={"FX Recording Offset: " + fxRecOffsetMs + " ms (default = 0 ms)"}
                   onChange={function(e){ setFxRecOffsetMs(parseInt(e.target.value, 10)); }}
                   style={{ width:"100%",accentColor:"#10B981" }} />
