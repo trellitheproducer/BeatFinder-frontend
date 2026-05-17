@@ -26756,26 +26756,34 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }
 
       // ── Cloud sync (Pro feature) ─────────────────────────────────────────
-      // Phase 1 of cloud project sync: push the project METADATA (track
-      // config, FX state, BPM, clip positions/durations) to the backend
-      // so projects survive PWA reinstall and Safari storage eviction.
-      // Audio buffers themselves still live in IndexedDB locally — Phase
-      // 2 will add vocal upload to Cloudinary.
+      // Phase 1: project METADATA (track config, FX state, BPM, clip
+      //          positions/durations) pushed to backend MongoDB.
+      // Phase 2 (THIS): vocal recordings uploaded to Cloudinary so audio
+      //          survives PWA reinstall. Beat clips remain local-only
+      //          for now (they're already uploaded files the user has).
       //
-      // This runs AFTER the local save succeeds. If cloud sync fails for
-      // any reason (no network, plan downgraded, server error), the local
-      // save is unaffected — graceful degradation. We never block the UI
-      // on cloud sync.
+      // Sequence:
+      //   1. Save project metadata first (gets us a cloud ID we need
+      //      to namespace the Cloudinary uploads).
+      //   2. For each VOCAL clip without an existing vocalUrl, upload
+      //      its audio buffer to Cloudinary and capture the secure_url.
+      //   3. Re-save the project metadata with the new vocalUrls baked
+      //      into the clips array.
       //
-      // Free users will get a 403 from the backend; we silently skip
-      // showing that as a UI error (it's expected behavior, not a bug).
+      // All of this runs in the background AFTER the local save has
+      // succeeded. User sees "Saved ✓" instantly; the cloud bits don't
+      // block UI. Failures are logged but never shown unless unexpected.
       (async function cloudSync() {
         try {
-          // Strip audio data from tracks before uploading — we only sync
-          // metadata in Phase 1. The local clips already have idbKey set
-          // and audioBuffer/url/blob nulled out by the save flow above.
-          const cloudTracks = savedTracks.map(function(t) {
-            const cleanClips = (t.clips || []).map(function(cl) {
+          // Build the cloud-shaped track list. PRESERVE existing vocalUrl
+          // from prior saves so we don't re-upload audio that's already
+          // in Cloudinary. The original `tracks` state still has the
+          // audio buffers we'll need for fresh uploads — savedTracks (the
+          // post-IDB-save copy) has them nulled out.
+          const cloudTracks = savedTracks.map(function(savedT, ti) {
+            const liveT = tracks[ti] || savedT;
+            const cleanClips = (savedT.clips || []).map(function(cl, ci) {
+              const liveClip = (liveT.clips || [])[ci] || cl;
               return {
                 id:         cl.id,
                 startTime:  cl.startTime || 0,
@@ -26785,28 +26793,32 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                 label:      cl.label || "",
                 active:     cl.active !== false,
                 idbKey:     cl.idbKey || null,
+                // PRESERVE existing cloud URL — if it was uploaded before
+                // and the audio hasn't changed, no need to re-upload.
+                // (Detecting "audio changed" is Phase 3 territory; for now
+                // we trust that if vocalUrl exists, the clip is the same.)
+                vocalUrl:   liveClip.vocalUrl || cl.vocalUrl || null,
               };
             });
             return {
-              id:        t.id,
-              name:      t.name || "",
-              type:      t.type || "beat",
-              volume:    t.volume ?? 1,
-              pan:       t.pan ?? 0,
-              isMuted:   !!t.isMuted,
-              isSoloed:  !!t.isSoloed,
-              color:     t.color || "",
-              effects:   t.effects || {},
+              id:        savedT.id,
+              name:      savedT.name || "",
+              type:      savedT.type || "beat",
+              volume:    savedT.volume ?? 1,
+              pan:       savedT.pan ?? 0,
+              isMuted:   !!savedT.isMuted,
+              isSoloed:  !!savedT.isSoloed,
+              color:     savedT.color || "",
+              effects:   savedT.effects || {},
               clips:     cleanClips,
-              trackIdbKey: t.trackIdbKey || null,
+              trackIdbKey: savedT.trackIdbKey || null,
             };
           });
 
           // For the cloud, project ID is a Mongo ObjectId string — the
           // backend assigns it on first save. We persist the cloud ID
           // back on the local project doc so subsequent saves update
-          // (not duplicate). The local-only numeric ID stays as `id`,
-          // separate from the cloud ID.
+          // (not duplicate).
           const body = {
             id:            proj.cloudId || null,
             name:          proj.name,
@@ -26819,15 +26831,125 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
             method: "POST",
             body:   JSON.stringify(body),
           });
+
           // Stamp the returned cloud ID back onto the local project doc
-          if (resp && resp.id) {
+          const cloudProjectId = resp && resp.id;
+          if (cloudProjectId) {
             const cur = JSON.parse(localStorage.getItem("bf_studio_projects") || "[]");
             const idx = cur.findIndex(function(p) { return p.id === proj.id; });
             if (idx >= 0) {
-              cur[idx].cloudId    = resp.id;
+              cur[idx].cloudId    = cloudProjectId;
               cur[idx].cloudSavedAt = resp.saved_at;
               localStorage.setItem("bf_studio_projects", JSON.stringify(cur));
               setSavedProjects(cur);
+            }
+          }
+
+          // ── Phase 2: Upload vocal recordings to Cloudinary ──────────────
+          // Now that we have a cloud project ID, upload any vocal clips
+          // that haven't been uploaded yet. The `tracks` variable here
+          // still has the LIVE AudioBuffers (state hasn't changed during
+          // the save flow). audioBufferToWav is already used by the IDB
+          // save above so we know it works.
+          if (!cloudProjectId) return; // first save failed, nothing to upload to
+
+          const uploadsNeeded = [];
+          tracks.forEach(function(t, ti) {
+            if (t.type !== "vocal") return; // beats not uploaded in Phase 2
+            (t.clips || []).forEach(function(cl, ci) {
+              // Skip if already uploaded (vocalUrl set from prior save)
+              const cloudClip = cloudTracks[ti] && cloudTracks[ti].clips[ci];
+              if (cloudClip && cloudClip.vocalUrl) return;
+              // Need a live audio buffer to upload from
+              if (!cl.audioBuffer) return;
+              uploadsNeeded.push({ trackIdx: ti, clipIdx: ci, clip: cl });
+            });
+          });
+
+          if (uploadsNeeded.length === 0) return;
+
+          // Upload each vocal clip one at a time (sequential — avoid
+          // saturating mobile uplink with parallel requests).
+          let uploadsCompleted = 0;
+          for (const job of uploadsNeeded) {
+            try {
+              // 1. Get a signed upload signature from our backend
+              const sig = await apiFetch("/api/studio/projects/sign-vocal-upload", {
+                method: "POST",
+                body:   JSON.stringify({
+                  project_id: cloudProjectId,
+                  clip_id:    String(job.clip.id).replace(/[^A-Za-z0-9._-]/g, "_"),
+                }),
+              });
+              if (!sig || !sig.upload_url) throw new Error("No signature returned");
+
+              // 2. Convert audio buffer → WAV blob
+              const wavBuf  = audioBufferToWav(job.clip.audioBuffer);
+              const wavBlob = new Blob([wavBuf], { type: "audio/wav" });
+
+              // 3. POST directly to Cloudinary with the signed params
+              const fd = new FormData();
+              fd.append("api_key",   sig.api_key);
+              fd.append("timestamp", String(sig.timestamp));
+              fd.append("folder",    sig.folder);
+              fd.append("public_id", sig.public_id);
+              fd.append("signature", sig.signature);
+              fd.append("file",      wavBlob, "vocal.wav");
+
+              const cloudResp = await fetch(sig.upload_url, {
+                method: "POST",
+                body:   fd,
+              });
+              if (!cloudResp.ok) {
+                throw new Error("Cloudinary upload returned " + cloudResp.status);
+              }
+              const cloudData = await cloudResp.json();
+              const vocalUrl  = cloudData && cloudData.secure_url;
+              if (!vocalUrl) throw new Error("Cloudinary did not return secure_url");
+
+              // 4. Stamp the URL into our cloudTracks for re-save
+              cloudTracks[job.trackIdx].clips[job.clipIdx].vocalUrl = vocalUrl;
+              uploadsCompleted++;
+            } catch (uploadErr) {
+              console.warn("[BeatFinder] Vocal upload failed (clip ", job.clip.id, "):", uploadErr);
+              // Continue with next clip — partial upload is better than none
+            }
+          }
+
+          // If at least one upload succeeded, re-save the project so the
+          // cloud doc reflects the new URLs. The metadata save endpoint
+          // performs upsert by `id`, so this is an in-place update.
+          if (uploadsCompleted > 0) {
+            try {
+              await apiFetch("/api/studio/projects/save", {
+                method: "POST",
+                body:   JSON.stringify({
+                  id:            cloudProjectId,
+                  name:          proj.name,
+                  bpm:           proj.bpm,
+                  key:           proj.projectKey,
+                  time_sig_num:  proj.timeSigNum,
+                  tracks:        cloudTracks,
+                }),
+              });
+              // Also mirror vocalUrl onto local state so future saves
+              // skip re-upload. Update tracks state in-place.
+              setTracks(function(prev) {
+                return prev.map(function(t, ti) {
+                  if (t.type !== "vocal") return t;
+                  return Object.assign({}, t, {
+                    clips: (t.clips || []).map(function(cl, ci) {
+                      const cu = cloudTracks[ti] && cloudTracks[ti].clips[ci];
+                      if (cu && cu.vocalUrl && !cl.vocalUrl) {
+                        return Object.assign({}, cl, { vocalUrl: cu.vocalUrl });
+                      }
+                      return cl;
+                    }),
+                  });
+                });
+              });
+            } catch (resaveErr) {
+              console.warn("[BeatFinder] Re-save after vocal upload failed:", resaveErr);
             }
           }
         } catch (cloudErr) {
