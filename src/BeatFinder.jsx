@@ -28786,7 +28786,20 @@ userPickedMicRef.current = true;
           Ruler uses position:sticky,top:0 — always visible.
           One scrollLeft drives everything — zero sync bugs.
       ══════════════════════════════════════════════════════════════════════ */}
-      <div ref={lassoContainerRef} style={{ flex:1, minHeight:0, overflow:"clip", position:"relative" }}>
+      <div ref={lassoContainerRef} style={{
+        flex:1, minHeight:0, overflow:"clip", position:"relative",
+        // When the FX panel is open it overlays this area, but iOS Safari
+        // still hit-tests against the timeline DOM behind it — which
+        // confuses gesture disambiguation. The FX panel sees scrollable
+        // children underneath fixed buttons (transport, knobs) and
+        // sometimes intercepts taps as the start of a timeline scroll.
+        // Disabling pointer events on the entire timeline subtree while
+        // FX is open removes those hidden touch targets — iOS now sees
+        // ONLY the FX panel and transport bar as touchable regions.
+        // Visibility is preserved so layout/refs don't shift when FX
+        // closes (no flash, no measurement bugs).
+        pointerEvents: fxTrackId ? "none" : "auto",
+      }}>
 
         {/* Playhead — position updated directly via DOM ref, no React re-render = smooth */}
         <div
