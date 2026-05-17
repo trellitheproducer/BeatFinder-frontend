@@ -25244,6 +25244,859 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   };
 
   // ── Play from a given time — all tracks share master destination ──
+  // Build Web Audio effects chain for a track, return the gain node for mute/solo control
+  // Accepts ctx as parameter so live (actx) and offline (OfflineAudioContext)
+  // can both call into the same DSP code. opts.registerLive=true causes
+  // React-ref side effects to fire (live mute/solo control, VU analysers,
+  // FX node tracking for live param updates); offline export passes false.
+  const buildChain = function (ctx, master, track, hasSolo, opts) {
+    opts = opts || { registerLive: true };
+    const registerLive = opts.registerLive !== false;
+    let node = master;
+    const fx = track.effects || {};
+    const liveNodes = {}; // collect refs for real-time updates
+
+    // Pan
+    if (ctx.createStereoPanner) {
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = track.pan || 0;
+      panner.connect(node); node = panner;
+      liveNodes.panner = panner;
+    }
+
+    // Makeup gain (post-compressor) — always create so we can update it live
+    const mg = ctx.createGain();
+    mg.gain.value = (fx.compressor && fx.compressor.on && fx.compressor.makeupGain)
+      ? Math.pow(10, (fx.compressor.makeupGain || 0) / 20) : 1;
+    mg.connect(node); node = mg;
+    liveNodes.makeupGain = mg;
+
+    // Track volume
+    const volGain = ctx.createGain();
+    const shouldPlay = !track.isMuted && (!hasSolo || track.isSoloed);
+    volGain.gain.value = (track.volume ?? 1) * (shouldPlay ? 1 : 0);
+    volGain.connect(node); node = volGain;
+    if (registerLive) gainNodesRef.current[track.id] = volGain;
+
+    // ── Per-track VU analyser (side-branch, read-only, doesn't affect sound) ──
+    // Offline export skips this — VU analyser does no useful work without
+    // a UI to read it, and saves a node per track.
+    if (registerLive) {
+      const trackAnalyser = ctx.createAnalyser();
+      trackAnalyser.fftSize = 256;
+      trackAnalyser.smoothingTimeConstant = 0.5;
+      volGain.connect(trackAnalyser); // taps off AFTER volume/mute
+      trackAnalysersRef.current[track.id] = trackAnalyser;
+    }
+
+    // ── Reverb — only allocate ConvolverNode when plugin is ON ──
+    // CRASH FIX: allocating IR buffers for every track even when off was
+    // the main cause of iOS memory crashes with 4+ tracks.
+    {
+      const reverbOn = !!(fx.reverb && fx.reverb.on);
+      const wetVal   = reverbOn ? (fx.reverb.wet || 0.25) : 0;
+      const dryG = ctx.createGain(); dryG.gain.value = 1 - wetVal;
+      const wetG = ctx.createGain(); wetG.gain.value = wetVal;
+      const mix  = ctx.createGain();
+      dryG.connect(mix); wetG.connect(mix); mix.connect(node);
+
+      if (reverbOn) {
+        const sr = ctx.sampleRate;
+        const preDelaySec = (fx.reverb.preDelay || 0) / 1000;
+        const preDelay = ctx.createDelay(0.2);
+        preDelay.delayTime.value = preDelaySec;
+        const roomSize = fx.reverb.roomSize || 0.8;
+        // Shared IR buffer per roomSize to avoid re-allocating per track
+        const len = Math.round(sr * Math.min(roomSize, 1.5) * 2); // capped at 2s IR
+        const ir = ctx.createBuffer(2, len, sr);
+        for (let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.5);}
+        const conv = ctx.createConvolver(); conv.buffer = ir;
+        const split = ctx.createGain(); split.gain.value = 1;
+        split.connect(dryG); split.connect(preDelay);
+        preDelay.connect(conv); conv.connect(wetG);
+        node = split;
+        liveNodes.reverb = { dryG, wetG, preDelay, conv };
+      } else {
+        // Bypass: dry path only, no convolver allocated
+        const split = ctx.createGain(); split.gain.value = 1;
+        split.connect(dryG);
+        node = split;
+        liveNodes.reverb = { dryG, wetG };
+      }
+    }
+
+    // ── Ocean Reverb — only allocate when ON ──
+    {
+      const oceanOn = !!(fx.ocean && fx.ocean.on);
+      const wetVal  = oceanOn ? (fx.ocean.wet || 0.35) : 0;
+      const dryG = ctx.createGain(); dryG.gain.value = 1 - wetVal;
+      const wetG = ctx.createGain(); wetG.gain.value = wetVal;
+      const mix  = ctx.createGain();
+      dryG.connect(mix); wetG.connect(mix); mix.connect(node);
+
+      if (oceanOn) {
+        const sr = ctx.sampleRate;
+        const preDelaySec = (fx.ocean.preDelay || 20) / 1000;
+        const roomSize = Math.min(1.5, fx.ocean.roomSize || 1.0); // hard cap at 1.5s IR
+        const len = Math.round(sr * roomSize * 2.5);
+        const ir = ctx.createBuffer(2, len, sr);
+        for (let ch=0;ch<2;ch++){
+          const d = ir.getChannelData(ch);
+          for (let i=0;i<len;i++) d[i] = (Math.random()*2-1)*Math.pow(1-i/len, 1.8);
+        }
+        const conv = ctx.createConvolver(); conv.buffer = ir;
+        const damp = fx.ocean.damp || 0.6;
+        const lpf = ctx.createBiquadFilter();
+        lpf.type = "lowpass";
+        lpf.frequency.value = 800 + (1 - damp) * 7200;
+        lpf.Q.value = 0.5;
+        const preDelay = ctx.createDelay(0.3); preDelay.delayTime.value = preDelaySec;
+        const split = ctx.createGain(); split.gain.value = 1;
+        split.connect(dryG); split.connect(preDelay);
+        preDelay.connect(conv); conv.connect(lpf); lpf.connect(wetG);
+        node = split;
+        liveNodes.ocean = { dryG, wetG, preDelay, lpf, conv };
+      } else {
+        // Bypass: dry path only, no convolver/lpf allocated
+        const split = ctx.createGain(); split.gain.value = 1;
+        split.connect(dryG);
+        node = split;
+        liveNodes.ocean = { dryG, wetG };
+      }
+    }
+
+    // ── 5-band parametric EQ — only built when on ──
+    // PERF: 5 biquad filters in series consume real audio-thread CPU
+    // per track. When EQ is OFF we skip them entirely; turning EQ on
+    // bumps fxSignature so the chain rebuilds with the filters
+    // inserted. Audible result is identical (the previous "bypass"
+    // mode set frequencies/gains to neutral but the biquads still
+    // processed audio).
+    {
+      const eq = fx.eq || {};
+      const T  = 0.005;
+      const eqOn = !!(fx.eq && fx.eq.on);
+
+      if (eqOn) {
+        const hpf = ctx.createBiquadFilter();
+        hpf.type = "highpass";
+        hpf.frequency.setTargetAtTime(eq.hpfFreq||80,   ctx.currentTime, T);
+        hpf.Q.setTargetAtTime(        eq.hpfQ||0.707,   ctx.currentTime, T);
+
+        const low = ctx.createBiquadFilter();
+        low.type = "lowshelf";
+        low.frequency.setTargetAtTime(eq.lowFreq||200,  ctx.currentTime, T);
+        low.gain.setTargetAtTime(     eq.low||0,        ctx.currentTime, T);
+
+        const mid = ctx.createBiquadFilter();
+        mid.type = "peaking";
+        mid.frequency.setTargetAtTime(eq.midFreq||1000, ctx.currentTime, T);
+        mid.gain.setTargetAtTime(     eq.mid||0,        ctx.currentTime, T);
+        mid.Q.setTargetAtTime(        eq.midQ||1.0,     ctx.currentTime, T);
+
+        const high = ctx.createBiquadFilter();
+        high.type = "highshelf";
+        high.frequency.setTargetAtTime(eq.highFreq||8000, ctx.currentTime, T);
+        high.gain.setTargetAtTime(     eq.high||0,        ctx.currentTime, T);
+
+        const lpf = ctx.createBiquadFilter();
+        lpf.type = "lowpass";
+        lpf.frequency.setTargetAtTime(eq.lpfFreq||18000, ctx.currentTime, T);
+        lpf.Q.setTargetAtTime(        eq.lpfQ||0.707,    ctx.currentTime, T);
+
+        // Chain: hpf → low → mid → high → lpf → [rest of chain]
+        lpf.connect(node); high.connect(lpf); mid.connect(high); low.connect(mid); hpf.connect(low);
+        node = hpf;
+        liveNodes.eq = { hpf, low, mid, high, lpf };
+      }
+      // else: EQ off — node passes through unchanged. liveNodes.eq
+      // is omitted; live-update code paths must null-check it.
+    }
+
+    // ── Compressor — always built; bypass when off via extreme settings ──
+    {
+      const comp = ctx.createDynamicsCompressor();
+      const compOn = !!(fx.compressor && fx.compressor.on);
+      comp.threshold.value = compOn ? (fx.compressor.threshold ?? -24) : 0;
+      comp.ratio.value     = compOn ? (fx.compressor.ratio ?? 4)       : 1;
+      comp.attack.value    = compOn ? (fx.compressor.attack ?? 0.003)  : 0.003;
+      comp.release.value   = compOn ? (fx.compressor.release ?? 0.25)  : 0.25;
+      comp.connect(node); node = comp;
+      liveNodes.comp = comp;
+    }
+
+    // ── R-Comp (Waves Renaissance Compressor style) ────────────────────────
+    // ARC = Auto-Release Control: when enabled, release time follows the
+    // input envelope (longer for sustained signals, shorter for transients).
+    // Web Audio's DynamicsCompressor has fixed release, so we simulate ARC
+    // by setting a base release time and reacting to compressor.reduction
+    // via a setInterval that nudges release between MIN (0.05s) and MAX (1.5s).
+    //
+    // Warm mode: subtle pre-stage tube saturation (light WaveShaper curve)
+    //            + low-shelf boost @ 200Hz for body. Vocal-friendly.
+    // Electro:   harder knee, faster attack, slight pre-emphasis HPF @ 80Hz.
+    //            Tighter, punchier — good for drums/bass/synths.
+    //
+    // Always built so warm/electro can switch and ARC can toggle without
+    // tearing down the chain. When off, threshold=0 + ratio=1 makes it
+    // transparent (no gain reduction).
+    {
+      const rc       = fx.rcomp || {};
+      const rcOn     = !!rc.on;
+      const rcMode   = rc.mode || "warm";  // "warm" | "electro"
+
+      // ── Pre-stage: mode-specific tone-shaper ──
+      const rcInGain = ctx.createGain(); rcInGain.gain.value = 1;
+      const rcShelf  = ctx.createBiquadFilter();
+      const rcSat    = ctx.createWaveShaper();
+      rcSat.oversample = "2x";
+      // Build saturation curve per mode. Warm = soft tube-style asymmetric
+      // clip; Electro = symmetric harder clip. Curve length 1024 is fine
+      // for vocal frequencies (Nyquist aliasing minimal at oversample=2x).
+      const makeRCompCurve = function(mode, amount) {
+        const n = 1024;
+        const c = new Float32Array(n);
+        const drive = Math.max(0.01, amount);
+        for (let i=0; i<n; i++) {
+          const x = (i * 2 / n - 1);
+          if (mode === "warm") {
+            // Asymmetric soft clip — gentler on negative half
+            const sign = x >= 0 ? 1 : 0.82;
+            c[i] = Math.tanh(x * (1 + drive * 0.6) * sign) * 0.94;
+          } else {
+            // Electro: harder symmetric clip with brighter edge
+            c[i] = Math.tanh(x * (1 + drive * 1.4)) * 0.98;
+          }
+        }
+        return c;
+      };
+      // Warm mode adds low-shelf body; electro adds high-pass pre-emphasis
+      if (rcMode === "warm") {
+        rcShelf.type = "lowshelf";
+        rcShelf.frequency.value = 200;
+        rcShelf.gain.value = rcOn ? 1.2 : 0;
+      } else {
+        rcShelf.type = "highpass";
+        rcShelf.frequency.value = 80;
+        rcShelf.Q.value = 0.5;
+      }
+      rcSat.curve = makeRCompCurve(rcMode, rcOn ? 0.18 : 0);
+
+      // ── Core compressor (DynamicsCompressor) ──
+      const rcComp = ctx.createDynamicsCompressor();
+      rcComp.threshold.value = rcOn ? (rc.threshold ?? -18) : 0;
+      rcComp.ratio.value     = rcOn ? (rc.ratio ?? 3)        : 1;
+      rcComp.attack.value    = rcOn ? (rc.attack ?? 0.012)   : 0.003;
+      // Initial release; ARC will modulate this if enabled.
+      rcComp.release.value   = rcOn ? (rc.release ?? 0.18)   : 0.25;
+      // Knee: warm = soft (6dB), electro = harder (2dB)
+      rcComp.knee.value      = rcOn ? (rcMode === "warm" ? 6 : 2) : 30;
+
+      // ── Makeup gain ──
+      const rcMakeup = ctx.createGain();
+      rcMakeup.gain.value = rcOn ? Math.pow(10, ((rc.makeupGain ?? 0)) / 20) : 1;
+
+      // Connect: rcInGain → rcShelf → rcSat → rcComp → rcMakeup → [rest]
+      rcInGain.connect(rcShelf);
+      rcShelf.connect(rcSat);
+      rcSat.connect(rcComp);
+      rcComp.connect(rcMakeup);
+      rcMakeup.connect(node);
+      node = rcInGain;
+
+      // ── ARC: auto-release modulation ──
+      // Poll reduction value at 30Hz. If reduction stays heavy, gradually
+      // extend release toward MAX. If reduction is intermittent, pull back
+      // toward MIN. This approximates Waves' ARC heuristic without
+      // requiring a full envelope follower implementation.
+      let arcTimer = null;
+      // ARC interval only meaningful in live context — offline render is
+      // instantaneous, the timer would never fire during render anyway.
+      if (registerLive && rcOn && (rc.arc !== false)) {  // ARC defaults to ON
+        const MIN_REL = 0.05, MAX_REL = 1.5;
+        let smoothed = rcComp.release.value;
+        arcTimer = setInterval(function(){
+          try {
+            // reduction is negative (in dB). More negative = more compression.
+            const red = Math.abs(rcComp.reduction || 0);
+            // Map: low reduction (< 2dB) → short release; high (> 8dB) → long
+            const target = MIN_REL + (Math.min(8, red) / 8) * (MAX_REL - MIN_REL);
+            // EMA smoothing so release doesn't jitter on every poll
+            smoothed = smoothed * 0.85 + target * 0.15;
+            rcComp.release.setTargetAtTime(smoothed, ctx.currentTime, 0.05);
+          } catch(e) {}
+        }, 33);
+      }
+
+      liveNodes.rcomp = {
+        rcInGain, rcShelf, rcSat, rcComp, rcMakeup,
+        mode: rcMode,
+        arcTimer,
+        makeRCompCurve,
+      };
+    }
+
+    // ── Pultec EQP-1A — Passive Program Equalizer ──────────────────────────
+    // Four-stage biquad chain emulating the classic Pultec topology:
+    //   Stage 1: Low Boost  — lowshelf at lowFreq, +0..10 dB
+    //   Stage 2: Low Atten  — peaking at lowFreq, -0..10 dB (creates scoop above)
+    //   Stage 3: High Boost — peaking at hiFreq, +0..10 dB, Q from SHARP knob
+    //   Stage 4: High Atten — highshelf at attenFreq, -0..10 dB
+    //
+    // The "Pultec trick": engaging Low Boost AND Low Atten simultaneously at
+    // the same frequency creates a uniquely musical curve — deep weight at
+    // the chosen frequency with a scoop just above it (carves out mud).
+    // The trick works here because the lowshelf and peaking filter have
+    // different curve shapes; their sum is not flat even though both target
+    // the same Hz.
+    //
+    // SHARP knob (1..10) maps to Q: SHARP=1 → Q=2 (narrow), SHARP=10 → Q=0.3
+    // (wide). This matches the Pultec hardware bandwidth behavior (counter-
+    // intuitive: higher SHARP = WIDER bell, due to historical labeling).
+    //
+    // Always built so all knobs can morph live without a chain rebuild.
+    // When the plugin is OFF, all gains go to 0 (transparent pass-through).
+    {
+      const pt = fx.pultec || {};
+      const ptOn = !!pt.on;
+      const T  = 0.005;
+
+      // ── Stage 1: Low Boost (lowshelf) ──
+      const ptLowBoost = ctx.createBiquadFilter();
+      ptLowBoost.type = "lowshelf";
+      ptLowBoost.frequency.value = pt.lowFreq ?? 60;
+      ptLowBoost.gain.value = ptOn ? (pt.lowBoost ?? 0) : 0;
+
+      // ── Stage 2: Low Atten (peaking, negative gain) ──
+      // Peaking filter at the same freq with NEGATIVE gain creates the
+      // characteristic Pultec mid-scoop above the bass region.
+      const ptLowAtten = ctx.createBiquadFilter();
+      ptLowAtten.type = "peaking";
+      ptLowAtten.frequency.value = pt.lowFreq ?? 60;
+      ptLowAtten.Q.value = 0.6;  // Pultec's low atten has a wider bell
+      ptLowAtten.gain.value = ptOn ? -(pt.lowAtten ?? 0) : 0;
+
+      // ── Stage 3: High Boost (peaking with bandwidth/Q) ──
+      // SHARP knob (1..10) inverted to Q: high SHARP = wide bell (low Q),
+      // low SHARP = narrow bell (high Q). Map linearly from Q=2 to Q=0.3.
+      const sharpVal = pt.sharp ?? 5;
+      const hiBoostQ = 2.0 - ((sharpVal - 1) / 9) * 1.7;  // 1→2.0, 10→0.3
+      const ptHiBoost = ctx.createBiquadFilter();
+      ptHiBoost.type = "peaking";
+      ptHiBoost.frequency.value = pt.hiFreq ?? 5000;
+      ptHiBoost.Q.value = hiBoostQ;
+      ptHiBoost.gain.value = ptOn ? (pt.hiBoost ?? 0) : 0;
+
+      // ── Stage 4: High Atten (highshelf, negative gain) ──
+      const ptHiAtten = ctx.createBiquadFilter();
+      ptHiAtten.type = "highshelf";
+      ptHiAtten.frequency.value = pt.attenFreq ?? 10000;
+      ptHiAtten.gain.value = ptOn ? -(pt.hiAtten ?? 0) : 0;
+
+      // Chain: ptLowBoost → ptLowAtten → ptHiBoost → ptHiAtten → [rest]
+      ptHiAtten.connect(node);
+      ptHiBoost.connect(ptHiAtten);
+      ptLowAtten.connect(ptHiBoost);
+      ptLowBoost.connect(ptLowAtten);
+      node = ptLowBoost;
+
+      liveNodes.pultec = { ptLowBoost, ptLowAtten, ptHiBoost, ptHiAtten };
+    }
+
+    // ── Vocal Doubler — Haas delay + gentle detune chorus + M/S width ────────
+    // Always built so wet/dry and width can morph live without a rebuild.
+    {
+      const db       = fx.doubler || {};
+      const doubOn   = !!(fx.doubler && fx.doubler.on);
+      const delayMs  = doubOn ? (db.delay  ?? 20)  : 20;
+      const detune   = doubOn ? (db.detune ?? 8)   : 8;   // cents
+      const width    = doubOn ? (db.width  ?? 0.7) : 0;
+      const mixWet   = doubOn ? (db.mix    ?? 0.5) : 0;
+
+      // ── Dry path ──
+      const dryGain  = ctx.createGain();
+      dryGain.gain.value = 1 - mixWet;
+
+      // ── Wet path: Haas delay (L) + detuned copy (R) ──
+      const wetGain  = ctx.createGain();
+      wetGain.gain.value = mixWet;
+
+      // Splitter/merger for M/S width
+      const splitter = ctx.createChannelSplitter(2);
+      const merger   = ctx.createChannelMerger(2);
+
+      // Left copy: Haas delay
+      const haasDelay = ctx.createDelay(0.1);
+      haasDelay.delayTime.value = delayMs / 1000;
+
+      // Right copy: detune via oscillator-as-LFO? No — use a BiquadFilter allpass
+      // for subtle chorus via comb phasing (detune knob drives a slight pitchbend
+      // via a short feedback delay acting as a chorus line).
+      const chorusDelay = ctx.createDelay(0.05);
+      chorusDelay.delayTime.value = (detune / 1000) * 0.012 + 0.001; // 1–13ms chorus
+
+      const chorusFeedback = ctx.createGain();
+      chorusFeedback.gain.value = 0.18;
+
+      // Width: blend L vs R amount into merger
+      const lWidthGain = ctx.createGain(); lWidthGain.gain.value = 0.5 + width * 0.5;
+      const rWidthGain = ctx.createGain(); rWidthGain.gain.value = 0.5 + width * 0.5;
+
+      // Wet mix bus
+      const wetMix = ctx.createGain(); wetMix.gain.value = 1;
+      const dryMix = ctx.createGain(); dryMix.gain.value = 1;
+      const outMix = ctx.createGain(); outMix.gain.value = 1;
+
+      // Entry gain (splits the signal)
+      const doubEntry = ctx.createGain(); doubEntry.gain.value = 1;
+
+      // Routing: entry → dryGain → outMix (always)
+      // When doubler is OFF, skip the wet path entirely. The two delay
+      // lines (plus chorus feedback loop) would otherwise process the
+      // signal even when the wet gain is 0, costing audio-thread CPU.
+      // Audible result is identical (wet would have been silent anyway).
+      doubEntry.connect(dryGain);
+      dryGain.connect(outMix);
+
+      if (doubOn) {
+        // Chorus feedback loop — only wired when needed
+        chorusDelay.connect(chorusFeedback);
+        chorusFeedback.connect(chorusDelay);
+
+        doubEntry.connect(haasDelay);
+        doubEntry.connect(chorusDelay);
+
+        haasDelay.connect(lWidthGain);
+        chorusDelay.connect(rWidthGain);
+
+        lWidthGain.connect(wetMix);
+        rWidthGain.connect(wetMix);
+
+        wetMix.connect(wetGain);
+        wetGain.connect(outMix);
+      }
+
+      outMix.connect(node);
+      node = doubEntry;
+
+      liveNodes.doubler = {
+        haasDelay, chorusDelay, chorusFeedback,
+        dryGain, wetGain, wetMix,
+        lWidthGain, rWidthGain,
+      };
+    }
+
+    // ── H-Delay — Waves H-Delay emulation ────────────────────────────────────
+    // Always built so wet/dry and all params can morph live.
+    // Architecture: input → [dry path] + [delay loop with hi/lo cut + drive]
+    // Tape mode: adds a slow LFO modulating the delay time (wow/flutter)
+    // Ping-pong: alternates wet signal L vs R each repeat via a StereoPanner
+    {
+      const hd       = fx.hdelay || {};
+      const hdOn     = !!(fx.hdelay && fx.hdelay.on);
+      const mode     = hd.mode        ?? "digital";
+      const feedback = hdOn ? Math.min(0.95, hd.feedback ?? 0.35) : 0;
+      const wetMixV  = hdOn ? (hd.wet ?? 0.40) : 0;
+      const hiCut    = hd.hiCut   ?? 8000;
+      const loCut    = hd.loCut   ?? 80;
+      const drive    = hdOn ? (hd.drive ?? 0) : 0;
+
+      // BPM sync helper (mirrors UI)
+      function hdSubdivMs(sub, bpmVal) {
+        const beat = 60000 / (bpmVal || 120);
+        const map = {
+          "1/1":beat*4,"1/2":beat*2,"1/2T":beat*(4/3),
+          "1/4":beat,"1/4T":beat*(2/3),
+          "1/8":beat/2,"1/8T":beat/3,
+          "1/16":beat/4,"1/16T":beat/6,"1/32":beat/8,
+        };
+        return Math.min(2000, (map[sub] || beat)) / 1000;
+      }
+      const delayTimeSec = hdOn
+        ? (hd.sync ? hdSubdivMs(hd.subdivision ?? "1/4", hd.bpm ?? 120) : (hd.delayMs ?? 375) / 1000)
+        : 0.375;
+
+      // Entry split
+      const hdEntry  = ctx.createGain(); hdEntry.gain.value = 1;
+
+      // Dry path
+      const hdDry    = ctx.createGain(); hdDry.gain.value = 1 - wetMixV;
+
+      // Wet output gain
+      const hdWet    = ctx.createGain(); hdWet.gain.value = wetMixV;
+
+      // Output sum
+      const hdOut    = ctx.createGain(); hdOut.gain.value = 1;
+
+      // Main delay (up to 2.1s)
+      const hdDelay  = ctx.createDelay(2.1);
+      hdDelay.delayTime.value = delayTimeSec;
+
+      // Feedback path: delay → hiCut filter → loCut filter → (drive) → feedback gain → delay
+      const hdHiCut  = ctx.createBiquadFilter();
+      hdHiCut.type = "lowpass";
+      hdHiCut.frequency.value = hiCut;
+      hdHiCut.Q.value = 0.5;
+
+      const hdLoCut  = ctx.createBiquadFilter();
+      hdLoCut.type = "highpass";
+      hdLoCut.frequency.value = loCut;
+      hdLoCut.Q.value = 0.5;
+
+      // Analog saturation waveshaper (soft clip — bypassed when drive=0)
+      // PERF: oversample:"2x" doubles CPU on this stage (processes at
+      // 2× sample rate). Only enable when drive > 0 AND h-delay is on,
+      // so disabled tracks don't pay the cost.
+      const hdSat = ctx.createWaveShaper();
+      const satCurve = (function() {
+        const n = 256, c = new Float32Array(n);
+        for(let i=0;i<n;i++){
+          const x = (i * 2 / n) - 1;
+          c[i] = x * (1 + drive * 4) / (1 + Math.abs(x) * drive * 4);
+        }
+        return c;
+      })();
+      hdSat.curve = satCurve;
+      hdSat.oversample = (hdOn && drive > 0) ? "2x" : "none";
+
+      // Tape wow/flutter: LFO → delay modulation (only in tape mode).
+      // PERF: an OscillatorNode runs at audio rate even at 0.001 Hz —
+      // each running LFO is a small but real CPU cost on the audio
+      // thread, multiplied across every track. Only START the LFO
+      // when it's actually needed (h-delay on AND tape mode). It can
+      // be lazily started later via the live-update path if mode
+      // changes to "tape" mid-session.
+      const hdLfo   = ctx.createOscillator();
+      const hdLfoGain = ctx.createGain();
+      const modDepth = hdOn ? (hd.modDepth ?? 0.15) : 0;
+      const modRate  = hd.modRate ?? 0.5;
+      hdLfo.type = "sine";
+      hdLfo.frequency.value = mode === "tape" ? modRate : 0.001;
+      hdLfoGain.gain.value = mode === "tape" ? modDepth * 0.015 : 0;
+      hdLfo.connect(hdLfoGain);
+      hdLfoGain.connect(hdDelay.delayTime);
+      if (hdOn && mode === "tape") {
+        try { hdLfo.start(); } catch (e) {}
+      }
+
+      // Feedback gain
+      const hdFb    = ctx.createGain(); hdFb.gain.value = feedback;
+
+      // Ping-pong panner: alternates L/R on each repeat via a secondary delay copy
+      // We implement ping-pong with a StereoPanner that is flipped by feedback count.
+      // Simplification: in ping-pong we duplicate the wet signal with a half-offset copy.
+      const hdPan   = ctx.createStereoPanner();
+      hdPan.pan.value = mode === "ping" ? -1 : 0; // first echo hard-L, feedback flips
+
+      const hdPanFlip = ctx.createStereoPanner();
+      hdPanFlip.pan.value = mode === "ping" ? 1 : 0; // second echo hard-R
+
+      const hdFbFlip = ctx.createGain(); hdFbFlip.gain.value = mode === "ping" ? feedback : 0;
+      const hdDelayFlip = ctx.createDelay(2.1);
+      hdDelayFlip.delayTime.value = delayTimeSec; // half-offset for flip copy
+
+      // ── Routing ──
+      // Main chain: hdEntry → hdDelay → hdHiCut → hdLoCut → hdSat → hdPan → hdWet → hdOut
+      //             └─ feedback: hdSat → hdFb → hdDelay (loop)
+      // PERF: when h-delay is OFF, route through the dry path ONLY.
+      // The wet path's 2.1s delay buffer + biquads + waveshaper + LFO
+      // all consume audio-thread CPU even when their output gain is 0.
+      // Skipping the connection entirely saves all of that, with zero
+      // audible difference (wet output would be silent anyway).
+      hdEntry.connect(hdDry);
+      hdDry.connect(hdOut);
+
+      if (hdOn) {
+        hdEntry.connect(hdDelay);
+        hdDelay.connect(hdHiCut);
+        hdHiCut.connect(hdLoCut);
+        hdLoCut.connect(hdSat);
+        hdSat.connect(hdPan);
+        hdPan.connect(hdWet);
+        // Feedback loop
+        hdSat.connect(hdFb);
+        hdFb.connect(hdDelay);
+
+        // Ping-pong second copy (offset by half a delay period)
+        if (mode === "ping") {
+          hdSat.connect(hdFbFlip);
+          hdFbFlip.connect(hdDelayFlip);
+          hdDelayFlip.connect(hdPanFlip);
+          hdPanFlip.connect(hdWet);
+        }
+
+        hdWet.connect(hdOut);
+      }
+      hdOut.connect(node);
+      node = hdEntry;
+
+      liveNodes.hdelay = {
+        hdDelay, hdDelayFlip, hdHiCut, hdLoCut, hdSat,
+        hdDry, hdWet, hdFb, hdFbFlip,
+        hdPan, hdPanFlip, hdLfo, hdLfoGain, hdOut,
+      };
+    }
+    // ── Noise Remover — always built so on/off toggle works live ────────────
+    // When off: bypass=1 (worklet path) or threshold=0/ratio=1 (fallback).
+    // voice param drives a post-gate presence shelf (+0..+8dB at 2.5kHz).
+    // ── Noise Gate + Hiss Reduction chain ──────────────────────────────────
+    {
+      const nr         = fx.noiseremover || {};
+      const nrOn       = !!(fx.noiseremover && fx.noiseremover.on);
+      const threshDb   = nrOn ? (nr.threshold ?? -40) : -200; // direct dB
+      const releaseSec = nrOn ? (nr.release   ?? 0.15) : 0.15;
+      const holdSec    = nrOn ? (nr.hold      ?? 0.08) : 0.08;
+      const hissAmt    = nrOn ? (nr.hiss      ?? 0)    : 0;   // 0–1 → 0..-18dB @ 8kHz
+      const lookahead  = !!(nr.lookahead ?? true);
+      const attackSec  = lookahead ? 0.001 : 0.003;
+      const reductDb   = -80; // gate floor: near-silence when closed
+
+      // ── High-shelf hiss filter (always in chain for live updates) ─────────
+      // Cuts 8kHz+ by 0..–18dB. Reduces white noise/hiss that gets through
+      // when the gate is open (e.g. room hiss under a loud vocal).
+      const hissFilter = ctx.createBiquadFilter();
+      hissFilter.type = "highshelf";
+      hissFilter.frequency.value = 8000;
+      hissFilter.gain.value = hissAmt * -18; // 0 = flat, 1 = -18dB cut
+      hissFilter.connect(node);
+      node = hissFilter;
+
+      // ── Noise Gate AudioWorklet (primary path) ────────────────────────────
+      // noiseGateWorkletReady is an optional ref — if it's not declared in this
+      // build, skip the worklet path entirely and use the DynamicsCompressor fallback.
+      // (A missing ref previously threw a ReferenceError here that killed buildChain
+      //  for every track, resulting in total Studio silence.)
+      //
+      // PERF: only allocate the worklet when the user actually has noise
+      // removal ON. The processor runs JS per-sample even with bypass=1, so
+      // a dormant worklet still burns audio-thread CPU. We rely on the
+      // auto-stop-on-FX-toggle behaviour to safely rebuild the chain when
+      // user enables it during playback.
+      const gateReady = (typeof noiseGateWorkletReady !== "undefined")
+        && noiseGateWorkletReady
+        && noiseGateWorkletReady.current;
+      if (gateReady && nrOn) {
+        try {
+          const gateNode = new AudioWorkletNode(ctx, "noise-gate-processor", {
+            numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+          });
+          gateNode.parameters.get("threshold").value = threshDb;
+          gateNode.parameters.get("reduction").value = reductDb;
+          gateNode.parameters.get("attack").value    = attackSec;
+          gateNode.parameters.get("hold").value      = Math.min(1.0, holdSec);
+          gateNode.parameters.get("release").value   = releaseSec;
+          gateNode.parameters.get("bypass").value    = nrOn ? 0 : 1;
+          // Patch a message port so the UI can read gate open/closed state
+          gateNode.port.onmessage = function(e) {};
+          liveNodes.rnnoiseNode = gateNode;
+          gateNode.connect(node);
+          node = gateNode;
+        } catch(e) { /* fall through */ }
+      }
+
+      // ── Fallback: DynamicsCompressor as gate ──────────────────────────────
+      // Only allocate when noise removal is ON. A passthrough compressor
+      // (threshold=0, ratio=1) is mathematically a no-op but still has
+      // tiny per-sample cost across 4-6 tracks.
+      if (!liveNodes.rnnoiseNode && nrOn) {
+        const gate = ctx.createDynamicsCompressor();
+        gate.threshold.value = threshDb;
+        gate.ratio.value     = 20;
+        gate.attack.value    = attackSec;
+        gate.release.value   = releaseSec;
+        gate.knee.value      = 0;
+        gate.connect(node); node = gate;
+        liveNodes.rnnoiseGate = gate;
+      }
+
+      liveNodes.noiseremover = { on: nrOn, hissFilter };
+    }
+
+    // ── T-Rotten Master — IK Multimedia T-RackS One emulation ──────────────
+    // Signal chain: inputGain → 3-band EQ → compressor → tape saturator → limiter → outputGain
+    // Always built so all knobs can morph live without a restart.
+    {
+      const tr   = fx.trotten || {};
+      const trOn = !!(fx.trotten && fx.trotten.on);
+
+      // Input gain
+      const trInGain = ctx.createGain();
+      trInGain.gain.value = trOn ? Math.pow(10, (tr.inputGain ?? 0) / 20) : 1;
+
+      // Low-shelf EQ
+      const trEqLow = ctx.createBiquadFilter();
+      trEqLow.type = trOn && tr.eqLowT === "bell" ? "peaking" : "lowshelf";
+      trEqLow.frequency.value = 200;
+      trEqLow.gain.value      = trOn ? (tr.eqLow ?? 0) : 0;
+      trEqLow.Q.value         = 0.707;
+
+      // Mid peaking/bell EQ
+      const trEqMid = ctx.createBiquadFilter();
+      trEqMid.type = trOn && tr.eqMidT === "shelf" ? "lowshelf" : "peaking";
+      trEqMid.frequency.value = 1000;
+      trEqMid.gain.value      = trOn ? (tr.eqMid ?? 0) : 0;
+      trEqMid.Q.value         = 1.0;
+
+      // High-shelf EQ
+      const trEqHigh = ctx.createBiquadFilter();
+      trEqHigh.type = trOn && tr.eqHighT === "bell" ? "peaking" : "highshelf";
+      trEqHigh.frequency.value = 8000;
+      trEqHigh.gain.value      = trOn ? (tr.eqHigh ?? 0) : 0;
+      trEqHigh.Q.value         = 0.707;
+
+      // Compressor — compAmt 0..100 maps to ratio 1..20, threshold from compThr
+      const trComp = ctx.createDynamicsCompressor();
+      const compRatio = trOn ? Math.max(1, 1 + (tr.compAmt ?? 50) / 100 * 19) : 1;
+      trComp.threshold.value = trOn ? (tr.compThr ?? -15) : 0;
+      trComp.ratio.value     = compRatio;
+      trComp.attack.value    = trOn && tr.compMode === "fast" ? 0.001 : 0.005;
+      trComp.release.value   = trOn && tr.compMode === "slow" ? 0.5   : 0.1;
+      trComp.knee.value      = 6;
+
+      // Tape saturation waveshaper — tapeDrv 0..10, tapeSat 0..10
+      const trTape = ctx.createWaveShaper();
+      const buildTapeCurve = function(drv, sat, mode) {
+        const n = 512; const c = new Float32Array(n);
+        const k = (drv / 10) * 4 + (sat / 10) * 2; // combined drive+sat
+        const warmBoost = mode === "vintage" ? 1.3 : 1.0;
+        for (let i = 0; i < n; i++) {
+          const x = (i * 2 / n - 1) * warmBoost;
+          if (k < 0.01) { c[i] = x; }
+          else { c[i] = (Math.PI + k) * x / (Math.PI + k * Math.abs(x)); }
+        }
+        return c;
+      };
+      trTape.curve      = buildTapeCurve(
+        trOn ? (tr.tapeDrv ?? 5) : 0,
+        trOn ? (tr.tapeSat ?? 5) : 0,
+        trOn ? (tr.tapeMode ?? "modern") : "modern"
+      );
+      trTape.oversample = "4x";
+
+      // Tape tone coloring: slight low-end warmth boost in vintage mode
+      const trTapeShelf = ctx.createBiquadFilter();
+      trTapeShelf.type          = "lowshelf";
+      trTapeShelf.frequency.value = 300;
+      trTapeShelf.gain.value    = trOn && tr.tapeMode === "vintage" ? 1.5 : 0;
+
+      // Brickwall limiter (emulate true-peak limiter via hard DynamicsCompressor)
+      const trLim = ctx.createDynamicsCompressor();
+      const limCeil = trOn ? (tr.limCeil ?? -0.5) : 0;
+      trLim.threshold.value = trOn ? limCeil : 0;
+      trLim.ratio.value     = 20; // near-infinite ratio = brickwall
+      trLim.attack.value    = 0.0005; // 0.5ms lookahead
+      trLim.release.value   = trOn ? Math.max(0.05, tr.limRel ?? 0.5) : 0.25;
+      trLim.knee.value      = 0;
+
+      // Output gain
+      const trOutGain = ctx.createGain();
+      trOutGain.gain.value = trOn ? Math.pow(10, (tr.outputGain ?? 0) / 20) : 1;
+
+      // Chain: trInGain → trEqLow → trEqMid → trEqHigh → trComp → trTape → trTapeShelf → trLim → trOutGain → [rest]
+      trOutGain.connect(node);
+      trLim.connect(trOutGain);
+      trTapeShelf.connect(trLim);
+      trTape.connect(trTapeShelf);
+      trComp.connect(trTape);
+      trEqHigh.connect(trComp);
+      trEqMid.connect(trEqHigh);
+      trEqLow.connect(trEqMid);
+      trInGain.connect(trEqLow);
+      node = trInGain;
+
+      liveNodes.trotten = {
+        trInGain, trEqLow, trEqMid, trEqHigh,
+        trComp, trTape, trTapeShelf, trLim, trOutGain,
+        buildTapeCurve,
+      };
+    }
+
+    // ── GRM Bandpass — dual cascaded biquad bandpass (≈12 dB/oct × 2 = 6th order) ──
+    // Always built wet/dry so mix morphs live. When off, dryG=1 / wetG=0.
+    {
+      const bpFx   = fx.bandpass || {};
+      const bpOn   = !!(fx.bandpass && fx.bandpass.on);
+      const center = bpOn ? Math.min(8000, bpFx.center ?? 1000) : 1000;
+      const octW   = bpOn ? (bpFx.width  ?? 1.0)  : 1.0;
+      const resDb  = bpOn ? (bpFx.res    ?? 0)    : 0;
+      const mixWet = bpOn ? (bpFx.mix    ?? 1)    : 0;
+
+      // Q from octave bandwidth: Q = √2^w / (2^w − 1)
+      const Q  = Math.sqrt(Math.pow(2, octW)) / (Math.pow(2, octW) - 1);
+      const Qr = Math.max(0.1, Q * (1 + resDb / 6));
+
+      // First cascaded biquad bandpass
+      const bp1 = ctx.createBiquadFilter();
+      bp1.type = "bandpass";
+      bp1.frequency.value = center;
+      bp1.Q.value = Qr;
+
+      // Second cascaded biquad bandpass (same params → steeper skirts)
+      const bp2 = ctx.createBiquadFilter();
+      bp2.type = "bandpass";
+      bp2.frequency.value = center;
+      bp2.Q.value = Qr;
+
+      // Wet/dry mix
+      const bpDry = ctx.createGain(); bpDry.gain.value = 1 - mixWet;
+      const bpWet = ctx.createGain(); bpWet.gain.value = mixWet;
+      const bpOut = ctx.createGain(); bpOut.gain.value = 1;
+      const bpEntry = ctx.createGain(); bpEntry.gain.value = 1;
+
+      // Routing: entry → dry → out ; entry → bp1 → bp2 → wet → out → next
+      bpEntry.connect(bpDry);
+      bpDry.connect(bpOut);
+      bpEntry.connect(bp1);
+      bp1.connect(bp2);
+      bp2.connect(bpWet);
+      bpWet.connect(bpOut);
+      bpOut.connect(node);
+      node = bpEntry;
+
+      liveNodes.bandpass = { bp1, bp2, bpDry, bpWet, bpOut };
+    }
+
+    // ── Autotune — pitch correction on playback ───────────────────────────
+    // Only allocated when ON. AudioWorklet processors run JS on every audio
+    // frame even with bypass=1, which on iOS Safari can cause crackles when
+    // multiple tracks each have a dormant worklet sitting in the chain.
+    //
+    // The auto-stop-on-FX-toggle behaviour (in fxUpdRef.current) ensures
+    // that toggling autotune ON during playback stops playback so the chain
+    // rebuilds with the worklet inserted on the next Play press. No UX
+    // surprise — the toast tells the user "Press Play to apply".
+    {
+      const at   = fx.autotune || {};
+      const atOn = !!(at.on);
+      if (atOn) {
+      try {
+        const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
+        const atNode = new AudioWorkletNode(ctx, "autotune-processor", {
+          numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+        });
+        atNode.parameters.get("bypass").value   = atOn ? 0 : 1;
+        atNode.parameters.get("key").value      = KEY_OFFSETS[at.key || "C"] || 0;
+        atNode.parameters.get("speed").value    = at.speed ?? 50;
+        atNode.parameters.get("humanize").value = at.humanize ?? 10;
+        atNode.parameters.get("wet").value      = at.wet ?? 1;
+        atNode.parameters.get("vibrato").value  = at.vibrato ?? 0;
+        atNode.port.postMessage({ scale: at.scale || "major" });
+        atNode.connect(node);
+        node = atNode;
+        liveNodes.autotune = atNode;
+      } catch(e) {
+        // Worklet not ready yet — autotune simply unavailable for this play session
+        console.warn("[Studio] Autotune node creation failed:", e);
+      }
+      } // end if(atOn) — skip worklet allocation entirely when off
+    }
+
+    // Store live nodes for this track
+    if (registerLive) fxNodesRef.current[track.id] = liveNodes;
+
+    return node; // clips connect here
+  };
+
   const doPlay = async function (fromTime) {
     stopAll();
     userScrolledAt.current = null; // reset manual override — auto-scroll active from start
@@ -25317,846 +26170,6 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
 
     const hasSolo = tracksRef.current.some(function(t){ return t.isSoloed; });
 
-    // Build Web Audio effects chain for a track, return the gain node for mute/solo control
-    const buildChain = function (track) {
-      let node = master;
-      const fx = track.effects || {};
-      const liveNodes = {}; // collect refs for real-time updates
-
-      // Pan
-      if (actx.createStereoPanner) {
-        const panner = actx.createStereoPanner();
-        panner.pan.value = track.pan || 0;
-        panner.connect(node); node = panner;
-        liveNodes.panner = panner;
-      }
-
-      // Makeup gain (post-compressor) — always create so we can update it live
-      const mg = actx.createGain();
-      mg.gain.value = (fx.compressor && fx.compressor.on && fx.compressor.makeupGain)
-        ? Math.pow(10, (fx.compressor.makeupGain || 0) / 20) : 1;
-      mg.connect(node); node = mg;
-      liveNodes.makeupGain = mg;
-
-      // Track volume
-      const volGain = actx.createGain();
-      const shouldPlay = !track.isMuted && (!hasSolo || track.isSoloed);
-      volGain.gain.value = (track.volume ?? 1) * (shouldPlay ? 1 : 0);
-      volGain.connect(node); node = volGain;
-      gainNodesRef.current[track.id] = volGain;
-
-      // ── Per-track VU analyser (side-branch, read-only, doesn't affect sound) ──
-      const trackAnalyser = actx.createAnalyser();
-      trackAnalyser.fftSize = 256;
-      trackAnalyser.smoothingTimeConstant = 0.5;
-      volGain.connect(trackAnalyser); // taps off AFTER volume/mute
-      trackAnalysersRef.current[track.id] = trackAnalyser;
-
-      // ── Reverb — only allocate ConvolverNode when plugin is ON ──
-      // CRASH FIX: allocating IR buffers for every track even when off was
-      // the main cause of iOS memory crashes with 4+ tracks.
-      {
-        const reverbOn = !!(fx.reverb && fx.reverb.on);
-        const wetVal   = reverbOn ? (fx.reverb.wet || 0.25) : 0;
-        const dryG = actx.createGain(); dryG.gain.value = 1 - wetVal;
-        const wetG = actx.createGain(); wetG.gain.value = wetVal;
-        const mix  = actx.createGain();
-        dryG.connect(mix); wetG.connect(mix); mix.connect(node);
-
-        if (reverbOn) {
-          const sr = actx.sampleRate;
-          const preDelaySec = (fx.reverb.preDelay || 0) / 1000;
-          const preDelay = actx.createDelay(0.2);
-          preDelay.delayTime.value = preDelaySec;
-          const roomSize = fx.reverb.roomSize || 0.8;
-          // Shared IR buffer per roomSize to avoid re-allocating per track
-          const len = Math.round(sr * Math.min(roomSize, 1.5) * 2); // capped at 2s IR
-          const ir = actx.createBuffer(2, len, sr);
-          for (let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.5);}
-          const conv = actx.createConvolver(); conv.buffer = ir;
-          const split = actx.createGain(); split.gain.value = 1;
-          split.connect(dryG); split.connect(preDelay);
-          preDelay.connect(conv); conv.connect(wetG);
-          node = split;
-          liveNodes.reverb = { dryG, wetG, preDelay, conv };
-        } else {
-          // Bypass: dry path only, no convolver allocated
-          const split = actx.createGain(); split.gain.value = 1;
-          split.connect(dryG);
-          node = split;
-          liveNodes.reverb = { dryG, wetG };
-        }
-      }
-
-      // ── Ocean Reverb — only allocate when ON ──
-      {
-        const oceanOn = !!(fx.ocean && fx.ocean.on);
-        const wetVal  = oceanOn ? (fx.ocean.wet || 0.35) : 0;
-        const dryG = actx.createGain(); dryG.gain.value = 1 - wetVal;
-        const wetG = actx.createGain(); wetG.gain.value = wetVal;
-        const mix  = actx.createGain();
-        dryG.connect(mix); wetG.connect(mix); mix.connect(node);
-
-        if (oceanOn) {
-          const sr = actx.sampleRate;
-          const preDelaySec = (fx.ocean.preDelay || 20) / 1000;
-          const roomSize = Math.min(1.5, fx.ocean.roomSize || 1.0); // hard cap at 1.5s IR
-          const len = Math.round(sr * roomSize * 2.5);
-          const ir = actx.createBuffer(2, len, sr);
-          for (let ch=0;ch<2;ch++){
-            const d = ir.getChannelData(ch);
-            for (let i=0;i<len;i++) d[i] = (Math.random()*2-1)*Math.pow(1-i/len, 1.8);
-          }
-          const conv = actx.createConvolver(); conv.buffer = ir;
-          const damp = fx.ocean.damp || 0.6;
-          const lpf = actx.createBiquadFilter();
-          lpf.type = "lowpass";
-          lpf.frequency.value = 800 + (1 - damp) * 7200;
-          lpf.Q.value = 0.5;
-          const preDelay = actx.createDelay(0.3); preDelay.delayTime.value = preDelaySec;
-          const split = actx.createGain(); split.gain.value = 1;
-          split.connect(dryG); split.connect(preDelay);
-          preDelay.connect(conv); conv.connect(lpf); lpf.connect(wetG);
-          node = split;
-          liveNodes.ocean = { dryG, wetG, preDelay, lpf, conv };
-        } else {
-          // Bypass: dry path only, no convolver/lpf allocated
-          const split = actx.createGain(); split.gain.value = 1;
-          split.connect(dryG);
-          node = split;
-          liveNodes.ocean = { dryG, wetG };
-        }
-      }
-
-      // ── 5-band parametric EQ — only built when on ──
-      // PERF: 5 biquad filters in series consume real audio-thread CPU
-      // per track. When EQ is OFF we skip them entirely; turning EQ on
-      // bumps fxSignature so the chain rebuilds with the filters
-      // inserted. Audible result is identical (the previous "bypass"
-      // mode set frequencies/gains to neutral but the biquads still
-      // processed audio).
-      {
-        const eq = fx.eq || {};
-        const T  = 0.005;
-        const eqOn = !!(fx.eq && fx.eq.on);
-
-        if (eqOn) {
-          const hpf = actx.createBiquadFilter();
-          hpf.type = "highpass";
-          hpf.frequency.setTargetAtTime(eq.hpfFreq||80,   actx.currentTime, T);
-          hpf.Q.setTargetAtTime(        eq.hpfQ||0.707,   actx.currentTime, T);
-
-          const low = actx.createBiquadFilter();
-          low.type = "lowshelf";
-          low.frequency.setTargetAtTime(eq.lowFreq||200,  actx.currentTime, T);
-          low.gain.setTargetAtTime(     eq.low||0,        actx.currentTime, T);
-
-          const mid = actx.createBiquadFilter();
-          mid.type = "peaking";
-          mid.frequency.setTargetAtTime(eq.midFreq||1000, actx.currentTime, T);
-          mid.gain.setTargetAtTime(     eq.mid||0,        actx.currentTime, T);
-          mid.Q.setTargetAtTime(        eq.midQ||1.0,     actx.currentTime, T);
-
-          const high = actx.createBiquadFilter();
-          high.type = "highshelf";
-          high.frequency.setTargetAtTime(eq.highFreq||8000, actx.currentTime, T);
-          high.gain.setTargetAtTime(     eq.high||0,        actx.currentTime, T);
-
-          const lpf = actx.createBiquadFilter();
-          lpf.type = "lowpass";
-          lpf.frequency.setTargetAtTime(eq.lpfFreq||18000, actx.currentTime, T);
-          lpf.Q.setTargetAtTime(        eq.lpfQ||0.707,    actx.currentTime, T);
-
-          // Chain: hpf → low → mid → high → lpf → [rest of chain]
-          lpf.connect(node); high.connect(lpf); mid.connect(high); low.connect(mid); hpf.connect(low);
-          node = hpf;
-          liveNodes.eq = { hpf, low, mid, high, lpf };
-        }
-        // else: EQ off — node passes through unchanged. liveNodes.eq
-        // is omitted; live-update code paths must null-check it.
-      }
-
-      // ── Compressor — always built; bypass when off via extreme settings ──
-      {
-        const comp = actx.createDynamicsCompressor();
-        const compOn = !!(fx.compressor && fx.compressor.on);
-        comp.threshold.value = compOn ? (fx.compressor.threshold ?? -24) : 0;
-        comp.ratio.value     = compOn ? (fx.compressor.ratio ?? 4)       : 1;
-        comp.attack.value    = compOn ? (fx.compressor.attack ?? 0.003)  : 0.003;
-        comp.release.value   = compOn ? (fx.compressor.release ?? 0.25)  : 0.25;
-        comp.connect(node); node = comp;
-        liveNodes.comp = comp;
-      }
-
-      // ── R-Comp (Waves Renaissance Compressor style) ────────────────────────
-      // ARC = Auto-Release Control: when enabled, release time follows the
-      // input envelope (longer for sustained signals, shorter for transients).
-      // Web Audio's DynamicsCompressor has fixed release, so we simulate ARC
-      // by setting a base release time and reacting to compressor.reduction
-      // via a setInterval that nudges release between MIN (0.05s) and MAX (1.5s).
-      //
-      // Warm mode: subtle pre-stage tube saturation (light WaveShaper curve)
-      //            + low-shelf boost @ 200Hz for body. Vocal-friendly.
-      // Electro:   harder knee, faster attack, slight pre-emphasis HPF @ 80Hz.
-      //            Tighter, punchier — good for drums/bass/synths.
-      //
-      // Always built so warm/electro can switch and ARC can toggle without
-      // tearing down the chain. When off, threshold=0 + ratio=1 makes it
-      // transparent (no gain reduction).
-      {
-        const rc       = fx.rcomp || {};
-        const rcOn     = !!rc.on;
-        const rcMode   = rc.mode || "warm";  // "warm" | "electro"
-
-        // ── Pre-stage: mode-specific tone-shaper ──
-        const rcInGain = actx.createGain(); rcInGain.gain.value = 1;
-        const rcShelf  = actx.createBiquadFilter();
-        const rcSat    = actx.createWaveShaper();
-        rcSat.oversample = "2x";
-        // Build saturation curve per mode. Warm = soft tube-style asymmetric
-        // clip; Electro = symmetric harder clip. Curve length 1024 is fine
-        // for vocal frequencies (Nyquist aliasing minimal at oversample=2x).
-        const makeRCompCurve = function(mode, amount) {
-          const n = 1024;
-          const c = new Float32Array(n);
-          const drive = Math.max(0.01, amount);
-          for (let i=0; i<n; i++) {
-            const x = (i * 2 / n - 1);
-            if (mode === "warm") {
-              // Asymmetric soft clip — gentler on negative half
-              const sign = x >= 0 ? 1 : 0.82;
-              c[i] = Math.tanh(x * (1 + drive * 0.6) * sign) * 0.94;
-            } else {
-              // Electro: harder symmetric clip with brighter edge
-              c[i] = Math.tanh(x * (1 + drive * 1.4)) * 0.98;
-            }
-          }
-          return c;
-        };
-        // Warm mode adds low-shelf body; electro adds high-pass pre-emphasis
-        if (rcMode === "warm") {
-          rcShelf.type = "lowshelf";
-          rcShelf.frequency.value = 200;
-          rcShelf.gain.value = rcOn ? 1.2 : 0;
-        } else {
-          rcShelf.type = "highpass";
-          rcShelf.frequency.value = 80;
-          rcShelf.Q.value = 0.5;
-        }
-        rcSat.curve = makeRCompCurve(rcMode, rcOn ? 0.18 : 0);
-
-        // ── Core compressor (DynamicsCompressor) ──
-        const rcComp = actx.createDynamicsCompressor();
-        rcComp.threshold.value = rcOn ? (rc.threshold ?? -18) : 0;
-        rcComp.ratio.value     = rcOn ? (rc.ratio ?? 3)        : 1;
-        rcComp.attack.value    = rcOn ? (rc.attack ?? 0.012)   : 0.003;
-        // Initial release; ARC will modulate this if enabled.
-        rcComp.release.value   = rcOn ? (rc.release ?? 0.18)   : 0.25;
-        // Knee: warm = soft (6dB), electro = harder (2dB)
-        rcComp.knee.value      = rcOn ? (rcMode === "warm" ? 6 : 2) : 30;
-
-        // ── Makeup gain ──
-        const rcMakeup = actx.createGain();
-        rcMakeup.gain.value = rcOn ? Math.pow(10, ((rc.makeupGain ?? 0)) / 20) : 1;
-
-        // Connect: rcInGain → rcShelf → rcSat → rcComp → rcMakeup → [rest]
-        rcInGain.connect(rcShelf);
-        rcShelf.connect(rcSat);
-        rcSat.connect(rcComp);
-        rcComp.connect(rcMakeup);
-        rcMakeup.connect(node);
-        node = rcInGain;
-
-        // ── ARC: auto-release modulation ──
-        // Poll reduction value at 30Hz. If reduction stays heavy, gradually
-        // extend release toward MAX. If reduction is intermittent, pull back
-        // toward MIN. This approximates Waves' ARC heuristic without
-        // requiring a full envelope follower implementation.
-        let arcTimer = null;
-        if (rcOn && (rc.arc !== false)) {  // ARC defaults to ON
-          const MIN_REL = 0.05, MAX_REL = 1.5;
-          let smoothed = rcComp.release.value;
-          arcTimer = setInterval(function(){
-            try {
-              // reduction is negative (in dB). More negative = more compression.
-              const red = Math.abs(rcComp.reduction || 0);
-              // Map: low reduction (< 2dB) → short release; high (> 8dB) → long
-              const target = MIN_REL + (Math.min(8, red) / 8) * (MAX_REL - MIN_REL);
-              // EMA smoothing so release doesn't jitter on every poll
-              smoothed = smoothed * 0.85 + target * 0.15;
-              rcComp.release.setTargetAtTime(smoothed, actx.currentTime, 0.05);
-            } catch(e) {}
-          }, 33);
-        }
-
-        liveNodes.rcomp = {
-          rcInGain, rcShelf, rcSat, rcComp, rcMakeup,
-          mode: rcMode,
-          arcTimer,
-          makeRCompCurve,
-        };
-      }
-
-      // ── Pultec EQP-1A — Passive Program Equalizer ──────────────────────────
-      // Four-stage biquad chain emulating the classic Pultec topology:
-      //   Stage 1: Low Boost  — lowshelf at lowFreq, +0..10 dB
-      //   Stage 2: Low Atten  — peaking at lowFreq, -0..10 dB (creates scoop above)
-      //   Stage 3: High Boost — peaking at hiFreq, +0..10 dB, Q from SHARP knob
-      //   Stage 4: High Atten — highshelf at attenFreq, -0..10 dB
-      //
-      // The "Pultec trick": engaging Low Boost AND Low Atten simultaneously at
-      // the same frequency creates a uniquely musical curve — deep weight at
-      // the chosen frequency with a scoop just above it (carves out mud).
-      // The trick works here because the lowshelf and peaking filter have
-      // different curve shapes; their sum is not flat even though both target
-      // the same Hz.
-      //
-      // SHARP knob (1..10) maps to Q: SHARP=1 → Q=2 (narrow), SHARP=10 → Q=0.3
-      // (wide). This matches the Pultec hardware bandwidth behavior (counter-
-      // intuitive: higher SHARP = WIDER bell, due to historical labeling).
-      //
-      // Always built so all knobs can morph live without a chain rebuild.
-      // When the plugin is OFF, all gains go to 0 (transparent pass-through).
-      {
-        const pt = fx.pultec || {};
-        const ptOn = !!pt.on;
-        const T  = 0.005;
-
-        // ── Stage 1: Low Boost (lowshelf) ──
-        const ptLowBoost = actx.createBiquadFilter();
-        ptLowBoost.type = "lowshelf";
-        ptLowBoost.frequency.value = pt.lowFreq ?? 60;
-        ptLowBoost.gain.value = ptOn ? (pt.lowBoost ?? 0) : 0;
-
-        // ── Stage 2: Low Atten (peaking, negative gain) ──
-        // Peaking filter at the same freq with NEGATIVE gain creates the
-        // characteristic Pultec mid-scoop above the bass region.
-        const ptLowAtten = actx.createBiquadFilter();
-        ptLowAtten.type = "peaking";
-        ptLowAtten.frequency.value = pt.lowFreq ?? 60;
-        ptLowAtten.Q.value = 0.6;  // Pultec's low atten has a wider bell
-        ptLowAtten.gain.value = ptOn ? -(pt.lowAtten ?? 0) : 0;
-
-        // ── Stage 3: High Boost (peaking with bandwidth/Q) ──
-        // SHARP knob (1..10) inverted to Q: high SHARP = wide bell (low Q),
-        // low SHARP = narrow bell (high Q). Map linearly from Q=2 to Q=0.3.
-        const sharpVal = pt.sharp ?? 5;
-        const hiBoostQ = 2.0 - ((sharpVal - 1) / 9) * 1.7;  // 1→2.0, 10→0.3
-        const ptHiBoost = actx.createBiquadFilter();
-        ptHiBoost.type = "peaking";
-        ptHiBoost.frequency.value = pt.hiFreq ?? 5000;
-        ptHiBoost.Q.value = hiBoostQ;
-        ptHiBoost.gain.value = ptOn ? (pt.hiBoost ?? 0) : 0;
-
-        // ── Stage 4: High Atten (highshelf, negative gain) ──
-        const ptHiAtten = actx.createBiquadFilter();
-        ptHiAtten.type = "highshelf";
-        ptHiAtten.frequency.value = pt.attenFreq ?? 10000;
-        ptHiAtten.gain.value = ptOn ? -(pt.hiAtten ?? 0) : 0;
-
-        // Chain: ptLowBoost → ptLowAtten → ptHiBoost → ptHiAtten → [rest]
-        ptHiAtten.connect(node);
-        ptHiBoost.connect(ptHiAtten);
-        ptLowAtten.connect(ptHiBoost);
-        ptLowBoost.connect(ptLowAtten);
-        node = ptLowBoost;
-
-        liveNodes.pultec = { ptLowBoost, ptLowAtten, ptHiBoost, ptHiAtten };
-      }
-
-      // ── Vocal Doubler — Haas delay + gentle detune chorus + M/S width ────────
-      // Always built so wet/dry and width can morph live without a rebuild.
-      {
-        const db       = fx.doubler || {};
-        const doubOn   = !!(fx.doubler && fx.doubler.on);
-        const delayMs  = doubOn ? (db.delay  ?? 20)  : 20;
-        const detune   = doubOn ? (db.detune ?? 8)   : 8;   // cents
-        const width    = doubOn ? (db.width  ?? 0.7) : 0;
-        const mixWet   = doubOn ? (db.mix    ?? 0.5) : 0;
-
-        // ── Dry path ──
-        const dryGain  = actx.createGain();
-        dryGain.gain.value = 1 - mixWet;
-
-        // ── Wet path: Haas delay (L) + detuned copy (R) ──
-        const wetGain  = actx.createGain();
-        wetGain.gain.value = mixWet;
-
-        // Splitter/merger for M/S width
-        const splitter = actx.createChannelSplitter(2);
-        const merger   = actx.createChannelMerger(2);
-
-        // Left copy: Haas delay
-        const haasDelay = actx.createDelay(0.1);
-        haasDelay.delayTime.value = delayMs / 1000;
-
-        // Right copy: detune via oscillator-as-LFO? No — use a BiquadFilter allpass
-        // for subtle chorus via comb phasing (detune knob drives a slight pitchbend
-        // via a short feedback delay acting as a chorus line).
-        const chorusDelay = actx.createDelay(0.05);
-        chorusDelay.delayTime.value = (detune / 1000) * 0.012 + 0.001; // 1–13ms chorus
-
-        const chorusFeedback = actx.createGain();
-        chorusFeedback.gain.value = 0.18;
-
-        // Width: blend L vs R amount into merger
-        const lWidthGain = actx.createGain(); lWidthGain.gain.value = 0.5 + width * 0.5;
-        const rWidthGain = actx.createGain(); rWidthGain.gain.value = 0.5 + width * 0.5;
-
-        // Wet mix bus
-        const wetMix = actx.createGain(); wetMix.gain.value = 1;
-        const dryMix = actx.createGain(); dryMix.gain.value = 1;
-        const outMix = actx.createGain(); outMix.gain.value = 1;
-
-        // Entry gain (splits the signal)
-        const doubEntry = actx.createGain(); doubEntry.gain.value = 1;
-
-        // Routing: entry → dryGain → outMix (always)
-        // When doubler is OFF, skip the wet path entirely. The two delay
-        // lines (plus chorus feedback loop) would otherwise process the
-        // signal even when the wet gain is 0, costing audio-thread CPU.
-        // Audible result is identical (wet would have been silent anyway).
-        doubEntry.connect(dryGain);
-        dryGain.connect(outMix);
-
-        if (doubOn) {
-          // Chorus feedback loop — only wired when needed
-          chorusDelay.connect(chorusFeedback);
-          chorusFeedback.connect(chorusDelay);
-
-          doubEntry.connect(haasDelay);
-          doubEntry.connect(chorusDelay);
-
-          haasDelay.connect(lWidthGain);
-          chorusDelay.connect(rWidthGain);
-
-          lWidthGain.connect(wetMix);
-          rWidthGain.connect(wetMix);
-
-          wetMix.connect(wetGain);
-          wetGain.connect(outMix);
-        }
-
-        outMix.connect(node);
-        node = doubEntry;
-
-        liveNodes.doubler = {
-          haasDelay, chorusDelay, chorusFeedback,
-          dryGain, wetGain, wetMix,
-          lWidthGain, rWidthGain,
-        };
-      }
-
-      // ── H-Delay — Waves H-Delay emulation ────────────────────────────────────
-      // Always built so wet/dry and all params can morph live.
-      // Architecture: input → [dry path] + [delay loop with hi/lo cut + drive]
-      // Tape mode: adds a slow LFO modulating the delay time (wow/flutter)
-      // Ping-pong: alternates wet signal L vs R each repeat via a StereoPanner
-      {
-        const hd       = fx.hdelay || {};
-        const hdOn     = !!(fx.hdelay && fx.hdelay.on);
-        const mode     = hd.mode        ?? "digital";
-        const feedback = hdOn ? Math.min(0.95, hd.feedback ?? 0.35) : 0;
-        const wetMixV  = hdOn ? (hd.wet ?? 0.40) : 0;
-        const hiCut    = hd.hiCut   ?? 8000;
-        const loCut    = hd.loCut   ?? 80;
-        const drive    = hdOn ? (hd.drive ?? 0) : 0;
-
-        // BPM sync helper (mirrors UI)
-        function hdSubdivMs(sub, bpmVal) {
-          const beat = 60000 / (bpmVal || 120);
-          const map = {
-            "1/1":beat*4,"1/2":beat*2,"1/2T":beat*(4/3),
-            "1/4":beat,"1/4T":beat*(2/3),
-            "1/8":beat/2,"1/8T":beat/3,
-            "1/16":beat/4,"1/16T":beat/6,"1/32":beat/8,
-          };
-          return Math.min(2000, (map[sub] || beat)) / 1000;
-        }
-        const delayTimeSec = hdOn
-          ? (hd.sync ? hdSubdivMs(hd.subdivision ?? "1/4", hd.bpm ?? 120) : (hd.delayMs ?? 375) / 1000)
-          : 0.375;
-
-        // Entry split
-        const hdEntry  = actx.createGain(); hdEntry.gain.value = 1;
-
-        // Dry path
-        const hdDry    = actx.createGain(); hdDry.gain.value = 1 - wetMixV;
-
-        // Wet output gain
-        const hdWet    = actx.createGain(); hdWet.gain.value = wetMixV;
-
-        // Output sum
-        const hdOut    = actx.createGain(); hdOut.gain.value = 1;
-
-        // Main delay (up to 2.1s)
-        const hdDelay  = actx.createDelay(2.1);
-        hdDelay.delayTime.value = delayTimeSec;
-
-        // Feedback path: delay → hiCut filter → loCut filter → (drive) → feedback gain → delay
-        const hdHiCut  = actx.createBiquadFilter();
-        hdHiCut.type = "lowpass";
-        hdHiCut.frequency.value = hiCut;
-        hdHiCut.Q.value = 0.5;
-
-        const hdLoCut  = actx.createBiquadFilter();
-        hdLoCut.type = "highpass";
-        hdLoCut.frequency.value = loCut;
-        hdLoCut.Q.value = 0.5;
-
-        // Analog saturation waveshaper (soft clip — bypassed when drive=0)
-        // PERF: oversample:"2x" doubles CPU on this stage (processes at
-        // 2× sample rate). Only enable when drive > 0 AND h-delay is on,
-        // so disabled tracks don't pay the cost.
-        const hdSat = actx.createWaveShaper();
-        const satCurve = (function() {
-          const n = 256, c = new Float32Array(n);
-          for(let i=0;i<n;i++){
-            const x = (i * 2 / n) - 1;
-            c[i] = x * (1 + drive * 4) / (1 + Math.abs(x) * drive * 4);
-          }
-          return c;
-        })();
-        hdSat.curve = satCurve;
-        hdSat.oversample = (hdOn && drive > 0) ? "2x" : "none";
-
-        // Tape wow/flutter: LFO → delay modulation (only in tape mode).
-        // PERF: an OscillatorNode runs at audio rate even at 0.001 Hz —
-        // each running LFO is a small but real CPU cost on the audio
-        // thread, multiplied across every track. Only START the LFO
-        // when it's actually needed (h-delay on AND tape mode). It can
-        // be lazily started later via the live-update path if mode
-        // changes to "tape" mid-session.
-        const hdLfo   = actx.createOscillator();
-        const hdLfoGain = actx.createGain();
-        const modDepth = hdOn ? (hd.modDepth ?? 0.15) : 0;
-        const modRate  = hd.modRate ?? 0.5;
-        hdLfo.type = "sine";
-        hdLfo.frequency.value = mode === "tape" ? modRate : 0.001;
-        hdLfoGain.gain.value = mode === "tape" ? modDepth * 0.015 : 0;
-        hdLfo.connect(hdLfoGain);
-        hdLfoGain.connect(hdDelay.delayTime);
-        if (hdOn && mode === "tape") {
-          try { hdLfo.start(); } catch (e) {}
-        }
-
-        // Feedback gain
-        const hdFb    = actx.createGain(); hdFb.gain.value = feedback;
-
-        // Ping-pong panner: alternates L/R on each repeat via a secondary delay copy
-        // We implement ping-pong with a StereoPanner that is flipped by feedback count.
-        // Simplification: in ping-pong we duplicate the wet signal with a half-offset copy.
-        const hdPan   = actx.createStereoPanner();
-        hdPan.pan.value = mode === "ping" ? -1 : 0; // first echo hard-L, feedback flips
-
-        const hdPanFlip = actx.createStereoPanner();
-        hdPanFlip.pan.value = mode === "ping" ? 1 : 0; // second echo hard-R
-
-        const hdFbFlip = actx.createGain(); hdFbFlip.gain.value = mode === "ping" ? feedback : 0;
-        const hdDelayFlip = actx.createDelay(2.1);
-        hdDelayFlip.delayTime.value = delayTimeSec; // half-offset for flip copy
-
-        // ── Routing ──
-        // Main chain: hdEntry → hdDelay → hdHiCut → hdLoCut → hdSat → hdPan → hdWet → hdOut
-        //             └─ feedback: hdSat → hdFb → hdDelay (loop)
-        // PERF: when h-delay is OFF, route through the dry path ONLY.
-        // The wet path's 2.1s delay buffer + biquads + waveshaper + LFO
-        // all consume audio-thread CPU even when their output gain is 0.
-        // Skipping the connection entirely saves all of that, with zero
-        // audible difference (wet output would be silent anyway).
-        hdEntry.connect(hdDry);
-        hdDry.connect(hdOut);
-
-        if (hdOn) {
-          hdEntry.connect(hdDelay);
-          hdDelay.connect(hdHiCut);
-          hdHiCut.connect(hdLoCut);
-          hdLoCut.connect(hdSat);
-          hdSat.connect(hdPan);
-          hdPan.connect(hdWet);
-          // Feedback loop
-          hdSat.connect(hdFb);
-          hdFb.connect(hdDelay);
-
-          // Ping-pong second copy (offset by half a delay period)
-          if (mode === "ping") {
-            hdSat.connect(hdFbFlip);
-            hdFbFlip.connect(hdDelayFlip);
-            hdDelayFlip.connect(hdPanFlip);
-            hdPanFlip.connect(hdWet);
-          }
-
-          hdWet.connect(hdOut);
-        }
-        hdOut.connect(node);
-        node = hdEntry;
-
-        liveNodes.hdelay = {
-          hdDelay, hdDelayFlip, hdHiCut, hdLoCut, hdSat,
-          hdDry, hdWet, hdFb, hdFbFlip,
-          hdPan, hdPanFlip, hdLfo, hdLfoGain, hdOut,
-        };
-      }
-      // ── Noise Remover — always built so on/off toggle works live ────────────
-      // When off: bypass=1 (worklet path) or threshold=0/ratio=1 (fallback).
-      // voice param drives a post-gate presence shelf (+0..+8dB at 2.5kHz).
-      // ── Noise Gate + Hiss Reduction chain ──────────────────────────────────
-      {
-        const nr         = fx.noiseremover || {};
-        const nrOn       = !!(fx.noiseremover && fx.noiseremover.on);
-        const threshDb   = nrOn ? (nr.threshold ?? -40) : -200; // direct dB
-        const releaseSec = nrOn ? (nr.release   ?? 0.15) : 0.15;
-        const holdSec    = nrOn ? (nr.hold      ?? 0.08) : 0.08;
-        const hissAmt    = nrOn ? (nr.hiss      ?? 0)    : 0;   // 0–1 → 0..-18dB @ 8kHz
-        const lookahead  = !!(nr.lookahead ?? true);
-        const attackSec  = lookahead ? 0.001 : 0.003;
-        const reductDb   = -80; // gate floor: near-silence when closed
-
-        // ── High-shelf hiss filter (always in chain for live updates) ─────────
-        // Cuts 8kHz+ by 0..–18dB. Reduces white noise/hiss that gets through
-        // when the gate is open (e.g. room hiss under a loud vocal).
-        const hissFilter = actx.createBiquadFilter();
-        hissFilter.type = "highshelf";
-        hissFilter.frequency.value = 8000;
-        hissFilter.gain.value = hissAmt * -18; // 0 = flat, 1 = -18dB cut
-        hissFilter.connect(node);
-        node = hissFilter;
-
-        // ── Noise Gate AudioWorklet (primary path) ────────────────────────────
-        // noiseGateWorkletReady is an optional ref — if it's not declared in this
-        // build, skip the worklet path entirely and use the DynamicsCompressor fallback.
-        // (A missing ref previously threw a ReferenceError here that killed buildChain
-        //  for every track, resulting in total Studio silence.)
-        //
-        // PERF: only allocate the worklet when the user actually has noise
-        // removal ON. The processor runs JS per-sample even with bypass=1, so
-        // a dormant worklet still burns audio-thread CPU. We rely on the
-        // auto-stop-on-FX-toggle behaviour to safely rebuild the chain when
-        // user enables it during playback.
-        const gateReady = (typeof noiseGateWorkletReady !== "undefined")
-          && noiseGateWorkletReady
-          && noiseGateWorkletReady.current;
-        if (gateReady && nrOn) {
-          try {
-            const gateNode = new AudioWorkletNode(actx, "noise-gate-processor", {
-              numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
-            });
-            gateNode.parameters.get("threshold").value = threshDb;
-            gateNode.parameters.get("reduction").value = reductDb;
-            gateNode.parameters.get("attack").value    = attackSec;
-            gateNode.parameters.get("hold").value      = Math.min(1.0, holdSec);
-            gateNode.parameters.get("release").value   = releaseSec;
-            gateNode.parameters.get("bypass").value    = nrOn ? 0 : 1;
-            // Patch a message port so the UI can read gate open/closed state
-            gateNode.port.onmessage = function(e) {};
-            liveNodes.rnnoiseNode = gateNode;
-            gateNode.connect(node);
-            node = gateNode;
-          } catch(e) { /* fall through */ }
-        }
-
-        // ── Fallback: DynamicsCompressor as gate ──────────────────────────────
-        // Only allocate when noise removal is ON. A passthrough compressor
-        // (threshold=0, ratio=1) is mathematically a no-op but still has
-        // tiny per-sample cost across 4-6 tracks.
-        if (!liveNodes.rnnoiseNode && nrOn) {
-          const gate = actx.createDynamicsCompressor();
-          gate.threshold.value = threshDb;
-          gate.ratio.value     = 20;
-          gate.attack.value    = attackSec;
-          gate.release.value   = releaseSec;
-          gate.knee.value      = 0;
-          gate.connect(node); node = gate;
-          liveNodes.rnnoiseGate = gate;
-        }
-
-        liveNodes.noiseremover = { on: nrOn, hissFilter };
-      }
-
-      // ── T-Rotten Master — IK Multimedia T-RackS One emulation ──────────────
-      // Signal chain: inputGain → 3-band EQ → compressor → tape saturator → limiter → outputGain
-      // Always built so all knobs can morph live without a restart.
-      {
-        const tr   = fx.trotten || {};
-        const trOn = !!(fx.trotten && fx.trotten.on);
-
-        // Input gain
-        const trInGain = actx.createGain();
-        trInGain.gain.value = trOn ? Math.pow(10, (tr.inputGain ?? 0) / 20) : 1;
-
-        // Low-shelf EQ
-        const trEqLow = actx.createBiquadFilter();
-        trEqLow.type = trOn && tr.eqLowT === "bell" ? "peaking" : "lowshelf";
-        trEqLow.frequency.value = 200;
-        trEqLow.gain.value      = trOn ? (tr.eqLow ?? 0) : 0;
-        trEqLow.Q.value         = 0.707;
-
-        // Mid peaking/bell EQ
-        const trEqMid = actx.createBiquadFilter();
-        trEqMid.type = trOn && tr.eqMidT === "shelf" ? "lowshelf" : "peaking";
-        trEqMid.frequency.value = 1000;
-        trEqMid.gain.value      = trOn ? (tr.eqMid ?? 0) : 0;
-        trEqMid.Q.value         = 1.0;
-
-        // High-shelf EQ
-        const trEqHigh = actx.createBiquadFilter();
-        trEqHigh.type = trOn && tr.eqHighT === "bell" ? "peaking" : "highshelf";
-        trEqHigh.frequency.value = 8000;
-        trEqHigh.gain.value      = trOn ? (tr.eqHigh ?? 0) : 0;
-        trEqHigh.Q.value         = 0.707;
-
-        // Compressor — compAmt 0..100 maps to ratio 1..20, threshold from compThr
-        const trComp = actx.createDynamicsCompressor();
-        const compRatio = trOn ? Math.max(1, 1 + (tr.compAmt ?? 50) / 100 * 19) : 1;
-        trComp.threshold.value = trOn ? (tr.compThr ?? -15) : 0;
-        trComp.ratio.value     = compRatio;
-        trComp.attack.value    = trOn && tr.compMode === "fast" ? 0.001 : 0.005;
-        trComp.release.value   = trOn && tr.compMode === "slow" ? 0.5   : 0.1;
-        trComp.knee.value      = 6;
-
-        // Tape saturation waveshaper — tapeDrv 0..10, tapeSat 0..10
-        const trTape = actx.createWaveShaper();
-        const buildTapeCurve = function(drv, sat, mode) {
-          const n = 512; const c = new Float32Array(n);
-          const k = (drv / 10) * 4 + (sat / 10) * 2; // combined drive+sat
-          const warmBoost = mode === "vintage" ? 1.3 : 1.0;
-          for (let i = 0; i < n; i++) {
-            const x = (i * 2 / n - 1) * warmBoost;
-            if (k < 0.01) { c[i] = x; }
-            else { c[i] = (Math.PI + k) * x / (Math.PI + k * Math.abs(x)); }
-          }
-          return c;
-        };
-        trTape.curve      = buildTapeCurve(
-          trOn ? (tr.tapeDrv ?? 5) : 0,
-          trOn ? (tr.tapeSat ?? 5) : 0,
-          trOn ? (tr.tapeMode ?? "modern") : "modern"
-        );
-        trTape.oversample = "4x";
-
-        // Tape tone coloring: slight low-end warmth boost in vintage mode
-        const trTapeShelf = actx.createBiquadFilter();
-        trTapeShelf.type          = "lowshelf";
-        trTapeShelf.frequency.value = 300;
-        trTapeShelf.gain.value    = trOn && tr.tapeMode === "vintage" ? 1.5 : 0;
-
-        // Brickwall limiter (emulate true-peak limiter via hard DynamicsCompressor)
-        const trLim = actx.createDynamicsCompressor();
-        const limCeil = trOn ? (tr.limCeil ?? -0.5) : 0;
-        trLim.threshold.value = trOn ? limCeil : 0;
-        trLim.ratio.value     = 20; // near-infinite ratio = brickwall
-        trLim.attack.value    = 0.0005; // 0.5ms lookahead
-        trLim.release.value   = trOn ? Math.max(0.05, tr.limRel ?? 0.5) : 0.25;
-        trLim.knee.value      = 0;
-
-        // Output gain
-        const trOutGain = actx.createGain();
-        trOutGain.gain.value = trOn ? Math.pow(10, (tr.outputGain ?? 0) / 20) : 1;
-
-        // Chain: trInGain → trEqLow → trEqMid → trEqHigh → trComp → trTape → trTapeShelf → trLim → trOutGain → [rest]
-        trOutGain.connect(node);
-        trLim.connect(trOutGain);
-        trTapeShelf.connect(trLim);
-        trTape.connect(trTapeShelf);
-        trComp.connect(trTape);
-        trEqHigh.connect(trComp);
-        trEqMid.connect(trEqHigh);
-        trEqLow.connect(trEqMid);
-        trInGain.connect(trEqLow);
-        node = trInGain;
-
-        liveNodes.trotten = {
-          trInGain, trEqLow, trEqMid, trEqHigh,
-          trComp, trTape, trTapeShelf, trLim, trOutGain,
-          buildTapeCurve,
-        };
-      }
-
-      // ── GRM Bandpass — dual cascaded biquad bandpass (≈12 dB/oct × 2 = 6th order) ──
-      // Always built wet/dry so mix morphs live. When off, dryG=1 / wetG=0.
-      {
-        const bpFx   = fx.bandpass || {};
-        const bpOn   = !!(fx.bandpass && fx.bandpass.on);
-        const center = bpOn ? Math.min(8000, bpFx.center ?? 1000) : 1000;
-        const octW   = bpOn ? (bpFx.width  ?? 1.0)  : 1.0;
-        const resDb  = bpOn ? (bpFx.res    ?? 0)    : 0;
-        const mixWet = bpOn ? (bpFx.mix    ?? 1)    : 0;
-
-        // Q from octave bandwidth: Q = √2^w / (2^w − 1)
-        const Q  = Math.sqrt(Math.pow(2, octW)) / (Math.pow(2, octW) - 1);
-        const Qr = Math.max(0.1, Q * (1 + resDb / 6));
-
-        // First cascaded biquad bandpass
-        const bp1 = actx.createBiquadFilter();
-        bp1.type = "bandpass";
-        bp1.frequency.value = center;
-        bp1.Q.value = Qr;
-
-        // Second cascaded biquad bandpass (same params → steeper skirts)
-        const bp2 = actx.createBiquadFilter();
-        bp2.type = "bandpass";
-        bp2.frequency.value = center;
-        bp2.Q.value = Qr;
-
-        // Wet/dry mix
-        const bpDry = actx.createGain(); bpDry.gain.value = 1 - mixWet;
-        const bpWet = actx.createGain(); bpWet.gain.value = mixWet;
-        const bpOut = actx.createGain(); bpOut.gain.value = 1;
-        const bpEntry = actx.createGain(); bpEntry.gain.value = 1;
-
-        // Routing: entry → dry → out ; entry → bp1 → bp2 → wet → out → next
-        bpEntry.connect(bpDry);
-        bpDry.connect(bpOut);
-        bpEntry.connect(bp1);
-        bp1.connect(bp2);
-        bp2.connect(bpWet);
-        bpWet.connect(bpOut);
-        bpOut.connect(node);
-        node = bpEntry;
-
-        liveNodes.bandpass = { bp1, bp2, bpDry, bpWet, bpOut };
-      }
-
-      // ── Autotune — pitch correction on playback ───────────────────────────
-      // Only allocated when ON. AudioWorklet processors run JS on every audio
-      // frame even with bypass=1, which on iOS Safari can cause crackles when
-      // multiple tracks each have a dormant worklet sitting in the chain.
-      //
-      // The auto-stop-on-FX-toggle behaviour (in fxUpdRef.current) ensures
-      // that toggling autotune ON during playback stops playback so the chain
-      // rebuilds with the worklet inserted on the next Play press. No UX
-      // surprise — the toast tells the user "Press Play to apply".
-      {
-        const at   = fx.autotune || {};
-        const atOn = !!(at.on);
-        if (atOn) {
-        try {
-          const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
-          const atNode = new AudioWorkletNode(actx, "autotune-processor", {
-            numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
-          });
-          atNode.parameters.get("bypass").value   = atOn ? 0 : 1;
-          atNode.parameters.get("key").value      = KEY_OFFSETS[at.key || "C"] || 0;
-          atNode.parameters.get("speed").value    = at.speed ?? 50;
-          atNode.parameters.get("humanize").value = at.humanize ?? 10;
-          atNode.parameters.get("wet").value      = at.wet ?? 1;
-          atNode.parameters.get("vibrato").value  = at.vibrato ?? 0;
-          atNode.port.postMessage({ scale: at.scale || "major" });
-          atNode.connect(node);
-          node = atNode;
-          liveNodes.autotune = atNode;
-        } catch(e) {
-          // Worklet not ready yet — autotune simply unavailable for this play session
-          console.warn("[Studio] Autotune node creation failed:", e);
-        }
-        } // end if(atOn) — skip worklet allocation entirely when off
-      }
-
-      // Store live nodes for this track
-      fxNodesRef.current[track.id] = liveNodes;
-
-      return node; // clips connect here
-    };
 
     const scheduleClip = function (track, clip, entryNode) {
       if (clip.active === false || !clip.audioBuffer) return;
@@ -26233,7 +26246,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }
       // Tear down old chain fully before building a new one
       tearDownChain(track.id);
-      const entry = buildChain(track);
+      const entry = buildChain(actx, master, track, hasSolo, { registerLive: true });
       chainsRef.current[track.id] = { entry: entry, fxSig: currentSig };
       return entry;
     };
@@ -28854,372 +28867,6 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     return ab;
   };
 
-  // ── Offline chain builder for export ──────────────────────────────
-  // Mirrors the live buildChain DSP exactly, but uses the OfflineAudioContext
-  // passed in as `ctx`. Returns the entry node (where clips connect upstream).
-  //
-  // Differences from live buildChain:
-  //   • No React refs touched (gainNodesRef, fxNodesRef, trackAnalysersRef)
-  //   • No VU analyser side-branch (saves CPU, irrelevant offline)
-  //   • No R-Comp ARC interval (offline render is instantaneous; ARC would
-  //     never see meaningful reduction data — falls back to fixed release)
-  //   • Worklets (autotune, noise gate) are conditionally added if
-  //     pre-registered on the offline context before rendering
-  //
-  // The DSP code itself is identical to the live version so the export
-  // sounds bit-for-bit like real-time playback (modulo ARC).
-  const buildChainOffline = function (ctx, master, track, hasSolo) {
-    let node = master;
-    const fx = track.effects || {};
-
-    // Pan
-    if (ctx.createStereoPanner) {
-      const panner = ctx.createStereoPanner();
-      panner.pan.value = track.pan || 0;
-      panner.connect(node); node = panner;
-    }
-
-    // Makeup gain (post-compressor)
-    const mg = ctx.createGain();
-    mg.gain.value = (fx.compressor && fx.compressor.on && fx.compressor.makeupGain)
-      ? Math.pow(10, (fx.compressor.makeupGain || 0) / 20) : 1;
-    mg.connect(node); node = mg;
-
-    // Track volume + mute/solo gating
-    const volGain = ctx.createGain();
-    const shouldPlay = !track.isMuted && (!hasSolo || track.isSoloed);
-    volGain.gain.value = (track.volume ?? 1) * (shouldPlay ? 1 : 0);
-    volGain.connect(node); node = volGain;
-
-    // ── Reverb ──
-    {
-      const reverbOn = !!(fx.reverb && fx.reverb.on);
-      const wetVal   = reverbOn ? (fx.reverb.wet || 0.25) : 0;
-      const dryG = ctx.createGain(); dryG.gain.value = 1 - wetVal;
-      const wetG = ctx.createGain(); wetG.gain.value = wetVal;
-      const mix  = ctx.createGain();
-      dryG.connect(mix); wetG.connect(mix); mix.connect(node);
-      if (reverbOn) {
-        const sr = ctx.sampleRate;
-        const preDelaySec = (fx.reverb.preDelay || 0) / 1000;
-        const preDelay = ctx.createDelay(0.2);
-        preDelay.delayTime.value = preDelaySec;
-        const roomSize = fx.reverb.roomSize || 0.8;
-        const len = Math.round(sr * Math.min(roomSize, 1.5) * 2);
-        const ir = ctx.createBuffer(2, len, sr);
-        for (let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.5);}
-        const conv = ctx.createConvolver(); conv.buffer = ir;
-        const split = ctx.createGain(); split.gain.value = 1;
-        split.connect(dryG); split.connect(preDelay);
-        preDelay.connect(conv); conv.connect(wetG);
-        node = split;
-      } else {
-        const split = ctx.createGain(); split.gain.value = 1;
-        split.connect(dryG);
-        node = split;
-      }
-    }
-
-    // ── Ocean Reverb ──
-    {
-      const oceanOn = !!(fx.ocean && fx.ocean.on);
-      const wetVal  = oceanOn ? (fx.ocean.wet || 0.35) : 0;
-      const dryG = ctx.createGain(); dryG.gain.value = 1 - wetVal;
-      const wetG = ctx.createGain(); wetG.gain.value = wetVal;
-      const mix  = ctx.createGain();
-      dryG.connect(mix); wetG.connect(mix); mix.connect(node);
-      if (oceanOn) {
-        const sr = ctx.sampleRate;
-        const preDelaySec = (fx.ocean.preDelay || 20) / 1000;
-        const roomSize = Math.min(1.5, fx.ocean.roomSize || 1.0);
-        const len = Math.round(sr * roomSize * 2.5);
-        const ir = ctx.createBuffer(2, len, sr);
-        for (let ch=0;ch<2;ch++){
-          const d = ir.getChannelData(ch);
-          for (let i=0;i<len;i++) d[i] = (Math.random()*2-1)*Math.pow(1-i/len, 1.8);
-        }
-        const conv = ctx.createConvolver(); conv.buffer = ir;
-        const damp = fx.ocean.damp || 0.6;
-        const lpf = ctx.createBiquadFilter();
-        lpf.type = "lowpass";
-        lpf.frequency.value = 800 + (1 - damp) * 7200;
-        lpf.Q.value = 0.5;
-        const preDelay = ctx.createDelay(0.3); preDelay.delayTime.value = preDelaySec;
-        const split = ctx.createGain(); split.gain.value = 1;
-        split.connect(dryG); split.connect(preDelay);
-        preDelay.connect(conv); conv.connect(lpf); lpf.connect(wetG);
-        node = split;
-      } else {
-        const split = ctx.createGain(); split.gain.value = 1;
-        split.connect(dryG);
-        node = split;
-      }
-    }
-
-    // ── 5-band parametric EQ ──
-    {
-      const eq = fx.eq || {};
-      const eqOn = !!(fx.eq && fx.eq.on);
-      if (eqOn) {
-        const hpf = ctx.createBiquadFilter();
-        hpf.type = "highpass";
-        hpf.frequency.value = eq.hpfFreq || 80;
-        hpf.Q.value = eq.hpfQ || 0.707;
-        const low = ctx.createBiquadFilter();
-        low.type = "lowshelf";
-        low.frequency.value = eq.lowFreq || 200;
-        low.gain.value = eq.low || 0;
-        const mid = ctx.createBiquadFilter();
-        mid.type = "peaking";
-        mid.frequency.value = eq.midFreq || 1000;
-        mid.gain.value = eq.mid || 0;
-        mid.Q.value = eq.midQ || 1.0;
-        const high = ctx.createBiquadFilter();
-        high.type = "highshelf";
-        high.frequency.value = eq.highFreq || 8000;
-        high.gain.value = eq.high || 0;
-        const lpf = ctx.createBiquadFilter();
-        lpf.type = "lowpass";
-        lpf.frequency.value = eq.lpfFreq || 18000;
-        lpf.Q.value = eq.lpfQ || 0.707;
-        lpf.connect(node); high.connect(lpf); mid.connect(high); low.connect(mid); hpf.connect(low);
-        node = hpf;
-      }
-    }
-
-    // ── Compressor ──
-    {
-      const comp = ctx.createDynamicsCompressor();
-      const compOn = !!(fx.compressor && fx.compressor.on);
-      comp.threshold.value = compOn ? (fx.compressor.threshold ?? -24) : 0;
-      comp.ratio.value     = compOn ? (fx.compressor.ratio ?? 4)       : 1;
-      comp.attack.value    = compOn ? (fx.compressor.attack ?? 0.003)  : 0.003;
-      comp.release.value   = compOn ? (fx.compressor.release ?? 0.25)  : 0.25;
-      comp.connect(node); node = comp;
-    }
-
-    // ── R-Comp (no ARC in offline — fixed release) ──
-    {
-      const rc     = fx.rcomp || {};
-      const rcOn   = !!rc.on;
-      const rcMode = rc.mode || "warm";
-
-      const rcInGain = ctx.createGain(); rcInGain.gain.value = 1;
-      const rcShelf  = ctx.createBiquadFilter();
-      const rcSat    = ctx.createWaveShaper();
-      rcSat.oversample = "2x";
-
-      const makeRCompCurve = function(mode, amount) {
-        const n = 1024;
-        const c = new Float32Array(n);
-        const drive = Math.max(0.01, amount);
-        for (let i=0; i<n; i++) {
-          const x = (i * 2 / n - 1);
-          if (mode === "warm") {
-            const sign = x >= 0 ? 1 : 0.82;
-            c[i] = Math.tanh(x * (1 + drive * 0.6) * sign) * 0.94;
-          } else {
-            c[i] = Math.tanh(x * (1 + drive * 1.4)) * 0.98;
-          }
-        }
-        return c;
-      };
-      if (rcMode === "warm") {
-        rcShelf.type = "lowshelf";
-        rcShelf.frequency.value = 200;
-        rcShelf.gain.value = rcOn ? 1.2 : 0;
-      } else {
-        rcShelf.type = "highpass";
-        rcShelf.frequency.value = 80;
-        rcShelf.Q.value = 0.5;
-      }
-      rcSat.curve = makeRCompCurve(rcMode, rcOn ? 0.18 : 0);
-
-      const rcComp = ctx.createDynamicsCompressor();
-      rcComp.threshold.value = rcOn ? (rc.threshold ?? -18) : 0;
-      rcComp.ratio.value     = rcOn ? (rc.ratio ?? 3)        : 1;
-      rcComp.attack.value    = rcOn ? (rc.attack ?? 0.012)   : 0.003;
-      rcComp.release.value   = rcOn ? (rc.release ?? 0.18)   : 0.25;
-      rcComp.knee.value      = rcOn ? (rcMode === "warm" ? 6 : 2) : 30;
-
-      const rcMakeup = ctx.createGain();
-      rcMakeup.gain.value = rcOn ? Math.pow(10, ((rc.makeupGain ?? 0)) / 20) : 1;
-
-      rcInGain.connect(rcShelf);
-      rcShelf.connect(rcSat);
-      rcSat.connect(rcComp);
-      rcComp.connect(rcMakeup);
-      rcMakeup.connect(node);
-      node = rcInGain;
-    }
-
-    // ── Pultec EQP-1A ──
-    {
-      const pt = fx.pultec || {};
-      const ptOn = !!pt.on;
-      const ptLowBoost = ctx.createBiquadFilter();
-      ptLowBoost.type = "lowshelf";
-      ptLowBoost.frequency.value = pt.lowFreq ?? 60;
-      ptLowBoost.gain.value = ptOn ? (pt.lowBoost ?? 0) : 0;
-      const ptLowAtten = ctx.createBiquadFilter();
-      ptLowAtten.type = "peaking";
-      ptLowAtten.frequency.value = pt.lowFreq ?? 60;
-      ptLowAtten.Q.value = 0.6;
-      ptLowAtten.gain.value = ptOn ? -(pt.lowAtten ?? 0) : 0;
-      const sharpVal = pt.sharp ?? 5;
-      const hiBoostQ = 2.0 - ((sharpVal - 1) / 9) * 1.7;
-      const ptHiBoost = ctx.createBiquadFilter();
-      ptHiBoost.type = "peaking";
-      ptHiBoost.frequency.value = pt.hiFreq ?? 5000;
-      ptHiBoost.Q.value = hiBoostQ;
-      ptHiBoost.gain.value = ptOn ? (pt.hiBoost ?? 0) : 0;
-      const ptHiAtten = ctx.createBiquadFilter();
-      ptHiAtten.type = "highshelf";
-      ptHiAtten.frequency.value = pt.attenFreq ?? 10000;
-      ptHiAtten.gain.value = ptOn ? -(pt.hiAtten ?? 0) : 0;
-      ptHiAtten.connect(node);
-      ptHiBoost.connect(ptHiAtten);
-      ptLowAtten.connect(ptHiBoost);
-      ptLowBoost.connect(ptLowAtten);
-      node = ptLowBoost;
-    }
-
-    // ── Vocal Doubler ──
-    {
-      const db     = fx.doubler || {};
-      const doubOn = !!db.on;
-      const mixWet = doubOn ? (db.mix ?? 0.4) : 0;
-      const delayMs = db.delay ?? 20;
-      const detune  = db.detune ?? 10;
-
-      const entry  = ctx.createGain(); entry.gain.value = 1;
-      const haasDelay = ctx.createDelay(0.1);
-      haasDelay.delayTime.value = delayMs / 1000;
-      const chorusDelay = ctx.createDelay(0.1);
-      chorusDelay.delayTime.value = (detune / 1000) * 0.012 + 0.001;
-      const dryGain = ctx.createGain(); dryGain.gain.value = 1 - mixWet;
-      const wetGain = ctx.createGain(); wetGain.gain.value = mixWet;
-      const out = ctx.createGain(); out.gain.value = 1;
-      entry.connect(dryGain); dryGain.connect(out);
-      entry.connect(haasDelay); haasDelay.connect(chorusDelay); chorusDelay.connect(wetGain); wetGain.connect(out);
-      out.connect(node);
-      node = entry;
-    }
-
-    // ── H-Delay ──
-    {
-      const hd     = fx.hdelay || {};
-      const hdOn   = !!hd.on;
-      const hdMix  = hdOn ? (hd.mix ?? 0.3) : 0;
-      const hdTimeMs = hd.time ?? 250;
-      const fb     = Math.min(0.85, hd.feedback ?? 0.4);
-
-      const entry = ctx.createGain(); entry.gain.value = 1;
-      const dry   = ctx.createGain(); dry.gain.value = 1;
-      const wet   = ctx.createGain(); wet.gain.value = hdMix;
-      const delay = ctx.createDelay(2.0);
-      delay.delayTime.value = hdTimeMs / 1000;
-      const fbGain = ctx.createGain(); fbGain.gain.value = hdOn ? fb : 0;
-      const hdHiCut = ctx.createBiquadFilter();
-      hdHiCut.type = "lowpass";
-      hdHiCut.frequency.value = hd.hiCut ?? 8000;
-      const hdLoCut = ctx.createBiquadFilter();
-      hdLoCut.type = "highpass";
-      hdLoCut.frequency.value = hd.loCut ?? 150;
-      const out = ctx.createGain(); out.gain.value = 1;
-      entry.connect(dry); dry.connect(out);
-      entry.connect(delay);
-      delay.connect(hdHiCut); hdHiCut.connect(hdLoCut); hdLoCut.connect(wet); wet.connect(out);
-      // Feedback loop
-      hdLoCut.connect(fbGain); fbGain.connect(delay);
-      out.connect(node);
-      node = entry;
-    }
-
-    // ── Noise Remover (RNNoise worklet) ──
-    if (fx.noiseremover && fx.noiseremover.on) {
-      try {
-        const gate = new AudioWorkletNode(ctx, "rnnoise-gate-processor");
-        gate.port.postMessage({
-          threshold: fx.noiseremover.threshold ?? -40,
-          release:   fx.noiseremover.release   ?? 0.15,
-          hold:      fx.noiseremover.hold      ?? 0.08,
-          hiss:      fx.noiseremover.hiss      ?? 0,
-          lookahead: fx.noiseremover.lookahead !== false,
-        });
-        gate.connect(node);
-        node = gate;
-      } catch(e) {
-        console.warn("[export] Noise gate worklet unavailable in offline context — skipping");
-      }
-    }
-
-    // ── T-Rotten Master ──
-    if (fx.trotten && fx.trotten.on) {
-      const tr = fx.trotten;
-      const inGain = ctx.createGain(); inGain.gain.value = Math.pow(10, (tr.inputGain || 0) / 20);
-      const outGain = ctx.createGain(); outGain.gain.value = Math.pow(10, (tr.outputGain || 0) / 20);
-      const eqL = ctx.createBiquadFilter(); eqL.type = "lowshelf"; eqL.frequency.value = 200; eqL.gain.value = tr.eqLow || 0;
-      const eqM = ctx.createBiquadFilter(); eqM.type = "peaking"; eqM.frequency.value = 1500; eqM.gain.value = tr.eqMid || 0; eqM.Q.value = 0.8;
-      const eqH = ctx.createBiquadFilter(); eqH.type = "highshelf"; eqH.frequency.value = 8000; eqH.gain.value = tr.eqHigh || 0;
-      const comp = ctx.createDynamicsCompressor();
-      comp.threshold.value = tr.compThr ?? -15;
-      comp.ratio.value = 4;
-      comp.attack.value = 0.005;
-      comp.release.value = 0.1;
-      const lim = ctx.createDynamicsCompressor();
-      lim.threshold.value = tr.limCeil ?? -0.5;
-      lim.ratio.value = 20;
-      lim.attack.value = 0.0005;
-      lim.release.value = Math.max(0.05, tr.limRel ?? 0.5);
-      inGain.connect(eqL); eqL.connect(eqM); eqM.connect(eqH);
-      eqH.connect(comp); comp.connect(lim); lim.connect(outGain); outGain.connect(node);
-      node = inGain;
-    }
-
-    // ── GRM Bandpass ──
-    if (fx.bandpass && fx.bandpass.on) {
-      const bp = fx.bandpass;
-      const center = bp.freq ?? 1000;
-      const octW   = bp.bandwidth ?? 1.0;
-      const resDb  = bp.resonance ?? 0;
-      const mixWet = bp.mix ?? 1.0;
-      const Q  = Math.sqrt(Math.pow(2, octW)) / (Math.pow(2, octW) - 1);
-      const Qr = Math.max(0.1, Q * (1 + resDb / 6));
-      const bp1 = ctx.createBiquadFilter();
-      bp1.type = "bandpass"; bp1.frequency.value = center; bp1.Q.value = Qr;
-      const bp2 = ctx.createBiquadFilter();
-      bp2.type = "bandpass"; bp2.frequency.value = center; bp2.Q.value = Qr;
-      const bpDry = ctx.createGain(); bpDry.gain.value = 1 - mixWet;
-      const bpWet = ctx.createGain(); bpWet.gain.value = mixWet;
-      const bpOut = ctx.createGain(); bpOut.gain.value = 1;
-      const bpEntry = ctx.createGain(); bpEntry.gain.value = 1;
-      bpEntry.connect(bpDry); bpDry.connect(bpOut);
-      bpEntry.connect(bp1); bp1.connect(bp2); bp2.connect(bpWet); bpWet.connect(bpOut);
-      bpOut.connect(node);
-      node = bpEntry;
-    }
-
-    // ── Autotune (worklet) ──
-    if (fx.autotune && fx.autotune.on) {
-      try {
-        const at = new AudioWorkletNode(ctx, "autotune-processor");
-        const atParams = fx.autotune;
-        at.parameters.get("amount").value     = atParams.amount ?? 0.8;
-        at.parameters.get("speed").value      = atParams.speed ?? 0.5;
-        at.parameters.get("formant").value    = atParams.formant ?? 1.0;
-        at.parameters.get("wet").value        = atParams.wet ?? 1;
-        at.parameters.get("vibrato").value    = atParams.vibrato ?? 0;
-        at.port.postMessage({ scale: atParams.scale || "major" });
-        at.connect(node);
-        node = at;
-      } catch(e) {
-        console.warn("[export] Autotune worklet unavailable in offline context — skipping");
-      }
-    }
-
-    return node; // clips connect to this
-  };
 
   const exportMix = async function () {
     setExporting(true); setExportMsg("Preparing...");
@@ -29276,9 +28923,11 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         const hasAnyAudio = clips.some(function(c){ return c.audioBuffer && c.active !== false; });
         if (!hasAnyAudio) continue;
 
-        // Build the FX chain for this track. Returns the entry node.
+        // Build the FX chain for this track using the unified buildChain.
+        // registerLive: false ensures no React-ref side effects, no VU
+        // analyser allocation, no R-Comp ARC interval — clean offline render.
         setExportMsg("Mixing " + (tr.name || "track") + "...");
-        const entry = buildChainOffline(oc, oc.destination, tr, hasSolo);
+        const entry = buildChain(oc, oc.destination, tr, hasSolo, { registerLive: false });
 
         // Schedule each clip into the chain
         for (const cl of clips) {
