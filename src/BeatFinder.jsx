@@ -19184,7 +19184,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
   const HDelayPlugin       = function(p){ return <_HDelayPlugin {...p} />; };
   const TRottenPlugin      = function(p){ return <_TRottenMasterPlugin {...p} />; };
   const BandpassPlugin     = function(p){ return <_BandpassPlugin {...p} />; };
-  const ExciterPlugin      = function(p){ return <_ExciterPlugin {...p} />; };
+  const PultecPlugin       = function(p){ return <_PultecPlugin {...p} />; };
   // Phosphor-style plugin icons — each tailored to its FX type
   function PhosphorPluginIcon({ id, color = "#888", size = 22 }) {
     const paths = {
@@ -19233,7 +19233,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"hdelay",       label:"H-Delay",              sub:"Tape · BPM sync · Analog",       icon:"◷", color:"#E85D04" },
     { key:"trotten",      label:"T-Rotten Master",      sub:"Mastering · Analog warmth",       icon:"knobs", color:"#C8762A" },
     { key:"bandpass",     label:"GRM Bandpass",         sub:"Dual 6th-order · Resonance",      icon:"knobs", color:"#00b4d8" },
-    { key:"exciter",      label:"Aural Exciter",        sub:"Aphex-style · Harmonic air",     icon:"wave", color:"#FCD34D" },
+    { key:"pultec",       label:"Pultec EQP-1A",        sub:"Passive tube · Boost/Atten trick",icon:"knobs", color:"#D4A574" },
   ];
 
   const addPlugin = function(key) {
@@ -19272,7 +19272,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"hdelay",       label:"T-Delay",             sub:"Tape · BPM sync", icon:"ph-delay",       color:"#ea580c", cat:"UTILITY",  tag:"EFFECT" },
     { key:"trotten",      label:"T-Rotten Master 19",  sub:"Analog warmth",   icon:"ph-master",      color:"#854d0e", cat:"DYNAMICS", tag:"MASTER" },
     { key:"bandpass",     label:"GRM Bandpass",        sub:"Dual 6th-order",  icon:"ph-bandpass",    color:"#0e7490", cat:"EQ",       tag:"FILTER" },
-    { key:"exciter",      label:"Aural Exciter",       sub:"Aphex · Harmonic", icon:"ph-eq",         color:"#FCD34D", cat:"EQ",       tag:"EFFECT" },
+    { key:"pultec",       label:"Pultec EQP-1A",       sub:"Tube · Vintage",  icon:"ph-eq",          color:"#D4A574", cat:"EQ",       tag:"EFFECT" },
   ];
 
   const visiblePlugins = FL_PLUGINS.filter(function(p){
@@ -19523,8 +19523,8 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
           {/* GRM Bandpass plugin */}
           {key === "bandpass" && <BandpassPlugin fx={fx} upd={upd} Knob={Knob} />}
 
-          {/* Aural Exciter plugin */}
-          {key === "exciter" && <ExciterPlugin fx={fx} upd={upd} Knob={Knob} />}
+          {/* Pultec EQP-1A plugin */}
+          {key === "pultec" && <PultecPlugin fx={fx} upd={upd} Knob={Knob} />}
 
           {/* Autotune plugin */}
           {key === "autotune" && <AutotunePlugin fx={fx} upd={upd} Knob={Knob} />}
@@ -21659,68 +21659,284 @@ const _RCompPlugin = React.memo(_RCompPluginInner, function(prev, next) {
 });
 
 // =============================================================================
-// AURAL EXCITER — Aphex-style. Generates upper harmonics from the highs,
-// blends them back via wet mix. Two modes:
-//   • Vintage (Aphex Type B): asymmetric soft-clip, 2nd-harmonic rich, warm
-//   • Modern: symmetric clip, 3rd-harmonic rich, cleaner
-// TUNE knob controls where harmonic generation kicks in (HPF cutoff 2-8kHz).
-// HARMONICS controls saturation drive (how much overtone content is generated).
-// MIX blends the harmonic-rich wet signal back with the dry vocal.
+// PULTEC EQP-1A — Passive Program Equalizer (1950s tube unit)
+// The legendary "boost and cut the same frequency" passive EQ. Famous for
+// its musical curves and the iconic "Pultec trick": simultaneously boosting
+// AND attenuating the same low frequency produces a uniquely scooped curve
+// that adds deep weight while taking out the muddy 200-400Hz region.
+//
+// Topology (matches the original signal flow):
+//   in → [Low Boost lowshelf] → [Low Atten peaking with negative gain]
+//      → [High Boost peaking with bandwidth Q] → [High Atten highshelf] → out
+//
+// Frequency selects are discrete (authentic), bandwidth (SHARP) maps to Q
+// (higher SHARP = wider bell, lower SHARP = narrower). Boosts always positive,
+// attens always positive in UI but inverted as negative gain in the filters.
 // =============================================================================
-function _ExciterPluginInner({ fx, upd, Knob }) {
-  const ex      = fx.exciter || {};
-  const on      = !!ex.on;
-  const mode    = ex.mode || "vintage";
+function _PultecPluginInner({ fx, upd, Knob }) {
+  const pt        = fx.pultec || {};
+  const on        = !!pt.on;
+  const lowFreq   = pt.lowFreq   ?? 60;        // 20 | 30 | 60 | 100
+  const lowBoost  = pt.lowBoost  ?? 0;         // 0..10 dB
+  const lowAtten  = pt.lowAtten  ?? 0;         // 0..10 dB (applied as negative)
+  const hiFreq    = pt.hiFreq    ?? 5000;      // 3000|4000|5000|8000|10000|12000|16000
+  const hiBoost   = pt.hiBoost   ?? 0;         // 0..10 dB
+  const sharp     = pt.sharp     ?? 5;         // 1..10 (higher = wider bell)
+  const attenFreq = pt.attenFreq ?? 10000;     // 5000 | 10000 | 20000
+  const hiAtten   = pt.hiAtten   ?? 0;         // 0..10 dB (applied as negative)
+
+  const LOW_FREQS  = [20, 30, 60, 100];
+  const HIGH_FREQS = [3000, 4000, 5000, 8000, 10000, 12000, 16000];
+  const ATTEN_FREQS = [5000, 10000, 20000];
+  const fmtHz = function(hz){ return hz >= 1000 ? (hz/1000).toFixed(hz % 1000 === 0 ? 0 : 1) + "K" : String(hz); };
+
+  // Section button style — the iconic Pultec frequency-select look
+  const SelectBtn = function({ value, current, onClick, children }){
+    const sel = value === current;
+    return (
+      <button onClick={function(){ onClick(value); }}
+        style={{
+          background: sel
+            ? "linear-gradient(180deg,#F5E4C3 0%,#D4A574 60%,#A07843 100%)"
+            : "linear-gradient(180deg,#3a2e1f 0%,#2a2015 100%)",
+          border: "1px solid " + (sel ? "#8B5E2E" : "#1a1208"),
+          borderRadius: 3,
+          color: sel ? "#3d1f00" : "#7a6045",
+          fontSize: 9,
+          fontWeight: 800,
+          fontFamily: "monospace",
+          padding: "5px 7px",
+          cursor: "pointer",
+          minWidth: 28,
+          textShadow: sel ? "0 1px 0 rgba(255,255,255,0.3)" : "none",
+          boxShadow: sel
+            ? "inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 4px rgba(0,0,0,0.4)"
+            : "inset 0 1px 0 rgba(0,0,0,0.3)",
+          transition: "all 0.1s",
+        }}>{children}</button>
+    );
+  };
 
   return (
-    <div style={{ background:"linear-gradient(180deg,#1f1a08 0%,#15110a 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (on ? "#FCD34D" : "#2a2a2a"), boxShadow: on ? "0 0 20px rgba(252,211,77,0.18), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
-      {/* Header */}
-      <div style={{ background:"linear-gradient(180deg,#231d0c 0%,#1a1410 100%)", padding:"8px 14px", borderBottom:"1px solid #3a3018", display:"flex", alignItems:"center", gap:8 }}>
+    <div style={{
+      background: "linear-gradient(180deg,#3a2918 0%,#2a1f13 100%)",
+      borderRadius: 12,
+      overflow: "hidden",
+      border: "2px solid " + (on ? "#8B5E2E" : "#2a2018"),
+      boxShadow: on
+        ? "0 0 24px rgba(212,165,116,0.18), inset 0 1px 0 rgba(245,228,195,0.1), 0 4px 12px rgba(0,0,0,0.5)"
+        : "inset 0 1px 0 rgba(245,228,195,0.04), 0 2px 6px rgba(0,0,0,0.4)",
+      position: "relative",
+    }}>
+      {/* Wooden side panels for hardware look */}
+      <div style={{ position:"absolute", top:0, bottom:0, left:0, width:8,
+        background:"linear-gradient(90deg,#4a2810 0%,#6b3a15 50%,#3a1f0a 100%)",
+        borderRight:"1px solid #1a0e05", zIndex:1 }} />
+      <div style={{ position:"absolute", top:0, bottom:0, right:0, width:8,
+        background:"linear-gradient(90deg,#3a1f0a 0%,#6b3a15 50%,#4a2810 100%)",
+        borderLeft:"1px solid #1a0e05", zIndex:1 }} />
+
+      {/* Header — brushed metal faceplate */}
+      <div style={{
+        background: "linear-gradient(180deg,#5c4a35 0%,#4a3a28 50%,#3d2f1f 100%)",
+        padding: "8px 16px",
+        margin: "0 8px",
+        borderBottom: "1px solid #2a2015",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        boxShadow: "inset 0 1px 0 rgba(245,228,195,0.2)",
+      }}>
         <div style={{ flex:1 }}>
-          <div style={{ color:"#FDE68A", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>AURAL EXCITER</div>
-          <div style={{ color:"#5c4818", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>HARMONIC ENHANCEMENT · APHEX-STYLE</div>
+          <div style={{
+            color: "#F5E4C3",
+            fontWeight: 900,
+            fontSize: 12,
+            letterSpacing: 3,
+            fontFamily: "'Georgia', serif",
+            lineHeight: 1,
+            textShadow: "0 1px 0 rgba(0,0,0,0.4)",
+          }}>PULTEC EQP-1A</div>
+          <div style={{
+            color: "#a08e6a",
+            fontSize: 7,
+            letterSpacing: 2,
+            fontFamily: "monospace",
+            marginTop: 2,
+          }}>PROGRAM EQUALIZER · PASSIVE</div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          {/* Glowing harmonic indicator dots */}
-          <div style={{ display:"flex", gap:2, alignItems:"center" }}>
-            {[0,1,2,3].map(function(i){
-              return <div key={i} style={{ width:4, height:4, borderRadius:"50%", background: on ? "#FCD34D" : "#2a2410", boxShadow: on ? "0 0 4px #FCD34D" : "none", opacity: on ? 1 - i*0.18 : 1, transition:"all 0.15s" }} />;
-            })}
-          </div>
-          <div style={{ width:8, height:8, borderRadius:"50%", background: on ? "#FCD34D" : "#1a1a1a", boxShadow: on ? "0 0 6px #FCD34D, 0 0 12px rgba(252,211,77,0.5)" : "none", transition:"all 0.2s" }} />
-          <button onClick={function(){ upd("exciter",{on:!on}); }}
-            style={{ background: on ? "linear-gradient(180deg,#EAB308,#CA8A04)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (on ? "#FCD34D" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1, boxShadow: on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>
-            {on ? "ON" : "OFF"}
-          </button>
+          {/* Tube-glow indicator */}
+          <div style={{
+            width: 10, height: 10, borderRadius: "50%",
+            background: on
+              ? "radial-gradient(circle at 35% 35%,#FFE6B0 0%,#FCA453 40%,#7C3A0A 100%)"
+              : "radial-gradient(circle,#1a1208 0%,#0a0604 100%)",
+            boxShadow: on
+              ? "0 0 8px #FCA453, 0 0 16px rgba(252,164,83,0.5), inset 0 1px 1px rgba(255,230,176,0.6)"
+              : "inset 0 1px 1px rgba(0,0,0,0.6)",
+            transition: "all 0.3s",
+          }} />
+          <button onClick={function(){ upd("pultec",{on:!on}); }}
+            style={{
+              background: on
+                ? "linear-gradient(180deg,#A07843 0%,#7C5832 100%)"
+                : "linear-gradient(180deg,#2a2015 0%,#1a1208 100%)",
+              border: "1px solid " + (on ? "#D4A574" : "#3a2e1f"),
+              borderRadius: 4,
+              color: on ? "#F5E4C3" : "#5a4838",
+              fontSize: 9,
+              fontWeight: 800,
+              padding: "5px 14px",
+              cursor: "pointer",
+              letterSpacing: 1,
+              boxShadow: on
+                ? "inset 0 1px 0 rgba(245,228,195,0.3), 0 1px 3px rgba(0,0,0,0.4)"
+                : "inset 0 1px 0 rgba(0,0,0,0.4)",
+            }}>{on ? "IN" : "OUT"}</button>
         </div>
       </div>
 
-      <div style={{ padding:"12px 14px", opacity: on ? 1 : 0.4, transition:"opacity 0.2s" }}>
-        {/* Mode toggle */}
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
-          <div style={{ display:"flex", gap:0, background:"#0a0805", border:"1px solid #3a3018", borderRadius:6, padding:2 }}>
-            <button onClick={function(){ upd("exciter",{mode:"vintage"}); }}
-              style={{ background: mode === "vintage" ? "linear-gradient(180deg,#EAB308,#CA8A04)" : "transparent", border:"none", borderRadius:4, color: mode === "vintage" ? "white" : "#5c4818", fontSize:9, fontWeight:800, padding:"3px 10px", cursor:"pointer", letterSpacing:1 }}>VINTAGE</button>
-            <button onClick={function(){ upd("exciter",{mode:"modern"}); }}
-              style={{ background: mode === "modern" ? "linear-gradient(180deg,#EAB308,#CA8A04)" : "transparent", border:"none", borderRadius:4, color: mode === "modern" ? "white" : "#5c4818", fontSize:9, fontWeight:800, padding:"3px 10px", cursor:"pointer", letterSpacing:1 }}>MODERN</button>
+      <div style={{
+        padding: "14px 18px",
+        opacity: on ? 1 : 0.5,
+        transition: "opacity 0.2s",
+        // Faceplate texture
+        background: "radial-gradient(ellipse at center,rgba(245,228,195,0.04) 0%,transparent 70%)",
+      }}>
+        {/* ── LOW FREQUENCY SECTION ── */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{
+            color: "#D4A574",
+            fontSize: 8,
+            letterSpacing: 2,
+            fontWeight: 800,
+            fontFamily: "'Georgia', serif",
+            marginBottom: 6,
+            textShadow: "0 1px 0 rgba(0,0,0,0.4)",
+          }}>LOW FREQUENCY</div>
+
+          {/* Low freq select buttons */}
+          <div style={{
+            display: "flex",
+            gap: 4,
+            background: "linear-gradient(180deg,#1a1208 0%,#0a0604 100%)",
+            padding: 6,
+            borderRadius: 5,
+            border: "1px solid #2a2015",
+            boxShadow: "inset 0 2px 4px rgba(0,0,0,0.6)",
+            marginBottom: 8,
+          }}>
+            <span style={{ color:"#7a6045", fontSize:8, fontWeight:700, letterSpacing:1, alignSelf:"center", marginRight:4 }}>CPS</span>
+            {LOW_FREQS.map(function(f){
+              return <SelectBtn key={f} value={f} current={lowFreq} onClick={function(v){ upd("pultec",{lowFreq:v}); }}>{f}</SelectBtn>;
+            })}
           </div>
-          <div style={{ color: on ? "#FDE68A" : "#5c4818", fontSize:9, fontWeight:800, letterSpacing:1, fontFamily:"monospace" }}>
-            {mode === "vintage" ? "TYPE B · 2nd HARM" : "TYPE C · 3rd HARM"}
+
+          {/* Low boost + atten knobs */}
+          <div style={{ display:"flex", justifyContent:"space-around", gap:8 }}>
+            <Knob label="LOW BOOST" value={lowBoost} min={0} max={10} step={0.1} unit="dB" color="#D4A574" onChange={function(v){ upd("pultec",{lowBoost:v}); }} />
+            <Knob label="LOW ATTEN" value={lowAtten} min={0} max={10} step={0.1} unit="dB" color="#A07843" onChange={function(v){ upd("pultec",{lowAtten:v}); }} />
           </div>
         </div>
 
-        {/* Knobs */}
-        <div style={{ display:"flex", justifyContent:"space-around", overflow:"visible" }}>
-          <Knob label="TUNE"      value={ex.tune ?? 4000}        min={2000} max={8000} step={100}  unit="Hz" color="#FCD34D" onChange={function(v){ upd("exciter",{tune:v}); }} />
-          <Knob label="HARMONICS" value={Math.round((ex.harmonics ?? 0.5) * 100)} min={0} max={100} step={1} unit="%"  color="#EAB308" onChange={function(v){ upd("exciter",{harmonics:v/100}); }} />
-          <Knob label="MIX"       value={Math.round((ex.mix ?? 0.3) * 100)} min={0} max={100} step={1} unit="%"  color="#22C55E" onChange={function(v){ upd("exciter",{mix:v/100}); }} />
+        <div style={{ height:1, background:"linear-gradient(90deg,transparent,#5c4a35,transparent)", margin:"10px 0" }} />
+
+        {/* ── HIGH FREQUENCY BOOST SECTION ── */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{
+            color: "#D4A574",
+            fontSize: 8,
+            letterSpacing: 2,
+            fontWeight: 800,
+            fontFamily: "'Georgia', serif",
+            marginBottom: 6,
+            textShadow: "0 1px 0 rgba(0,0,0,0.4)",
+          }}>HIGH FREQUENCY BOOST</div>
+
+          <div style={{
+            display: "flex",
+            gap: 3,
+            background: "linear-gradient(180deg,#1a1208 0%,#0a0604 100%)",
+            padding: 6,
+            borderRadius: 5,
+            border: "1px solid #2a2015",
+            boxShadow: "inset 0 2px 4px rgba(0,0,0,0.6)",
+            marginBottom: 8,
+            flexWrap: "wrap",
+          }}>
+            <span style={{ color:"#7a6045", fontSize:8, fontWeight:700, letterSpacing:1, alignSelf:"center", marginRight:2 }}>KCS</span>
+            {HIGH_FREQS.map(function(f){
+              return <SelectBtn key={f} value={f} current={hiFreq} onClick={function(v){ upd("pultec",{hiFreq:v}); }}>{fmtHz(f)}</SelectBtn>;
+            })}
+          </div>
+
+          <div style={{ display:"flex", justifyContent:"space-around", gap:8 }}>
+            <Knob label="HI BOOST" value={hiBoost} min={0} max={10} step={0.1} unit="dB" color="#D4A574" onChange={function(v){ upd("pultec",{hiBoost:v}); }} />
+            <Knob label="SHARP" value={sharp} min={1} max={10} step={0.1} unit="" color="#a08e6a" onChange={function(v){ upd("pultec",{sharp:v}); }} />
+          </div>
+          <div style={{ textAlign:"center", color:"#7a6045", fontSize:8, marginTop:2, fontFamily:"monospace", letterSpacing:1 }}>
+            ← BROAD · SHARP → NARROW
+          </div>
         </div>
+
+        <div style={{ height:1, background:"linear-gradient(90deg,transparent,#5c4a35,transparent)", margin:"10px 0" }} />
+
+        {/* ── ATTEN SELECT + HIGH ATTEN ── */}
+        <div>
+          <div style={{
+            color: "#D4A574",
+            fontSize: 8,
+            letterSpacing: 2,
+            fontWeight: 800,
+            fontFamily: "'Georgia', serif",
+            marginBottom: 6,
+            textShadow: "0 1px 0 rgba(0,0,0,0.4)",
+          }}>ATTEN SEL</div>
+
+          <div style={{
+            display: "flex",
+            gap: 4,
+            background: "linear-gradient(180deg,#1a1208 0%,#0a0604 100%)",
+            padding: 6,
+            borderRadius: 5,
+            border: "1px solid #2a2015",
+            boxShadow: "inset 0 2px 4px rgba(0,0,0,0.6)",
+            marginBottom: 8,
+          }}>
+            <span style={{ color:"#7a6045", fontSize:8, fontWeight:700, letterSpacing:1, alignSelf:"center", marginRight:4 }}>KCS</span>
+            {ATTEN_FREQS.map(function(f){
+              return <SelectBtn key={f} value={f} current={attenFreq} onClick={function(v){ upd("pultec",{attenFreq:v}); }}>{fmtHz(f)}</SelectBtn>;
+            })}
+          </div>
+
+          <div style={{ display:"flex", justifyContent:"center" }}>
+            <Knob label="ATTEN" value={hiAtten} min={0} max={10} step={0.1} unit="dB" color="#A07843" onChange={function(v){ upd("pultec",{hiAtten:v}); }} />
+          </div>
+        </div>
+
+        {/* Pultec trick hint when both low boost and atten are engaged */}
+        {on && lowBoost > 0.5 && lowAtten > 0.5 && (
+          <div style={{
+            marginTop: 12,
+            padding: "6px 10px",
+            background: "linear-gradient(180deg,rgba(245,228,195,0.08),rgba(212,165,116,0.04))",
+            borderRadius: 4,
+            border: "1px solid rgba(212,165,116,0.3)",
+            color: "#F5E4C3",
+            fontSize: 9,
+            fontStyle: "italic",
+            textAlign: "center",
+            fontFamily: "'Georgia',serif",
+            letterSpacing: 0.5,
+          }}>✦ Pultec trick engaged — deep lows + carved mids</div>
+        )}
       </div>
     </div>
   );
 }
-const _ExciterPlugin = React.memo(_ExciterPluginInner, function(prev, next) {
-  return prev.fx.exciter === next.fx.exciter && prev.upd === next.upd;
+const _PultecPlugin = React.memo(_PultecPluginInner, function(prev, next) {
+  return prev.fx.pultec === next.fx.pultec && prev.upd === next.upd;
 });
 
 // This is the correct way to prevent re-renders from the 30fps currentTime
@@ -24442,9 +24658,8 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       (e.trotten && e.trotten.on)      ? "t"  : "-",
       (e.bandpass && e.bandpass.on)    ? "b"  : "-",
       (e.autotune && e.autotune.on)    ? "a"  : "-",
-      (e.exciter && e.exciter.on)      ? "x"  : "-",
-      (e.exciter && e.exciter.mode)    || "-",  // exciter mode affects topology slightly
       (e.rcomp && e.rcomp.mode)        || "-",  // r-comp warm/electro affects pre-stage
+      (e.pultec && e.pultec.on)        ? "pt" : "--",
     ].join("|");
   };
 
@@ -24741,24 +24956,30 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }
     }
 
-    // ── Exciter live param updates ──
-    // Mode (vintage/modern) requires rebuild (different curve). HPF cutoff,
-    // mix, and harmonic amount tweak live.
-    if (live.exciter && fx.exciter !== undefined) {
-      const ex    = fx.exciter || {};
-      const exOn  = !!ex.on;
+    // ── Pultec EQP-1A live param updates ──
+    // Frequency selects (lowFreq, hiFreq, attenFreq) are topology-stable —
+    // the same biquad nodes just retune. So all knob and freq-select changes
+    // can morph live without a chain rebuild. Only on/off toggles trigger
+    // a rebuild via fxSignature.
+    if (live.pultec && fx.pultec !== undefined) {
+      const pt   = fx.pultec || {};
+      const ptOn = !!pt.on;
       try {
-        const tuneHz  = exOn ? (ex.tune ?? 4000) : 4000;
-        const mixWet  = exOn ? (ex.mix ?? 0.3)    : 0;
-        const harmAmt = exOn ? (ex.harmonics ?? 0.5) : 0;
-        live.exciter.exHPF.frequency.setTargetAtTime(tuneHz, now, T);
-        live.exciter.exWet.gain.setTargetAtTime(mixWet, now, T);
-        live.exciter.exTaper.gain.setTargetAtTime(exOn ? 2.5 : 0, now, T);
-        // Recompute the saturation curve if harmonic amount changed.
-        // WaveShaper curve is a Float32Array — replacement is safe at runtime.
-        if (live.exciter.makeExciterCurve) {
-          live.exciter.exShaper.curve = live.exciter.makeExciterCurve(live.exciter.mode, harmAmt);
-        }
+        // Stage 1: Low Boost
+        live.pultec.ptLowBoost.frequency.setTargetAtTime(pt.lowFreq ?? 60,                  now, T);
+        live.pultec.ptLowBoost.gain.setTargetAtTime(     ptOn ? (pt.lowBoost ?? 0) : 0,     now, T);
+        // Stage 2: Low Atten (negative gain on a peaking filter at same freq)
+        live.pultec.ptLowAtten.frequency.setTargetAtTime(pt.lowFreq ?? 60,                  now, T);
+        live.pultec.ptLowAtten.gain.setTargetAtTime(     ptOn ? -(pt.lowAtten ?? 0) : 0,    now, T);
+        // Stage 3: High Boost (with SHARP-controlled Q)
+        const sharpVal = pt.sharp ?? 5;
+        const hiBoostQ = 2.0 - ((sharpVal - 1) / 9) * 1.7;
+        live.pultec.ptHiBoost.frequency.setTargetAtTime( pt.hiFreq ?? 5000,                 now, T);
+        live.pultec.ptHiBoost.Q.setTargetAtTime(         hiBoostQ,                          now, T);
+        live.pultec.ptHiBoost.gain.setTargetAtTime(      ptOn ? (pt.hiBoost ?? 0) : 0,      now, T);
+        // Stage 4: High Atten
+        live.pultec.ptHiAtten.frequency.setTargetAtTime( pt.attenFreq ?? 10000,             now, T);
+        live.pultec.ptHiAtten.gain.setTargetAtTime(      ptOn ? -(pt.hiAtten ?? 0) : 0,     now, T);
       } catch(e) {}
     }
   };
@@ -25115,92 +25336,71 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         };
       }
 
-      // ── Aural Exciter (Aphex-style) ────────────────────────────────────────
-      // Topology: dry-thru + parallel wet generator
-      //   wet path: split → HPF (tune) → asymmetric soft-clip (harmonics)
-      //             → high-shelf (taper) → wet gain → sum
-      //   dry path: split → dry gain → sum
-      //   Sum out → [rest of chain]
+      // ── Pultec EQP-1A — Passive Program Equalizer ──────────────────────────
+      // Four-stage biquad chain emulating the classic Pultec topology:
+      //   Stage 1: Low Boost  — lowshelf at lowFreq, +0..10 dB
+      //   Stage 2: Low Atten  — peaking at lowFreq, -0..10 dB (creates scoop above)
+      //   Stage 3: High Boost — peaking at hiFreq, +0..10 dB, Q from SHARP knob
+      //   Stage 4: High Atten — highshelf at attenFreq, -0..10 dB
       //
-      // This generates upper harmonics from the highs only, adds them back
-      // proportionally via the MIX knob. Result: vocals get "air" without
-      // boosting frequencies that aren't already present (vs a simple EQ
-      // high-shelf, which lifts existing high content but can't create
-      // overtones that aren't there).
+      // The "Pultec trick": engaging Low Boost AND Low Atten simultaneously at
+      // the same frequency creates a uniquely musical curve — deep weight at
+      // the chosen frequency with a scoop just above it (carves out mud).
+      // The trick works here because the lowshelf and peaking filter have
+      // different curve shapes; their sum is not flat even though both target
+      // the same Hz.
       //
-      // Tunable HPF cutoff (TUNE knob): 2-8kHz controls where the harmonic
-      // generation kicks in. Lower = more aggressive, higher = subtler air.
+      // SHARP knob (1..10) maps to Q: SHARP=1 → Q=2 (narrow), SHARP=10 → Q=0.3
+      // (wide). This matches the Pultec hardware bandwidth behavior (counter-
+      // intuitive: higher SHARP = WIDER bell, due to historical labeling).
       //
-      // Mode: "vintage" (Aphex Type B style, warmer asym clip)
-      //   vs   "modern"  (cleaner symmetric saturation)
+      // Always built so all knobs can morph live without a chain rebuild.
+      // When the plugin is OFF, all gains go to 0 (transparent pass-through).
       {
-        const ex      = fx.exciter || {};
-        const exOn    = !!ex.on;
-        const exMode  = ex.mode || "vintage";
-        const harmAmt = exOn ? (ex.harmonics ?? 0.5) : 0;   // 0..1
-        const mixWet  = exOn ? (ex.mix ?? 0.3)        : 0;   // 0..1
-        const tuneHz  = exOn ? (ex.tune ?? 4000)      : 4000;// 2000..8000
+        const pt = fx.pultec || {};
+        const ptOn = !!pt.on;
+        const T  = 0.005;
 
-        // Entry splitter
-        const exEntry = actx.createGain(); exEntry.gain.value = 1;
-        const exDry   = actx.createGain(); exDry.gain.value = 1;        // dry pass-thru full
-        const exWet   = actx.createGain(); exWet.gain.value = mixWet;
-        const exOut   = actx.createGain(); exOut.gain.value = 1;
+        // ── Stage 1: Low Boost (lowshelf) ──
+        const ptLowBoost = actx.createBiquadFilter();
+        ptLowBoost.type = "lowshelf";
+        ptLowBoost.frequency.value = pt.lowFreq ?? 60;
+        ptLowBoost.gain.value = ptOn ? (pt.lowBoost ?? 0) : 0;
 
-        // Wet chain
-        const exHPF = actx.createBiquadFilter();
-        exHPF.type = "highpass";
-        exHPF.frequency.value = tuneHz;
-        exHPF.Q.value = 0.707;
+        // ── Stage 2: Low Atten (peaking, negative gain) ──
+        // Peaking filter at the same freq with NEGATIVE gain creates the
+        // characteristic Pultec mid-scoop above the bass region.
+        const ptLowAtten = actx.createBiquadFilter();
+        ptLowAtten.type = "peaking";
+        ptLowAtten.frequency.value = pt.lowFreq ?? 60;
+        ptLowAtten.Q.value = 0.6;  // Pultec's low atten has a wider bell
+        ptLowAtten.gain.value = ptOn ? -(pt.lowAtten ?? 0) : 0;
 
-        const exShaper = actx.createWaveShaper();
-        exShaper.oversample = "4x";  // Aliasing matters more for high freqs
-        const makeExciterCurve = function(mode, amount) {
-          const n = 2048;
-          const c = new Float32Array(n);
-          const drive = 1 + amount * 8; // 1..9 drive
-          for (let i=0; i<n; i++) {
-            const x = (i * 2 / n - 1);
-            if (mode === "vintage") {
-              // Asymmetric: 2nd-harmonic-rich (musical, vocal-friendly)
-              const asym = x >= 0 ? 1 : 0.7;
-              c[i] = Math.tanh(x * drive * asym) * 0.5;
-            } else {
-              // Modern: symmetric (3rd-harmonic-rich, cleaner)
-              c[i] = Math.tanh(x * drive) * 0.5;
-            }
-          }
-          return c;
-        };
-        exShaper.curve = makeExciterCurve(exMode, harmAmt);
+        // ── Stage 3: High Boost (peaking with bandwidth/Q) ──
+        // SHARP knob (1..10) inverted to Q: high SHARP = wide bell (low Q),
+        // low SHARP = narrow bell (high Q). Map linearly from Q=2 to Q=0.3.
+        const sharpVal = pt.sharp ?? 5;
+        const hiBoostQ = 2.0 - ((sharpVal - 1) / 9) * 1.7;  // 1→2.0, 10→0.3
+        const ptHiBoost = actx.createBiquadFilter();
+        ptHiBoost.type = "peaking";
+        ptHiBoost.frequency.value = pt.hiFreq ?? 5000;
+        ptHiBoost.Q.value = hiBoostQ;
+        ptHiBoost.gain.value = ptOn ? (pt.hiBoost ?? 0) : 0;
 
-        // Taper: shape the harmonic content with a gentle high-shelf so it
-        // doesn't get harsh — adds a "sheen" character matching Aphex Type B
-        const exTaper = actx.createBiquadFilter();
-        exTaper.type = "highshelf";
-        exTaper.frequency.value = 6000;
-        exTaper.gain.value = exOn ? 2.5 : 0;
+        // ── Stage 4: High Atten (highshelf, negative gain) ──
+        const ptHiAtten = actx.createBiquadFilter();
+        ptHiAtten.type = "highshelf";
+        ptHiAtten.frequency.value = pt.attenFreq ?? 10000;
+        ptHiAtten.gain.value = ptOn ? -(pt.hiAtten ?? 0) : 0;
 
-        // Routing
-        exEntry.connect(exDry);
-        exDry.connect(exOut);
+        // Chain: ptLowBoost → ptLowAtten → ptHiBoost → ptHiAtten → [rest]
+        ptHiAtten.connect(node);
+        ptHiBoost.connect(ptHiAtten);
+        ptLowAtten.connect(ptHiBoost);
+        ptLowBoost.connect(ptLowAtten);
+        node = ptLowBoost;
 
-        if (exOn) {
-          exEntry.connect(exHPF);
-          exHPF.connect(exShaper);
-          exShaper.connect(exTaper);
-          exTaper.connect(exWet);
-          exWet.connect(exOut);
-        }
-
-        exOut.connect(node);
-        node = exEntry;
-
-        liveNodes.exciter = {
-          exEntry, exDry, exWet, exOut, exHPF, exShaper, exTaper,
-          mode: exMode,
-          makeExciterCurve,
-        };
+        liveNodes.pultec = { ptLowBoost, ptLowAtten, ptHiBoost, ptHiAtten };
       }
 
       // ── Vocal Doubler — Haas delay + gentle detune chorus + M/S width ────────
@@ -26182,7 +26382,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       eq:         { on:false, low:0, mid:0, high:0 },
       compressor: { on:false, threshold:-24, ratio:4, attack:0.003, release:0.25 },
       rcomp:      { on:false, threshold:-18, ratio:3, attack:0.012, release:0.18, makeupGain:0, mode:"warm", arc:true },
-      exciter:    { on:false, harmonics:0.5, mix:0.3, tune:4000, mode:"vintage" },
+      pultec:     { on:false, lowFreq:60, lowBoost:0, lowAtten:0, hiFreq:5000, hiBoost:0, sharp:5, attenFreq:10000, hiAtten:0 },
       trotten:    { on:false, eqLow:0, eqMid:0, eqHigh:0, eqLowT:"shelf", eqMidT:"bell", eqHighT:"shelf", compThr:-15, compAmt:50, compMode:"auto", tapeDrv:5, tapeSat:5, tapeMode:"modern", limCeil:-0.5, limRel:0.5, limMode:"truepeak", inputGain:0, outputGain:0 },
       noiseremover: { on:false, threshold:-40, release:0.15, hold:0.08, hiss:0, lookahead:true },
     };
@@ -30015,14 +30215,10 @@ userPickedMicRef.current = true;
             const oldOn = !!(t.effects[section] && t.effects[section].on);
             const newOn = !!(newEffects[section] && newEffects[section].on);
             if (oldOn !== newOn) changesTopology = true;
-            // R-Comp mode (warm/electro) and Exciter mode change pre-stage
-            // WaveShaper curves & HPF cutoff — require a chain rebuild.
+            // R-Comp mode (warm/electro) changes pre-stage WaveShaper curve
+            // & HPF cutoff — requires a chain rebuild.
             if (section === "rcomp" && patch && patch.mode !== undefined &&
                 t.effects.rcomp && t.effects.rcomp.mode !== patch.mode) {
-              changesTopology = true;
-            }
-            if (section === "exciter" && patch && patch.mode !== undefined &&
-                t.effects.exciter && t.effects.exciter.mode !== patch.mode) {
               changesTopology = true;
             }
           }
