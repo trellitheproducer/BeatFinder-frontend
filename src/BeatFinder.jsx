@@ -23570,6 +23570,10 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   const recDurRef       = useRef(0);
   const recStartTimeRef = useRef(0);  // AudioContext-clock-derived timeline position at rec start
   const recStopActxTimeRef = useRef(null); // actx.currentTime snapshot at the moment stop is pressed
+  // Raw actx.currentTime when mr.start() fired. Together with recStopActxTimeRef
+  // this gives us the playback-clock duration of the recording — which we
+  // compare to buf.duration (mic clock) to detect and compensate for clock drift.
+  const recStartActxTimeRef = useRef(null);
   const clipIdRef = useRef(null);
   const countTimerRef   = useRef(null);
   const metroRef        = useRef(null);
@@ -26968,6 +26972,81 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
           return;
         }
 
+        // ── Clock-drift compensation ───────────────────────────────────────
+        // PROBLEM: The mic's recording clock and the AudioContext's playback
+        // clock are two separate hardware oscillators on iOS. They tick at
+        // slightly different rates (typically a few parts per million off).
+        // Over a short take this is inaudible, but over a 1-2 minute recording
+        // the drift accumulates to 5-20ms — enough to make the vocal slide
+        // behind (or ahead of) the beat by the end.
+        //
+        // FIX: Compare the recording duration as measured by:
+        //   • mic clock    = buf.duration (samples / sampleRate, from MediaRecorder)
+        //   • actx clock   = stopActxTime - startActxTime (what playback engine sees)
+        // If they differ, resample buf to fit the actx duration exactly. Then
+        // every sample in the recording plays back at the rate the playback
+        // engine expects, so timing stays locked from start to end.
+        //
+        // We use simple linear interpolation. At ppm-level drift the resample
+        // ratio is essentially 1.0 (e.g. 0.99995..1.00005) and the audible
+        // difference between linear and cubic is undetectable. The pitch
+        // shift introduced is also imperceptible (50 ppm = 0.08 cents).
+        //
+        // SAFETY: Only compensate if drift is small (< 5%). Larger differences
+        // mean something else went wrong (codec hiccup, clock reset) and the
+        // safe thing is to keep the buffer untouched.
+        try {
+          const startActx = recStartActxTimeRef.current;
+          const stopActx  = recStopActxTimeRef.current;
+          if (startActx !== null && stopActx !== null && stopActx > startActx) {
+            const actxDuration = stopActx - startActx;
+            const micDuration  = buf.duration;
+            const driftRatio   = actxDuration / micDuration;
+            const driftAbsMs   = Math.abs(actxDuration - micDuration) * 1000;
+            // Compensate when:
+            //   • Drift is more than 5ms (below this, audibly nothing to fix)
+            //   • Drift is less than 5% (above this, something pathological)
+            //   • Recording is at least 5 seconds (short clips don't need it)
+            if (driftAbsMs > 5 && Math.abs(driftRatio - 1) < 0.05 && micDuration >= 5) {
+              const sr        = buf.sampleRate;
+              const channels  = buf.numberOfChannels;
+              const targetLen = Math.round(actxDuration * sr);
+              const srcLen    = buf.length;
+              // Build a new buffer at the same sample rate but with sample count
+              // that matches the actx-clock duration. The audio is "stretched" or
+              // "compressed" by the drift ratio via linear interpolation.
+              const stretched = getActx().createBuffer(channels, targetLen, sr);
+              for (let ch = 0; ch < channels; ch++) {
+                const srcData = buf.getChannelData(ch);
+                const dstData = stretched.getChannelData(ch);
+                // For each output sample, find its position in the source and
+                // linearly interpolate between the two nearest source samples.
+                // step = how far through the source we advance per output sample
+                const step = (srcLen - 1) / (targetLen - 1);
+                for (let i = 0; i < targetLen; i++) {
+                  const srcPos = i * step;
+                  const i0     = Math.floor(srcPos);
+                  const i1     = Math.min(srcLen - 1, i0 + 1);
+                  const frac   = srcPos - i0;
+                  dstData[i]   = srcData[i0] * (1 - frac) + srcData[i1] * frac;
+                }
+              }
+              try {
+                console.log("[BF] Clock drift compensated:",
+                  "mic=" + micDuration.toFixed(3) + "s",
+                  "actx=" + actxDuration.toFixed(3) + "s",
+                  "drift=" + (driftAbsMs).toFixed(1) + "ms",
+                  "ratio=" + driftRatio.toFixed(6));
+              } catch(e) {}
+              buf = stretched;
+            }
+          }
+        } catch(driftErr) {
+          // Compensation failed — keep the original buffer.
+          // Better to ship a slightly-drifted recording than to lose the take.
+          console.warn("[BF] Clock drift compensation failed:", driftErr);
+        }
+
         // ── Ground-truth timing ───────────────────────────────────────────
         // buf.duration = the ONLY reliable measure of how long was captured (always use this).
         // Wall-clock (recDurRef) drifts due to async gaps and codec buffering — never use it.
@@ -27077,6 +27156,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       // ── Start the recorder and stamp the clock as tightly as possible ──────
       mr.start(100); // 100ms chunks — reliable across iOS Safari + Chrome; 50ms causes gaps
       const startActxTime = actx.currentTime;
+      recStartActxTimeRef.current = startActxTime; // for clock-drift compensation
       // Chrome exposes actx.inputLatency; Safari does not (it's undefined).
       // On Safari, we apply a user-configurable recording offset (default 80ms)
       // via the Studio settings slider. The offset compensates for mic + monitor
