@@ -20617,6 +20617,192 @@ async function registerRNNoiseWorklet(actx) {
   return await p;
 }
 
+// =============================================================================
+// PLUGIN DELAY COMPENSATION (PDC)
+//
+// Measures the actual latency a track's FX chain introduces, by feeding an
+// impulse into an OfflineAudioContext-replicated chain and finding when the
+// audio first emerges at the output.
+//
+// Result is in SECONDS (not samples). Returns 0 if no FX or measurement fails.
+//
+// IMPORTANT: This builds a SIMPLIFIED chain that only includes the latency-
+// introducing nodes. Pan, gain, mute/solo logic, and zero-latency biquads
+// (EQ, Pultec) are omitted — they don't contribute to delay. We model:
+//   • DynamicsCompressor — inherent ~6ms lookahead in implementation
+//   • ConvolverNode      — the IR introduces some pre-delay
+//   • DelayNode          — the explicit delay time
+//   • WaveShaper         — zero-latency, but oversample buffers add a few samples
+//   • AudioWorkletNode   — 128 samples per quantum + any internal buffering
+//
+// The chain inside the OfflineAudioContext is built in the SAME ORDER as the
+// live chain, so cumulative buffering propagation matches reality.
+// =============================================================================
+async function measureChainLatency(track, sampleRate) {
+  if (!track || !track.effects) return 0;
+  const fx = track.effects;
+
+  // Quick check: anything in the chain that could introduce latency?
+  // If not, skip measurement entirely — biquad-only chains have zero latency.
+  const hasLatencySource =
+    (fx.compressor && fx.compressor.on) ||
+    (fx.rcomp && fx.rcomp.on) ||
+    (fx.reverb && fx.reverb.on) ||
+    (fx.ocean && fx.ocean.on) ||
+    (fx.doubler && fx.doubler.on) ||
+    (fx.hdelay && fx.hdelay.on) ||
+    (fx.noiseremover && fx.noiseremover.on) ||
+    (fx.autotune && fx.autotune.on) ||
+    (fx.trotten && fx.trotten.on);
+  if (!hasLatencySource) return 0;
+
+  try {
+    // 2 seconds of buffer is more than enough to capture any realistic
+    // FX latency (longest expected is ~150ms for autotune + reverb stacks).
+    const renderSec = 2.0;
+    const renderLen = Math.round(sampleRate * renderSec);
+    const offline = new OfflineAudioContext(1, renderLen, sampleRate);
+
+    // Register worklets on this offline context if any plugin needs them.
+    // Each offline context is independent, so we need to do this once per
+    // measurement.
+    if (fx.autotune && fx.autotune.on) {
+      await registerAutotuneWorklet(offline);
+    }
+    if (fx.noiseremover && fx.noiseremover.on) {
+      await registerRNNoiseWorklet(offline);
+    }
+
+    // Build a SIMPLIFIED chain mirroring buildChain's topology, with only the
+    // latency-introducing nodes. Order matches buildChain so propagation
+    // delays accumulate the same way.
+    let node = offline.destination;
+
+    // R-Comp (warm/electro modes — both use DynamicsCompressor)
+    if (fx.rcomp && fx.rcomp.on) {
+      const rc = offline.createDynamicsCompressor();
+      rc.threshold.value = fx.rcomp.threshold ?? -18;
+      rc.ratio.value     = fx.rcomp.ratio ?? 3;
+      rc.attack.value    = fx.rcomp.attack ?? 0.012;
+      rc.release.value   = fx.rcomp.release ?? 0.18;
+      rc.connect(node); node = rc;
+    }
+
+    // Compressor
+    if (fx.compressor && fx.compressor.on) {
+      const comp = offline.createDynamicsCompressor();
+      comp.threshold.value = fx.compressor.threshold ?? -24;
+      comp.ratio.value     = fx.compressor.ratio ?? 4;
+      comp.attack.value    = fx.compressor.attack ?? 0.003;
+      comp.release.value   = fx.compressor.release ?? 0.25;
+      comp.connect(node); node = comp;
+    }
+
+    // Ocean Reverb (convolver with synthetic IR)
+    if (fx.ocean && fx.ocean.on) {
+      const sr = offline.sampleRate;
+      const roomSize = Math.min(1.5, fx.ocean.roomSize || 1.0);
+      const len = Math.round(sr * roomSize * 2.5);
+      const ir = offline.createBuffer(2, len, sr);
+      for (let ch=0; ch<2; ch++) {
+        const d = ir.getChannelData(ch);
+        for (let i=0; i<len; i++) d[i] = (Math.random()*2-1) * Math.pow(1-i/len, 1.8);
+      }
+      const conv = offline.createConvolver();
+      conv.buffer = ir;
+      const preDelaySec = (fx.ocean.preDelay || 20) / 1000;
+      const preDelay = offline.createDelay(0.3);
+      preDelay.delayTime.value = preDelaySec;
+      preDelay.connect(conv); conv.connect(node); node = preDelay;
+    }
+
+    // Convolution Reverb (similar)
+    if (fx.reverb && fx.reverb.on) {
+      const sr = offline.sampleRate;
+      const len = Math.round(sr * (fx.reverb.roomSize || 0.8) * 2);
+      const ir = offline.createBuffer(2, len, sr);
+      for (let ch=0; ch<2; ch++) {
+        const d = ir.getChannelData(ch);
+        for (let i=0; i<len; i++) d[i] = (Math.random()*2-1) * Math.pow(1-i/len, 1.5);
+      }
+      const conv = offline.createConvolver(); conv.buffer = ir;
+      conv.connect(node); node = conv;
+    }
+
+    // Doubler — Haas delay is the dominant latency
+    if (fx.doubler && fx.doubler.on) {
+      const delayMs = fx.doubler.delay ?? 20;
+      const haas = offline.createDelay(0.1);
+      haas.delayTime.value = delayMs / 1000;
+      haas.connect(node); node = haas;
+    }
+
+    // H-Delay — modelled as just the dry-path latency (delay node feedback
+    // loop only affects wet path, dry passes through immediately)
+    if (fx.hdelay && fx.hdelay.on) {
+      // H-Delay's dry path is zero-latency; only the wet path is delayed.
+      // The user perceives the dry signal arriving on time. No compensation.
+    }
+
+    // Noise Remover (AudioWorkletNode — 128 sample buffering)
+    if (fx.noiseremover && fx.noiseremover.on) {
+      try {
+        const gate = new AudioWorkletNode(offline, "rnnoise-gate-processor");
+        gate.connect(node); node = gate;
+      } catch(e) { /* worklet not ready, skip */ }
+    }
+
+    // Autotune (AudioWorkletNode — 128 sample buffering + internal lookahead)
+    if (fx.autotune && fx.autotune.on) {
+      try {
+        const at = new AudioWorkletNode(offline, "autotune-processor");
+        at.connect(node); node = at;
+      } catch(e) { /* worklet not ready, skip */ }
+    }
+
+    // T-Rotten Master — DynamicsCompressor + brickwall limiter (another DC)
+    // Skip EQ sections (biquads, zero latency).
+    if (fx.trotten && fx.trotten.on) {
+      const comp = offline.createDynamicsCompressor();
+      comp.threshold.value = fx.trotten.compThr ?? -15;
+      comp.ratio.value     = 4;
+      comp.attack.value    = 0.005;
+      comp.release.value   = 0.1;
+      const lim = offline.createDynamicsCompressor();
+      lim.threshold.value = fx.trotten.limCeil ?? -0.5;
+      lim.ratio.value     = 20;
+      lim.attack.value    = 0.0005;
+      lim.release.value   = Math.max(0.05, fx.trotten.limRel ?? 0.5);
+      comp.connect(lim); lim.connect(node); node = comp;
+    }
+
+    // Feed an impulse at sample 0 of the input
+    const impulse = offline.createBuffer(1, 1, sampleRate);
+    impulse.getChannelData(0)[0] = 1.0;
+    const src = offline.createBufferSource();
+    src.buffer = impulse;
+    src.connect(node);
+    src.start(0);
+
+    // Render. Returns an AudioBuffer with the result.
+    const rendered = await offline.startRendering();
+    const data = rendered.getChannelData(0);
+    // Find the first sample with magnitude > threshold. That's our latency.
+    // Threshold is set fairly low (0.005) so we catch the leading edge even
+    // for chains that significantly attenuate.
+    const THRESHOLD = 0.005;
+    for (let i = 0; i < data.length; i++) {
+      if (Math.abs(data[i]) > THRESHOLD) {
+        return i / sampleRate;
+      }
+    }
+    return 0;  // No signal made it through — assume no latency
+  } catch (e) {
+    console.warn("[PDC] measureChainLatency failed for track", track.id, e);
+    return 0;  // Fail-soft: no compensation rather than broken playback
+  }
+}
+
 function _TRottenMasterPluginInner({ fx, upd }) {
   const m  = fx.trotten || {};
   const on = !!m.on;
@@ -23716,6 +23902,9 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // Invalidated when: AudioContext is recreated, track is deleted, plugin
   //                   on/off state changes for that track.
   const chainsRef     = useRef({});   // trackId → { entry, fxSig }
+  // PDC latency cache. Keyed by trackId, value is { fxSig, latencySec }.
+  // Re-measured automatically when fxSig changes (chain rebuild).
+  const fxLatencyRef  = useRef({});
 
   // ── Ruler drag ref ───────────────────────────────────────────────────────
   const rulerDragRef = useRef(null); // { mode: "in"|"out"|"new", startX, startT }
@@ -25071,12 +25260,57 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     noiseGateWorkletReady.current = !!gateOk;
     // Register autotune worklet on the playback AudioContext so it's ready for buildChain
     await registerAutotuneWorklet(actx);
-    // Schedule audio 50ms ahead so all tracks start at exactly the same moment.
-    // masterStartRef MUST equal `now` (the scheduled start), NOT actx.currentTime.
+
+    // ── PDC: Measure FX chain latencies in parallel ──
+    // For each track with FX, measure its actual end-to-end latency via
+    // OfflineAudioContext. Result cached per (trackId, fxSig) so we don't
+    // re-measure on every play. The MAX latency across all tracks determines
+    // how far ahead we need to schedule audio so FX-laden tracks finish their
+    // processing at the same wall-clock moment as dry tracks.
+    let maxFxLatency = 0;
+    try {
+      const liveTracks = tracksRef.current || [];
+      const measureTasks = liveTracks.map(async function(track) {
+        const sig = fxSignature(track.effects);
+        const cached = fxLatencyRef.current[track.id];
+        // Cache hit — skip measurement
+        if (cached && cached.fxSig === sig) return cached.latencySec;
+        // Measure for real
+        const lat = await measureChainLatency(track, actx.sampleRate);
+        fxLatencyRef.current[track.id] = { fxSig: sig, latencySec: lat };
+        return lat;
+      });
+      const latencies = await Promise.all(measureTasks);
+      for (let i = 0; i < latencies.length; i++) {
+        if (latencies[i] > maxFxLatency) maxFxLatency = latencies[i];
+      }
+      // Log so we can see what was measured during development
+      try {
+        if (maxFxLatency > 0) {
+          console.log("[PDC] Measured chain latencies:",
+            liveTracks.map(function(t, i){
+              return t.name + "=" + (latencies[i]*1000).toFixed(1) + "ms";
+            }).join(", "),
+            "→ max=" + (maxFxLatency * 1000).toFixed(1) + "ms");
+        }
+      } catch(e) {}
+    } catch(e) {
+      console.warn("[PDC] Measurement pass failed, no compensation applied:", e);
+      maxFxLatency = 0;
+    }
+
+    // Schedule audio (50ms + maxFxLatency) ahead so all tracks start at
+    // exactly the same moment. masterStartRef MUST equal `now` (the
+    // scheduled start), NOT actx.currentTime.
     // Recording timing: playheadAtRef + (startActxTime - masterStartRef).
     // If masterStartRef is 50ms behind `now`, every clip is placed 50ms too early
     // on the timeline, causing it to play back late (behind the beat) on playback.
-    const now    = actx.currentTime + 0.05;
+    // BUMPING NOW by maxFxLatency gives FX-laden tracks enough headroom to be
+    // scheduled at (now - trackLatency) without going below actx.currentTime.
+    // Capped at 250ms total so worst-case startup is bearable; latencies above
+    // that almost certainly indicate a measurement glitch.
+    const startupLead = Math.min(0.25, Math.max(0.05, maxFxLatency + 0.02));
+    const now    = actx.currentTime + startupLead;
     masterStartRef.current = now;
     playheadAtRef.current  = fromTime;
 
@@ -25940,9 +26174,22 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
 
         src.connect(entryNode);
 
+        // ── PDC: pull this track's clips back in time by its FX latency ──
+        // So when the audio reaches the master destination after passing
+        // through the chain, it arrives at the same wall-clock moment as
+        // dry tracks. `now` has already been bumped by maxFxLatency in
+        // doPlay, so every track has enough headroom to subtract its own
+        // latency without going below actx.currentTime.
+        const cached = fxLatencyRef.current[track.id];
+        const trackLatency = (cached && cached.latencySec) || 0;
+
         let when, bufOff;
         if (fromTime <= clipStart) { when=now+(clipStart-fromTime); bufOff=trimS; }
         else                       { when=now; bufOff=trimS+(fromTime-clipStart); }
+        // Compensate for THIS track's FX chain latency
+        when = when - trackLatency;
+        // Safety clamp: never schedule before actx.currentTime (Web Audio errors)
+        if (when < actx.currentTime) when = actx.currentTime;
         const remain = (trimS + trimDur) - bufOff;
         if (remain > 0) { src.start(when, bufOff, remain); scheduledRef.current.push(src); }
       } catch(e) {}
@@ -26626,6 +26873,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     delete fxNodesRef.current[id];
     delete gainNodesRef.current[id];
     delete trackAnalysersRef.current[id];
+    delete fxLatencyRef.current[id];  // PDC cache
     setContextMenu(null); setIsSaved(false);
   };
 
