@@ -28027,6 +28027,38 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
               }} style={{ display:"flex",alignItems:"center",gap:12,width:"100%",padding:"13px 16px",background:"none",border:"none",borderBottom:"1px solid #111",color:"white",fontSize:14,cursor:"pointer" }}>
                 <span style={{ width:20,textAlign:"center" }}>⧉</span> Duplicate
               </button>
+              {/* Move to track above — preserves startTime so it lands in the same
+                  timeline position, just on a different track. Useful when the
+                  manual drag is fiddly (e.g. drifting horizontally when the user
+                  intended a vertical-only move to a channel with FX applied). */}
+              {(function(){
+                const idx = tracks.findIndex(function(tr){ return tr.id === contextMenu.track.id; });
+                if (idx <= 0) return null;
+                const above = tracks[idx - 1];
+                return (
+                  <button onClick={function(){
+                    moveClipToTrack(contextMenu.track.id, contextMenu.clip.id, above.id);
+                    setContextMenu(null);
+                  }} style={{ display:"flex",alignItems:"center",gap:12,width:"100%",padding:"13px 16px",background:"none",border:"none",borderBottom:"1px solid #111",color:"white",fontSize:14,cursor:"pointer" }}>
+                    <span style={{ width:20,textAlign:"center" }}>↑</span>
+                    <span style={{ flex:1, textAlign:"left" }}>Move to {above.name}</span>
+                  </button>
+                );
+              })()}
+              {(function(){
+                const idx = tracks.findIndex(function(tr){ return tr.id === contextMenu.track.id; });
+                if (idx < 0 || idx >= tracks.length - 1) return null;
+                const below = tracks[idx + 1];
+                return (
+                  <button onClick={function(){
+                    moveClipToTrack(contextMenu.track.id, contextMenu.clip.id, below.id);
+                    setContextMenu(null);
+                  }} style={{ display:"flex",alignItems:"center",gap:12,width:"100%",padding:"13px 16px",background:"none",border:"none",borderBottom:"1px solid #111",color:"white",fontSize:14,cursor:"pointer" }}>
+                    <span style={{ width:20,textAlign:"center" }}>↓</span>
+                    <span style={{ flex:1, textAlign:"left" }}>Move to {below.name}</span>
+                  </button>
+                );
+              })()}
               <button onClick={function(){ removeClip(contextMenu.track.id, contextMenu.clip.id); }} style={{ display:"flex",alignItems:"center",gap:12,width:"100%",padding:"13px 16px",background:"none",border:"none",borderBottom:"1px solid #111",color:"#EF4444",fontSize:14,cursor:"pointer" }}>
                 <span style={{ width:20,textAlign:"center" }}>⌫</span> Delete clip
               </button>
