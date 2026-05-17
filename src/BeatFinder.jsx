@@ -19166,7 +19166,15 @@ class StudioErrorBoundary extends React.Component {
 }
 
 // ── Plugin chain panel — extracted from IIFE so useState is a valid hook call ──
-function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, analyserNode, isPlaying }) {
+// Wrapped in React.memo at the bottom of this function with a custom
+// comparator. The Knob/EQGraph/CompGraph/ReverbViz props are recreated on
+// every parent (FxPanel) render with new function references, which would
+// defeat shallow-compare React.memo. The custom comparator ignores those
+// function refs and only re-renders when the underlying DATA actually
+// changes (fx state, eq5, isPlaying, analyserNode). This is the right
+// pattern because those graph/knob components are pure: same inputs →
+// same output regardless of which closure created them.
+function _FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, analyserNode, isPlaying }) {
   // EQPlugin / CompPlugin / ReverbPlugin / PitchPlugin are pure render helpers
   // defined here so they always have the correct fx/upd/Knob/graph refs.
   const EQPlugin     = function(p){ return _EQPlugin(p); };
@@ -19547,6 +19555,35 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
   </div>
   );
 }
+
+// React.memo wrapper for FxPanelPlugins.
+// Custom comparator: skip re-render if the underlying DATA props haven't
+// changed, even when function-reference props (Knob, EQGraph, etc.) are new.
+// Those component-function props are recreated on every parent render but
+// behave identically — comparing them shallowly would force unnecessary
+// re-renders of the entire plugin tree (every knob, every graph) on every
+// tick, hammering the main thread and causing the touch-disambiguation
+// failures users have reported (knobs not responding, scrolling triggering
+// knob drags, etc.).
+const FxPanelPlugins = React.memo(_FxPanelPlugins, function areEqual(prev, next) {
+  // Re-render ONLY when these actually change:
+  //   • fx — the effects state object (replaced on FX updates)
+  //   • isPlaying — playback state
+  //   • analyserNode — the per-track VU analyser reference
+  //   • upd — the update callback (stable via ref but defensively included)
+  //
+  // We deliberately do NOT compare:
+  //   • Knob/EQGraph/CompGraph/ReverbViz — pure render functions, recreated
+  //     each parent render but identical behavior. Comparing them defeats
+  //     the memo (new refs every time).
+  //   • eq5 — derived from fx.eq via spread, so a new reference every render
+  //     but the same VALUE when fx hasn't changed. fx equality is sufficient
+  //     to know eq5 didn't meaningfully change.
+  return prev.fx           === next.fx
+      && prev.isPlaying    === next.isPlaying
+      && prev.analyserNode === next.analyserNode
+      && prev.upd          === next.upd;
+});
 
 // =============================================================================
 // ── FX plugin sub-components (pure render functions, no hooks) ──
