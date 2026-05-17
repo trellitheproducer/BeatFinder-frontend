@@ -23521,7 +23521,8 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // a track that already has FX enabled — chained effects add audible
   // latency through the mic monitor loop. State holds the pending track
   // id so the user can confirm + continue, dismiss permanently, or cancel.
-  const [fxRecordWarn, setFxRecordWarn] = useState(null); // { trackId } or null
+  // fxRecordWarn state removed — PDC + drift compensation now handle
+  // FX-on-channel recording automatically. No warning needed.
 
   // Returns true if the given track has any audio FX enabled — used to
   // warn the user before recording into an effected chain.
@@ -28815,16 +28816,8 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       seekForward: seekForward,
       onRecord:    function() {
         if (isRecording) { stopRecording(); return; }
-        // Same FX-record guard as the main transport button
-        var skipFxWarn = false;
-        try { skipFxWarn = localStorage.getItem("bf_skip_fx_record_warn") === "1"; } catch(e) {}
-        if (!skipFxWarn && selectedTrackId) {
-          var sel = tracks.find(function(t){ return t.id === selectedTrackId; });
-          if (sel && trackHasFx(sel)) {
-            setFxRecordWarn({ trackId: selectedTrackId });
-            return;
-          }
-        }
+        // PDC + drift compensation now handle FX-on-channel timing
+        // automatically, so no warning is needed.
         startCountIn(selectedTrackId);
       },
     });
@@ -30731,18 +30724,8 @@ userPickedMicRef.current = true;
             stopRecording();
             return;
           }
-          // Honour skip-fx-warn preference
-          var skipFxWarn = false;
-          try { skipFxWarn = localStorage.getItem("bf_skip_fx_record_warn") === "1"; } catch(e) {}
-          // From the FX panel, the track being recorded onto is the
-          // track we're editing FX for.
-          if (!skipFxWarn && fxTrackId) {
-            var rec = tracks.find(function(tr){ return tr.id === fxTrackId; });
-            if (rec && trackHasFx(rec)) {
-              setFxRecordWarn({ trackId: fxTrackId });
-              return;
-            }
-          }
+          // PDC + drift compensation now handle FX-on-channel timing
+          // automatically, so no warning is needed.
           startCountIn(fxTrackId);
         };
         // Admin preset save: snapshot the current FX state and POST to the
@@ -31099,18 +31082,8 @@ userPickedMicRef.current = true;
           {/* Record */}
           <button onClick={function(){
             if(isRecording){ stopRecording(); return; }
-            // FX warning — if the selected track has FX enabled, prompt
-            // first so the user knows about the latency risk. Honour the
-            // 'don't show again' preference.
-            var skipFxWarn = false;
-            try { skipFxWarn = localStorage.getItem("bf_skip_fx_record_warn") === "1"; } catch(e) {}
-            if (!skipFxWarn && selectedTrackId) {
-              var sel = tracks.find(function(t){ return t.id === selectedTrackId; });
-              if (sel && trackHasFx(sel)) {
-                setFxRecordWarn({ trackId: selectedTrackId });
-                return;
-              }
-            }
+            // PDC + drift compensation now handle FX-on-channel timing
+            // automatically, so no warning is needed.
             startCountIn(selectedTrackId);
           }} disabled={countIn>0} style={{ width:48,height:48,borderRadius:"50%",background:isRecording?"#EF4444":"linear-gradient(135deg,#EF4444,#DC2626)",border:isRecording?"3px solid rgba(239,68,68,0.5)":"3px solid rgba(239,68,68,0.2)",cursor:countIn>0?"not-allowed":"pointer",opacity:countIn>0?0.4:1,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:isRecording?"0 0 20px rgba(239,68,68,0.5)":"none",flexShrink:0 }}>
             {isRecording?<div style={{ width:14,height:14,background:"white",borderRadius:3 }} />:<div style={{ width:18,height:18,background:"white",borderRadius:"50%" }} />}
@@ -31129,148 +31102,6 @@ userPickedMicRef.current = true;
           </button>
         </div>
       </div>
-
-      {/* ── FX-on-record warning modal ────────────────────────
-          Shown when the user attempts to record onto a track that has
-          one or more FX enabled. Effects in the monitoring chain add
-          audible latency, so we let the user know and offer a clean
-          path (create a new empty channel) before continuing. */}
-      {fxRecordWarn && (
-        <div onClick={function(){ setFxRecordWarn(null); }} style={{
-          position: "fixed", inset: 0, zIndex: 99996,
-          background: "rgba(0,0,0,0.85)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          padding: 24,
-          backdropFilter: "blur(4px)",
-          fontFamily: "'DM Sans',sans-serif",
-        }}>
-          <div onClick={function(e){ e.stopPropagation(); }} style={{
-            background: "linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
-            border: "1px solid rgba(245,158,11,0.3)",
-            borderRadius: 18, padding: 24,
-            maxWidth: 380, width: "100%",
-            boxShadow: "0 16px 40px rgba(0,0,0,0.75), 0 0 24px rgba(245,158,11,0.15)",
-            position: "relative", overflow: "hidden",
-          }}>
-            {/* LED top edge — amber for warning */}
-            <div style={{
-              position: "absolute", top: 0, left: 0, right: 0, height: 2,
-              background: "linear-gradient(90deg,transparent,#F59E0B,#FBBF24,#F59E0B,transparent)",
-              boxShadow: "0 0 8px rgba(245,158,11,0.7)",
-            }} />
-
-            {/* Icon + title row */}
-            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
-              <div style={{
-                width: 48, height: 48, borderRadius: 14, flexShrink: 0,
-                background: "linear-gradient(135deg,rgba(245,158,11,0.2),rgba(245,158,11,0.08))",
-                border: "1px solid rgba(245,158,11,0.4)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                boxShadow: "0 0 14px rgba(245,158,11,0.3)",
-              }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M10.29 3.86L1.82 18a2 2 0 002 3h16.94a2 2 0 002-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-                  <line x1="12" y1="9" x2="12" y2="13"/>
-                  <line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ color: "white", fontWeight: 800, fontSize: 18, marginBottom: 2 }}>
-                  FX Detected on Track
-                </div>
-                <div style={{ color: "#888", fontSize: 12 }}>
-                  Latency warning
-                </div>
-              </div>
-            </div>
-
-            {/* Explanation */}
-            <div style={{
-              color: "#bbb", fontSize: 13, lineHeight: 1.6,
-              marginBottom: 12,
-              padding: "12px 14px",
-              background: "rgba(0,0,0,0.3)",
-              border: "1px solid rgba(124,58,237,0.15)",
-              borderRadius: 10,
-            }}>
-              This track has effects enabled. Recording with FX in the chain can introduce monitoring delay and may print latency into the take.
-            </div>
-
-            {/* Tip */}
-            <div style={{
-              display: "flex", gap: 10, alignItems: "flex-start",
-              padding: "11px 13px", marginBottom: 18,
-              background: "rgba(124,58,237,0.08)",
-              border: "1px solid rgba(124,58,237,0.25)",
-              borderRadius: 10,
-            }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                style={{ flexShrink: 0, marginTop: 1 }}>
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="16" x2="12" y2="12"/>
-                <line x1="12" y1="8" x2="12.01" y2="8"/>
-              </svg>
-              <div style={{ flex: 1, color: "#C4B5FD", fontSize: 11.5, lineHeight: 1.55, fontWeight: 500 }}>
-                For the cleanest take, record onto an empty channel with no FX, then add effects after recording.
-              </div>
-            </div>
-
-            {/* Don't show again */}
-            <label style={{
-              display: "flex", alignItems: "center", gap: 8,
-              marginBottom: 14, cursor: "pointer",
-              userSelect: "none", WebkitUserSelect: "none",
-            }}>
-              <input type="checkbox" id="bf_fx_warn_dismiss"
-                style={{ width: 14, height: 14, accentColor: "#7C3AED", cursor: "pointer" }} />
-              <span style={{ color: "#888", fontSize: 11, fontWeight: 600 }}>
-                Don't show this again
-              </span>
-            </label>
-
-            {/* Buttons row */}
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={function(){ setFxRecordWarn(null); }}
-                style={{
-                  flex: 1, padding: "13px",
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  borderRadius: 12,
-                  color: "#ccc", fontWeight: 700, fontSize: 14,
-                  cursor: "pointer", letterSpacing: 0.3,
-                }}>
-                Cancel
-              </button>
-              <button onClick={function(){
-                // Honour 'don't show again' checkbox
-                try {
-                  var cb = document.getElementById("bf_fx_warn_dismiss");
-                  if (cb && cb.checked) localStorage.setItem("bf_skip_fx_record_warn", "1");
-                } catch(e) {}
-                var tid = fxRecordWarn.trackId;
-                setFxRecordWarn(null);
-                startCountIn(tid);
-              }}
-                style={{
-                  flex: 1, padding: "13px",
-                  background: "linear-gradient(135deg,#EF4444,#DC2626)",
-                  border: "none",
-                  borderRadius: 12,
-                  color: "white", fontWeight: 800, fontSize: 14,
-                  cursor: "pointer", letterSpacing: 0.3,
-                  boxShadow: "0 4px 14px rgba(239,68,68,0.4), inset 0 1px 0 rgba(255,255,255,0.15)",
-                  textShadow: "0 1px 2px rgba(0,0,0,0.3)",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
-                }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="white">
-                  <circle cx="12" cy="12" r="6"/>
-                </svg>
-                Record Anyway
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Lyrics workspace panel (BandLab-style side overlay) ──
           Lets the user read or write lyrics while recording. Slides in
