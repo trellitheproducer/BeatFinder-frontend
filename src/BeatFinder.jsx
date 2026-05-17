@@ -24707,10 +24707,16 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         // build, skip the worklet path entirely and use the DynamicsCompressor fallback.
         // (A missing ref previously threw a ReferenceError here that killed buildChain
         //  for every track, resulting in total Studio silence.)
+        //
+        // PERF: only allocate the worklet when the user actually has noise
+        // removal ON. The processor runs JS per-sample even with bypass=1, so
+        // a dormant worklet still burns audio-thread CPU. We rely on the
+        // auto-stop-on-FX-toggle behaviour to safely rebuild the chain when
+        // user enables it during playback.
         const gateReady = (typeof noiseGateWorkletReady !== "undefined")
           && noiseGateWorkletReady
           && noiseGateWorkletReady.current;
-        if (gateReady) {
+        if (gateReady && nrOn) {
           try {
             const gateNode = new AudioWorkletNode(actx, "noise-gate-processor", {
               numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
@@ -24730,10 +24736,13 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         }
 
         // ── Fallback: DynamicsCompressor as gate ──────────────────────────────
-        if (!liveNodes.rnnoiseNode) {
+        // Only allocate when noise removal is ON. A passthrough compressor
+        // (threshold=0, ratio=1) is mathematically a no-op but still has
+        // tiny per-sample cost across 4-6 tracks.
+        if (!liveNodes.rnnoiseNode && nrOn) {
           const gate = actx.createDynamicsCompressor();
-          gate.threshold.value = nrOn ? threshDb : 0;
-          gate.ratio.value     = nrOn ? 20 : 1;
+          gate.threshold.value = threshDb;
+          gate.ratio.value     = 20;
           gate.attack.value    = attackSec;
           gate.release.value   = releaseSec;
           gate.knee.value      = 0;
@@ -24889,12 +24898,18 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }
 
       // ── Autotune — pitch correction on playback ───────────────────────────
-      // Always inserted (with bypass=1 when off) so the ON/OFF toggle works LIVE
-      // during playback. If we skip the node when off, the user has to stop +
-      // restart playback to activate autotune — bad UX.
+      // Only allocated when ON. AudioWorklet processors run JS on every audio
+      // frame even with bypass=1, which on iOS Safari can cause crackles when
+      // multiple tracks each have a dormant worklet sitting in the chain.
+      //
+      // The auto-stop-on-FX-toggle behaviour (in fxUpdRef.current) ensures
+      // that toggling autotune ON during playback stops playback so the chain
+      // rebuilds with the worklet inserted on the next Play press. No UX
+      // surprise — the toast tells the user "Press Play to apply".
       {
         const at   = fx.autotune || {};
         const atOn = !!(at.on);
+        if (atOn) {
         try {
           const KEY_OFFSETS = {C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
           const atNode = new AudioWorkletNode(actx, "autotune-processor", {
@@ -24914,6 +24929,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
           // Worklet not ready yet — autotune simply unavailable for this play session
           console.warn("[Studio] Autotune node creation failed:", e);
         }
+        } // end if(atOn) — skip worklet allocation entirely when off
       }
 
       // Store live nodes for this track
