@@ -18190,10 +18190,10 @@ function ProfileScreen({ user, setUser, onLogout, savedLyrics, setSavedLyrics, o
               </svg>
               <div style={{ flex: 1, color: "#888", fontSize: 12, fontFamily: "monospace",
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                beatfinder.app/profile/{user.username}
+                beatfinder.co.uk/profile/{user.username}
               </div>
               <button onClick={() => {
-                navigator.clipboard?.writeText("beatfinder.app/profile/" + user.username)
+                navigator.clipboard?.writeText("https://beatfinder.co.uk/profile/" + user.username)
                   .then(() => { setBioMsg("Link copied!"); setTimeout(() => setBioMsg(""), 2000); });
               }} style={{
                 background: "linear-gradient(135deg,#C026D3,#7C3AED)",
@@ -22452,6 +22452,253 @@ const FX_PRESETS = [
 ];
 
 
+// =============================================================================
+// STUDIO DEBUG OVERLAY (admin-only)
+// =============================================================================
+// Performance diagnostics overlay. Shown when admin taps the 🐛 button in
+// the Studio toolbar. Refreshes every 500ms while visible.
+//
+// What we can reliably measure:
+//   • AudioContext state, sample rate, latency, currentTime
+//   • Node counts (we keep manual tallies; Web Audio doesn't expose this)
+//   • Per-track FX chain state from the existing refs
+//   • requestAnimationFrame jitter (proxy for buffer-underrun risk)
+//
+// What we infer / approximate (and label as such):
+//   • "Buffer health" — derived from frame jitter; if frames consistently
+//     exceed 33ms while audio is playing, audio is likely stuttering
+//   • Memory — `performance.memory` only works on Chromium; Safari shows
+//     "Unavailable"
+//
+// Intentionally NOT measured: per-worklet CPU (would need worklet
+// instrumentation), buffer underrun count (not exposed by Web Audio).
+function StudioDebugOverlay({
+  actxRef, gainNodesRef, fxNodesRef, chainsRef, trackAnalysersRef,
+  tracks, isPlaying, isRecording, onClose,
+}) {
+  var [tick, setTick] = React.useState(0);
+  var frameTimesRef   = React.useRef([]);
+  var rafRef          = React.useRef(0);
+
+  // Tick every 500ms while overlay is open
+  React.useEffect(function() {
+    var id = setInterval(function() { setTick(function(t) { return t + 1; }); }, 500);
+    return function() { clearInterval(id); };
+  }, []);
+
+  // Track requestAnimationFrame jitter — captures the last 60 frames so we
+  // can compute avg/max/p95. If frame time spikes past 33ms (the 30fps
+  // boundary) consistently while audio is playing, that's a strong signal
+  // the audio thread is also stuttering because the main thread is hogging
+  // CPU.
+  React.useEffect(function() {
+    var last = performance.now();
+    var alive = true;
+    function loop(now) {
+      if (!alive) return;
+      var dt = now - last;
+      last = now;
+      var arr = frameTimesRef.current;
+      arr.push(dt);
+      if (arr.length > 60) arr.shift();
+      rafRef.current = requestAnimationFrame(loop);
+    }
+    rafRef.current = requestAnimationFrame(loop);
+    return function() { alive = false; cancelAnimationFrame(rafRef.current); };
+  }, []);
+
+  // ── Gather metrics for current render ─────────────────────────
+  var actx = actxRef && actxRef.current;
+  var ctxState     = actx ? actx.state : "no context";
+  var sampleRate   = actx ? actx.sampleRate : 0;
+  var baseLatency  = (actx && typeof actx.baseLatency   === "number") ? actx.baseLatency   : null;
+  var outLatency   = (actx && typeof actx.outputLatency === "number") ? actx.outputLatency : null;
+  var ctxTime      = actx ? actx.currentTime : 0;
+
+  // Node counts — derived from refs since Web Audio doesn't expose this
+  var gainCount       = Object.keys(gainNodesRef.current || {}).length;
+  var analyserCount   = Object.keys(trackAnalysersRef.current || {}).length;
+  var chainCount      = Object.keys(chainsRef.current || {}).length;
+  var fxBlockCount    = Object.keys(fxNodesRef.current || {}).length;
+
+  // FX node breakdown — sum across all tracks
+  var fxBreakdown = { eq:0, comp:0, reverb:0, ocean:0, hdelay:0, doubler:0, nrm:0, trotten:0, bandpass:0, autotune:0, makeupGain:0, panner:0 };
+  Object.keys(fxNodesRef.current || {}).forEach(function(tid) {
+    var live = fxNodesRef.current[tid] || {};
+    Object.keys(fxBreakdown).forEach(function(k) {
+      if (live[k]) fxBreakdown[k] += 1;
+    });
+  });
+  var totalFxNodes = Object.keys(fxBreakdown).reduce(function(sum, k) { return sum + fxBreakdown[k]; }, 0);
+
+  // Frame time stats
+  var frames = frameTimesRef.current.slice();
+  frames.sort(function(a,b){ return a-b; });
+  var fAvg = frames.length ? (frames.reduce(function(s,v){return s+v;}, 0) / frames.length) : 0;
+  var fMax = frames.length ? frames[frames.length - 1] : 0;
+  var fP95 = frames.length ? frames[Math.floor(frames.length * 0.95)] : 0;
+
+  // Buffer-health heuristic. While playing, if p95 frame time > 33ms or
+  // max > 50ms, we're likely seeing audio stutter. Color the indicator.
+  var health = "good";
+  var healthReason = "Frame times stable";
+  if (isPlaying) {
+    if (fMax > 80 || fP95 > 50) { health = "bad"; healthReason = "Frame stalls detected — audio likely stuttering"; }
+    else if (fMax > 50 || fP95 > 33) { health = "warn"; healthReason = "Frame jitter — audio may glitch"; }
+  } else {
+    healthReason = "Not playing — start playback to measure";
+  }
+  var healthColor = health === "good" ? "#22C55E" : (health === "warn" ? "#F59E0B" : "#EF4444");
+
+  // Memory (Chrome only; Safari returns nothing)
+  var mem = (typeof performance !== "undefined" && performance.memory) ? performance.memory : null;
+  var memUsedMB = mem ? (mem.usedJSHeapSize / 1024 / 1024).toFixed(1) : null;
+  var memLimitMB = mem ? (mem.jsHeapSizeLimit / 1024 / 1024).toFixed(0) : null;
+
+  // Track FX summary — count plugins ON per track
+  var trackSummary = (tracks || []).map(function(t) {
+    var fx = t.effects || {};
+    var onPlugins = [];
+    ["eq","compressor","reverb","ocean","hdelay","doubler","noiseremover","trotten","bandpass","autotune"].forEach(function(k){
+      if (fx[k] && fx[k].on) onPlugins.push(k);
+    });
+    var chainLen = Array.isArray(fx.pluginChain) ? fx.pluginChain.length : 0;
+    return { id: t.id, name: t.name || ("Track " + t.id), onPlugins: onPlugins, chainLen: chainLen };
+  });
+
+  function Section(props) {
+    return (
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ color: "#A78BFA", fontSize: 9, fontWeight: 800, letterSpacing: 1.2, marginBottom: 4 }}>
+          {props.label}
+        </div>
+        <div style={{ background: "#0d0d0d", border: "1px solid #1f1f1f", borderRadius: 6, padding: "8px 10px", fontFamily: "monospace", fontSize: 11, color: "#ccc", lineHeight: 1.55 }}>
+          {props.children}
+        </div>
+      </div>
+    );
+  }
+  function Row(props) {
+    return (
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <span style={{ color: "#888" }}>{props.k}</span>
+        <span style={{ color: props.color || "#ddd", textAlign: "right" }}>{props.v}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      position: "absolute",
+      top: "calc(env(safe-area-inset-top) + 56px)",
+      right: 10, left: 10,
+      maxWidth: 360, marginLeft: "auto",
+      zIndex: 6000,
+      background: "rgba(10,10,10,0.97)",
+      border: "1px solid #2a2a2a",
+      borderRadius: 10,
+      padding: "10px 12px 12px",
+      fontFamily: "'DM Sans',sans-serif",
+      boxShadow: "0 12px 32px rgba(0,0,0,0.7), 0 0 24px rgba(34,197,94,0.08)",
+      maxHeight: "calc(100vh - 120px)",
+      overflowY: "auto",
+      WebkitOverflowScrolling: "touch",
+    }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 14 }}>🐛</span>
+          <span style={{ color: "white", fontWeight: 800, fontSize: 12, letterSpacing: 0.5 }}>STUDIO DEBUG</span>
+          <span style={{
+            display: "inline-block", width: 8, height: 8, borderRadius: "50%",
+            background: healthColor, boxShadow: "0 0 6px " + healthColor,
+            marginLeft: 4,
+          }} />
+        </div>
+        <button onClick={onClose} style={{
+          background: "transparent", border: "none", color: "#888",
+          fontSize: 16, cursor: "pointer", padding: "2px 6px",
+        }}>×</button>
+      </div>
+
+      <Section label="HEALTH">
+        <Row k="Status" v={health.toUpperCase()} color={healthColor} />
+        <Row k="Reason" v={healthReason} />
+      </Section>
+
+      <Section label="AUDIO CONTEXT">
+        <Row k="State"        v={ctxState} color={ctxState === "running" ? "#22C55E" : (ctxState === "suspended" ? "#F59E0B" : "#888")} />
+        <Row k="Sample rate"  v={sampleRate ? (sampleRate + " Hz") : "—"} />
+        <Row k="Base latency" v={baseLatency != null ? ((baseLatency * 1000).toFixed(2) + " ms") : "n/a"} />
+        <Row k="Output latency" v={outLatency != null ? ((outLatency * 1000).toFixed(2) + " ms") : "n/a"} />
+        <Row k="Uptime" v={ctxTime.toFixed(1) + "s"} />
+      </Section>
+
+      <Section label="AUDIO GRAPH">
+        <Row k="Active chains"   v={chainCount} />
+        <Row k="Track FX blocks" v={fxBlockCount} />
+        <Row k="Volume gains"    v={gainCount} />
+        <Row k="VU analysers"    v={analyserCount} />
+        <Row k="Total FX nodes"  v={totalFxNodes} color={totalFxNodes > 30 ? "#F59E0B" : "#ddd"} />
+        {totalFxNodes > 0 && (
+          <div style={{ marginTop: 4, paddingTop: 4, borderTop: "1px solid #1f1f1f", color: "#666", fontSize: 10 }}>
+            {Object.keys(fxBreakdown).filter(function(k){ return fxBreakdown[k] > 0; }).map(function(k) {
+              return k + ":" + fxBreakdown[k];
+            }).join("  ")}
+          </div>
+        )}
+      </Section>
+
+      <Section label="PLAYBACK">
+        <Row k="Playing"    v={isPlaying ? "yes" : "no"}    color={isPlaying ? "#22C55E" : "#888"} />
+        <Row k="Recording"  v={isRecording ? "yes" : "no"}  color={isRecording ? "#EF4444" : "#888"} />
+        <Row k="Track count" v={(tracks || []).length} />
+      </Section>
+
+      <Section label="FRAME TIME (last ~1s)">
+        <Row k="Avg" v={fAvg.toFixed(1) + " ms"} color={fAvg > 20 ? "#F59E0B" : "#22C55E"} />
+        <Row k="p95" v={fP95.toFixed(1) + " ms"} color={fP95 > 33 ? "#F59E0B" : "#22C55E"} />
+        <Row k="Max" v={fMax.toFixed(1) + " ms"} color={fMax > 50 ? "#EF4444" : (fMax > 33 ? "#F59E0B" : "#22C55E")} />
+        <div style={{ marginTop: 4, paddingTop: 4, borderTop: "1px solid #1f1f1f", color: "#666", fontSize: 10, lineHeight: 1.4 }}>
+          16.7ms = 60fps · 33ms = 30fps · 50ms+ = noticeable jank
+        </div>
+      </Section>
+
+      <Section label="MEMORY">
+        {mem ? (
+          <Row k="JS heap" v={memUsedMB + " / " + memLimitMB + " MB"} />
+        ) : (
+          <div style={{ color: "#666", fontStyle: "italic" }}>Not exposed by this browser (Safari)</div>
+        )}
+      </Section>
+
+      {trackSummary.length > 0 && (
+        <Section label={"TRACKS (" + trackSummary.length + ")"}>
+          {trackSummary.map(function(t, i) {
+            return (
+              <div key={t.id || i} style={{ marginBottom: i === trackSummary.length - 1 ? 0 : 4, paddingBottom: 4, borderBottom: i === trackSummary.length - 1 ? "none" : "1px solid #1a1a1a" }}>
+                <div style={{ color: "#ddd", fontSize: 10 }}>
+                  {t.name} <span style={{ color: "#666" }}>· {t.onPlugins.length} fx ON</span>
+                </div>
+                {t.onPlugins.length > 0 && (
+                  <div style={{ color: "#888", fontSize: 9, marginTop: 1 }}>
+                    {t.onPlugins.join(", ")}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </Section>
+      )}
+
+      <div style={{ marginTop: 6, color: "#555", fontSize: 9, fontFamily: "'DM Sans',sans-serif", lineHeight: 1.4 }}>
+        Refreshes every 500ms. Health is inferred from frame jitter — Web Audio doesn't expose buffer underruns directly.
+      </div>
+    </div>
+  );
+}
+
+
 function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRegisterTransport }) {
 
   // ── Constants ─────────────────────────────────────────────────
@@ -22546,6 +22793,9 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   const [showProjMenu, setShowProjMenu] = useState(false);
   const [showAddMenu,  setShowAddMenu]  = useState(false);
   const [renamingProj, setRenamingProj] = useState(false);
+  // Admin debug overlay — toggled by the 🐛 button in the toolbar
+  // (only visible to admins). Shows AudioContext/node/FX/frame metrics.
+  const [showDebug,    setShowDebug]    = useState(false);
   const [unsavedAlert, setUnsavedAlert] = useState(false);
   const [showNamePrompt, setShowNamePrompt] = useState(false); // name-before-save modal
   const [pendingNameAction, setPendingNameAction] = useState(null); // "exit" | "new"
@@ -27062,6 +27312,22 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
           </div>
         );
       })()}
+
+      {/* Admin debug overlay — toggle via 🐛 button in toolbar */}
+      {showDebug && (
+        <StudioDebugOverlay
+          actxRef={actxRef}
+          gainNodesRef={gainNodesRef}
+          fxNodesRef={fxNodesRef}
+          chainsRef={chainsRef}
+          trackAnalysersRef={trackAnalysersRef}
+          tracks={tracks}
+          isPlaying={isPlaying}
+          isRecording={isRecording}
+          onClose={function(){ setShowDebug(false); }}
+        />
+      )}
+
       {exporting && (
         <div style={{ position:"absolute",inset:0,zIndex:9000,background:"rgba(0,0,0,0.9)",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:20 }}>
           <div style={{ width:52,height:52,borderRadius:"50%",border:"3px solid rgba(192,38,211,0.3)",borderTop:"3px solid #C026D3",animation:"bf-spin 0.8s linear infinite" }} />
@@ -27687,6 +27953,19 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         }
         <button onClick={function(e){ e.stopPropagation();setShowProjMenu(function(v){return !v;});setShowSettings(false); }} style={{ background:showProjMenu?"rgba(192,38,211,0.15)":"#1a1a1a",border:"1px solid "+(showProjMenu?"rgba(192,38,211,0.4)":"#2a2a2a"),borderRadius:8,color:"#aaa",fontSize:13,fontWeight:700,padding:"5px 10px",cursor:"pointer",flexShrink:0,letterSpacing:2 }}>···</button>
         <button onClick={function(e){ e.stopPropagation();setShowProjMenu(false);setShowSettings(function(v){return !v;}); }} style={{ background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:8,color:"#888",fontSize:12,padding:"5px 8px",cursor:"pointer",flexShrink:0 }}>⚙</button>
+        {/* Debug overlay toggle — admin only. Opens a perf-metrics overlay
+            showing AudioContext state, node counts, FX chain depth, and
+            frame-time jitter so we can identify what causes Studio lag. */}
+        {(user && (user.is_admin === true || user.username === "Trelli")) && (
+          <button onClick={function(e){ e.stopPropagation(); setShowDebug(function(v){ return !v; }); }}
+            title="Debug (admin)"
+            style={{
+              background: showDebug ? "rgba(34,197,94,0.18)" : "#1a1a1a",
+              border: "1px solid " + (showDebug ? "rgba(34,197,94,0.5)" : "#2a2a2a"),
+              borderRadius: 8, color: showDebug ? "#22C55E" : "#888",
+              fontSize: 12, padding: "5px 8px", cursor: "pointer", flexShrink: 0,
+            }}>🐛</button>
+        )}
         {/* Lyrics — toggles a side panel that lets you read/write lyrics while recording, BandLab-style */}
         <button onClick={function(e){ e.stopPropagation(); setLyricsPanelOpen(function(v){ return !v; }); }}
           title="Lyrics"
