@@ -22855,6 +22855,11 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   const [pendingName, setPendingName] = useState("");
   const [isSaved,      setIsSaved]      = useState(false);
   const [savedProjects,setSavedProjects]= useState([]);
+  // Phase 3: cloud-only projects (in MongoDB but not local). Fetched
+  // when the picker opens. Merged with savedProjects for display.
+  // Each entry has { cloudId, name, bpm, key, updated_at, size_bytes }.
+  const [cloudProjects, setCloudProjects] = useState([]);
+  const [cloudFetchState, setCloudFetchState] = useState("idle"); // "idle"|"loading"|"error"|"done"
   const [saveStatus,   setSaveStatus]   = useState("");
   const [error,        setError]        = useState("");
   const [isDecodingFile, setIsDecodingFile] = useState(false);
@@ -23284,6 +23289,31 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   useEffect(function () {
     try { setSavedProjects(JSON.parse(localStorage.getItem("bf_studio_projects") || "[]")); } catch (e) {}
   }, []);
+
+  // ── Cloud project list (Phase 3) ──────────────────────────────
+  // Fetch the user's cloud projects whenever the project picker opens.
+  // Best-effort: silent on auth/permission errors (free tier 403, logged
+  // out 401 are normal). Failures don't block the picker — local-only
+  // projects still display from savedProjects.
+  useEffect(function() {
+    if (!showProjects) return;
+    setCloudFetchState("loading");
+    apiFetch("/api/studio/projects/list")
+      .then(function(resp) {
+        const list = (resp && resp.projects) || [];
+        setCloudProjects(list);
+        setCloudFetchState("done");
+      })
+      .catch(function(err) {
+        var msg = (err && err.message) || "";
+        // 403 = free tier, 401 = not logged in. Both expected, silent.
+        if (msg && !msg.includes("403") && !msg.includes("401")) {
+          console.warn("[BeatFinder] Cloud projects fetch failed:", err);
+        }
+        setCloudProjects([]);
+        setCloudFetchState("error");
+      });
+  }, [showProjects]);
 
   // ── iOS Background Persistence ────────────────────────────────
   // iOS Safari can fully reload the page when the app is backgrounded.
@@ -28167,7 +28197,22 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
               <div>
                 <div style={{ color:"white", fontWeight:800, fontSize:18, letterSpacing:0.2 }}>Saved Projects</div>
                 <div style={{ color:"#666", fontSize:11, marginTop:2 }}>
-                  {savedProjects.length} {savedProjects.length === 1 ? "project" : "projects"}
+                  {(function(){
+                    // Count = local + cloud-only (cloud projects without a local mirror)
+                    var localCloudIds = new Set(
+                      (savedProjects || [])
+                        .map(function(p){ return p.cloudId; })
+                        .filter(Boolean)
+                    );
+                    var cloudOnly = (cloudProjects || []).filter(function(cp){
+                      return !localCloudIds.has(cp.id);
+                    });
+                    var total = (savedProjects || []).length + cloudOnly.length;
+                    return total + " " + (total === 1 ? "project" : "projects");
+                  })()}
+                  {cloudFetchState === "loading" && (
+                    <span style={{ color:"#A78BFA", marginLeft:8, opacity:0.7 }}>· syncing…</span>
+                  )}
                 </div>
               </div>
               <button
@@ -28181,35 +28226,113 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
             </div>
             {/* Scrollable list */}
             <div style={{ flex:1, overflowY:"auto", padding:"0 16px 20px", WebkitOverflowScrolling:"touch" }}>
-              {savedProjects.length === 0 ? (
-                <div style={{ color:"#555", fontSize:14, textAlign:"center", padding:"48px 20px" }}>
-                  <div style={{ fontSize:32, marginBottom:10, opacity:0.4 }}>📂</div>
-                  <div style={{ fontWeight:700, color:"#888", marginBottom:4 }}>No saved projects</div>
-                  <div style={{ fontSize:12, color:"#444" }}>Save a project from the ••• menu to see it here.</div>
-                </div>
-              ) : (
-                savedProjects.map(function(p){
+              {(function(){
+                // ── Merge local + cloud project lists for display ───────
+                // Pattern:
+                //   localProj with cloudId matching a cloudProj.id → SYNCED (show local)
+                //   localProj with no cloudId / no match           → LOCAL_ONLY
+                //   cloudProj with no local mirror                  → CLOUD_ONLY (restore-able)
+                //
+                // We render all of them in one merged list, sorted by most
+                // recent save first. Visual badges indicate the storage state.
+                var localList = (savedProjects || []).map(function(p) {
+                  var matchedCloud = null;
+                  if (p.cloudId) {
+                    matchedCloud = (cloudProjects || []).find(function(c) {
+                      return c.id === p.cloudId;
+                    });
+                  }
+                  return Object.assign({}, p, {
+                    _kind: matchedCloud ? "synced" : "local",
+                    _sortDate: p.savedAt || (matchedCloud && matchedCloud.updated_at) || null,
+                  });
+                });
+                var localCloudIds = new Set(
+                  localList.map(function(p){ return p.cloudId; }).filter(Boolean)
+                );
+                var cloudOnlyList = (cloudProjects || [])
+                  .filter(function(cp){ return !localCloudIds.has(cp.id); })
+                  .map(function(cp){
+                    return {
+                      id:        cp.id,    // we use cloud id as the React key
+                      cloudId:   cp.id,
+                      name:      cp.name,
+                      bpm:       cp.bpm,
+                      projectKey:cp.key,
+                      tracks:    [],
+                      savedAt:   cp.updated_at,
+                      _kind:     "cloud",
+                      _sortDate: cp.updated_at,
+                    };
+                  });
+                var merged = localList.concat(cloudOnlyList);
+                // Sort newest first by _sortDate (ISO strings compare lexically just fine)
+                merged.sort(function(a, b){
+                  var aD = a._sortDate || "";
+                  var bD = b._sortDate || "";
+                  return aD < bD ? 1 : aD > bD ? -1 : 0;
+                });
+                if (merged.length === 0) {
+                  return (
+                    <div style={{ color:"#555", fontSize:14, textAlign:"center", padding:"48px 20px" }}>
+                      <div style={{ fontSize:32, marginBottom:10, opacity:0.4 }}>📂</div>
+                      <div style={{ fontWeight:700, color:"#888", marginBottom:4 }}>No saved projects</div>
+                      <div style={{ fontSize:12, color:"#444" }}>Save a project from the ••• menu to see it here.</div>
+                    </div>
+                  );
+                }
+                return merged.map(function(p) {
                   const savedAt = p.savedAt ? new Date(p.savedAt) : null;
                   const dateStr = savedAt
                     ? (savedAt.toLocaleDateString(undefined, { day:"numeric", month:"short" }) +
                        " · " + savedAt.toLocaleTimeString(undefined, { hour:"2-digit", minute:"2-digit" }))
                     : "";
                   return (
-                    <div key={p.id} style={{
+                    <div key={p._kind === "cloud" ? "cloud_" + p.id : p.id} style={{
                       background:"#15131c",
                       borderRadius:14,
                       padding:"14px 14px",
                       marginBottom:10,
                       display:"flex", alignItems:"center", gap:10,
-                      border:"1px solid #1f1c28",
+                      border:"1px solid " + (p._kind === "cloud" ? "rgba(59,130,246,0.3)" : "#1f1c28"),
                     }}>
                       <div
-                        onClick={function(){ loadProject(p); }}
+                        onClick={function(){
+                          if (p._kind === "cloud") {
+                            // Phase 3 Part B will add cloud restore. For now,
+                            // tell the user the feature is coming.
+                            setError("Cloud restore coming in the next update — your data is safe in the cloud, but opening cloud-only projects isn't available yet.");
+                            setTimeout(function(){ setError(""); }, 5000);
+                          } else {
+                            loadProject(p);
+                          }
+                        }}
                         style={{ flex:1, minWidth:0, cursor:"pointer" }}>
                         <div style={{
                           color:"white", fontWeight:700, fontSize:14, marginBottom:4,
                           overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                        }}>{p.name}</div>
+                          display:"flex", alignItems:"center", gap:6,
+                        }}>
+                          {p.name}
+                          {p._kind === "cloud" && (
+                            <span style={{
+                              fontSize:9, fontWeight:800, letterSpacing:0.5,
+                              color:"#60A5FA", background:"rgba(59,130,246,0.12)",
+                              padding:"2px 6px", borderRadius:4,
+                              border:"1px solid rgba(59,130,246,0.3)",
+                              flexShrink:0,
+                            }}>☁ CLOUD</span>
+                          )}
+                          {p._kind === "synced" && (
+                            <span style={{
+                              fontSize:9, fontWeight:800, letterSpacing:0.5,
+                              color:"#34D399", background:"rgba(52,211,153,0.10)",
+                              padding:"2px 6px", borderRadius:4,
+                              border:"1px solid rgba(52,211,153,0.25)",
+                              flexShrink:0,
+                            }}>✓ SYNCED</span>
+                          )}
+                        </div>
                         <div style={{ color:"#777", fontSize:11, display:"flex", flexWrap:"wrap", gap:"4px 8px" }}>
                           <span>{(p.tracks||[]).length} {((p.tracks||[]).length === 1) ? "track" : "tracks"}</span>
                           <span style={{ color:"#333" }}>·</span>
@@ -28219,7 +28342,26 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                         </div>
                       </div>
                       <button
-                        onClick={function(e){ e.stopPropagation(); deleteProject(p.id); }}
+                        onClick={function(e){
+                          e.stopPropagation();
+                          if (p._kind === "cloud") {
+                            // Cloud-only delete — fires backend DELETE directly
+                            if (!window.confirm("Delete '" + p.name + "' from cloud? This cannot be undone.")) return;
+                            apiFetch("/api/studio/projects/delete/" + encodeURIComponent(p.cloudId), {
+                              method: "DELETE",
+                            }).then(function(){
+                              setCloudProjects(function(prev){
+                                return (prev || []).filter(function(c){ return c.id !== p.cloudId; });
+                              });
+                            }).catch(function(err){
+                              console.warn("[BeatFinder] Cloud delete failed:", err);
+                              setError("Could not delete from cloud — " + ((err && err.message) || "unknown error"));
+                              setTimeout(function(){ setError(""); }, 4000);
+                            });
+                          } else {
+                            deleteProject(p.id);
+                          }
+                        }}
                         style={{
                           background:"#1f1a26", border:"1px solid #2a2336",
                           borderRadius:8, width:32, height:32, color:"#777",
@@ -28228,8 +28370,8 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                         }}>✕</button>
                     </div>
                   );
-                })
-              )}
+                });
+              })()}
             </div>
           </div>
         </div>
