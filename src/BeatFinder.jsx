@@ -28854,36 +28854,472 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     return ab;
   };
 
-  const exportMix = async function () {
-    setExporting(true);setExportMsg("Preparing...");
-    try {
-      const SR=44100;
-      let totalDur2=0;
-      tracks.forEach(function(t){const e=(t.startTime||0)+(t.duration||0);if(e>totalDur2)totalDur2=e;});
-      if(totalDur2<0.5){setExportMsg("Nothing to export");setTimeout(function(){setExporting(false);setExportMsg("");},2000);return;}
-      const oc=new OfflineAudioContext(2,Math.ceil(totalDur2*SR),SR);
-      const dec=async function(url){const r=await fetch(url);const ab=await r.arrayBuffer();return oc.decodeAudioData(ab);};
-      const hasSolo=tracks.some(function(t){return t.isSoloed;});
-      for(const tr of tracks){
-        if(tr.isMuted||!tr.audioBuffer)continue;
-        if(hasSolo&&!tr.isSoloed)continue;
-        setExportMsg("Loading "+tr.name+"...");
-        try{
-          // Copy buffer into offline context
-          const oc2 = new OfflineAudioContext(tr.audioBuffer.numberOfChannels, tr.audioBuffer.length, tr.audioBuffer.sampleRate);
-          const g=oc.createGain();g.gain.value=1;
-          const s=oc.createBufferSource();s.buffer=tr.audioBuffer;s.connect(g);g.connect(oc.destination);
-          s.start(tr.startTime||0,0,tr.audioBuffer.duration);
-        }catch(e){}
+  // ── Offline chain builder for export ──────────────────────────────
+  // Mirrors the live buildChain DSP exactly, but uses the OfflineAudioContext
+  // passed in as `ctx`. Returns the entry node (where clips connect upstream).
+  //
+  // Differences from live buildChain:
+  //   • No React refs touched (gainNodesRef, fxNodesRef, trackAnalysersRef)
+  //   • No VU analyser side-branch (saves CPU, irrelevant offline)
+  //   • No R-Comp ARC interval (offline render is instantaneous; ARC would
+  //     never see meaningful reduction data — falls back to fixed release)
+  //   • Worklets (autotune, noise gate) are conditionally added if
+  //     pre-registered on the offline context before rendering
+  //
+  // The DSP code itself is identical to the live version so the export
+  // sounds bit-for-bit like real-time playback (modulo ARC).
+  const buildChainOffline = function (ctx, master, track, hasSolo) {
+    let node = master;
+    const fx = track.effects || {};
+
+    // Pan
+    if (ctx.createStereoPanner) {
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = track.pan || 0;
+      panner.connect(node); node = panner;
+    }
+
+    // Makeup gain (post-compressor)
+    const mg = ctx.createGain();
+    mg.gain.value = (fx.compressor && fx.compressor.on && fx.compressor.makeupGain)
+      ? Math.pow(10, (fx.compressor.makeupGain || 0) / 20) : 1;
+    mg.connect(node); node = mg;
+
+    // Track volume + mute/solo gating
+    const volGain = ctx.createGain();
+    const shouldPlay = !track.isMuted && (!hasSolo || track.isSoloed);
+    volGain.gain.value = (track.volume ?? 1) * (shouldPlay ? 1 : 0);
+    volGain.connect(node); node = volGain;
+
+    // ── Reverb ──
+    {
+      const reverbOn = !!(fx.reverb && fx.reverb.on);
+      const wetVal   = reverbOn ? (fx.reverb.wet || 0.25) : 0;
+      const dryG = ctx.createGain(); dryG.gain.value = 1 - wetVal;
+      const wetG = ctx.createGain(); wetG.gain.value = wetVal;
+      const mix  = ctx.createGain();
+      dryG.connect(mix); wetG.connect(mix); mix.connect(node);
+      if (reverbOn) {
+        const sr = ctx.sampleRate;
+        const preDelaySec = (fx.reverb.preDelay || 0) / 1000;
+        const preDelay = ctx.createDelay(0.2);
+        preDelay.delayTime.value = preDelaySec;
+        const roomSize = fx.reverb.roomSize || 0.8;
+        const len = Math.round(sr * Math.min(roomSize, 1.5) * 2);
+        const ir = ctx.createBuffer(2, len, sr);
+        for (let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.5);}
+        const conv = ctx.createConvolver(); conv.buffer = ir;
+        const split = ctx.createGain(); split.gain.value = 1;
+        split.connect(dryG); split.connect(preDelay);
+        preDelay.connect(conv); conv.connect(wetG);
+        node = split;
+      } else {
+        const split = ctx.createGain(); split.gain.value = 1;
+        split.connect(dryG);
+        node = split;
       }
+    }
+
+    // ── Ocean Reverb ──
+    {
+      const oceanOn = !!(fx.ocean && fx.ocean.on);
+      const wetVal  = oceanOn ? (fx.ocean.wet || 0.35) : 0;
+      const dryG = ctx.createGain(); dryG.gain.value = 1 - wetVal;
+      const wetG = ctx.createGain(); wetG.gain.value = wetVal;
+      const mix  = ctx.createGain();
+      dryG.connect(mix); wetG.connect(mix); mix.connect(node);
+      if (oceanOn) {
+        const sr = ctx.sampleRate;
+        const preDelaySec = (fx.ocean.preDelay || 20) / 1000;
+        const roomSize = Math.min(1.5, fx.ocean.roomSize || 1.0);
+        const len = Math.round(sr * roomSize * 2.5);
+        const ir = ctx.createBuffer(2, len, sr);
+        for (let ch=0;ch<2;ch++){
+          const d = ir.getChannelData(ch);
+          for (let i=0;i<len;i++) d[i] = (Math.random()*2-1)*Math.pow(1-i/len, 1.8);
+        }
+        const conv = ctx.createConvolver(); conv.buffer = ir;
+        const damp = fx.ocean.damp || 0.6;
+        const lpf = ctx.createBiquadFilter();
+        lpf.type = "lowpass";
+        lpf.frequency.value = 800 + (1 - damp) * 7200;
+        lpf.Q.value = 0.5;
+        const preDelay = ctx.createDelay(0.3); preDelay.delayTime.value = preDelaySec;
+        const split = ctx.createGain(); split.gain.value = 1;
+        split.connect(dryG); split.connect(preDelay);
+        preDelay.connect(conv); conv.connect(lpf); lpf.connect(wetG);
+        node = split;
+      } else {
+        const split = ctx.createGain(); split.gain.value = 1;
+        split.connect(dryG);
+        node = split;
+      }
+    }
+
+    // ── 5-band parametric EQ ──
+    {
+      const eq = fx.eq || {};
+      const eqOn = !!(fx.eq && fx.eq.on);
+      if (eqOn) {
+        const hpf = ctx.createBiquadFilter();
+        hpf.type = "highpass";
+        hpf.frequency.value = eq.hpfFreq || 80;
+        hpf.Q.value = eq.hpfQ || 0.707;
+        const low = ctx.createBiquadFilter();
+        low.type = "lowshelf";
+        low.frequency.value = eq.lowFreq || 200;
+        low.gain.value = eq.low || 0;
+        const mid = ctx.createBiquadFilter();
+        mid.type = "peaking";
+        mid.frequency.value = eq.midFreq || 1000;
+        mid.gain.value = eq.mid || 0;
+        mid.Q.value = eq.midQ || 1.0;
+        const high = ctx.createBiquadFilter();
+        high.type = "highshelf";
+        high.frequency.value = eq.highFreq || 8000;
+        high.gain.value = eq.high || 0;
+        const lpf = ctx.createBiquadFilter();
+        lpf.type = "lowpass";
+        lpf.frequency.value = eq.lpfFreq || 18000;
+        lpf.Q.value = eq.lpfQ || 0.707;
+        lpf.connect(node); high.connect(lpf); mid.connect(high); low.connect(mid); hpf.connect(low);
+        node = hpf;
+      }
+    }
+
+    // ── Compressor ──
+    {
+      const comp = ctx.createDynamicsCompressor();
+      const compOn = !!(fx.compressor && fx.compressor.on);
+      comp.threshold.value = compOn ? (fx.compressor.threshold ?? -24) : 0;
+      comp.ratio.value     = compOn ? (fx.compressor.ratio ?? 4)       : 1;
+      comp.attack.value    = compOn ? (fx.compressor.attack ?? 0.003)  : 0.003;
+      comp.release.value   = compOn ? (fx.compressor.release ?? 0.25)  : 0.25;
+      comp.connect(node); node = comp;
+    }
+
+    // ── R-Comp (no ARC in offline — fixed release) ──
+    {
+      const rc     = fx.rcomp || {};
+      const rcOn   = !!rc.on;
+      const rcMode = rc.mode || "warm";
+
+      const rcInGain = ctx.createGain(); rcInGain.gain.value = 1;
+      const rcShelf  = ctx.createBiquadFilter();
+      const rcSat    = ctx.createWaveShaper();
+      rcSat.oversample = "2x";
+
+      const makeRCompCurve = function(mode, amount) {
+        const n = 1024;
+        const c = new Float32Array(n);
+        const drive = Math.max(0.01, amount);
+        for (let i=0; i<n; i++) {
+          const x = (i * 2 / n - 1);
+          if (mode === "warm") {
+            const sign = x >= 0 ? 1 : 0.82;
+            c[i] = Math.tanh(x * (1 + drive * 0.6) * sign) * 0.94;
+          } else {
+            c[i] = Math.tanh(x * (1 + drive * 1.4)) * 0.98;
+          }
+        }
+        return c;
+      };
+      if (rcMode === "warm") {
+        rcShelf.type = "lowshelf";
+        rcShelf.frequency.value = 200;
+        rcShelf.gain.value = rcOn ? 1.2 : 0;
+      } else {
+        rcShelf.type = "highpass";
+        rcShelf.frequency.value = 80;
+        rcShelf.Q.value = 0.5;
+      }
+      rcSat.curve = makeRCompCurve(rcMode, rcOn ? 0.18 : 0);
+
+      const rcComp = ctx.createDynamicsCompressor();
+      rcComp.threshold.value = rcOn ? (rc.threshold ?? -18) : 0;
+      rcComp.ratio.value     = rcOn ? (rc.ratio ?? 3)        : 1;
+      rcComp.attack.value    = rcOn ? (rc.attack ?? 0.012)   : 0.003;
+      rcComp.release.value   = rcOn ? (rc.release ?? 0.18)   : 0.25;
+      rcComp.knee.value      = rcOn ? (rcMode === "warm" ? 6 : 2) : 30;
+
+      const rcMakeup = ctx.createGain();
+      rcMakeup.gain.value = rcOn ? Math.pow(10, ((rc.makeupGain ?? 0)) / 20) : 1;
+
+      rcInGain.connect(rcShelf);
+      rcShelf.connect(rcSat);
+      rcSat.connect(rcComp);
+      rcComp.connect(rcMakeup);
+      rcMakeup.connect(node);
+      node = rcInGain;
+    }
+
+    // ── Pultec EQP-1A ──
+    {
+      const pt = fx.pultec || {};
+      const ptOn = !!pt.on;
+      const ptLowBoost = ctx.createBiquadFilter();
+      ptLowBoost.type = "lowshelf";
+      ptLowBoost.frequency.value = pt.lowFreq ?? 60;
+      ptLowBoost.gain.value = ptOn ? (pt.lowBoost ?? 0) : 0;
+      const ptLowAtten = ctx.createBiquadFilter();
+      ptLowAtten.type = "peaking";
+      ptLowAtten.frequency.value = pt.lowFreq ?? 60;
+      ptLowAtten.Q.value = 0.6;
+      ptLowAtten.gain.value = ptOn ? -(pt.lowAtten ?? 0) : 0;
+      const sharpVal = pt.sharp ?? 5;
+      const hiBoostQ = 2.0 - ((sharpVal - 1) / 9) * 1.7;
+      const ptHiBoost = ctx.createBiquadFilter();
+      ptHiBoost.type = "peaking";
+      ptHiBoost.frequency.value = pt.hiFreq ?? 5000;
+      ptHiBoost.Q.value = hiBoostQ;
+      ptHiBoost.gain.value = ptOn ? (pt.hiBoost ?? 0) : 0;
+      const ptHiAtten = ctx.createBiquadFilter();
+      ptHiAtten.type = "highshelf";
+      ptHiAtten.frequency.value = pt.attenFreq ?? 10000;
+      ptHiAtten.gain.value = ptOn ? -(pt.hiAtten ?? 0) : 0;
+      ptHiAtten.connect(node);
+      ptHiBoost.connect(ptHiAtten);
+      ptLowAtten.connect(ptHiBoost);
+      ptLowBoost.connect(ptLowAtten);
+      node = ptLowBoost;
+    }
+
+    // ── Vocal Doubler ──
+    {
+      const db     = fx.doubler || {};
+      const doubOn = !!db.on;
+      const mixWet = doubOn ? (db.mix ?? 0.4) : 0;
+      const delayMs = db.delay ?? 20;
+      const detune  = db.detune ?? 10;
+
+      const entry  = ctx.createGain(); entry.gain.value = 1;
+      const haasDelay = ctx.createDelay(0.1);
+      haasDelay.delayTime.value = delayMs / 1000;
+      const chorusDelay = ctx.createDelay(0.1);
+      chorusDelay.delayTime.value = (detune / 1000) * 0.012 + 0.001;
+      const dryGain = ctx.createGain(); dryGain.gain.value = 1 - mixWet;
+      const wetGain = ctx.createGain(); wetGain.gain.value = mixWet;
+      const out = ctx.createGain(); out.gain.value = 1;
+      entry.connect(dryGain); dryGain.connect(out);
+      entry.connect(haasDelay); haasDelay.connect(chorusDelay); chorusDelay.connect(wetGain); wetGain.connect(out);
+      out.connect(node);
+      node = entry;
+    }
+
+    // ── H-Delay ──
+    {
+      const hd     = fx.hdelay || {};
+      const hdOn   = !!hd.on;
+      const hdMix  = hdOn ? (hd.mix ?? 0.3) : 0;
+      const hdTimeMs = hd.time ?? 250;
+      const fb     = Math.min(0.85, hd.feedback ?? 0.4);
+
+      const entry = ctx.createGain(); entry.gain.value = 1;
+      const dry   = ctx.createGain(); dry.gain.value = 1;
+      const wet   = ctx.createGain(); wet.gain.value = hdMix;
+      const delay = ctx.createDelay(2.0);
+      delay.delayTime.value = hdTimeMs / 1000;
+      const fbGain = ctx.createGain(); fbGain.gain.value = hdOn ? fb : 0;
+      const hdHiCut = ctx.createBiquadFilter();
+      hdHiCut.type = "lowpass";
+      hdHiCut.frequency.value = hd.hiCut ?? 8000;
+      const hdLoCut = ctx.createBiquadFilter();
+      hdLoCut.type = "highpass";
+      hdLoCut.frequency.value = hd.loCut ?? 150;
+      const out = ctx.createGain(); out.gain.value = 1;
+      entry.connect(dry); dry.connect(out);
+      entry.connect(delay);
+      delay.connect(hdHiCut); hdHiCut.connect(hdLoCut); hdLoCut.connect(wet); wet.connect(out);
+      // Feedback loop
+      hdLoCut.connect(fbGain); fbGain.connect(delay);
+      out.connect(node);
+      node = entry;
+    }
+
+    // ── Noise Remover (RNNoise worklet) ──
+    if (fx.noiseremover && fx.noiseremover.on) {
+      try {
+        const gate = new AudioWorkletNode(ctx, "rnnoise-gate-processor");
+        gate.port.postMessage({
+          threshold: fx.noiseremover.threshold ?? -40,
+          release:   fx.noiseremover.release   ?? 0.15,
+          hold:      fx.noiseremover.hold      ?? 0.08,
+          hiss:      fx.noiseremover.hiss      ?? 0,
+          lookahead: fx.noiseremover.lookahead !== false,
+        });
+        gate.connect(node);
+        node = gate;
+      } catch(e) {
+        console.warn("[export] Noise gate worklet unavailable in offline context — skipping");
+      }
+    }
+
+    // ── T-Rotten Master ──
+    if (fx.trotten && fx.trotten.on) {
+      const tr = fx.trotten;
+      const inGain = ctx.createGain(); inGain.gain.value = Math.pow(10, (tr.inputGain || 0) / 20);
+      const outGain = ctx.createGain(); outGain.gain.value = Math.pow(10, (tr.outputGain || 0) / 20);
+      const eqL = ctx.createBiquadFilter(); eqL.type = "lowshelf"; eqL.frequency.value = 200; eqL.gain.value = tr.eqLow || 0;
+      const eqM = ctx.createBiquadFilter(); eqM.type = "peaking"; eqM.frequency.value = 1500; eqM.gain.value = tr.eqMid || 0; eqM.Q.value = 0.8;
+      const eqH = ctx.createBiquadFilter(); eqH.type = "highshelf"; eqH.frequency.value = 8000; eqH.gain.value = tr.eqHigh || 0;
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = tr.compThr ?? -15;
+      comp.ratio.value = 4;
+      comp.attack.value = 0.005;
+      comp.release.value = 0.1;
+      const lim = ctx.createDynamicsCompressor();
+      lim.threshold.value = tr.limCeil ?? -0.5;
+      lim.ratio.value = 20;
+      lim.attack.value = 0.0005;
+      lim.release.value = Math.max(0.05, tr.limRel ?? 0.5);
+      inGain.connect(eqL); eqL.connect(eqM); eqM.connect(eqH);
+      eqH.connect(comp); comp.connect(lim); lim.connect(outGain); outGain.connect(node);
+      node = inGain;
+    }
+
+    // ── GRM Bandpass ──
+    if (fx.bandpass && fx.bandpass.on) {
+      const bp = fx.bandpass;
+      const center = bp.freq ?? 1000;
+      const octW   = bp.bandwidth ?? 1.0;
+      const resDb  = bp.resonance ?? 0;
+      const mixWet = bp.mix ?? 1.0;
+      const Q  = Math.sqrt(Math.pow(2, octW)) / (Math.pow(2, octW) - 1);
+      const Qr = Math.max(0.1, Q * (1 + resDb / 6));
+      const bp1 = ctx.createBiquadFilter();
+      bp1.type = "bandpass"; bp1.frequency.value = center; bp1.Q.value = Qr;
+      const bp2 = ctx.createBiquadFilter();
+      bp2.type = "bandpass"; bp2.frequency.value = center; bp2.Q.value = Qr;
+      const bpDry = ctx.createGain(); bpDry.gain.value = 1 - mixWet;
+      const bpWet = ctx.createGain(); bpWet.gain.value = mixWet;
+      const bpOut = ctx.createGain(); bpOut.gain.value = 1;
+      const bpEntry = ctx.createGain(); bpEntry.gain.value = 1;
+      bpEntry.connect(bpDry); bpDry.connect(bpOut);
+      bpEntry.connect(bp1); bp1.connect(bp2); bp2.connect(bpWet); bpWet.connect(bpOut);
+      bpOut.connect(node);
+      node = bpEntry;
+    }
+
+    // ── Autotune (worklet) ──
+    if (fx.autotune && fx.autotune.on) {
+      try {
+        const at = new AudioWorkletNode(ctx, "autotune-processor");
+        const atParams = fx.autotune;
+        at.parameters.get("amount").value     = atParams.amount ?? 0.8;
+        at.parameters.get("speed").value      = atParams.speed ?? 0.5;
+        at.parameters.get("formant").value    = atParams.formant ?? 1.0;
+        at.parameters.get("wet").value        = atParams.wet ?? 1;
+        at.parameters.get("vibrato").value    = atParams.vibrato ?? 0;
+        at.port.postMessage({ scale: atParams.scale || "major" });
+        at.connect(node);
+        node = at;
+      } catch(e) {
+        console.warn("[export] Autotune worklet unavailable in offline context — skipping");
+      }
+    }
+
+    return node; // clips connect to this
+  };
+
+  const exportMix = async function () {
+    setExporting(true); setExportMsg("Preparing...");
+    try {
+      const SR = 44100;
+      const liveTracks = tracksRef.current || tracks || [];
+
+      // ── Compute total project duration from clip endpoints ──
+      let totalDur = 0;
+      for (const tr of liveTracks) {
+        const clips = tr.clips || [];
+        for (const cl of clips) {
+          if (cl.active === false || !cl.audioBuffer) continue;
+          const trimS = cl.trimStart || 0;
+          const trimE = cl.trimEnd !== undefined ? cl.trimEnd : cl.audioBuffer.duration;
+          const trimDur = Math.max(0, trimE - trimS);
+          const clipEnd = (cl.startTime || 0) + trimDur;
+          if (clipEnd > totalDur) totalDur = clipEnd;
+        }
+      }
+      // Add 2 seconds of tail to capture reverb fades, delay echoes, etc.
+      totalDur += 2.0;
+
+      if (totalDur < 0.5) {
+        setExportMsg("Nothing to export");
+        setTimeout(function(){ setExporting(false); setExportMsg(""); }, 2000);
+        return;
+      }
+
+      setExportMsg("Building chains...");
+
+      // ── Create OfflineAudioContext ──
+      const oc = new OfflineAudioContext(2, Math.ceil(totalDur * SR), SR);
+
+      // ── Register worklets if any track needs them ──
+      const needsAutotune = liveTracks.some(function(t){ return t.effects && t.effects.autotune && t.effects.autotune.on; });
+      const needsNoiseGate = liveTracks.some(function(t){ return t.effects && t.effects.noiseremover && t.effects.noiseremover.on; });
+      if (needsAutotune) {
+        setExportMsg("Loading Autotune...");
+        await registerAutotuneWorklet(oc);
+      }
+      if (needsNoiseGate) {
+        setExportMsg("Loading Noise Gate...");
+        await registerRNNoiseWorklet(oc);
+      }
+
+      // ── Build each track's chain and schedule its clips ──
+      const hasSolo = liveTracks.some(function(t){ return t.isSoloed; });
+      for (const tr of liveTracks) {
+        if (tr.isMuted) continue;
+        if (hasSolo && !tr.isSoloed) continue;
+        const clips = tr.clips || [];
+        if (clips.length === 0) continue;
+        const hasAnyAudio = clips.some(function(c){ return c.audioBuffer && c.active !== false; });
+        if (!hasAnyAudio) continue;
+
+        // Build the FX chain for this track. Returns the entry node.
+        setExportMsg("Mixing " + (tr.name || "track") + "...");
+        const entry = buildChainOffline(oc, oc.destination, tr, hasSolo);
+
+        // Schedule each clip into the chain
+        for (const cl of clips) {
+          if (cl.active === false || !cl.audioBuffer) continue;
+          const trimS = cl.trimStart || 0;
+          const trimE = cl.trimEnd !== undefined ? cl.trimEnd : cl.audioBuffer.duration;
+          const trimDur = Math.max(0, trimE - trimS);
+          if (trimDur <= 0) continue;
+          try {
+            const src = oc.createBufferSource();
+            src.buffer = cl.audioBuffer;
+            src.connect(entry);
+            src.start(cl.startTime || 0, trimS, trimDur);
+          } catch(clipErr) {
+            console.warn("[export] Failed to schedule clip:", clipErr);
+          }
+        }
+      }
+
+      // ── Render ──
       setExportMsg("Rendering...");
-      const rendered=await oc.startRendering();
-      const wavBuf=audioBufferToWav(rendered);
-      // audioBufferToWav now returns an ArrayBuffer; wrap for download
-      const wavBlob=new Blob([wavBuf],{type:"audio/wav"});
-      const a=document.createElement("a");a.href=URL.createObjectURL(wavBlob);a.download=(projectName||"project")+" - mix.wav";a.click();
-      setExportMsg("Done!");setTimeout(function(){setExporting(false);setExportMsg("");},2500);
-    }catch(e){setExportMsg("Failed.");setTimeout(function(){setExporting(false);setExportMsg("");},3000);}
+      const rendered = await oc.startRendering();
+
+      // ── Encode to WAV and trigger download ──
+      setExportMsg("Encoding...");
+      const wavBuf = audioBufferToWav(rendered);
+      const wavBlob = new Blob([wavBuf], { type: "audio/wav" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(wavBlob);
+      a.download = (projectName || "project") + " - mix.wav";
+      a.click();
+      // Clean up the object URL after a moment
+      setTimeout(function(){ try { URL.revokeObjectURL(a.href); } catch(e) {} }, 1000);
+
+      setExportMsg("Done!");
+      setTimeout(function(){ setExporting(false); setExportMsg(""); }, 2500);
+    } catch (e) {
+      console.error("[export] Failed:", e);
+      setExportMsg("Export failed: " + (e.message || "unknown error"));
+      setTimeout(function(){ setExporting(false); setExportMsg(""); }, 3500);
+    }
   };
 
   const fmt = function (s) {
