@@ -270,16 +270,6 @@ function useAnalyser(analyserNode, isActive) {
   const peakHold   = React.useRef(0);
   const peakTimer  = React.useRef(null);
   const rafRef     = React.useRef(null);
-  // Throttle VU updates to ~30fps. The eye can't distinguish VU bars
-  // changing more frequently than ~33ms anyway, and at 60fps × N tracks
-  // we were burning ~7-10ms of main thread per frame just on React
-  // reconciliation of VU state. That competed with tap/click handling
-  // on iOS Safari — when the user tapped a button, the gesture system
-  // sometimes decided the gesture was a scroll because the main thread
-  // was busy. Throttling to 30fps halves the reconcile cost while
-  // keeping the visual feedback indistinguishable.
-  const lastUpdateRef = React.useRef(0);
-  const VU_INTERVAL_MS = 33; // ~30fps
 
   React.useEffect(() => {
     if (!analyserNode || !isActive) {
@@ -288,14 +278,7 @@ function useAnalyser(analyserNode, isActive) {
     }
     const bufLen = analyserNode.frequencyBinCount;
     const data   = new Float32Array(bufLen);
-    const tick   = (now) => {
-      // Skip work entirely if not enough time has passed since last update
-      if (now - lastUpdateRef.current < VU_INTERVAL_MS) {
-        rafRef.current = requestAnimationFrame(tick);
-        return;
-      }
-      lastUpdateRef.current = now;
-
+    const tick   = () => {
       analyserNode.getFloatTimeDomainData(data);
       let rms = 0;
       let pk  = 0;
@@ -21535,7 +21518,7 @@ function _HDelayPlugin({ fx, upd, Knob }) {
 // here because this is a real component, not an IIFE or callback.
 // Re-renders ONLY when fx data, fxTrackId, trackName, or trackColor change.
 // =============================================================================
-const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackColor, onClose, onUpd, onApplyPreset, analyserNode, isPlaying }) {
+const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackColor, onClose, onUpd, onApplyPreset, analyserNode, isPlaying, isRecording, onTogglePlay, onRecord }) {
   const upd = onUpd; // stable ref-backed callback passed from StudioScreen
   const [presetMenuOpen, setPresetMenuOpen] = React.useState(false);
 
@@ -21553,20 +21536,6 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
     const arcD = `M ${startA.x.toFixed(2)} ${startA.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${endA.x.toFixed(2)} ${endA.y.toFixed(2)}`;
     const onPointerDown = function(e) {
       e.preventDefault();
-      // Capture the pointer to the knob's own element so all subsequent
-      // pointermove/up/cancel events go DIRECTLY to this knob, not the
-      // whole document. Previously we attached listeners to `document`,
-      // which on iOS sometimes left them orphaned (touch ends without
-      // firing pointerup — happens with scroll, app focus changes, gesture
-      // recognizers). Those orphaned move listeners then fired during
-      // unrelated taps elsewhere (e.g. transport buttons), triggering
-      // state updates mid-tap that caused click events to drop.
-      //
-      // setPointerCapture binds the pointer to one element until release,
-      // and pointercancel covers the iOS "touch went away" case so we
-      // always clean up.
-      const target = e.currentTarget;
-      try { target.setPointerCapture && target.setPointerCapture(e.pointerId); } catch(_) {}
       startRef.current = { y: e.clientY, val: value };
       const onMove = function(me) {
         const dy = startRef.current.y - me.clientY;
@@ -21575,15 +21544,9 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
         const snapped = step ? Math.round(clamped / step) * step : clamped;
         onChange(+snapped.toFixed(3));
       };
-      const cleanup = function() {
-        try { target.removeEventListener("pointermove",   onMove);  } catch(_) {}
-        try { target.removeEventListener("pointerup",     cleanup); } catch(_) {}
-        try { target.removeEventListener("pointercancel", cleanup); } catch(_) {}
-        try { target.releasePointerCapture && target.releasePointerCapture(e.pointerId); } catch(_) {}
-      };
-      target.addEventListener("pointermove",   onMove);
-      target.addEventListener("pointerup",     cleanup);
-      target.addEventListener("pointercancel", cleanup);
+      const onUp = function() { document.removeEventListener("pointermove", onMove); document.removeEventListener("pointerup", onUp); };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
     };
     const display = unit === "dB" ? (value >= 0 ? "+" : "") + value + "dB"
                   : unit === "%" ? Math.round(value * 100) + "%"
@@ -21853,23 +21816,12 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
 
   return (
     <div style={{
-      // Was `inset:0` which made the panel cover the entire Studio
-      // viewport — including the area behind the fixed transport bar
-      // at z-index 9100. Even though the transport bar floats ON TOP
-      // visually, iOS Safari's gesture system saw a scrollable container
-      // underneath fixed buttons and sometimes intercepted taps as
-      // scroll-start gestures. Leaving the bottom uncovered (90px =
-      // transport bar height + safe area) means iOS knows that region
-      // belongs solely to the transport bar.
-      position:"absolute",
-      top:0, left:0, right:0,
-      bottom:"calc(90px + env(safe-area-inset-bottom))",
-      zIndex:800, background:"rgba(0,0,0,0.97)",
-      display:"flex", flexDirection:"column", overflowY:"auto",
+      position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)",
+      display:"flex", flexDirection:"column", overflow:"hidden",
       paddingTop:"var(--bf-safe-top, env(safe-area-inset-top))",
-      paddingBottom:"12px",
     }} onClick={function(e){ e.stopPropagation(); }} onTouchMove={function(e){ e.stopPropagation(); }}>
-      <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0, position:"sticky", top:0, zIndex:10 }}>
+      {/* Sticky top header — track name, presets, done */}
+      <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0, zIndex:10 }}>
         <div style={{ width:8, height:8, borderRadius:"50%", background:trackColor, marginRight:8 }} />
         <span style={{ color:"white", fontWeight:800, fontSize:14, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{trackName} — Effects</span>
         {/* Presets dropdown */}
@@ -21936,7 +21888,74 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
         </div>
         <button onClick={onClose} style={{ background:"#1a1a1a", border:"1px solid #2a2a2a", borderRadius:8, color:"#888", fontSize:13, padding:"5px 14px", cursor:"pointer" }}>Done</button>
       </div>
-      <FxPanelPlugins fx={fx} upd={upd} eq5={eq5} EQGraph={EQGraph} CompGraph={CompGraph} ReverbViz={ReverbViz} Knob={Knob} analyserNode={analyserNode} isPlaying={isPlaying} />
+      {/* Scrollable middle area — the FX content */}
+      <div style={{ flex:1, minHeight:0, overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+        <FxPanelPlugins fx={fx} upd={upd} eq5={eq5} EQGraph={EQGraph} CompGraph={CompGraph} ReverbViz={ReverbViz} Knob={Knob} analyserNode={analyserNode} isPlaying={isPlaying} />
+      </div>
+      {/* ── FX-internal transport bar ─────────────────────────────────────
+          Lives INSIDE the FX panel so iOS sees a single context: panel
+          content + transport row owned by the same React subtree. No
+          shared buttons with the main timeline transport (which is
+          hidden via display:none in StudioScreen while fxTrackId is set).
+
+          Three buttons: Play/Pause, Record, Back. Calls the same
+          underlying functions as the main transport — togglePlay,
+          stopRecording/startCountIn, and onClose. */}
+      <div style={{
+        flexShrink:0,
+        background:"linear-gradient(180deg,rgba(15,10,31,0.96) 0%,rgba(10,10,20,0.98) 100%)",
+        borderTop:"1px solid rgba(124,58,237,0.25)",
+        padding:"10px 16px",
+        paddingBottom:"calc(10px + env(safe-area-inset-bottom))",
+        display:"flex", alignItems:"center", justifyContent:"center", gap:24,
+      }}>
+        {/* Back — same action as Done in header, but accessible from bottom */}
+        <button onClick={onClose}
+          aria-label="Back to timeline"
+          style={{
+            width:44, height:44, borderRadius:12,
+            background:"#141414", border:"1px solid #2a2a2a",
+            cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
+            flexShrink:0, color:"#aaa", fontSize:13, fontWeight:700,
+          }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </button>
+        {/* Record */}
+        {onRecord && (
+          <button onClick={onRecord}
+            aria-label={isRecording ? "Stop recording" : "Record"}
+            style={{
+              width:52, height:52, borderRadius:"50%",
+              background:isRecording?"#EF4444":"linear-gradient(135deg,#EF4444,#DC2626)",
+              border:isRecording?"3px solid rgba(239,68,68,0.5)":"3px solid rgba(239,68,68,0.2)",
+              cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
+              boxShadow:isRecording?"0 0 20px rgba(239,68,68,0.5)":"none",
+              flexShrink:0,
+            }}>
+            {isRecording
+              ? <div style={{ width:16, height:16, background:"white", borderRadius:3 }} />
+              : <div style={{ width:20, height:20, background:"white", borderRadius:"50%" }} />}
+          </button>
+        )}
+        {/* Play / Pause */}
+        {onTogglePlay && (
+          <button onClick={onTogglePlay}
+            aria-label={isPlaying ? "Pause" : "Play"}
+            style={{
+              width:44, height:44, borderRadius:"50%",
+              background:"linear-gradient(135deg,#C026D3,#7C3AED)",
+              border:"none", cursor:"pointer",
+              display:"flex", alignItems:"center", justifyContent:"center",
+              flexShrink:0,
+            }}>
+            {isPlaying
+              ? <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              : <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>}
+          </button>
+        )}
+      </div>
     </div>
   );
 }, function areEqual(prev, next) {
@@ -21946,6 +21965,7 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
          prev.trackName === next.trackName &&
          prev.trackColor === next.trackColor &&
          prev.isPlaying === next.isPlaying &&
+         prev.isRecording === next.isRecording &&
          prev.onApplyPreset === next.onApplyPreset;
 });
 
@@ -26999,6 +27019,162 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     }
   };
 
+  // ── Cloud project restore (Phase 3 Part B) ───────────────────────
+  // When user taps a cloud-only project in the picker, we need to:
+  //   1. Fetch the full project doc from /api/studio/projects/get/{id}
+  //   2. Download each vocal clip's audio from Cloudinary
+  //   3. Decode each audio file into an AudioBuffer
+  //   4. Save the audio back to local IndexedDB so future loads are fast
+  //   5. Hand off to loadProject as if it were a local project
+  //
+  // SAFETY:
+  //   • loadProject itself is UNTOUCHED — we just reuse it as the final step
+  //   • Beat clips have no cloud URL yet (Phase 2 only uploads vocals).
+  //     They restore with structure but no audio — user gets a warning.
+  //   • Individual clip failures don't kill the whole restore.
+  const loadCloudProject = async function (cloudId, displayName) {
+    setShowProjects(false);
+    setSaveStatus("Restoring from cloud…");
+    setError("");
+
+    try {
+      // 1. Fetch the full cloud doc
+      const cloudDoc = await apiFetch("/api/studio/projects/get/" + encodeURIComponent(cloudId));
+      if (!cloudDoc || !cloudDoc.tracks) {
+        throw new Error("Project data not found in cloud");
+      }
+
+      const actx = getActx();
+      if (actx.state === "suspended") {
+        try { await actx.resume(); } catch(_) {}
+      }
+
+      // 2-3. For each clip with a vocalUrl, fetch & decode in parallel.
+      // Use a local project id (numeric Date.now) for IndexedDB keys,
+      // matching the format used by saveProject (proj_<id>_<clipId>).
+      const localProjId = Date.now();
+      let totalVocals = 0;
+      let restoredVocals = 0;
+      let failedVocals  = 0;
+
+      // First pass: count vocals so we can show progress
+      cloudDoc.tracks.forEach(function(t) {
+        (t.clips || []).forEach(function(cl) {
+          if (cl.vocalUrl) totalVocals++;
+        });
+      });
+
+      const restoredTracks = await Promise.all(cloudDoc.tracks.map(async function(t, ti) {
+        const restoredClips = await Promise.all((t.clips || []).map(async function(cl, ci) {
+          // No vocal URL → no audio to restore (beat clips, or vocals
+          // saved before Phase 2 upload landed). Restore structure only.
+          if (!cl.vocalUrl) {
+            return Object.assign({}, cl, {
+              audioBuffer: null,
+              url:         null,
+              blob:        null,
+            });
+          }
+          try {
+            // Fetch the audio file from Cloudinary
+            const resp = await fetch(cl.vocalUrl);
+            if (!resp.ok) throw new Error("HTTP " + resp.status);
+            const ab = await resp.arrayBuffer();
+            // Decode — slice so the buffer isn't detached for later IDB save
+            const buf = await actx.decodeAudioData(ab.slice(0));
+
+            // Cache to IndexedDB so the next open is instant (no cloud fetch)
+            const idbKey = "proj_" + localProjId + "_" + cl.id;
+            try {
+              const wavBuf = audioBufferToWav(buf);
+              await AudioDB.saveClip(idbKey, wavBuf);
+            } catch(idbErr) {
+              console.warn("[BeatFinder] Cloud restore: IDB cache failed for", cl.id, idbErr);
+              // Continue anyway — buf is in memory, user can use this session
+            }
+
+            restoredVocals++;
+            setSaveStatus("Restoring from cloud… " + restoredVocals + "/" + totalVocals);
+
+            return Object.assign({}, cl, {
+              audioBuffer: buf,
+              url:         null,
+              blob:        null,
+              idbKey:      idbKey,
+            });
+          } catch (e) {
+            failedVocals++;
+            console.warn("[BeatFinder] Cloud restore: clip", cl.id, "failed:", e);
+            return Object.assign({}, cl, {
+              audioBuffer: null,
+              url:         null,
+              blob:        null,
+            });
+          }
+        }));
+        return Object.assign({}, t, { clips: restoredClips });
+      }));
+
+      // 4. Build a local-shape project object. Reuse fields from cloud doc.
+      const localProj = {
+        id:           localProjId,
+        cloudId:      cloudDoc.id,
+        cloudSavedAt: cloudDoc.updated_at,
+        name:         cloudDoc.name || displayName || "Untitled",
+        bpm:          cloudDoc.bpm || 120,
+        timeSigNum:   cloudDoc.time_sig_num || 4,
+        projectKey:   cloudDoc.key || "C major",
+        savedAt:      new Date().toISOString(),
+        tracks:       restoredTracks,
+      };
+
+      // 5. Save metadata to localStorage so it appears in future picker
+      //    loads without needing a cloud fetch.
+      try {
+        let list = JSON.parse(localStorage.getItem("bf_studio_projects") || "[]");
+        // Strip live AudioBuffers — same shape the regular save uses
+        const cleanTracks = restoredTracks.map(function(t) {
+          return Object.assign({}, t, {
+            audioBuffer: null,
+            url:         null,
+            blob:        null,
+            clips: (t.clips || []).map(function(cl) {
+              return Object.assign({}, cl, {
+                audioBuffer: null,
+                url:         null,
+                blob:        null,
+              });
+            }),
+          });
+        });
+        const persisted = Object.assign({}, localProj, { tracks: cleanTracks });
+        list.unshift(persisted);
+        list = list.slice(0, 10);
+        localStorage.setItem("bf_studio_projects", JSON.stringify(list));
+        setSavedProjects(list);
+      } catch(persistErr) {
+        console.warn("[BeatFinder] Could not persist restored project to localStorage:", persistErr);
+      }
+
+      // 6. Hand off to existing loadProject — this is the SAFE part because
+      // we're using the EXACT same code path as a regular local project load.
+      // loadProject reads audioBuffer/idbKey from each clip, sets up the
+      // audio engine, populates UI state.
+      await loadProject(localProj);
+
+      // 7. Show summary if any vocals failed
+      if (failedVocals > 0) {
+        setError("Restored project — but " + failedVocals + " of " + totalVocals + " vocal recordings couldn't be downloaded. They may still be in the cloud; try again later.");
+        setTimeout(function(){ setError(""); }, 8000);
+      }
+    } catch (e) {
+      console.error("[BeatFinder] Cloud restore failed:", e);
+      setSaveStatus("");
+      setError("Could not restore from cloud — " + ((e && e.message) || "unknown error"));
+      setTimeout(function(){ setError(""); }, 6000);
+    }
+  };
+
   const loadProject = async function (p) {
     setShowProjects(false);
     setSaveStatus("Loading…");
@@ -28299,10 +28475,8 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                       <div
                         onClick={function(){
                           if (p._kind === "cloud") {
-                            // Phase 3 Part B will add cloud restore. For now,
-                            // tell the user the feature is coming.
-                            setError("Cloud restore coming in the next update — your data is safe in the cloud, but opening cloud-only projects isn't available yet.");
-                            setTimeout(function(){ setError(""); }, 5000);
+                            // Phase 3 Part B: actually restore from cloud
+                            loadCloudProject(p.cloudId, p.name);
                           } else {
                             loadProject(p);
                           }
@@ -29143,6 +29317,30 @@ userPickedMicRef.current = true;
             onApplyPreset={applyPresetRef.current}
             analyserNode={trackAnalysersRef.current[fxTrackId] || null}
             isPlaying={isPlaying}
+            isRecording={isRecording}
+            onTogglePlay={togglePlay}
+            onRecord={function(){
+              // Mirror the main transport record-button logic so behavior
+              // is identical from inside FX panel. Count-in + FX-warn-modal
+              // logic must be preserved.
+              if (isRecording) {
+                stopRecording();
+                return;
+              }
+              // Honour skip-fx-warn preference
+              var skipFxWarn = false;
+              try { skipFxWarn = localStorage.getItem("bf_skip_fx_record_warn") === "1"; } catch(e) {}
+              // From the FX panel, the track being recorded onto is the
+              // track we're editing FX for.
+              if (!skipFxWarn && fxTrackId) {
+                var rec = tracks.find(function(tr){ return tr.id === fxTrackId; });
+                if (rec && trackHasFx(rec)) {
+                  setFxRecordWarn({ trackId: fxTrackId });
+                  return;
+                }
+              }
+              startCountIn(fxTrackId);
+            }}
           />
         );
       })()}
@@ -29368,6 +29566,11 @@ userPickedMicRef.current = true;
         zIndex:9100,
         backdropFilter:"blur(8px)",
         boxShadow:"0 -8px 24px rgba(0,0,0,0.5), 0 -1px 0 rgba(124,58,237,0.15)",
+        // When FX panel is open, hide the main transport entirely. The FX
+        // screen has its OWN transport bar rendered inside its own subtree,
+        // so there's no shared-button-touch-clash with the timeline.
+        // display:"none" fully removes from layout AND hit-testing.
+        display: fxTrackId ? "none" : undefined,
       }}>
         {/* LED top edge — subtle accent */}
         <div style={{
