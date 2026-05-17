@@ -19169,15 +19169,20 @@ class StudioErrorBoundary extends React.Component {
 function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, analyserNode, isPlaying }) {
   // EQPlugin / CompPlugin / ReverbPlugin / PitchPlugin are pure render helpers
   // defined here so they always have the correct fx/upd/Knob/graph refs.
-  const EQPlugin     = function(p){ return _EQPlugin(p); };
-  const CompPlugin   = function(p){ return _CompPlugin(p); };
-  const ReverbPlugin = function(p){ return _ReverbPlugin(p); };
-  const OceanPlugin  = function(p){ return _OceanPlugin(p); };
-  const NoiseRemoverPlugin = function(p){ return _NoiseRemoverPlugin(p); };
-  const DoublerPlugin = function(p){ return _DoublerPlugin(p); };
-  const HDelayPlugin  = function(p){ return _HDelayPlugin(p); };
-  const TRottenPlugin = function(p){ return _TRottenMasterPlugin(p); };
-  const BandpassPlugin = function(p){ return _BandpassPlugin(p); };
+  // Plugin sub-components are wrapped in React.memo at module scope,
+  // so they're React component objects (not plain callable functions).
+  // Render them as JSX, not by calling them directly. The aliases below
+  // exist to preserve the call-site style `<NoiseRemoverPlugin .../>`
+  // while still delegating to the memoized module-scope components.
+  const EQPlugin           = function(p){ return <_EQPlugin {...p} />; };
+  const CompPlugin         = function(p){ return <_CompPlugin {...p} />; };
+  const ReverbPlugin       = function(p){ return <_ReverbPlugin {...p} />; };
+  const OceanPlugin        = function(p){ return <_OceanPlugin {...p} />; };
+  const NoiseRemoverPlugin = function(p){ return <_NoiseRemoverPlugin {...p} />; };
+  const DoublerPlugin      = function(p){ return <_DoublerPlugin {...p} />; };
+  const HDelayPlugin       = function(p){ return <_HDelayPlugin {...p} />; };
+  const TRottenPlugin      = function(p){ return <_TRottenMasterPlugin {...p} />; };
+  const BandpassPlugin     = function(p){ return <_BandpassPlugin {...p} />; };
   // Phosphor-style plugin icons — each tailored to its FX type
   function PhosphorPluginIcon({ id, color = "#888", size = 22 }) {
     const paths = {
@@ -19552,7 +19557,13 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
 // ── FX plugin sub-components (pure render functions, no hooks) ──
 // Defined at top-level so they are stable references; FxPanel passes them
 // down via FxPanelPlugins.
-function _EQPlugin({ fx, upd, eq5, EQGraph, Knob }) {
+// Memoized EQ plugin. Re-renders only when fx.eq changes — not when
+// other plugins' state changes, not when isPlaying changes. Knob/EQGraph
+// are recreated on every parent render but are pure functions, so
+// ignoring them in the comparator is safe and gives back the win.
+// eq5 is derived from fx.eq via spread (new reference every parent
+// render), so we comparator-check fx.eq instead.
+function _EQPluginInner({ fx, upd, eq5, EQGraph, Knob }) {
   const on = !!fx.eq?.on;
   // Pro Q3 color palette per band
   const BAND_COLORS = { hpf:"#FF6B6B", low:"#4FC3F7", mid:"#69F0AE", high:"#FFD54F", lpf:"#FF6B6B" };
@@ -19682,8 +19693,11 @@ function _EQPlugin({ fx, upd, eq5, EQGraph, Knob }) {
     </div>
   );
 }
+const _EQPlugin = React.memo(_EQPluginInner, function(prev, next) {
+  return prev.fx.eq === next.fx.eq && prev.upd === next.upd;
+});
 
-function _CompPlugin({ fx, upd, CompGraph, Knob }) {
+function _CompPluginInner({ fx, upd, CompGraph, Knob }) {
   return (
     <div style={{ background:"linear-gradient(180deg,#1c1a22 0%,#130f1a 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (fx.compressor?.on ? "#8B5CF6" : "#2a2a2a"), boxShadow: fx.compressor?.on ? "0 0 20px rgba(139,92,246,0.15), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
       <div style={{ background:"linear-gradient(180deg,#1e1c25 0%,#181620 100%)", padding:"8px 14px", borderBottom:"1px solid #2a2535", display:"flex", alignItems:"center", gap:8 }}>
@@ -19721,8 +19735,11 @@ function _CompPlugin({ fx, upd, CompGraph, Knob }) {
     </div>
   );
 }
+const _CompPlugin = React.memo(_CompPluginInner, function(prev, next) {
+  return prev.fx.compressor === next.fx.compressor && prev.upd === next.upd;
+});
 
-function _ReverbPlugin({ fx, upd, ReverbViz, Knob }) {
+function _ReverbPluginInner({ fx, upd, ReverbViz, Knob }) {
   return (
     <div style={{ background:"linear-gradient(180deg,#1a1220 0%,#110d19 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (fx.reverb?.on ? "#C026D3" : "#2a2a2a"), boxShadow: fx.reverb?.on ? "0 0 20px rgba(192,38,211,0.15), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
       <div style={{ backgroundImage:"linear-gradient(180deg,#1e1629,#17101e)", padding:"8px 14px", borderBottom:"1px solid #2a1e35", display:"flex", alignItems:"center", gap:8 }}>
@@ -19750,8 +19767,11 @@ function _ReverbPlugin({ fx, upd, ReverbViz, Knob }) {
     </div>
   );
 }
+const _ReverbPlugin = React.memo(_ReverbPluginInner, function(prev, next) {
+  return prev.fx.reverb === next.fx.reverb && prev.upd === next.upd;
+});
 
-function _OceanPlugin({ fx, upd, Knob }) {
+function _OceanPluginInner({ fx, upd, Knob }) {
   const on = !!fx.ocean?.on;
   return (
     <div style={{ background:"linear-gradient(180deg,#0a1628 0%,#061020 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (on ? "#0891b2" : "#2a2a2a"), boxShadow: on ? "0 0 20px rgba(8,145,178,0.2), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
@@ -19776,6 +19796,9 @@ function _OceanPlugin({ fx, upd, Knob }) {
     </div>
   );
 }
+const _OceanPlugin = React.memo(_OceanPluginInner, function(prev, next) {
+  return prev.fx.ocean === next.fx.ocean && prev.upd === next.upd;
+});
 
 var _tkc = 0; // unique counter for TKnob SVG gradient IDs — must be declared before use
 function TKnob({ label, value, min, max, step, unit, onChange, size, color }) {
@@ -19919,7 +19942,7 @@ function TKnob({ label, value, min, max, step, unit, onChange, size, color }) {
 //   mix     — wet/dry  0–1                   (default 1)
 //   on      — bypass toggle
 // =============================================================================
-function _BandpassPlugin({ fx, upd, Knob }) {
+function _BandpassPluginInner({ fx, upd, Knob }) {
   const bp    = fx.bandpass || {};
   const on    = !!bp.on;
   const center = bp.center ?? 1000;
@@ -20178,6 +20201,9 @@ function _BandpassPlugin({ fx, upd, Knob }) {
     </div>
   );
 }
+const _BandpassPlugin = React.memo(_BandpassPluginInner, function(prev, next) {
+  return prev.fx.bandpass === next.fx.bandpass && prev.upd === next.upd;
+});
 
 // =============================================================================
 // AUTOTUNE WORKLET — Proven pitch correction for iOS Safari
@@ -20579,7 +20605,7 @@ async function registerRNNoiseWorklet(actx) {
   return await p;
 }
 
-function _TRottenMasterPlugin({ fx, upd }) {
+function _TRottenMasterPluginInner({ fx, upd }) {
   const m  = fx.trotten || {};
   const on = !!m.on;
 
@@ -20906,9 +20932,12 @@ function _TRottenMasterPlugin({ fx, upd }) {
     </div>
   );
 }
+const _TRottenMasterPlugin = React.memo(_TRottenMasterPluginInner, function(prev, next) {
+  return prev.fx.trotten === next.fx.trotten && prev.upd === next.upd;
+});
 
 // ── Noise Remover Plugin UI ──────────────────────────────────────────────────
-function _NoiseRemoverPlugin({ fx, upd, Knob }) {
+function _NoiseRemoverPluginInner({ fx, upd, Knob }) {
   const nr        = fx.noiseremover || {};
   const on        = !!nr.on;
   const threshold = nr.threshold ?? -40;   // dB: -80 to 0
@@ -21116,12 +21145,15 @@ function _NoiseRemoverPlugin({ fx, upd, Knob }) {
     </div>
   );
 }
+const _NoiseRemoverPlugin = React.memo(_NoiseRemoverPluginInner, function(prev, next) {
+  return prev.fx.noiseremover === next.fx.noiseremover && prev.upd === next.upd;
+});
 // =============================================================================
 // ── VOCAL DOUBLER PLUGIN ──────────────────────────────────────────────────
 // Professional Haas-effect stereo doubler with detuned copies, width control
 // and a stereo correlation meter (L/R phase visualiser).
 // =============================================================================
-function _DoublerPlugin({ fx, upd, Knob }) {
+function _DoublerPluginInner({ fx, upd, Knob }) {
   const d     = fx.doubler || {};
   const on    = !!d.on;
   const delay = d.delay    ?? 20;      // ms  – Haas time offset (L copy)
@@ -21247,13 +21279,16 @@ function _DoublerPlugin({ fx, upd, Knob }) {
     </div>
   );
 }
+const _DoublerPlugin = React.memo(_DoublerPluginInner, function(prev, next) {
+  return prev.fx.doubler === next.fx.doubler && prev.upd === next.upd;
+});
 
 // =============================================================================
 // ── H-DELAY PLUGIN UI ────────────────────────────────────────────────────────
 // Emulates Waves H-Delay: tape/digital modes, BPM sync, ping-pong, hi/lo cut,
 // analog-style saturation, modulation, and a live tap-tempo delay display.
 // =============================================================================
-function _HDelayPlugin({ fx, upd, Knob }) {
+function _HDelayPluginInner({ fx, upd, Knob }) {
   const hd = fx.hdelay || {};
   const on         = !!hd.on;
   const mode       = hd.mode       ?? "digital";   // "digital" | "tape" | "ping"
@@ -21530,6 +21565,9 @@ function _HDelayPlugin({ fx, upd, Knob }) {
     </div>
   );
 }
+const _HDelayPlugin = React.memo(_HDelayPluginInner, function(prev, next) {
+  return prev.fx.hdelay === next.fx.hdelay && prev.upd === next.upd;
+});
 
 // This is the correct way to prevent re-renders from the 30fps currentTime
 // here because this is a real component, not an IIFE or callback.
