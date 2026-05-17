@@ -270,6 +270,16 @@ function useAnalyser(analyserNode, isActive) {
   const peakHold   = React.useRef(0);
   const peakTimer  = React.useRef(null);
   const rafRef     = React.useRef(null);
+  // Throttle VU updates to ~30fps. The eye can't distinguish VU bars
+  // changing more frequently than ~33ms anyway, and at 60fps × N tracks
+  // we were burning ~7-10ms of main thread per frame just on React
+  // reconciliation of VU state. That competed with tap/click handling
+  // on iOS Safari — when the user tapped a button, the gesture system
+  // sometimes decided the gesture was a scroll because the main thread
+  // was busy. Throttling to 30fps halves the reconcile cost while
+  // keeping the visual feedback indistinguishable.
+  const lastUpdateRef = React.useRef(0);
+  const VU_INTERVAL_MS = 33; // ~30fps
 
   React.useEffect(() => {
     if (!analyserNode || !isActive) {
@@ -278,7 +288,14 @@ function useAnalyser(analyserNode, isActive) {
     }
     const bufLen = analyserNode.frequencyBinCount;
     const data   = new Float32Array(bufLen);
-    const tick   = () => {
+    const tick   = (now) => {
+      // Skip work entirely if not enough time has passed since last update
+      if (now - lastUpdateRef.current < VU_INTERVAL_MS) {
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+      lastUpdateRef.current = now;
+
       analyserNode.getFloatTimeDomainData(data);
       let rms = 0;
       let pk  = 0;
@@ -26726,6 +26743,92 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         setIsSaved(true);
         setSaveStatus("Saved! ✓"); setTimeout(function(){ setSaveStatus(""); }, 2500);
       }
+
+      // ── Cloud sync (Pro feature) ─────────────────────────────────────────
+      // Phase 1 of cloud project sync: push the project METADATA (track
+      // config, FX state, BPM, clip positions/durations) to the backend
+      // so projects survive PWA reinstall and Safari storage eviction.
+      // Audio buffers themselves still live in IndexedDB locally — Phase
+      // 2 will add vocal upload to Cloudinary.
+      //
+      // This runs AFTER the local save succeeds. If cloud sync fails for
+      // any reason (no network, plan downgraded, server error), the local
+      // save is unaffected — graceful degradation. We never block the UI
+      // on cloud sync.
+      //
+      // Free users will get a 403 from the backend; we silently skip
+      // showing that as a UI error (it's expected behavior, not a bug).
+      (async function cloudSync() {
+        try {
+          // Strip audio data from tracks before uploading — we only sync
+          // metadata in Phase 1. The local clips already have idbKey set
+          // and audioBuffer/url/blob nulled out by the save flow above.
+          const cloudTracks = savedTracks.map(function(t) {
+            const cleanClips = (t.clips || []).map(function(cl) {
+              return {
+                id:         cl.id,
+                startTime:  cl.startTime || 0,
+                duration:   cl.duration  || 0,
+                trimStart:  cl.trimStart || 0,
+                trimEnd:    cl.trimEnd   || 0,
+                label:      cl.label || "",
+                active:     cl.active !== false,
+                idbKey:     cl.idbKey || null,
+              };
+            });
+            return {
+              id:        t.id,
+              name:      t.name || "",
+              type:      t.type || "beat",
+              volume:    t.volume ?? 1,
+              pan:       t.pan ?? 0,
+              isMuted:   !!t.isMuted,
+              isSoloed:  !!t.isSoloed,
+              color:     t.color || "",
+              effects:   t.effects || {},
+              clips:     cleanClips,
+              trackIdbKey: t.trackIdbKey || null,
+            };
+          });
+
+          // For the cloud, project ID is a Mongo ObjectId string — the
+          // backend assigns it on first save. We persist the cloud ID
+          // back on the local project doc so subsequent saves update
+          // (not duplicate). The local-only numeric ID stays as `id`,
+          // separate from the cloud ID.
+          const body = {
+            id:            proj.cloudId || null,
+            name:          proj.name,
+            bpm:           proj.bpm,
+            key:           proj.projectKey,
+            time_sig_num:  proj.timeSigNum,
+            tracks:        cloudTracks,
+          };
+          const resp = await apiFetch("/api/studio/projects/save", {
+            method: "POST",
+            body:   JSON.stringify(body),
+          });
+          // Stamp the returned cloud ID back onto the local project doc
+          if (resp && resp.id) {
+            const cur = JSON.parse(localStorage.getItem("bf_studio_projects") || "[]");
+            const idx = cur.findIndex(function(p) { return p.id === proj.id; });
+            if (idx >= 0) {
+              cur[idx].cloudId    = resp.id;
+              cur[idx].cloudSavedAt = resp.saved_at;
+              localStorage.setItem("bf_studio_projects", JSON.stringify(cur));
+              setSavedProjects(cur);
+            }
+          }
+        } catch (cloudErr) {
+          // Best-effort. Don't surface to the user unless it's an
+          // unexpected error. 403 (free tier) and 401 (logged out) are
+          // both expected and silent.
+          var msg = (cloudErr && cloudErr.message) || "";
+          if (msg && !msg.includes("403") && !msg.includes("401")) {
+            console.warn("[BeatFinder] Cloud sync failed (local save OK):", cloudErr);
+          }
+        }
+      })();
     } catch(e){
       console.error("[BeatFinder] saveProject error:", e);
       setSaveStatus("Save failed — " + (e.message || "unknown error"));
@@ -26815,9 +26918,26 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   const deleteProject = function (id) {
     // Remove audio clips from IndexedDB (best-effort, async — no need to await)
     AudioDB.deleteProjectClips(id).catch(function(){});
+    // Find the project being deleted so we can mirror the deletion to the
+    // cloud (if it had been synced). Done before we remove from local list.
+    const toDelete = savedProjects.find(function(p){ return p.id===id; });
     const u = savedProjects.filter(function(p){ return p.id!==id; });
     setSavedProjects(u);
     localStorage.setItem("bf_studio_projects", JSON.stringify(u));
+
+    // Cloud delete — best-effort, silent on failure. The local delete is
+    // already committed by this point; if cloud fails the worst case is
+    // an orphaned cloud doc that next save will sync over anyway.
+    if (toDelete && toDelete.cloudId) {
+      apiFetch("/api/studio/projects/delete/" + encodeURIComponent(toDelete.cloudId), {
+        method: "DELETE",
+      }).catch(function(err) {
+        var msg = (err && err.message) || "";
+        if (msg && !msg.includes("403") && !msg.includes("401") && !msg.includes("404")) {
+          console.warn("[BeatFinder] Cloud delete failed:", err);
+        }
+      });
+    }
   };
 
   // ══════════════════════════════════════════════════════════════
