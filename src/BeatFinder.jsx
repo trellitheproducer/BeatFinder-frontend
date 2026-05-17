@@ -28883,7 +28883,7 @@ userPickedMicRef.current = true;
                     fontFamily: "'Bebas Neue',sans-serif", letterSpacing: 1, lineHeight: 1,
                   }}>LYRICS</div>
                   <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>
-                    Read & Write while you record
+                    Write while you record
                   </div>
                 </div>
               </div>
@@ -31364,7 +31364,7 @@ function ChangelogScreen({ onBack }) {
         })}
 
         <div style={{ color: "#444", fontSize: 9, textAlign: "center", marginTop: 8, lineHeight: 1.4 }}>
-          Feedback? <span style={{ color: "#A78BFA" }}>trellitheproducer@gmail.com</span>
+          Feedback? <span style={{ color: "#A78BFA" }}>support@beatfinder.co.uk</span>
         </div>
       </div>
     </div>
@@ -31510,59 +31510,14 @@ function AboutScreen({ onBack }) {
         </div>
 
         <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 800, letterSpacing: 1.5, marginBottom: 6, paddingLeft: 4 }}>
-          THE TEAM
-        </div>
-        <div style={{
-          background: "#0d0d0d",
-          border: "1px solid #2a2a2a",
-          borderRadius: 12, padding: "10px 12px",
-          marginBottom: 12,
-          display: "flex", gap: 10, alignItems: "center",
-        }}>
-          <div style={{
-            flex: "0 0 auto", width: 44, height: 44, borderRadius: "50%",
-            background: "linear-gradient(135deg,#C026D3,#7C3AED,#3B82F6)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, letterSpacing: 1,
-            color: "white",
-            boxShadow: "0 4px 16px rgba(192,38,211,0.4), inset 0 1px 0 rgba(255,255,255,0.25)",
-          }}>
-            T
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ color: "white", fontWeight: 800, fontSize: 14 }}>
-              Trelli
-            </div>
-            <div style={{ color: "#888", fontSize: 10, fontWeight: 700, letterSpacing: 0.5, marginBottom: 3 }}>
-              FOUNDER · PRODUCER
-            </div>
-            <div style={{ color: "#aaa", fontSize: 11, lineHeight: 1.4 }}>
-              Built BeatFinder to give producers and artists the platform we always wanted.
-            </div>
-          </div>
-        </div>
-
-        <div style={{ color: "#A78BFA", fontSize: 10, fontWeight: 800, letterSpacing: 1.5, marginBottom: 6, paddingLeft: 4 }}>
           GET IN TOUCH
         </div>
 
         <Row
           icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>}
           label="EMAIL"
-          value="trellitheproducer@gmail.com"
-          href="mailto:trellitheproducer@gmail.com"
-        />
-        <Row
-          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>}
-          label="INSTAGRAM"
-          value="@trelliofficial"
-          href="https://instagram.com/trelliofficial"
-        />
-        <Row
-          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5.8 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1.84-.1z"/></svg>}
-          label="TIKTOK"
-          value="@trelliofficial"
-          href="https://tiktok.com/@trelliofficial"
+          value="support@beatfinder.co.uk"
+          href="mailto:support@beatfinder.co.uk"
         />
 
         <div style={{ marginTop: 12, marginBottom: 12 }}>
