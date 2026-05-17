@@ -23478,6 +23478,28 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     recOffsetMsRef.current = recOffsetMs;
     try { localStorage.setItem("bf_rec_offset_ms", String(recOffsetMs)); } catch(e) {}
   }, [recOffsetMs]);
+  // Additional FX-induced recording offset. Applied on top of recOffsetMs
+  // when ANY track has FX enabled at recording start. FX adds audio-graph
+  // latency that the base offset can't account for, and it varies per
+  // device. Range -300..+300ms. Default 0 — user calibrates via the
+  // Calibrate button or slider in Studio Settings.
+  const [fxRecOffsetMs, setFxRecOffsetMs] = useState(function(){
+    try {
+      var raw = localStorage.getItem("bf_fx_rec_offset_ms");
+      if (raw === null) return 0;
+      var n = parseInt(raw, 10);
+      if (isNaN(n)) return 0;
+      return Math.max(-300, Math.min(300, n));
+    } catch(e) { return 0; }
+  });
+  const fxRecOffsetMsRef = useRef(0);
+  React.useEffect(function(){
+    fxRecOffsetMsRef.current = fxRecOffsetMs;
+    try { localStorage.setItem("bf_fx_rec_offset_ms", String(fxRecOffsetMs)); } catch(e) {}
+  }, [fxRecOffsetMs]);
+  // Calibration modal visibility. Opened from the "Calibrate" button next
+  // to the FX offset slider in Studio Settings.
+  const [calibrateOpen, setCalibrateOpen] = useState(false);
   const fxUpdRef = useRef(null); // stable ref so memoized FX panel always calls latest upd
   const applyPresetRef = useRef(null); // stable ref so memoized FX panel always calls latest preset applier
   // FX-internal transport callbacks. The challenge: FxPanel is memo'd,
@@ -27168,7 +27190,25 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       const manualOffsetSec   = (typeof actx.inputLatency === "undefined")
                                   ? ((recOffsetMsRef.current || 0) / 1000)
                                   : 0;
-      const totalLatency      = inputLatency + manualOffsetSec;
+      // ── FX-induced latency compensation ──
+      // When ANY track has FX enabled, the audio graph adds extra latency
+      // that the base offset doesn't account for. The user calibrates a
+      // SEPARATE FX offset value (Studio Settings → "FX Recording Offset"
+      // slider + Calibrate button). It auto-applies on top of the base
+      // offset only when FX is detected in any track at recording start.
+      // Safari-only — Chrome's reported inputLatency already handles this.
+      let fxOffsetSec = 0;
+      if (typeof actx.inputLatency === "undefined") {
+        try {
+          const anyTrackHasFx = (tracksRef.current || []).some(function(tr){
+            return trackHasFx(tr);
+          });
+          if (anyTrackHasFx) {
+            fxOffsetSec = (fxRecOffsetMsRef.current || 0) / 1000;
+          }
+        } catch(e) { fxOffsetSec = 0; }
+      }
+      const totalLatency      = inputLatency + manualOffsetSec + fxOffsetSec;
 
       // Timeline position = where the playhead was + how far actx has advanced since masterStart
       const trueStartTime = Math.max(0,
@@ -29359,6 +29399,107 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                   Reset to default (80 ms)
                 </button>
               </div>
+            </div>
+            {/* ── FX Recording Offset slider ──
+                Auto-applies on top of the base offset when ANY track has
+                FX enabled at recording start. Different devices need
+                different values (depends on headphones, FX chain length,
+                worklet latency). Use the Calibrate button for a guided
+                first-time setup. */}
+            <div style={{ margin:"0 16px 32px",background:"#1a1a1a",borderRadius:14 }}>
+              <div style={{ padding:"14px 16px 10px" }}>
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10 }}>
+                  <div>
+                    <div style={{ color:"white",fontWeight:700,fontSize:13 }}>FX Recording Offset</div>
+                    <div style={{ color:"#555",fontSize:11,marginTop:2,lineHeight:1.4 }}>Extra offset when any track has FX enabled. Calibrate to find your value.</div>
+                  </div>
+                  <span style={{ fontSize:12,fontWeight:800,fontFamily:"monospace",color:"#10B981",minWidth:48,textAlign:"right" }}>
+                    {fxRecOffsetMs > 0 ? "+" : ""}{fxRecOffsetMs} ms
+                  </span>
+                </div>
+                <input type="range" min={-300} max={300} step={10} value={fxRecOffsetMs}
+                  title={"FX Recording Offset: " + fxRecOffsetMs + " ms (default = 0 ms)"}
+                  onChange={function(e){ setFxRecOffsetMs(parseInt(e.target.value, 10)); }}
+                  style={{ width:"100%",accentColor:"#10B981" }} />
+                <div style={{ display:"flex",justifyContent:"space-between",marginTop:4 }}>
+                  <span style={{ color:"#444",fontSize:10,fontFamily:"monospace" }}>−300</span>
+                  <span style={{ color:"#444",fontSize:10,fontFamily:"monospace" }}>0</span>
+                  <span style={{ color:"#444",fontSize:10,fontFamily:"monospace" }}>+300</span>
+                </div>
+                <div style={{ display:"flex",gap:8,marginTop:10 }}>
+                  <button onClick={function(){ setCalibrateOpen(true); }}
+                    style={{ background:"linear-gradient(180deg,#10B981,#059669)",border:"1px solid #34d399",borderRadius:6,color:"white",fontSize:11,fontWeight:800,padding:"6px 14px",cursor:"pointer",letterSpacing:0.5 }}>
+                    🎯 Calibrate
+                  </button>
+                  <button onClick={function(){ setFxRecOffsetMs(0); }}
+                    style={{ background:"none",border:"1px solid #2a2a2a",borderRadius:6,color:"#666",fontSize:10,padding:"4px 10px",cursor:"pointer" }}>
+                    Reset to 0 ms
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Calibration modal ──
+          Guided 5-option prompt for tuning the FX recording offset.
+          Each option maps to a starting value. User can refine via the
+          slider afterwards. */}
+      {calibrateOpen && (
+        <div style={{ position:"absolute", inset:0, zIndex:750, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}
+          onClick={function(){ setCalibrateOpen(false); }}>
+          <div onClick={function(e){ e.stopPropagation(); }}
+            style={{ background:"#111", borderRadius:16, maxWidth:380, width:"100%", overflow:"hidden", border:"1px solid #1f1f1f", boxShadow:"0 12px 40px rgba(0,0,0,0.7)" }}>
+            <div style={{ padding:"18px 20px 12px", borderBottom:"1px solid #1a1a1a" }}>
+              <div style={{ color:"white", fontWeight:800, fontSize:16 }}>Calibrate FX Recording</div>
+              <div style={{ color:"#666", fontSize:12, marginTop:4, lineHeight:1.4 }}>
+                Record a short take with FX on a track, then tell me how it sounded. I'll set a starting value you can refine on the slider.
+              </div>
+            </div>
+            <div style={{ padding:"8px 0" }}>
+              {[
+                { label: "🎯 On time",         desc: "Stays the same — no FX offset needed", val: 0 },
+                { label: "⏪ A bit early",      desc: "Vocal slightly ahead of the beat",     val: 30 },
+                { label: "⏩ A bit late",       desc: "Vocal slightly behind the beat",       val: -30 },
+                { label: "🔥 Way too early",   desc: "Vocal clearly ahead of the beat",      val: 120 },
+                { label: "🐢 Way too late",    desc: "Vocal clearly behind the beat",        val: -120 },
+              ].map(function(opt, idx){
+                return (
+                  <button key={opt.val} onClick={function(){
+                    setFxRecOffsetMs(opt.val);
+                    setCalibrateOpen(false);
+                    try {
+                      if (typeof window !== "undefined" && window.bfToast && window.bfToast.info) {
+                        window.bfToast.info("FX offset set to " + (opt.val > 0 ? "+" : "") + opt.val + "ms. Fine-tune with the slider if needed.");
+                      }
+                    } catch(e) {}
+                  }}
+                    style={{
+                      display:"flex", alignItems:"center", gap:10,
+                      width:"100%", padding:"14px 20px",
+                      background:"none", border:"none",
+                      borderBottom: idx < 4 ? "1px solid #161616" : "none",
+                      color:"white", cursor:"pointer", textAlign:"left",
+                    }}
+                    onPointerEnter={function(e){ e.currentTarget.style.background="#181818"; }}
+                    onPointerLeave={function(e){ e.currentTarget.style.background="transparent"; }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontWeight:700, fontSize:13 }}>{opt.label}</div>
+                      <div style={{ color:"#666", fontSize:11, marginTop:2 }}>{opt.desc}</div>
+                    </div>
+                    <span style={{ color:"#10B981", fontSize:11, fontWeight:800, fontFamily:"monospace", minWidth:48, textAlign:"right" }}>
+                      {opt.val > 0 ? "+" : ""}{opt.val} ms
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ padding:"12px 20px", borderTop:"1px solid #1a1a1a", display:"flex", justifyContent:"flex-end" }}>
+              <button onClick={function(){ setCalibrateOpen(false); }}
+                style={{ background:"none", border:"1px solid #2a2a2a", borderRadius:6, color:"#888", fontSize:12, padding:"6px 14px", cursor:"pointer" }}>
+                Cancel
+              </button>
             </div>
           </div>
         </div>
