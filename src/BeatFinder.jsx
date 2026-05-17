@@ -21518,7 +21518,7 @@ function _HDelayPlugin({ fx, upd, Knob }) {
 // here because this is a real component, not an IIFE or callback.
 // Re-renders ONLY when fx data, fxTrackId, trackName, or trackColor change.
 // =============================================================================
-const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackColor, onClose, onUpd, onApplyPreset, analyserNode, isPlaying, isRecording, onTogglePlay, onRecord }) {
+const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackColor, onClose, onUpd, onApplyPreset, analyserNode, isPlaying, isRecording, onTogglePlay, onRecord, onSeekBack, onSeekForward }) {
   const upd = onUpd; // stable ref-backed callback passed from StudioScreen
   const [presetMenuOpen, setPresetMenuOpen] = React.useState(false);
 
@@ -21898,16 +21898,15 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
           shared buttons with the main timeline transport (which is
           hidden via display:none in StudioScreen while fxTrackId is set).
 
-          Three buttons: Play/Pause, Record, Back. Calls the same
-          underlying functions as the main transport — togglePlay,
-          stopRecording/startCountIn, and onClose. */}
+          Five buttons: Back, Rewind, Record, Play/Pause, Fast Forward.
+          Calls the same underlying functions as the main transport. */}
       <div style={{
         flexShrink:0,
         background:"linear-gradient(180deg,rgba(15,10,31,0.96) 0%,rgba(10,10,20,0.98) 100%)",
         borderTop:"1px solid rgba(124,58,237,0.25)",
-        padding:"10px 16px",
+        padding:"10px 12px",
         paddingBottom:"calc(10px + env(safe-area-inset-bottom))",
-        display:"flex", alignItems:"center", justifyContent:"center", gap:24,
+        display:"flex", alignItems:"center", justifyContent:"center", gap:14,
       }}>
         {/* Back — same action as Done in header, but accessible from bottom */}
         <button onClick={onClose}
@@ -21922,6 +21921,22 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
             <polyline points="15 18 9 12 15 6"/>
           </svg>
         </button>
+        {/* Rewind 5s — mirrors main transport seekBack */}
+        {onSeekBack && (
+          <button onClick={onSeekBack}
+            aria-label="Rewind 5 seconds"
+            style={{
+              width:36, height:36, borderRadius:8,
+              background:"#141414", border:"1px solid #222",
+              cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
+              flexShrink:0,
+            }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+              <path d="M12.5 8.5 7 12l5.5 3.5V8.5z"/>
+              <path d="M19.5 8.5 14 12l5.5 3.5V8.5z"/>
+            </svg>
+          </button>
+        )}
         {/* Record */}
         {onRecord && (
           <button onClick={onRecord}
@@ -21953,6 +21968,22 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
             {isPlaying
               ? <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
               : <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>}
+          </button>
+        )}
+        {/* Fast Forward 5s — mirrors main transport seekForward */}
+        {onSeekForward && (
+          <button onClick={onSeekForward}
+            aria-label="Fast forward 5 seconds"
+            style={{
+              width:36, height:36, borderRadius:8,
+              background:"#141414", border:"1px solid #222",
+              cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
+              flexShrink:0,
+            }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+              <path d="M11.5 8.5 17 12l-5.5 3.5V8.5z"/>
+              <path d="M4.5 8.5 10 12 4.5 15.5V8.5z"/>
+            </svg>
           </button>
         )}
       </div>
@@ -22915,6 +22946,26 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   const [masterVolume, setMasterVolume]  = useState(1); // independent master fader 0..1.5
   const fxUpdRef = useRef(null); // stable ref so memoized FX panel always calls latest upd
   const applyPresetRef = useRef(null); // stable ref so memoized FX panel always calls latest preset applier
+  // FX-internal transport callbacks. The challenge: FxPanel is memo'd,
+  // so if we pass togglePlay directly it caches the FIRST render's
+  // closure forever and reads stale isPlaying. If we add togglePlay to
+  // the memo comparator, FxPanel re-renders every parent render (since
+  // togglePlay is a new reference each time), defeating the memo.
+  //
+  // Solution: stable PROXY functions defined once via useMemo. They
+  // read fxTogglePlayRef.current and fxRecordRef.current AT CALL TIME,
+  // not at render time. The refs are updated each parent render with
+  // fresh closures, so the proxies always invoke the latest function
+  // with the latest state. FxPanel sees the same proxy reference
+  // forever and memo stays effective.
+  const fxTogglePlayRef = useRef(null);
+  const fxRecordRef     = useRef(null);
+  const fxTogglePlayProxy = React.useMemo(function(){
+    return function(){ if (fxTogglePlayRef.current) fxTogglePlayRef.current(); };
+  }, []);
+  const fxRecordProxy = React.useMemo(function(){
+    return function(){ if (fxRecordRef.current) fxRecordRef.current(); };
+  }, []);
   const [showTakes,    setShowTakes]     = useState(null);
   const [trimmingClip, setTrimmingClip]  = useState(null);
   const [monitoringOn, setMonitoringOn] = useState(false);
@@ -29305,6 +29356,32 @@ userPickedMicRef.current = true;
         // Stable preset applier — same pattern as fxUpdRef so FxPanel's memo
         // comparator sees the same function reference across re-renders
         applyPresetRef.current = function(preset){ applyPreset(t.id, preset); };
+        // Stable transport callbacks — set fresh each render so closure
+        // captures CURRENT isPlaying/isRecording/tracks state, but ref
+        // identity stays the same so memoized FxPanel sees same props.
+        fxTogglePlayRef.current = togglePlay;
+        fxRecordRef.current = function(){
+          // Mirror the main transport record-button logic so behavior
+          // is identical from inside FX panel. Count-in + FX-warn-modal
+          // logic must be preserved.
+          if (isRecording) {
+            stopRecording();
+            return;
+          }
+          // Honour skip-fx-warn preference
+          var skipFxWarn = false;
+          try { skipFxWarn = localStorage.getItem("bf_skip_fx_record_warn") === "1"; } catch(e) {}
+          // From the FX panel, the track being recorded onto is the
+          // track we're editing FX for.
+          if (!skipFxWarn && fxTrackId) {
+            var rec = tracks.find(function(tr){ return tr.id === fxTrackId; });
+            if (rec && trackHasFx(rec)) {
+              setFxRecordWarn({ trackId: fxTrackId });
+              return;
+            }
+          }
+          startCountIn(fxTrackId);
+        };
         return (
           <FxPanel
             key={fxTrackId}
@@ -29318,29 +29395,10 @@ userPickedMicRef.current = true;
             analyserNode={trackAnalysersRef.current[fxTrackId] || null}
             isPlaying={isPlaying}
             isRecording={isRecording}
-            onTogglePlay={togglePlay}
-            onRecord={function(){
-              // Mirror the main transport record-button logic so behavior
-              // is identical from inside FX panel. Count-in + FX-warn-modal
-              // logic must be preserved.
-              if (isRecording) {
-                stopRecording();
-                return;
-              }
-              // Honour skip-fx-warn preference
-              var skipFxWarn = false;
-              try { skipFxWarn = localStorage.getItem("bf_skip_fx_record_warn") === "1"; } catch(e) {}
-              // From the FX panel, the track being recorded onto is the
-              // track we're editing FX for.
-              if (!skipFxWarn && fxTrackId) {
-                var rec = tracks.find(function(tr){ return tr.id === fxTrackId; });
-                if (rec && trackHasFx(rec)) {
-                  setFxRecordWarn({ trackId: fxTrackId });
-                  return;
-                }
-              }
-              startCountIn(fxTrackId);
-            }}
+            onTogglePlay={fxTogglePlayProxy}
+            onRecord={fxRecordProxy}
+            onSeekBack={seekBack}
+            onSeekForward={seekForward}
           />
         );
       })()}
