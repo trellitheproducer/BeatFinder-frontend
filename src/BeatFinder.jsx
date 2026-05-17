@@ -270,6 +270,16 @@ function useAnalyser(analyserNode, isActive) {
   const peakHold   = React.useRef(0);
   const peakTimer  = React.useRef(null);
   const rafRef     = React.useRef(null);
+  // Throttle VU updates to ~30fps. The eye can't distinguish VU bars
+  // changing faster than ~33ms, but at 60fps × N tracks × FX plugins
+  // active, React reconciliation of VU state was eating enough main
+  // thread time during playback that iOS Safari couldn't reliably
+  // deliver tap events to buttons (pointerdown/pointerup spaced too
+  // far apart by the busy frames). Halving the reconcile rate gives
+  // back ~5ms per frame — enough for iOS to register taps on the
+  // first try instead of needing 3-4 retries.
+  const lastUpdateRef = React.useRef(0);
+  const VU_INTERVAL_MS = 33; // ~30fps
 
   React.useEffect(() => {
     if (!analyserNode || !isActive) {
@@ -278,7 +288,14 @@ function useAnalyser(analyserNode, isActive) {
     }
     const bufLen = analyserNode.frequencyBinCount;
     const data   = new Float32Array(bufLen);
-    const tick   = () => {
+    const tick   = (now) => {
+      // Skip work entirely if not enough time has passed since last update
+      if (now - lastUpdateRef.current < VU_INTERVAL_MS) {
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+      lastUpdateRef.current = now;
+
       analyserNode.getFloatTimeDomainData(data);
       let rms = 0;
       let pk  = 0;
