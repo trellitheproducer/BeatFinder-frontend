@@ -19176,6 +19176,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
   // while still delegating to the memoized module-scope components.
   const EQPlugin           = function(p){ return <_EQPlugin {...p} />; };
   const CompPlugin         = function(p){ return <_CompPlugin {...p} />; };
+  const RCompPlugin        = function(p){ return <_RCompPlugin {...p} />; };
   const ReverbPlugin       = function(p){ return <_ReverbPlugin {...p} />; };
   const OceanPlugin        = function(p){ return <_OceanPlugin {...p} />; };
   const NoiseRemoverPlugin = function(p){ return <_NoiseRemoverPlugin {...p} />; };
@@ -19183,6 +19184,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
   const HDelayPlugin       = function(p){ return <_HDelayPlugin {...p} />; };
   const TRottenPlugin      = function(p){ return <_TRottenMasterPlugin {...p} />; };
   const BandpassPlugin     = function(p){ return <_BandpassPlugin {...p} />; };
+  const ExciterPlugin      = function(p){ return <_ExciterPlugin {...p} />; };
   // Phosphor-style plugin icons — each tailored to its FX type
   function PhosphorPluginIcon({ id, color = "#888", size = 22 }) {
     const paths = {
@@ -19222,6 +19224,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
   const ALL_PLUGINS = [
     { key:"eq",           label:"Pro EQ",              sub:"5-Band · Drag handles",        icon:"▦", color:"#0ea5e9" },
     { key:"compressor",   label:"Compressor",          sub:"Dynamics processor",            icon:"fader", color:"#7C3AED" },
+    { key:"rcomp",        label:"R-Comp",              sub:"Renaissance · ARC auto-release", icon:"fader", color:"#06b6d4" },
     { key:"reverb",       label:"Convolution Reverb",  sub:"Room simulation",               icon:"wave", color:"#C026D3" },
     { key:"ocean",        label:"Ocean Reverb",        sub:"Deep · Lush · Atmospheric",     icon:"wave", color:"#0891b2" },
     { key:"noiseremover", label:"Noise Remover",       sub:"RNNoise · AI denoising",        icon:"mic", color:"#10B981" },
@@ -19230,6 +19233,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"hdelay",       label:"H-Delay",              sub:"Tape · BPM sync · Analog",       icon:"◷", color:"#E85D04" },
     { key:"trotten",      label:"T-Rotten Master",      sub:"Mastering · Analog warmth",       icon:"knobs", color:"#C8762A" },
     { key:"bandpass",     label:"GRM Bandpass",         sub:"Dual 6th-order · Resonance",      icon:"knobs", color:"#00b4d8" },
+    { key:"exciter",      label:"Aural Exciter",        sub:"Aphex-style · Harmonic air",     icon:"wave", color:"#FCD34D" },
   ];
 
   const addPlugin = function(key) {
@@ -19259,6 +19263,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
   const FL_PLUGINS = [
     { key:"eq",           label:"Parametric EQ",      sub:"5-Band",          icon:"ph-eq",          color:"#00b4d8", cat:"EQ",       tag:"MIXER"  },
     { key:"compressor",   label:"Compressor",          sub:"Dynamics",        icon:"ph-compress",    color:"#7c3aed", cat:"DYNAMICS", tag:"EFFECT" },
+    { key:"rcomp",        label:"R-Comp",              sub:"ARC · Warm/Electro", icon:"ph-compress", color:"#06b6d4", cat:"DYNAMICS", tag:"EFFECT" },
     { key:"reverb",       label:"Reverb",              sub:"Room sim",        icon:"ph-reverb",      color:"#0891b2", cat:"REVERB",   tag:"EFFECT" },
     { key:"ocean",        label:"Ocean Reverb",        sub:"Lush · Deep",     icon:"ph-reverb",      color:"#0369a1", cat:"REVERB",   tag:"EFFECT" },
     { key:"noiseremover", label:"Noise Gate AI",       sub:"RNNoise",         icon:"ph-gate",        color:"#059669", cat:"DYNAMICS", tag:"UTILITY" },
@@ -19267,6 +19272,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"hdelay",       label:"T-Delay",             sub:"Tape · BPM sync", icon:"ph-delay",       color:"#ea580c", cat:"UTILITY",  tag:"EFFECT" },
     { key:"trotten",      label:"T-Rotten Master 19",  sub:"Analog warmth",   icon:"ph-master",      color:"#854d0e", cat:"DYNAMICS", tag:"MASTER" },
     { key:"bandpass",     label:"GRM Bandpass",        sub:"Dual 6th-order",  icon:"ph-bandpass",    color:"#0e7490", cat:"EQ",       tag:"FILTER" },
+    { key:"exciter",      label:"Aural Exciter",       sub:"Aphex · Harmonic", icon:"ph-eq",         color:"#FCD34D", cat:"EQ",       tag:"EFFECT" },
   ];
 
   const visiblePlugins = FL_PLUGINS.filter(function(p){
@@ -19492,6 +19498,9 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
           {/* Compressor plugin */}
           {key === "compressor" && <CompPlugin fx={fx} upd={upd} CompGraph={CompGraph} Knob={Knob} />}
 
+          {/* R-Comp plugin */}
+          {key === "rcomp" && <RCompPlugin fx={fx} upd={upd} Knob={Knob} />}
+
           {/* Reverb plugin */}
           {key === "reverb" && <ReverbPlugin fx={fx} upd={upd} ReverbViz={ReverbViz} Knob={Knob} />}
 
@@ -19513,6 +19522,9 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
 
           {/* GRM Bandpass plugin */}
           {key === "bandpass" && <BandpassPlugin fx={fx} upd={upd} Knob={Knob} />}
+
+          {/* Aural Exciter plugin */}
+          {key === "exciter" && <ExciterPlugin fx={fx} upd={upd} Knob={Knob} />}
 
           {/* Autotune plugin */}
           {key === "autotune" && <AutotunePlugin fx={fx} upd={upd} Knob={Knob} />}
@@ -21569,11 +21581,153 @@ const _HDelayPlugin = React.memo(_HDelayPluginInner, function(prev, next) {
   return prev.fx.hdelay === next.fx.hdelay && prev.upd === next.upd;
 });
 
+// =============================================================================
+// R-COMP — Waves Renaissance Compressor style. Single-band compressor with:
+//   • ARC (Auto-Release Control): release time follows envelope dynamically
+//   • Warm mode: soft asymmetric tube-style saturation + 200Hz low-shelf body
+//   • Electro mode: harder symmetric clip + 80Hz HPF pre-emphasis
+// Designed for vocals — the warm mode is the classic Waves R-Comp tone.
+// =============================================================================
+function _RCompPluginInner({ fx, upd, Knob }) {
+  const rc      = fx.rcomp || {};
+  const on      = !!rc.on;
+  const mode    = rc.mode || "warm";
+  const arcOn   = rc.arc !== false; // default ON
+
+  return (
+    <div style={{ background:"linear-gradient(180deg,#0a1820 0%,#06121a 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (on ? "#06b6d4" : "#2a2a2a"), boxShadow: on ? "0 0 20px rgba(6,182,212,0.18), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+      {/* Header */}
+      <div style={{ background:"linear-gradient(180deg,#0c1c26 0%,#08131c 100%)", padding:"8px 14px", borderBottom:"1px solid #163245", display:"flex", alignItems:"center", gap:8 }}>
+        <div style={{ flex:1 }}>
+          <div style={{ color:"#67e8f9", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>R-COMP</div>
+          <div style={{ color:"#1e4d5c", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>RENAISSANCE COMPRESSOR · ARC</div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          {/* Indicator LEDs */}
+          <div style={{ display:"flex", gap:1.5, alignItems:"flex-end" }}>
+            {[0,1,2,3,4].map(function(i){
+              const colors = ["#22C55E","#22C55E","#F59E0B","#EF4444","#EF4444"];
+              return <div key={i} style={{ width:3, height: 6 + i * 2, borderRadius:1, background: on ? colors[i] : "#1a2a32", boxShadow: on ? "0 0 4px " + colors[i] + "88" : "none", transition:"all 0.15s" }} />;
+            })}
+          </div>
+          <div style={{ width:8, height:8, borderRadius:"50%", background: on ? "#06b6d4" : "#1a1a1a", boxShadow: on ? "0 0 6px #06b6d4, 0 0 12px rgba(6,182,212,0.5)" : "none", transition:"all 0.2s" }} />
+          <button onClick={function(){ upd("rcomp",{on:!on}); }}
+            style={{ background: on ? "linear-gradient(180deg,#0891b2,#0e7490)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (on ? "#06b6d4" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1, boxShadow: on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>
+            {on ? "ON" : "OFF"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding:"12px 14px", opacity: on ? 1 : 0.4, transition:"opacity 0.2s" }}>
+        {/* Mode + ARC controls row */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10, gap:8 }}>
+          {/* Mode toggle: warm / electro */}
+          <div style={{ display:"flex", gap:0, background:"#020608", border:"1px solid #163245", borderRadius:6, padding:2 }}>
+            <button onClick={function(){ upd("rcomp",{mode:"warm"}); }}
+              style={{ background: mode === "warm" ? "linear-gradient(180deg,#0891b2,#0e7490)" : "transparent", border:"none", borderRadius:4, color: mode === "warm" ? "white" : "#456", fontSize:9, fontWeight:800, padding:"3px 10px", cursor:"pointer", letterSpacing:1 }}>WARM</button>
+            <button onClick={function(){ upd("rcomp",{mode:"electro"}); }}
+              style={{ background: mode === "electro" ? "linear-gradient(180deg,#0891b2,#0e7490)" : "transparent", border:"none", borderRadius:4, color: mode === "electro" ? "white" : "#456", fontSize:9, fontWeight:800, padding:"3px 10px", cursor:"pointer", letterSpacing:1 }}>ELECTRO</button>
+          </div>
+          {/* ARC toggle */}
+          <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+            <span style={{ color: arcOn ? "#67e8f9" : "#456", fontSize:9, fontWeight:800, letterSpacing:1, fontFamily:"monospace" }}>ARC</span>
+            <button onClick={function(){ upd("rcomp",{arc:!arcOn}); }}
+              style={{ width:36, height:18, borderRadius:9, background: arcOn ? "linear-gradient(90deg,#0891b2,#06b6d4)" : "#1a2a32", border:"1px solid " + (arcOn ? "#06b6d4" : "#2a3a42"), cursor:"pointer", position:"relative", padding:0 }}>
+              <div style={{ position:"absolute", top:1, left: arcOn ? 19 : 1, width:14, height:14, borderRadius:"50%", background: arcOn ? "white" : "#456", transition:"left 0.15s", boxShadow:"0 1px 3px rgba(0,0,0,0.4)" }} />
+            </button>
+          </div>
+        </div>
+
+        {/* Knobs row 1: THRESH, RATIO */}
+        <div style={{ display:"flex", justifyContent:"space-around", overflow:"visible", marginBottom:8 }}>
+          <Knob label="THRESH"  value={rc.threshold ?? -18} min={-60} max={0}  step={1}    unit="dB" color="#06b6d4" onChange={function(v){ upd("rcomp",{threshold:v}); }} />
+          <Knob label="RATIO"   value={rc.ratio ?? 3}        min={1}   max={20} step={0.5}  unit=":1" color="#06b6d4" onChange={function(v){ upd("rcomp",{ratio:v}); }} />
+        </div>
+        <div style={{ height:1, background:"#163245", borderRadius:1 }} />
+        {/* Knobs row 2: ATTACK, RELEASE, GAIN */}
+        <div style={{ display:"flex", justifyContent:"space-around", overflow:"visible", marginTop:8 }}>
+          <Knob label="ATTACK"  value={Math.round((rc.attack ?? 0.012) * 1000)} min={1}  max={200}  step={1}   unit="ms" color="#67e8f9" onChange={function(v){ upd("rcomp",{attack:v/1000}); }} />
+          <Knob label={arcOn ? "REL · ARC" : "RELEASE"} value={Math.round((rc.release ?? 0.18) * 1000)} min={10} max={2000} step={10}  unit="ms" color={arcOn ? "#1e4d5c" : "#67e8f9"} onChange={function(v){ if (!arcOn) upd("rcomp",{release:v/1000}); }} />
+          <Knob label="GAIN"    value={rc.makeupGain ?? 0}    min={0}   max={24}  step={0.5} unit="dB" color="#22C55E" onChange={function(v){ upd("rcomp",{makeupGain:v}); }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+const _RCompPlugin = React.memo(_RCompPluginInner, function(prev, next) {
+  return prev.fx.rcomp === next.fx.rcomp && prev.upd === next.upd;
+});
+
+// =============================================================================
+// AURAL EXCITER — Aphex-style. Generates upper harmonics from the highs,
+// blends them back via wet mix. Two modes:
+//   • Vintage (Aphex Type B): asymmetric soft-clip, 2nd-harmonic rich, warm
+//   • Modern: symmetric clip, 3rd-harmonic rich, cleaner
+// TUNE knob controls where harmonic generation kicks in (HPF cutoff 2-8kHz).
+// HARMONICS controls saturation drive (how much overtone content is generated).
+// MIX blends the harmonic-rich wet signal back with the dry vocal.
+// =============================================================================
+function _ExciterPluginInner({ fx, upd, Knob }) {
+  const ex      = fx.exciter || {};
+  const on      = !!ex.on;
+  const mode    = ex.mode || "vintage";
+
+  return (
+    <div style={{ background:"linear-gradient(180deg,#1f1a08 0%,#15110a 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (on ? "#FCD34D" : "#2a2a2a"), boxShadow: on ? "0 0 20px rgba(252,211,77,0.18), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
+      {/* Header */}
+      <div style={{ background:"linear-gradient(180deg,#231d0c 0%,#1a1410 100%)", padding:"8px 14px", borderBottom:"1px solid #3a3018", display:"flex", alignItems:"center", gap:8 }}>
+        <div style={{ flex:1 }}>
+          <div style={{ color:"#FDE68A", fontWeight:900, fontSize:11, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>AURAL EXCITER</div>
+          <div style={{ color:"#5c4818", fontSize:7, letterSpacing:2, fontFamily:"monospace" }}>HARMONIC ENHANCEMENT · APHEX-STYLE</div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          {/* Glowing harmonic indicator dots */}
+          <div style={{ display:"flex", gap:2, alignItems:"center" }}>
+            {[0,1,2,3].map(function(i){
+              return <div key={i} style={{ width:4, height:4, borderRadius:"50%", background: on ? "#FCD34D" : "#2a2410", boxShadow: on ? "0 0 4px #FCD34D" : "none", opacity: on ? 1 - i*0.18 : 1, transition:"all 0.15s" }} />;
+            })}
+          </div>
+          <div style={{ width:8, height:8, borderRadius:"50%", background: on ? "#FCD34D" : "#1a1a1a", boxShadow: on ? "0 0 6px #FCD34D, 0 0 12px rgba(252,211,77,0.5)" : "none", transition:"all 0.2s" }} />
+          <button onClick={function(){ upd("exciter",{on:!on}); }}
+            style={{ background: on ? "linear-gradient(180deg,#EAB308,#CA8A04)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (on ? "#FCD34D" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1, boxShadow: on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>
+            {on ? "ON" : "OFF"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding:"12px 14px", opacity: on ? 1 : 0.4, transition:"opacity 0.2s" }}>
+        {/* Mode toggle */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+          <div style={{ display:"flex", gap:0, background:"#0a0805", border:"1px solid #3a3018", borderRadius:6, padding:2 }}>
+            <button onClick={function(){ upd("exciter",{mode:"vintage"}); }}
+              style={{ background: mode === "vintage" ? "linear-gradient(180deg,#EAB308,#CA8A04)" : "transparent", border:"none", borderRadius:4, color: mode === "vintage" ? "white" : "#5c4818", fontSize:9, fontWeight:800, padding:"3px 10px", cursor:"pointer", letterSpacing:1 }}>VINTAGE</button>
+            <button onClick={function(){ upd("exciter",{mode:"modern"}); }}
+              style={{ background: mode === "modern" ? "linear-gradient(180deg,#EAB308,#CA8A04)" : "transparent", border:"none", borderRadius:4, color: mode === "modern" ? "white" : "#5c4818", fontSize:9, fontWeight:800, padding:"3px 10px", cursor:"pointer", letterSpacing:1 }}>MODERN</button>
+          </div>
+          <div style={{ color: on ? "#FDE68A" : "#5c4818", fontSize:9, fontWeight:800, letterSpacing:1, fontFamily:"monospace" }}>
+            {mode === "vintage" ? "TYPE B · 2nd HARM" : "TYPE C · 3rd HARM"}
+          </div>
+        </div>
+
+        {/* Knobs */}
+        <div style={{ display:"flex", justifyContent:"space-around", overflow:"visible" }}>
+          <Knob label="TUNE"      value={ex.tune ?? 4000}        min={2000} max={8000} step={100}  unit="Hz" color="#FCD34D" onChange={function(v){ upd("exciter",{tune:v}); }} />
+          <Knob label="HARMONICS" value={Math.round((ex.harmonics ?? 0.5) * 100)} min={0} max={100} step={1} unit="%"  color="#EAB308" onChange={function(v){ upd("exciter",{harmonics:v/100}); }} />
+          <Knob label="MIX"       value={Math.round((ex.mix ?? 0.3) * 100)} min={0} max={100} step={1} unit="%"  color="#22C55E" onChange={function(v){ upd("exciter",{mix:v/100}); }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+const _ExciterPlugin = React.memo(_ExciterPluginInner, function(prev, next) {
+  return prev.fx.exciter === next.fx.exciter && prev.upd === next.upd;
+});
+
 // This is the correct way to prevent re-renders from the 30fps currentTime
 // here because this is a real component, not an IIFE or callback.
 // Re-renders ONLY when fx data, fxTrackId, trackName, or trackColor change.
 // =============================================================================
-const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackColor, onClose, onUpd, onApplyPreset, analyserNode, isPlaying, isRecording, onTogglePlay, onRecord, onSeekBack, onSeekForward }) {
+const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackColor, onClose, onUpd, onApplyPreset, analyserNode, isPlaying, isRecording, onTogglePlay, onRecord, onSeekBack, onSeekForward, presets, isAdmin, onSavePreset, onDeletePreset }) {
   const upd = onUpd; // stable ref-backed callback passed from StudioScreen
   const [presetMenuOpen, setPresetMenuOpen] = React.useState(false);
 
@@ -21909,26 +22063,72 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
                     <div style={{ color:"#c4b5fd", fontSize:11, fontWeight:800, letterSpacing:1 }}>FX PRESETS</div>
                     <div style={{ color:"#6b6486", fontSize:10, marginTop:2 }}>Replaces all current FX</div>
                   </div>
+                  {/* Admin: save current FX state as a new preset. */}
+                  {isAdmin && onSavePreset && (
+                    <button onClick={function(e){
+                      e.stopPropagation();
+                      setPresetMenuOpen(false);
+                      onSavePreset();
+                    }}
+                      style={{
+                        width:"100%",
+                        background:"linear-gradient(180deg,#1b2e1b,#142214)",
+                        border:"none", borderBottom:"1px solid #15152a",
+                        color:"#86efac", padding:"10px 14px", textAlign:"left",
+                        cursor:"pointer", display:"flex", alignItems:"center", gap:8,
+                        fontSize:11, fontWeight:800, letterSpacing:0.5,
+                      }}>
+                      <span style={{ fontSize:14 }}>＋</span>
+                      <span>Save current as preset</span>
+                      <span style={{ marginLeft:"auto", color:"#3f6f3f", fontSize:9, fontWeight:700 }}>ADMIN</span>
+                    </button>
+                  )}
                   <div style={{ maxHeight:360, overflowY:"auto" }}>
-                    {FX_PRESETS.map(function(p){
+                    {(presets && presets.length ? presets : FX_PRESETS).map(function(p){
+                      const isUserPreset = p.kind === "user";
                       return (
-                        <button key={p.id} onClick={function(e){
-                          e.stopPropagation();
-                          setPresetMenuOpen(false);
-                          onApplyPreset(p);
-                        }}
-                          style={{
-                            width:"100%", background:"none", border:"none",
-                            color:"#d0d0d0", padding:"10px 14px", textAlign:"left",
-                            cursor:"pointer", borderBottom:"1px solid #15152a",
-                            display:"block",
+                        <div key={p.id} style={{
+                          display:"flex", alignItems:"stretch",
+                          borderBottom:"1px solid #15152a",
+                        }}>
+                          <button onClick={function(e){
+                            e.stopPropagation();
+                            setPresetMenuOpen(false);
+                            onApplyPreset(p);
                           }}
-                          onPointerEnter={function(e){ e.currentTarget.style.background="#181830"; }}
-                          onPointerLeave={function(e){ e.currentTarget.style.background="transparent"; }}
-                        >
-                          <div style={{ color:"white", fontSize:12, fontWeight:800, marginBottom:2 }}>{p.name}</div>
-                          <div style={{ color:"#6b6486", fontSize:10, lineHeight:1.4 }}>{p.desc}</div>
-                        </button>
+                            style={{
+                              flex:1, background:"none", border:"none",
+                              color:"#d0d0d0", padding:"10px 14px", textAlign:"left",
+                              cursor:"pointer", display:"block", minWidth:0,
+                            }}
+                            onPointerEnter={function(e){ e.currentTarget.style.background="#181830"; }}
+                            onPointerLeave={function(e){ e.currentTarget.style.background="transparent"; }}
+                          >
+                            <div style={{ color:"white", fontSize:12, fontWeight:800, marginBottom:2, display:"flex", alignItems:"center", gap:6 }}>
+                              <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.name}</span>
+                              {isUserPreset && (
+                                <span style={{ background:"rgba(134,239,172,0.15)", color:"#86efac", fontSize:8, padding:"1px 5px", borderRadius:3, fontWeight:700, letterSpacing:0.5, flexShrink:0 }}>USER</span>
+                              )}
+                            </div>
+                            <div style={{ color:"#6b6486", fontSize:10, lineHeight:1.4 }}>{p.desc}</div>
+                          </button>
+                          {isAdmin && onDeletePreset && (
+                            <button onClick={function(e){
+                              e.stopPropagation();
+                              onDeletePreset(p);
+                            }}
+                              title={isUserPreset ? "Delete this preset" : "Hide this built-in preset for all users"}
+                              style={{
+                                background:"none", border:"none",
+                                borderLeft:"1px solid #15152a",
+                                color:"#666", fontSize:14, cursor:"pointer",
+                                padding:"0 12px", flexShrink:0,
+                              }}
+                              onPointerEnter={function(e){ e.currentTarget.style.color="#EF4444"; }}
+                              onPointerLeave={function(e){ e.currentTarget.style.color="#666"; }}
+                            >🗑</button>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
@@ -22052,7 +22252,9 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
          prev.trackColor === next.trackColor &&
          prev.isPlaying === next.isPlaying &&
          prev.isRecording === next.isRecording &&
-         prev.onApplyPreset === next.onApplyPreset;
+         prev.onApplyPreset === next.onApplyPreset &&
+         prev.presets === next.presets &&
+         prev.isAdmin === next.isAdmin;
 });
 
 // =============================================================================
@@ -22966,6 +23168,35 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // Each entry has { cloudId, name, bpm, key, updated_at, size_bytes }.
   const [cloudProjects, setCloudProjects] = useState([]);
   const [cloudFetchState, setCloudFetchState] = useState("idle"); // "idle"|"loading"|"error"|"done"
+  // Admin-managed FX presets fetched from backend on Studio mount.
+  // Merged with hardcoded FX_PRESETS for the preset picker (with hidden
+  // built-ins filtered out by admins via hide-builtin endpoint).
+  const [userPresets, setUserPresets] = React.useState([]);
+  const [hiddenBuiltins, setHiddenBuiltins] = React.useState([]);
+  // Merged preset list — built-ins (minus hidden) followed by admin-saved.
+  // useMemo so the reference stays stable while FxPanel is open and lets
+  // the memo comparator skip re-renders.
+  const mergedPresets = React.useMemo(function(){
+    var hiddenSet = new Set(hiddenBuiltins);
+    var builtins = (typeof FX_PRESETS !== "undefined" ? FX_PRESETS : [])
+      .filter(function(p){ return !hiddenSet.has(p.id); })
+      .map(function(p){ return Object.assign({}, p, { kind: "builtin" }); });
+    return builtins.concat(userPresets || []);
+  }, [userPresets, hiddenBuiltins]);
+  // Fetch admin-managed presets once on Studio mount. Public endpoint,
+  // no auth required. Soft-fails (sticks with built-ins) if backend is
+  // unreachable — the picker still works.
+  React.useEffect(function(){
+    var alive = true;
+    apiFetch("/api/fx-presets").then(function(res){
+      if (!alive || !res) return;
+      if (Array.isArray(res.presets)) setUserPresets(res.presets);
+      if (Array.isArray(res.hidden_builtins)) setHiddenBuiltins(res.hidden_builtins);
+    }).catch(function(e){
+      console.warn("[Studio] Could not load FX presets:", e);
+    });
+    return function(){ alive = false; };
+  }, []);
   const [saveStatus,   setSaveStatus]   = useState("");
   const [error,        setError]        = useState("");
   const [isDecodingFile, setIsDecodingFile] = useState(false);
@@ -23052,6 +23283,17 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   }, []);
   const fxRecordProxy = React.useMemo(function(){
     return function(){ if (fxRecordRef.current) fxRecordRef.current(); };
+  }, []);
+  // Same stable-proxy pattern for admin preset save/delete. Refs are
+  // assigned fresh each render so the proxies always invoke the
+  // latest closure with current state (fx, fxTrackId, setUserPresets).
+  const fxSavePresetRef   = useRef(null);
+  const fxDeletePresetRef = useRef(null);
+  const fxSavePresetProxy = React.useMemo(function(){
+    return function(){ if (fxSavePresetRef.current) fxSavePresetRef.current(); };
+  }, []);
+  const fxDeletePresetProxy = React.useMemo(function(){
+    return function(p){ if (fxDeletePresetRef.current) fxDeletePresetRef.current(p); };
   }, []);
   const [showTakes,    setShowTakes]     = useState(null);
   const [trimmingClip, setTrimmingClip]  = useState(null);
@@ -24193,12 +24435,16 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       (e.ocean && e.ocean.on)          ? "o"  : "-",
       (e.eq && e.eq.on)                ? "eq" : "--",
       (e.compressor && e.compressor.on)? "c"  : "-",
+      (e.rcomp && e.rcomp.on)          ? "rc" : "--",
       (e.doubler && e.doubler.on)      ? "d"  : "-",
       (e.hdelay && e.hdelay.on)        ? "h"  : "-",
       (e.noiseremover && e.noiseremover.on) ? "n" : "-",
       (e.trotten && e.trotten.on)      ? "t"  : "-",
       (e.bandpass && e.bandpass.on)    ? "b"  : "-",
       (e.autotune && e.autotune.on)    ? "a"  : "-",
+      (e.exciter && e.exciter.on)      ? "x"  : "-",
+      (e.exciter && e.exciter.mode)    || "-",  // exciter mode affects topology slightly
+      (e.rcomp && e.rcomp.mode)        || "-",  // r-comp warm/electro affects pre-stage
     ].join("|");
   };
 
@@ -24449,6 +24695,72 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         live.autotune.port.postMessage({ scale: at.scale || "major" });
       } catch(e) {}
     }
+
+    // ── R-Comp live param updates ──
+    // Mode (warm/electro) and on/off toggles require chain rebuild (handled
+    // upstream via fxSignature). Knob tweaks are live here.
+    if (live.rcomp && fx.rcomp !== undefined) {
+      const rc    = fx.rcomp || {};
+      const rcOn  = !!rc.on;
+      try {
+        live.rcomp.rcComp.threshold.setTargetAtTime(rcOn ? (rc.threshold ?? -18) : 0,    now, T);
+        live.rcomp.rcComp.ratio.setTargetAtTime(    rcOn ? (rc.ratio ?? 3)        : 1,    now, T);
+        live.rcomp.rcComp.attack.setTargetAtTime(   rcOn ? (rc.attack ?? 0.012)   : 0.003,now, T);
+        // Release: only set directly when ARC is OFF. When ARC is ON, the
+        // arcTimer is in charge of release modulation.
+        if (rc.arc === false) {
+          live.rcomp.rcComp.release.setTargetAtTime(rcOn ? (rc.release ?? 0.18)   : 0.25, now, T);
+        }
+        // Makeup gain
+        const mgVal = rcOn ? Math.pow(10, ((rc.makeupGain ?? 0)) / 20) : 1;
+        live.rcomp.rcMakeup.gain.setTargetAtTime(mgVal, now, T);
+        // Pre-stage shelf gain (mode-dependent)
+        if (live.rcomp.mode === "warm") {
+          live.rcomp.rcShelf.gain.setTargetAtTime(rcOn ? 1.2 : 0, now, T);
+        }
+      } catch(e) {}
+      // ARC enable/disable at runtime: if ARC was OFF and is now ON, start
+      // the interval. If it was ON and is now OFF, kill it.
+      const arcShouldRun = rcOn && (rc.arc !== false);
+      const arcRunning   = !!live.rcomp.arcTimer;
+      if (arcShouldRun && !arcRunning) {
+        const rcComp = live.rcomp.rcComp;
+        const MIN_REL = 0.05, MAX_REL = 1.5;
+        let smoothed = rcComp.release.value;
+        live.rcomp.arcTimer = setInterval(function(){
+          try {
+            const red = Math.abs(rcComp.reduction || 0);
+            const target = MIN_REL + (Math.min(8, red) / 8) * (MAX_REL - MIN_REL);
+            smoothed = smoothed * 0.85 + target * 0.15;
+            rcComp.release.setTargetAtTime(smoothed, actx.currentTime, 0.05);
+          } catch(e) {}
+        }, 33);
+      } else if (!arcShouldRun && arcRunning) {
+        try { clearInterval(live.rcomp.arcTimer); } catch(e) {}
+        live.rcomp.arcTimer = null;
+      }
+    }
+
+    // ── Exciter live param updates ──
+    // Mode (vintage/modern) requires rebuild (different curve). HPF cutoff,
+    // mix, and harmonic amount tweak live.
+    if (live.exciter && fx.exciter !== undefined) {
+      const ex    = fx.exciter || {};
+      const exOn  = !!ex.on;
+      try {
+        const tuneHz  = exOn ? (ex.tune ?? 4000) : 4000;
+        const mixWet  = exOn ? (ex.mix ?? 0.3)    : 0;
+        const harmAmt = exOn ? (ex.harmonics ?? 0.5) : 0;
+        live.exciter.exHPF.frequency.setTargetAtTime(tuneHz, now, T);
+        live.exciter.exWet.gain.setTargetAtTime(mixWet, now, T);
+        live.exciter.exTaper.gain.setTargetAtTime(exOn ? 2.5 : 0, now, T);
+        // Recompute the saturation curve if harmonic amount changed.
+        // WaveShaper curve is a Float32Array — replacement is safe at runtime.
+        if (live.exciter.makeExciterCurve) {
+          live.exciter.exShaper.curve = live.exciter.makeExciterCurve(live.exciter.mode, harmAmt);
+        }
+      } catch(e) {}
+    }
   };
   const toggleMute = function (id) {
     setTracks(function(prev){
@@ -24692,6 +25004,203 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         comp.release.value   = compOn ? (fx.compressor.release ?? 0.25)  : 0.25;
         comp.connect(node); node = comp;
         liveNodes.comp = comp;
+      }
+
+      // ── R-Comp (Waves Renaissance Compressor style) ────────────────────────
+      // ARC = Auto-Release Control: when enabled, release time follows the
+      // input envelope (longer for sustained signals, shorter for transients).
+      // Web Audio's DynamicsCompressor has fixed release, so we simulate ARC
+      // by setting a base release time and reacting to compressor.reduction
+      // via a setInterval that nudges release between MIN (0.05s) and MAX (1.5s).
+      //
+      // Warm mode: subtle pre-stage tube saturation (light WaveShaper curve)
+      //            + low-shelf boost @ 200Hz for body. Vocal-friendly.
+      // Electro:   harder knee, faster attack, slight pre-emphasis HPF @ 80Hz.
+      //            Tighter, punchier — good for drums/bass/synths.
+      //
+      // Always built so warm/electro can switch and ARC can toggle without
+      // tearing down the chain. When off, threshold=0 + ratio=1 makes it
+      // transparent (no gain reduction).
+      {
+        const rc       = fx.rcomp || {};
+        const rcOn     = !!rc.on;
+        const rcMode   = rc.mode || "warm";  // "warm" | "electro"
+
+        // ── Pre-stage: mode-specific tone-shaper ──
+        const rcInGain = actx.createGain(); rcInGain.gain.value = 1;
+        const rcShelf  = actx.createBiquadFilter();
+        const rcSat    = actx.createWaveShaper();
+        rcSat.oversample = "2x";
+        // Build saturation curve per mode. Warm = soft tube-style asymmetric
+        // clip; Electro = symmetric harder clip. Curve length 1024 is fine
+        // for vocal frequencies (Nyquist aliasing minimal at oversample=2x).
+        const makeRCompCurve = function(mode, amount) {
+          const n = 1024;
+          const c = new Float32Array(n);
+          const drive = Math.max(0.01, amount);
+          for (let i=0; i<n; i++) {
+            const x = (i * 2 / n - 1);
+            if (mode === "warm") {
+              // Asymmetric soft clip — gentler on negative half
+              const sign = x >= 0 ? 1 : 0.82;
+              c[i] = Math.tanh(x * (1 + drive * 0.6) * sign) * 0.94;
+            } else {
+              // Electro: harder symmetric clip with brighter edge
+              c[i] = Math.tanh(x * (1 + drive * 1.4)) * 0.98;
+            }
+          }
+          return c;
+        };
+        // Warm mode adds low-shelf body; electro adds high-pass pre-emphasis
+        if (rcMode === "warm") {
+          rcShelf.type = "lowshelf";
+          rcShelf.frequency.value = 200;
+          rcShelf.gain.value = rcOn ? 1.2 : 0;
+        } else {
+          rcShelf.type = "highpass";
+          rcShelf.frequency.value = 80;
+          rcShelf.Q.value = 0.5;
+        }
+        rcSat.curve = makeRCompCurve(rcMode, rcOn ? 0.18 : 0);
+
+        // ── Core compressor (DynamicsCompressor) ──
+        const rcComp = actx.createDynamicsCompressor();
+        rcComp.threshold.value = rcOn ? (rc.threshold ?? -18) : 0;
+        rcComp.ratio.value     = rcOn ? (rc.ratio ?? 3)        : 1;
+        rcComp.attack.value    = rcOn ? (rc.attack ?? 0.012)   : 0.003;
+        // Initial release; ARC will modulate this if enabled.
+        rcComp.release.value   = rcOn ? (rc.release ?? 0.18)   : 0.25;
+        // Knee: warm = soft (6dB), electro = harder (2dB)
+        rcComp.knee.value      = rcOn ? (rcMode === "warm" ? 6 : 2) : 30;
+
+        // ── Makeup gain ──
+        const rcMakeup = actx.createGain();
+        rcMakeup.gain.value = rcOn ? Math.pow(10, ((rc.makeupGain ?? 0)) / 20) : 1;
+
+        // Connect: rcInGain → rcShelf → rcSat → rcComp → rcMakeup → [rest]
+        rcInGain.connect(rcShelf);
+        rcShelf.connect(rcSat);
+        rcSat.connect(rcComp);
+        rcComp.connect(rcMakeup);
+        rcMakeup.connect(node);
+        node = rcInGain;
+
+        // ── ARC: auto-release modulation ──
+        // Poll reduction value at 30Hz. If reduction stays heavy, gradually
+        // extend release toward MAX. If reduction is intermittent, pull back
+        // toward MIN. This approximates Waves' ARC heuristic without
+        // requiring a full envelope follower implementation.
+        let arcTimer = null;
+        if (rcOn && (rc.arc !== false)) {  // ARC defaults to ON
+          const MIN_REL = 0.05, MAX_REL = 1.5;
+          let smoothed = rcComp.release.value;
+          arcTimer = setInterval(function(){
+            try {
+              // reduction is negative (in dB). More negative = more compression.
+              const red = Math.abs(rcComp.reduction || 0);
+              // Map: low reduction (< 2dB) → short release; high (> 8dB) → long
+              const target = MIN_REL + (Math.min(8, red) / 8) * (MAX_REL - MIN_REL);
+              // EMA smoothing so release doesn't jitter on every poll
+              smoothed = smoothed * 0.85 + target * 0.15;
+              rcComp.release.setTargetAtTime(smoothed, actx.currentTime, 0.05);
+            } catch(e) {}
+          }, 33);
+        }
+
+        liveNodes.rcomp = {
+          rcInGain, rcShelf, rcSat, rcComp, rcMakeup,
+          mode: rcMode,
+          arcTimer,
+          makeRCompCurve,
+        };
+      }
+
+      // ── Aural Exciter (Aphex-style) ────────────────────────────────────────
+      // Topology: dry-thru + parallel wet generator
+      //   wet path: split → HPF (tune) → asymmetric soft-clip (harmonics)
+      //             → high-shelf (taper) → wet gain → sum
+      //   dry path: split → dry gain → sum
+      //   Sum out → [rest of chain]
+      //
+      // This generates upper harmonics from the highs only, adds them back
+      // proportionally via the MIX knob. Result: vocals get "air" without
+      // boosting frequencies that aren't already present (vs a simple EQ
+      // high-shelf, which lifts existing high content but can't create
+      // overtones that aren't there).
+      //
+      // Tunable HPF cutoff (TUNE knob): 2-8kHz controls where the harmonic
+      // generation kicks in. Lower = more aggressive, higher = subtler air.
+      //
+      // Mode: "vintage" (Aphex Type B style, warmer asym clip)
+      //   vs   "modern"  (cleaner symmetric saturation)
+      {
+        const ex      = fx.exciter || {};
+        const exOn    = !!ex.on;
+        const exMode  = ex.mode || "vintage";
+        const harmAmt = exOn ? (ex.harmonics ?? 0.5) : 0;   // 0..1
+        const mixWet  = exOn ? (ex.mix ?? 0.3)        : 0;   // 0..1
+        const tuneHz  = exOn ? (ex.tune ?? 4000)      : 4000;// 2000..8000
+
+        // Entry splitter
+        const exEntry = actx.createGain(); exEntry.gain.value = 1;
+        const exDry   = actx.createGain(); exDry.gain.value = 1;        // dry pass-thru full
+        const exWet   = actx.createGain(); exWet.gain.value = mixWet;
+        const exOut   = actx.createGain(); exOut.gain.value = 1;
+
+        // Wet chain
+        const exHPF = actx.createBiquadFilter();
+        exHPF.type = "highpass";
+        exHPF.frequency.value = tuneHz;
+        exHPF.Q.value = 0.707;
+
+        const exShaper = actx.createWaveShaper();
+        exShaper.oversample = "4x";  // Aliasing matters more for high freqs
+        const makeExciterCurve = function(mode, amount) {
+          const n = 2048;
+          const c = new Float32Array(n);
+          const drive = 1 + amount * 8; // 1..9 drive
+          for (let i=0; i<n; i++) {
+            const x = (i * 2 / n - 1);
+            if (mode === "vintage") {
+              // Asymmetric: 2nd-harmonic-rich (musical, vocal-friendly)
+              const asym = x >= 0 ? 1 : 0.7;
+              c[i] = Math.tanh(x * drive * asym) * 0.5;
+            } else {
+              // Modern: symmetric (3rd-harmonic-rich, cleaner)
+              c[i] = Math.tanh(x * drive) * 0.5;
+            }
+          }
+          return c;
+        };
+        exShaper.curve = makeExciterCurve(exMode, harmAmt);
+
+        // Taper: shape the harmonic content with a gentle high-shelf so it
+        // doesn't get harsh — adds a "sheen" character matching Aphex Type B
+        const exTaper = actx.createBiquadFilter();
+        exTaper.type = "highshelf";
+        exTaper.frequency.value = 6000;
+        exTaper.gain.value = exOn ? 2.5 : 0;
+
+        // Routing
+        exEntry.connect(exDry);
+        exDry.connect(exOut);
+
+        if (exOn) {
+          exEntry.connect(exHPF);
+          exHPF.connect(exShaper);
+          exShaper.connect(exTaper);
+          exTaper.connect(exWet);
+          exWet.connect(exOut);
+        }
+
+        exOut.connect(node);
+        node = exEntry;
+
+        liveNodes.exciter = {
+          exEntry, exDry, exWet, exOut, exHPF, exShaper, exTaper,
+          mode: exMode,
+          makeExciterCurve,
+        };
       }
 
       // ── Vocal Doubler — Haas delay + gentle detune chorus + M/S width ────────
@@ -25226,6 +25735,13 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       if (cached && cached.entry) {
         try { cached.entry.disconnect(); } catch(e) {}
       }
+      // Clean up R-Comp ARC interval timer if it was running. Without this,
+      // each chain rebuild leaks a 30Hz polling interval.
+      const fxNodes = fxNodesRef.current[trackId];
+      if (fxNodes && fxNodes.rcomp && fxNodes.rcomp.arcTimer) {
+        try { clearInterval(fxNodes.rcomp.arcTimer); } catch(e) {}
+        fxNodes.rcomp.arcTimer = null;
+      }
       delete chainsRef.current[trackId];
       delete fxNodesRef.current[trackId];
       delete gainNodesRef.current[trackId];
@@ -25665,6 +26181,8 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       ocean:      { on:false, wet:0.35, roomSize:1.0, damp:0.6, preDelay:20 },
       eq:         { on:false, low:0, mid:0, high:0 },
       compressor: { on:false, threshold:-24, ratio:4, attack:0.003, release:0.25 },
+      rcomp:      { on:false, threshold:-18, ratio:3, attack:0.012, release:0.18, makeupGain:0, mode:"warm", arc:true },
+      exciter:    { on:false, harmonics:0.5, mix:0.3, tune:4000, mode:"vintage" },
       trotten:    { on:false, eqLow:0, eqMid:0, eqHigh:0, eqLowT:"shelf", eqMidT:"bell", eqHighT:"shelf", compThr:-15, compAmt:50, compMode:"auto", tapeDrv:5, tapeSat:5, tapeMode:"modern", limCeil:-0.5, limRel:0.5, limMode:"truepeak", inputGain:0, outputGain:0 },
       noiseremover: { on:false, threshold:-40, release:0.15, hold:0.08, hiss:0, lookahead:true },
     };
@@ -25872,6 +26390,11 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     const cached = chainsRef.current[id];
     if (cached && cached.entry) {
       try { cached.entry.disconnect(); } catch(e) {}
+    }
+    // Clean R-Comp ARC interval if present (matches teardownChain logic)
+    const fxNodes = fxNodesRef.current[id];
+    if (fxNodes && fxNodes.rcomp && fxNodes.rcomp.arcTimer) {
+      try { clearInterval(fxNodes.rcomp.arcTimer); } catch(e) {}
     }
     delete chainsRef.current[id];
     delete fxNodesRef.current[id];
@@ -29492,6 +30015,16 @@ userPickedMicRef.current = true;
             const oldOn = !!(t.effects[section] && t.effects[section].on);
             const newOn = !!(newEffects[section] && newEffects[section].on);
             if (oldOn !== newOn) changesTopology = true;
+            // R-Comp mode (warm/electro) and Exciter mode change pre-stage
+            // WaveShaper curves & HPF cutoff — require a chain rebuild.
+            if (section === "rcomp" && patch && patch.mode !== undefined &&
+                t.effects.rcomp && t.effects.rcomp.mode !== patch.mode) {
+              changesTopology = true;
+            }
+            if (section === "exciter" && patch && patch.mode !== undefined &&
+                t.effects.exciter && t.effects.exciter.mode !== patch.mode) {
+              changesTopology = true;
+            }
           }
 
           updateTrack(t.id, { effects: newEffects });
@@ -29547,6 +30080,77 @@ userPickedMicRef.current = true;
           }
           startCountIn(fxTrackId);
         };
+        // Admin preset save: snapshot the current FX state and POST to the
+        // backend. On success append to userPresets (no full re-fetch). Only
+        // wired up if the user is an admin — the proxy itself is stable.
+        fxSavePresetRef.current = function(){
+          try {
+            // Confirm there's actually something to save
+            var hasAnyOn = false;
+            if (fx && typeof fx === "object") {
+              Object.keys(fx).forEach(function(k){
+                var v = fx[k]; if (v && v.on) hasAnyOn = true;
+              });
+            }
+            if (!hasAnyOn) {
+              alert("Turn on at least one plugin before saving a preset.");
+              return;
+            }
+            var name = window.prompt("Preset name:", "");
+            if (!name || !name.trim()) return;
+            var desc = window.prompt("Short description (optional):", "") || "";
+            // Strip pluginChain from the fx snapshot — the backend derives it
+            // from which plugins have on:true. Keeps the saved payload tidy.
+            var fxSnap = {};
+            Object.keys(fx).forEach(function(k){
+              if (k === "pluginChain") return;
+              fxSnap[k] = fx[k];
+            });
+            apiFetch("/api/admin/fx-presets", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: name.trim(), desc: desc.trim(), fx: fxSnap }),
+            }).then(function(saved){
+              if (saved && saved.id) {
+                setUserPresets(function(prev){ return prev.concat([saved]); });
+              }
+            }).catch(function(e){
+              alert("Could not save preset: " + ((e && e.message) || "unknown error"));
+            });
+          } catch(e) {
+            console.warn("[Studio] Save preset failed:", e);
+          }
+        };
+        // Admin preset delete: for user-presets, calls DELETE; for built-ins,
+        // calls hide-builtin (which keeps the hardcoded preset alive but
+        // marks it hidden for ALL users). Both update local state on success.
+        fxDeletePresetRef.current = function(p){
+          if (!p || !p.id) return;
+          var isUserPreset = p.kind === "user";
+          var confirmMsg = isUserPreset
+            ? ("Delete preset \"" + p.name + "\"? This affects all users.")
+            : ("Hide built-in preset \"" + p.name + "\"? It will be hidden from all users until restored.");
+          if (!window.confirm(confirmMsg)) return;
+          if (isUserPreset) {
+            apiFetch("/api/admin/fx-presets/" + encodeURIComponent(p.id), {
+              method: "DELETE",
+            }).then(function(){
+              setUserPresets(function(prev){ return prev.filter(function(x){ return x.id !== p.id; }); });
+            }).catch(function(e){
+              alert("Could not delete preset: " + ((e && e.message) || "unknown error"));
+            });
+          } else {
+            apiFetch("/api/admin/fx-presets/hide-builtin", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: p.id }),
+            }).then(function(){
+              setHiddenBuiltins(function(prev){ return prev.indexOf(p.id) < 0 ? prev.concat([p.id]) : prev; });
+            }).catch(function(e){
+              alert("Could not hide preset: " + ((e && e.message) || "unknown error"));
+            });
+          }
+        };
         return (
           <FxPanel
             key={fxTrackId}
@@ -29574,6 +30178,10 @@ userPickedMicRef.current = true;
             onRecord={fxRecordProxy}
             onSeekBack={seekBack}
             onSeekForward={seekForward}
+            presets={mergedPresets}
+            isAdmin={!!(user && user.is_admin)}
+            onSavePreset={fxSavePresetProxy}
+            onDeletePreset={fxDeletePresetProxy}
           />
         );
       })()}
