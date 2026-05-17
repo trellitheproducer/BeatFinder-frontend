@@ -21835,7 +21835,23 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
   const eq5 = { hpfFreq:80,hpfQ:0.707,lowFreq:200,low:0,lowQ:0.707,midFreq:1000,mid:0,midQ:1.41,highFreq:8000,high:0,highQ:0.707,lpfFreq:18000,lpfQ:0.707,...fx.eq };
 
   return (
-    <div style={{ position:"absolute", inset:0, zIndex:800, background:"rgba(0,0,0,0.97)", display:"flex", flexDirection:"column", overflowY:"auto", paddingTop:"var(--bf-safe-top, env(safe-area-inset-top))", paddingBottom:"calc(80px + env(safe-area-inset-bottom))" }} onClick={function(e){ e.stopPropagation(); }} onTouchMove={function(e){ e.stopPropagation(); }}>
+    <div style={{
+      // Was `inset:0` which made the panel cover the entire Studio
+      // viewport — including the area behind the fixed transport bar
+      // at z-index 9100. Even though the transport bar floats ON TOP
+      // visually, iOS Safari's gesture system saw a scrollable container
+      // underneath fixed buttons and sometimes intercepted taps as
+      // scroll-start gestures. Leaving the bottom uncovered (90px =
+      // transport bar height + safe area) means iOS knows that region
+      // belongs solely to the transport bar.
+      position:"absolute",
+      top:0, left:0, right:0,
+      bottom:"calc(90px + env(safe-area-inset-bottom))",
+      zIndex:800, background:"rgba(0,0,0,0.97)",
+      display:"flex", flexDirection:"column", overflowY:"auto",
+      paddingTop:"var(--bf-safe-top, env(safe-area-inset-top))",
+      paddingBottom:"12px",
+    }} onClick={function(e){ e.stopPropagation(); }} onTouchMove={function(e){ e.stopPropagation(); }}>
       <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", borderBottom:"1px solid #1e1e1e", background:"#0a0a0a", flexShrink:0, position:"sticky", top:0, zIndex:10 }}>
         <div style={{ width:8, height:8, borderRadius:"50%", background:trackColor, marginRight:8 }} />
         <span style={{ color:"white", fontWeight:800, fontSize:14, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{trackName} — Effects</span>
