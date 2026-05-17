@@ -26714,7 +26714,18 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }));
 
       // ── 2. Save metadata to localStorage (tiny — just names/timing/FX) ───
-      const proj = { id:projId, name:projectName, bpm, timeSigNum, projectKey, savedAt:new Date().toISOString(), tracks:savedTracks };
+      // CRITICAL: Preserve cloudId from the existing entry. The cloud sync
+      // stamps cloudId back onto the local doc after first save so the
+      // second save can UPDATE the same backend row. Without this preserve,
+      // every save creates a duplicate cloud project.
+      const existingCloudId    = (existingIdx >= 0 && list[existingIdx].cloudId)    || null;
+      const existingCloudSavedAt = (existingIdx >= 0 && list[existingIdx].cloudSavedAt) || null;
+      const proj = {
+        id:projId, name:projectName, bpm, timeSigNum, projectKey,
+        savedAt:new Date().toISOString(), tracks:savedTracks,
+        cloudId: existingCloudId,
+        cloudSavedAt: existingCloudSavedAt,
+      };
       if (existingIdx >= 0) list[existingIdx] = proj; else list.unshift(proj);
       list = list.slice(0, 10);
       try {
