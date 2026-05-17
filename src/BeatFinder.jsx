@@ -22796,25 +22796,6 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // Admin debug overlay — toggled by the 🐛 button in the toolbar
   // (only visible to admins). Shows AudioContext/node/FX/frame metrics.
   const [showDebug,    setShowDebug]    = useState(false);
-  // Recording latency compensation — user-tunable offset, persisted per device.
-  // When recording vocals to a beat, mic input arrives later than the beat
-  // because of OS + browser audio pipeline latency. We shift the recorded
-  // clip's start position EARLIER to align it with the beat.
-  //
-  // Auto component: actx.outputLatency (Safari supports this, ~5-30ms typically)
-  // Manual component: user-tunable in Project Settings, range -100 to +200ms
-  // Saved key: "bf_studio_rec_offset_ms" — string, parsed as int
-  const [recOffsetMs, setRecOffsetMs] = useState(function() {
-    try {
-      var v = localStorage.getItem("bf_studio_rec_offset_ms");
-      // Default 50ms — a reasonable middle-ground for iOS Safari when used
-      // without input monitoring. User can dial it to fit their hardware.
-      return v != null ? parseInt(v, 10) : 50;
-    } catch (_) { return 50; }
-  });
-  React.useEffect(function() {
-    try { localStorage.setItem("bf_studio_rec_offset_ms", String(recOffsetMs)); } catch (_) {}
-  }, [recOffsetMs]);
   const [unsavedAlert, setUnsavedAlert] = useState(false);
   const [showNamePrompt, setShowNamePrompt] = useState(false); // name-before-save modal
   const [pendingNameAction, setPendingNameAction] = useState(null); // "exit" | "new"
@@ -26123,30 +26104,11 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       // ── Start the recorder and stamp the clock as tightly as possible ──────
       mr.start(100); // 100ms chunks — reliable across iOS Safari + Chrome; 50ms causes gaps
       const startActxTime = actx.currentTime;
-
-      // ── Latency compensation ──────────────────────────────────────────────
-      // The user hears the beat from speakers/headphones, sings to it, and
-      // the mic picks up their voice. That voice then travels through the
-      // OS/browser audio pipeline before being timestamped. Net effect:
-      // the recording lands LATE relative to the beat unless we compensate.
-      //
-      // We use TWO components:
-      //   1. actx.inputLatency  — Chrome exposes this (Safari returns undef)
-      //   2. actx.outputLatency — Safari DOES expose this (~5-30ms)
-      //   3. User offset (ms)   — manual tweak in Project Settings,
-      //                           defaults to 50ms (sensible iOS ballpark)
-      //
-      // On Chrome: inputLatency covers most of it. On Safari: outputLatency
-      // covers the output half, user offset covers the input + air gap.
-      // Either way, recOffsetMs lets the user dial it in for their hardware.
-      const inputLatency  = actx.inputLatency  || 0;
-      const outputLatency = actx.outputLatency || 0;
-      const userOffsetSec = (recOffsetMs || 0) / 1000;
-      const totalLatency  = inputLatency + outputLatency + userOffsetSec;
+      const inputLatency  = actx.inputLatency || 0;
 
       // Timeline position = where the playhead was + how far actx has advanced since masterStart
       const trueStartTime = Math.max(0,
-        headPos + (startActxTime - masterStart) - totalLatency
+        headPos + (startActxTime - masterStart) - inputLatency
       );
       recStartTimeRef.current = trueStartTime;
 
@@ -27828,75 +27790,6 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                 {detectedBpm === -1 && !bpmDetecting && (
                   <span style={{ color:"#A78BFA",fontSize:11,fontWeight:600,marginLeft:"auto",opacity:0.7 }}>Could not detect</span>
                 )}
-              </div>
-            </div>
-            {/* ── RECORDING LATENCY OFFSET ─────────────────────────────────── */}
-            {/* When vocals land late vs the beat on playback, the user nudges
-                this slider to shift recordings earlier. Persisted per device. */}
-            <div style={{
-              margin:"0 16px 16px",
-              background:"linear-gradient(165deg,#0f0a1f 0%,#0a0a14 60%,#080812 100%)",
-              border:"1px solid rgba(124,58,237,0.25)",
-              borderRadius:14, overflow:"hidden",
-              boxShadow:"0 0 24px rgba(124,58,237,0.08), inset 0 0 0 1px rgba(192,38,211,0.05)",
-              position:"relative",
-            }}>
-              <div style={{
-                position:"absolute", top:0, left:0, right:0, height:1,
-                background:"linear-gradient(90deg,transparent,rgba(192,38,211,0.5),rgba(124,58,237,0.5),rgba(59,130,246,0.5),transparent)",
-              }} />
-              <div style={{
-                padding:"14px 16px 6px",
-                fontFamily:"'Bebas Neue',sans-serif",
-                fontSize:16, letterSpacing:2,
-                background:"linear-gradient(90deg,#C026D3,#7C3AED,#3B82F6)",
-                WebkitBackgroundClip:"text", backgroundClip:"text",
-                color:"transparent", fontWeight:700,
-              }}>RECORDING OFFSET</div>
-              <div style={{ padding:"0 16px 14px" }}>
-                <div style={{ color:"#888", fontSize:11, lineHeight:1.5, marginBottom:10 }}>
-                  If your recordings land late vs the beat, increase this. If they sound early, decrease it.
-                  Saved per device.
-                </div>
-                <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
-                  <button onClick={function(){ setRecOffsetMs(function(v){ return Math.max(-100, v - 5); }); }}
-                    style={{
-                      background:"rgba(124,58,237,0.12)", border:"1px solid rgba(124,58,237,0.4)",
-                      color:"#A78BFA", borderRadius:8, padding:"6px 12px", fontSize:14,
-                      fontWeight:800, cursor:"pointer", flexShrink:0,
-                    }}>−</button>
-                  <input
-                    type="range"
-                    min="-100" max="200" step="5"
-                    value={recOffsetMs}
-                    onChange={function(e){ setRecOffsetMs(parseInt(e.target.value, 10)); }}
-                    style={{ flex:1, accentColor:"#C026D3" }}
-                  />
-                  <button onClick={function(){ setRecOffsetMs(function(v){ return Math.min(200, v + 5); }); }}
-                    style={{
-                      background:"rgba(124,58,237,0.12)", border:"1px solid rgba(124,58,237,0.4)",
-                      color:"#A78BFA", borderRadius:8, padding:"6px 12px", fontSize:14,
-                      fontWeight:800, cursor:"pointer", flexShrink:0,
-                    }}>+</button>
-                </div>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
-                  <div style={{
-                    fontFamily:"'Bebas Neue',sans-serif",
-                    fontSize:24, letterSpacing:1.5,
-                    color: recOffsetMs === 50 ? "#A78BFA" : "#C026D3",
-                  }}>
-                    {recOffsetMs > 0 ? "+" : ""}{recOffsetMs} ms
-                  </div>
-                  <button onClick={function(){ setRecOffsetMs(50); }}
-                    style={{
-                      background:"transparent", border:"1px solid #2a2a2a",
-                      color:"#888", borderRadius:6, padding:"4px 10px", fontSize:10,
-                      fontWeight:700, letterSpacing:0.5, cursor:"pointer",
-                    }}>RESET</button>
-                </div>
-                <div style={{ color:"#555", fontSize:10, lineHeight:1.4 }}>
-                  Tip: record a short vocal to a beat, play it back. If you sound late, +20ms. Repeat until tight.
-                </div>
               </div>
             </div>
             <div style={{ margin:"0 16px 16px",background:"#1a1a1a",borderRadius:14 }}>
