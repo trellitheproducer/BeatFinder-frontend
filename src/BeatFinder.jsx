@@ -19167,7 +19167,6 @@ class StudioErrorBoundary extends React.Component {
 
 // ── Plugin chain panel — extracted from IIFE so useState is a valid hook call ──
 function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, analyserNode, isPlaying }) {
-  try { console.log("[BF-FX] render FxPanelPlugins"); } catch(e) {}
   // EQPlugin / CompPlugin / ReverbPlugin / PitchPlugin are pure render helpers
   // defined here so they always have the correct fx/upd/Knob/graph refs.
   // Plugin sub-components are wrapped in React.memo at module scope,
@@ -19234,7 +19233,6 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
   ];
 
   const addPlugin = function(key) {
-    try { console.log("[BF-FX] add plugin "+key); } catch(e) {}
     if (chain.includes(key)) return;
     upd("pluginChain", null, [...chain, key]);
     setShowPluginPicker(false);
@@ -19566,7 +19564,6 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
 // eq5 is derived from fx.eq via spread (new reference every parent
 // render), so we comparator-check fx.eq instead.
 function _EQPluginInner({ fx, upd, eq5, EQGraph, Knob }) {
-  try { console.log("[BF-FX] render EQ"); } catch(e) {}
   const on = !!fx.eq?.on;
   // Pro Q3 color palette per band
   const BAND_COLORS = { hpf:"#FF6B6B", low:"#4FC3F7", mid:"#69F0AE", high:"#FFD54F", lpf:"#FF6B6B" };
@@ -19701,7 +19698,6 @@ const _EQPlugin = React.memo(_EQPluginInner, function(prev, next) {
 });
 
 function _CompPluginInner({ fx, upd, CompGraph, Knob }) {
-  try { console.log("[BF-FX] render Comp"); } catch(e) {}
   return (
     <div style={{ background:"linear-gradient(180deg,#1c1a22 0%,#130f1a 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (fx.compressor?.on ? "#8B5CF6" : "#2a2a2a"), boxShadow: fx.compressor?.on ? "0 0 20px rgba(139,92,246,0.15), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
       <div style={{ background:"linear-gradient(180deg,#1e1c25 0%,#181620 100%)", padding:"8px 14px", borderBottom:"1px solid #2a2535", display:"flex", alignItems:"center", gap:8 }}>
@@ -19744,7 +19740,6 @@ const _CompPlugin = React.memo(_CompPluginInner, function(prev, next) {
 });
 
 function _ReverbPluginInner({ fx, upd, ReverbViz, Knob }) {
-  try { console.log("[BF-FX] render Reverb"); } catch(e) {}
   return (
     <div style={{ background:"linear-gradient(180deg,#1a1220 0%,#110d19 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (fx.reverb?.on ? "#C026D3" : "#2a2a2a"), boxShadow: fx.reverb?.on ? "0 0 20px rgba(192,38,211,0.15), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
       <div style={{ backgroundImage:"linear-gradient(180deg,#1e1629,#17101e)", padding:"8px 14px", borderBottom:"1px solid #2a1e35", display:"flex", alignItems:"center", gap:8 }}>
@@ -19777,7 +19772,6 @@ const _ReverbPlugin = React.memo(_ReverbPluginInner, function(prev, next) {
 });
 
 function _OceanPluginInner({ fx, upd, Knob }) {
-  try { console.log("[BF-FX] render Ocean"); } catch(e) {}
   const on = !!fx.ocean?.on;
   return (
     <div style={{ background:"linear-gradient(180deg,#0a1628 0%,#061020 100%)", borderRadius:16, overflow:"hidden", border:"2px solid " + (on ? "#0891b2" : "#2a2a2a"), boxShadow: on ? "0 0 20px rgba(8,145,178,0.2), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)" }}>
@@ -19949,7 +19943,6 @@ function TKnob({ label, value, min, max, step, unit, onChange, size, color }) {
 //   on      — bypass toggle
 // =============================================================================
 function _BandpassPluginInner({ fx, upd, Knob }) {
-  try { console.log("[BF-FX] render Bandpass"); } catch(e) {}
   const bp    = fx.bandpass || {};
   const on    = !!bp.on;
   const center = bp.center ?? 1000;
@@ -20613,7 +20606,6 @@ async function registerRNNoiseWorklet(actx) {
 }
 
 function _TRottenMasterPluginInner({ fx, upd }) {
-  try { console.log("[BF-FX] render TRotten"); } catch(e) {}
   const m  = fx.trotten || {};
   const on = !!m.on;
 
@@ -20946,7 +20938,6 @@ const _TRottenMasterPlugin = React.memo(_TRottenMasterPluginInner, function(prev
 
 // ── Noise Remover Plugin UI ──────────────────────────────────────────────────
 function _NoiseRemoverPluginInner({ fx, upd, Knob }) {
-  try { console.log("[BF-FX] render NoiseRemover"); } catch(e) {}
   const nr        = fx.noiseremover || {};
   const on        = !!nr.on;
   const threshold = nr.threshold ?? -40;   // dB: -80 to 0
@@ -21163,7 +21154,6 @@ const _NoiseRemoverPlugin = React.memo(_NoiseRemoverPluginInner, function(prev, 
 // and a stereo correlation meter (L/R phase visualiser).
 // =============================================================================
 function _DoublerPluginInner({ fx, upd, Knob }) {
-  try { console.log("[BF-FX] render Doubler"); } catch(e) {}
   const d     = fx.doubler || {};
   const on    = !!d.on;
   const delay = d.delay    ?? 20;      // ms  – Haas time offset (L copy)
@@ -21299,7 +21289,6 @@ const _DoublerPlugin = React.memo(_DoublerPluginInner, function(prev, next) {
 // analog-style saturation, modulation, and a live tap-tempo delay display.
 // =============================================================================
 function _HDelayPluginInner({ fx, upd, Knob }) {
-  try { console.log("[BF-FX] render HDelay"); } catch(e) {}
   const hd = fx.hdelay || {};
   const on         = !!hd.on;
   const mode       = hd.mode       ?? "digital";   // "digital" | "tape" | "ping"
@@ -21585,7 +21574,6 @@ const _HDelayPlugin = React.memo(_HDelayPluginInner, function(prev, next) {
 // Re-renders ONLY when fx data, fxTrackId, trackName, or trackColor change.
 // =============================================================================
 const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackColor, onClose, onUpd, onApplyPreset, analyserNode, isPlaying, isRecording, onTogglePlay, onRecord, onSeekBack, onSeekForward }) {
-  try { console.log("[BF-FX] render FxPanel"); } catch(e) {}
   const upd = onUpd; // stable ref-backed callback passed from StudioScreen
   const [presetMenuOpen, setPresetMenuOpen] = React.useState(false);
 
@@ -21976,9 +21964,7 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
         display:"flex", alignItems:"center", justifyContent:"center", gap:14,
       }}>
         {/* Back — same action as Done in header, but accessible from bottom */}
-        <button
-          onPointerDown={function(){ try{ console.log("[BF-FX] pointerdown Back"); }catch(e){} }}
-          onClick={function(e){ try{ console.log("[BF-FX] click Back"); }catch(_){}  onClose && onClose(); }}
+        <button onClick={onClose}
           aria-label="Back to timeline"
           style={{
             width:44, height:44, borderRadius:12,
@@ -21992,9 +21978,7 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
         </button>
         {/* Rewind 5s — mirrors main transport seekBack */}
         {onSeekBack && (
-          <button
-            onPointerDown={function(){ try{ console.log("[BF-FX] pointerdown Rewind"); }catch(e){} }}
-            onClick={function(){ try{ console.log("[BF-FX] click Rewind"); }catch(_){}  onSeekBack(); }}
+          <button onClick={onSeekBack}
             aria-label="Rewind 5 seconds"
             style={{
               width:36, height:36, borderRadius:8,
@@ -22010,9 +21994,7 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
         )}
         {/* Record */}
         {onRecord && (
-          <button
-            onPointerDown={function(){ try{ console.log("[BF-FX] pointerdown Record"); }catch(e){} }}
-            onClick={function(){ try{ console.log("[BF-FX] click Record"); }catch(_){}  onRecord(); }}
+          <button onClick={onRecord}
             aria-label={isRecording ? "Stop recording" : "Record"}
             style={{
               width:52, height:52, borderRadius:"50%",
@@ -22029,9 +22011,7 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
         )}
         {/* Play / Pause */}
         {onTogglePlay && (
-          <button
-            onPointerDown={function(){ try{ console.log("[BF-FX] pointerdown Play"); }catch(e){} }}
-            onClick={function(){ try{ console.log("[BF-FX] click Play"); }catch(_){}  onTogglePlay(); }}
+          <button onClick={onTogglePlay}
             aria-label={isPlaying ? "Pause" : "Play"}
             style={{
               width:44, height:44, borderRadius:"50%",
@@ -23018,6 +22998,15 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   const [draggingReg,  setDraggingReg]  = useState(null);
   const [showMixer,    setShowMixer]     = useState(false);
   const [fxTrackId,    setFxTrackId]     = useState(null);
+  // Mirror fxTrackId into a ref so the rAF playback loop (a useEffect
+  // that captures values at setup) can read the latest value without
+  // restarting. Used to skip the 100ms setCurrentTime tick when FX
+  // panel is open — the time display in the toolbar isn't visible
+  // during FX mode anyway, and skipping it avoids re-rendering the
+  // entire FX tree 10x/sec during playback (which was choking the
+  // main thread and causing iOS to drop taps on transport buttons).
+  const fxTrackIdRef = useRef(null);
+  React.useEffect(function(){ fxTrackIdRef.current = fxTrackId; }, [fxTrackId]);
   const [masterVolume, setMasterVolume]  = useState(1); // independent master fader 0..1.5
   const fxUpdRef = useRef(null); // stable ref so memoized FX panel always calls latest upd
   const applyPresetRef = useRef(null); // stable ref so memoized FX panel always calls latest preset applier
@@ -24078,7 +24067,16 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }
 
       if (!lastUIUpdate || ts - lastUIUpdate > 100) {
-        setCurrentTime(t);
+        // Skip setCurrentTime while FX panel is open. The toolbar time
+        // display isn't visible in FX mode, and setting state every 100ms
+        // forces StudioScreen + FxPanel + FxPanelPlugins + all plugins
+        // to re-render at 10fps — that was choking the main thread enough
+        // that iOS Safari dropped tap events on transport buttons.
+        // The audio engine itself uses refs (playheadAtRef, liveTimeRef)
+        // and is unaffected by skipping this React state update.
+        if (!fxTrackIdRef.current) {
+          setCurrentTime(t);
+        }
         lastUIUpdate = ts;
       }
 
@@ -29464,7 +29462,17 @@ userPickedMicRef.current = true;
             fxTrackId={fxTrackId}
             trackName={t.name}
             trackColor={t.color}
-            onClose={function(){ setFxTrackId(null); }}
+            onClose={function(){
+              // Sync the time display to the live audio position when
+              // closing FX, since we've been skipping setCurrentTime
+              // updates during FX mode to keep the main thread free.
+              try {
+                if (typeof liveTimeRef !== "undefined" && liveTimeRef.current >= 0) {
+                  setCurrentTime(liveTimeRef.current);
+                }
+              } catch(e) {}
+              setFxTrackId(null);
+            }}
             onUpd={fxUpdRef.current}
             onApplyPreset={applyPresetRef.current}
             analyserNode={trackAnalysersRef.current[fxTrackId] || null}
