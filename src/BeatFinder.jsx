@@ -21536,6 +21536,20 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
     const arcD = `M ${startA.x.toFixed(2)} ${startA.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${endA.x.toFixed(2)} ${endA.y.toFixed(2)}`;
     const onPointerDown = function(e) {
       e.preventDefault();
+      // Capture the pointer to the knob's own element so all subsequent
+      // pointermove/up/cancel events go DIRECTLY to this knob, not the
+      // whole document. Previously we attached listeners to `document`,
+      // which on iOS sometimes left them orphaned (touch ends without
+      // firing pointerup — happens with scroll, app focus changes, gesture
+      // recognizers). Those orphaned move listeners then fired during
+      // unrelated taps elsewhere (e.g. transport buttons), triggering
+      // state updates mid-tap that caused click events to drop.
+      //
+      // setPointerCapture binds the pointer to one element until release,
+      // and pointercancel covers the iOS "touch went away" case so we
+      // always clean up.
+      const target = e.currentTarget;
+      try { target.setPointerCapture && target.setPointerCapture(e.pointerId); } catch(_) {}
       startRef.current = { y: e.clientY, val: value };
       const onMove = function(me) {
         const dy = startRef.current.y - me.clientY;
@@ -21544,9 +21558,15 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
         const snapped = step ? Math.round(clamped / step) * step : clamped;
         onChange(+snapped.toFixed(3));
       };
-      const onUp = function() { document.removeEventListener("pointermove", onMove); document.removeEventListener("pointerup", onUp); };
-      document.addEventListener("pointermove", onMove);
-      document.addEventListener("pointerup", onUp);
+      const cleanup = function() {
+        try { target.removeEventListener("pointermove",   onMove);  } catch(_) {}
+        try { target.removeEventListener("pointerup",     cleanup); } catch(_) {}
+        try { target.removeEventListener("pointercancel", cleanup); } catch(_) {}
+        try { target.releasePointerCapture && target.releasePointerCapture(e.pointerId); } catch(_) {}
+      };
+      target.addEventListener("pointermove",   onMove);
+      target.addEventListener("pointerup",     cleanup);
+      target.addEventListener("pointercancel", cleanup);
     };
     const display = unit === "dB" ? (value >= 0 ? "+" : "") + value + "dB"
                   : unit === "%" ? Math.round(value * 100) + "%"
