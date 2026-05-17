@@ -26999,6 +26999,162 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     }
   };
 
+  // ── Cloud project restore (Phase 3 Part B) ───────────────────────
+  // When user taps a cloud-only project in the picker, we need to:
+  //   1. Fetch the full project doc from /api/studio/projects/get/{id}
+  //   2. Download each vocal clip's audio from Cloudinary
+  //   3. Decode each audio file into an AudioBuffer
+  //   4. Save the audio back to local IndexedDB so future loads are fast
+  //   5. Hand off to loadProject as if it were a local project
+  //
+  // SAFETY:
+  //   • loadProject itself is UNTOUCHED — we just reuse it as the final step
+  //   • Beat clips have no cloud URL yet (Phase 2 only uploads vocals).
+  //     They restore with structure but no audio — user gets a warning.
+  //   • Individual clip failures don't kill the whole restore.
+  const loadCloudProject = async function (cloudId, displayName) {
+    setShowProjects(false);
+    setSaveStatus("Restoring from cloud…");
+    setError("");
+
+    try {
+      // 1. Fetch the full cloud doc
+      const cloudDoc = await apiFetch("/api/studio/projects/get/" + encodeURIComponent(cloudId));
+      if (!cloudDoc || !cloudDoc.tracks) {
+        throw new Error("Project data not found in cloud");
+      }
+
+      const actx = getActx();
+      if (actx.state === "suspended") {
+        try { await actx.resume(); } catch(_) {}
+      }
+
+      // 2-3. For each clip with a vocalUrl, fetch & decode in parallel.
+      // Use a local project id (numeric Date.now) for IndexedDB keys,
+      // matching the format used by saveProject (proj_<id>_<clipId>).
+      const localProjId = Date.now();
+      let totalVocals = 0;
+      let restoredVocals = 0;
+      let failedVocals  = 0;
+
+      // First pass: count vocals so we can show progress
+      cloudDoc.tracks.forEach(function(t) {
+        (t.clips || []).forEach(function(cl) {
+          if (cl.vocalUrl) totalVocals++;
+        });
+      });
+
+      const restoredTracks = await Promise.all(cloudDoc.tracks.map(async function(t, ti) {
+        const restoredClips = await Promise.all((t.clips || []).map(async function(cl, ci) {
+          // No vocal URL → no audio to restore (beat clips, or vocals
+          // saved before Phase 2 upload landed). Restore structure only.
+          if (!cl.vocalUrl) {
+            return Object.assign({}, cl, {
+              audioBuffer: null,
+              url:         null,
+              blob:        null,
+            });
+          }
+          try {
+            // Fetch the audio file from Cloudinary
+            const resp = await fetch(cl.vocalUrl);
+            if (!resp.ok) throw new Error("HTTP " + resp.status);
+            const ab = await resp.arrayBuffer();
+            // Decode — slice so the buffer isn't detached for later IDB save
+            const buf = await actx.decodeAudioData(ab.slice(0));
+
+            // Cache to IndexedDB so the next open is instant (no cloud fetch)
+            const idbKey = "proj_" + localProjId + "_" + cl.id;
+            try {
+              const wavBuf = audioBufferToWav(buf);
+              await AudioDB.saveClip(idbKey, wavBuf);
+            } catch(idbErr) {
+              console.warn("[BeatFinder] Cloud restore: IDB cache failed for", cl.id, idbErr);
+              // Continue anyway — buf is in memory, user can use this session
+            }
+
+            restoredVocals++;
+            setSaveStatus("Restoring from cloud… " + restoredVocals + "/" + totalVocals);
+
+            return Object.assign({}, cl, {
+              audioBuffer: buf,
+              url:         null,
+              blob:        null,
+              idbKey:      idbKey,
+            });
+          } catch (e) {
+            failedVocals++;
+            console.warn("[BeatFinder] Cloud restore: clip", cl.id, "failed:", e);
+            return Object.assign({}, cl, {
+              audioBuffer: null,
+              url:         null,
+              blob:        null,
+            });
+          }
+        }));
+        return Object.assign({}, t, { clips: restoredClips });
+      }));
+
+      // 4. Build a local-shape project object. Reuse fields from cloud doc.
+      const localProj = {
+        id:           localProjId,
+        cloudId:      cloudDoc.id,
+        cloudSavedAt: cloudDoc.updated_at,
+        name:         cloudDoc.name || displayName || "Untitled",
+        bpm:          cloudDoc.bpm || 120,
+        timeSigNum:   cloudDoc.time_sig_num || 4,
+        projectKey:   cloudDoc.key || "C major",
+        savedAt:      new Date().toISOString(),
+        tracks:       restoredTracks,
+      };
+
+      // 5. Save metadata to localStorage so it appears in future picker
+      //    loads without needing a cloud fetch.
+      try {
+        let list = JSON.parse(localStorage.getItem("bf_studio_projects") || "[]");
+        // Strip live AudioBuffers — same shape the regular save uses
+        const cleanTracks = restoredTracks.map(function(t) {
+          return Object.assign({}, t, {
+            audioBuffer: null,
+            url:         null,
+            blob:        null,
+            clips: (t.clips || []).map(function(cl) {
+              return Object.assign({}, cl, {
+                audioBuffer: null,
+                url:         null,
+                blob:        null,
+              });
+            }),
+          });
+        });
+        const persisted = Object.assign({}, localProj, { tracks: cleanTracks });
+        list.unshift(persisted);
+        list = list.slice(0, 10);
+        localStorage.setItem("bf_studio_projects", JSON.stringify(list));
+        setSavedProjects(list);
+      } catch(persistErr) {
+        console.warn("[BeatFinder] Could not persist restored project to localStorage:", persistErr);
+      }
+
+      // 6. Hand off to existing loadProject — this is the SAFE part because
+      // we're using the EXACT same code path as a regular local project load.
+      // loadProject reads audioBuffer/idbKey from each clip, sets up the
+      // audio engine, populates UI state.
+      await loadProject(localProj);
+
+      // 7. Show summary if any vocals failed
+      if (failedVocals > 0) {
+        setError("Restored project — but " + failedVocals + " of " + totalVocals + " vocal recordings couldn't be downloaded. They may still be in the cloud; try again later.");
+        setTimeout(function(){ setError(""); }, 8000);
+      }
+    } catch (e) {
+      console.error("[BeatFinder] Cloud restore failed:", e);
+      setSaveStatus("");
+      setError("Could not restore from cloud — " + ((e && e.message) || "unknown error"));
+      setTimeout(function(){ setError(""); }, 6000);
+    }
+  };
+
   const loadProject = async function (p) {
     setShowProjects(false);
     setSaveStatus("Loading…");
@@ -28299,10 +28455,8 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                       <div
                         onClick={function(){
                           if (p._kind === "cloud") {
-                            // Phase 3 Part B will add cloud restore. For now,
-                            // tell the user the feature is coming.
-                            setError("Cloud restore coming in the next update — your data is safe in the cloud, but opening cloud-only projects isn't available yet.");
-                            setTimeout(function(){ setError(""); }, 5000);
+                            // Phase 3 Part B: actually restore from cloud
+                            loadCloudProject(p.cloudId, p.name);
                           } else {
                             loadProject(p);
                           }
