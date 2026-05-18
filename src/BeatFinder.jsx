@@ -19599,8 +19599,18 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
           {/* Pultec EQP-1A plugin */}
           {key === "pultec" && <PultecPlugin fx={fx} upd={upd} Knob={Knob} />}
 
-          {/* TQ — Vocal Dynamic EQ plugin */}
-          {key === "tq" && <TQPlugin fx={fx} upd={upd} Knob={Knob} trackId={trackId} />}
+          {/* TQ — Vocal Dynamic EQ plugin
+              NOTE: We render `_TQPlugin` (module-scope component) directly
+              instead of through the `TQPlugin` wrapper alias. The wrapper is
+              a new function on every render of FxPanelPlugins, which would
+              cause React to treat it as a new component type each render —
+              unmounting and remounting _TQPlugin, RESETTING its useState
+              (selectedBandId would bounce back to plosive after ~1s when the
+              parent next re-rendered). Using the stable module-level
+              reference fixes this. The other plugin aliases above could
+              have the same issue but they don't rely on useState selection
+              that the user cares about. */}
+          {key === "tq" && <_TQPlugin fx={fx} upd={upd} Knob={Knob} trackId={trackId} />}
 
           {/* Autotune plugin */}
           {key === "autotune" && <AutotunePlugin fx={fx} upd={upd} Knob={Knob} />}
@@ -22430,7 +22440,7 @@ function TQFreqCurve({ trackId, bands, listenBandId, selectedBandId, width, heig
       ref={canvasRef}
       width={width * dpr}
       height={height * dpr}
-      style={{ width: width + "px", height: height + "px", display:"block", borderRadius:8, background:"rgba(0,0,0,0.3)" }}
+      style={{ width: width + "px", height: height + "px", display:"block", borderRadius:8, background:"rgba(0,0,0,0.3)", pointerEvents:"none" }}
     />
   );
 }
@@ -22730,9 +22740,6 @@ function _TQPluginInner({ fx, upd, Knob, trackId }) {
             return (
               <button key={b.id}
                 onClick={function(){
-                  // LISTEN doesn't lock navigation — the user can browse
-                  // other bands' controls while listening to one specific
-                  // frequency range.
                   setSelectedBandId(b.id);
                 }}
                 style={{
