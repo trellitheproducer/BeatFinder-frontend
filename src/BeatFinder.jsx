@@ -22236,7 +22236,7 @@ const _PultecPlugin = React.memo(_PultecPluginInner, function(prev, next) {
 // When playing, bars at each band's frequency show how much that band is
 // reducing/boosting right now — overlaid on the curve so you see both the
 // static intent and the live response.
-function TQFreqCurve({ trackId, bands, soloBandId, selectedBandId, width, height }) {
+function TQFreqCurve({ trackId, bands, listenBandId, selectedBandId, width, height }) {
   const canvasRef = React.useRef(null);
   // Live reductions per band, polled at ~20Hz from the live detectors.
   // Keep as a ref so we don't trigger re-renders on every poll tick —
@@ -22317,8 +22317,10 @@ function TQFreqCurve({ trackId, bands, soloBandId, selectedBandId, width, height
       const reductions = liveReductionsRef.current;
       const effectiveBands = bands.map(function(b){
         if (!b.on) return null;
-        // Solo'd: only solo band contributes; others are muted (effective gain 0)
-        if (soloBandId && b.id !== soloBandId) return null;
+        // LISTEN mode: only the listened band's static EQ curve is meaningful
+        // (because the audio is band-passed to that range — other bands'
+        // effects are inaudible). Show only the listened band's curve.
+        if (listenBandId && b.id !== listenBandId) return null;
         const r = reductions[b.id] || 0;
         let gEff;
         if (b.type === "cut") {
@@ -22394,8 +22396,8 @@ function TQFreqCurve({ trackId, bands, soloBandId, selectedBandId, width, height
         }
         const y = dbToY(gEff);
         const isSel = b.id === selectedBandId;
-        const isSolo = soloBandId === b.id;
-        const dim = (soloBandId && !isSolo) ? 0.25 : 1.0;
+        const isListening = listenBandId === b.id;
+        const dim = (listenBandId && !isListening) ? 0.25 : 1.0;
         // Halo for selected band
         if (isSel) {
           ctx.beginPath();
@@ -22418,7 +22420,7 @@ function TQFreqCurve({ trackId, bands, soloBandId, selectedBandId, width, height
     };
     rafId = requestAnimationFrame(draw);
     return function(){ if (rafId) cancelAnimationFrame(rafId); };
-  }, [bands, soloBandId, selectedBandId]);
+  }, [bands, listenBandId, selectedBandId]);
 
   // Width/height respect the panel — match canvas backing to displayed size
   // for crisp rendering on Retina/HiDPI displays.
@@ -22597,65 +22599,31 @@ function _TQPluginInner({ fx, upd, Knob, trackId }) {
   }, [bands.length]);
   const [selectedBandId, setSelectedBandId] = React.useState(defaultSelected);
 
-  // Solo state — when set, only this band is audible; others are bypassed
-  // (we mute their gain target to 0). Cleared when user picks "none".
-  // Stored locally to the panel; on tear-down or plugin off, it resets.
-  const [soloBandId, setSoloBandId] = React.useState(null);
+  // ── LISTEN state ──
+  // When set, the TQ chain inserts a bandpass filter at the chosen band's
+  // frequency, so the user hears ONLY that band's slice of audio (with its
+  // dynamic processing applied). All other frequencies are silenced.
+  // Stored in fx.tq.listenBandId so applyFxLive can configure the live
+  // listen filter without a chain rebuild (listen filter is always built,
+  // just configured transparent when listenBandId is null).
+  const listenBandId = tq.listenBandId || null;
+  const setListenBandId = function(bandId) {
+    upd("tq", { listenBandId: bandId });
+  };
 
-  // Apply solo: when a band is solo'd, mute all OTHER bands' gain targets.
-  // When solo is cleared, restore each band's original gain. The mutation
-  // happens in the TQ effects state itself so applyFxLive picks it up via
-  // the polling-loop's bandRef mutation path. We use a ref to remember the
-  // pre-solo gain values so we can restore on un-solo.
-  //
-  // KNOWN LIMITATION: while solo'd, the user can navigate to a non-solo'd
-  // band but its gain knob is locked at 0 (until un-solo restores). We
-  // mitigate this by force-selecting the solo'd band in the tile click
-  // handler — see the tile onClick below.
-  const preSoloGainsRef = React.useRef(null);
+  // When LISTEN is active, force-select that band so the detail panel shows
+  // what the user is hearing.
   React.useEffect(function(){
-    if (soloBandId) {
-      // Force-select the solo'd band so the detail panel shows what's audible.
-      setSelectedBandId(soloBandId);
-      // Entering solo — capture current gains of OTHER bands, then zero them.
-      // We exclude the solo'd band from capture so that any gain adjustments
-      // the user makes to it during solo are NOT reverted on un-solo (the
-      // restore loop later only touches bands present in the capture).
-      if (!preSoloGainsRef.current) {
-        preSoloGainsRef.current = bands.reduce(function(acc, b){
-          if (b.id !== soloBandId) acc[b.id] = b.gain;
-          return acc;
-        }, {});
-      }
-      const newBands = bands.map(function(b){
-        if (b.id === soloBandId) return b;
-        // Set gain to 0 = no processing. The biquad sits at neutral gain.
-        return Object.assign({}, b, { gain: 0 });
-      });
-      upd("tq", { bands: newBands });
-    } else {
-      // Exiting solo — restore captured gains for NON-solo'd bands only.
-      // The solo'd band keeps its current gain (which may have been adjusted
-      // by the user during solo). Without this skip, adjustments made while
-      // solo'd get wiped out on un-solo.
-      if (preSoloGainsRef.current) {
-        const restore = preSoloGainsRef.current;
-        // We don't track which band WAS solo'd separately; instead, the
-        // pre-solo capture only includes OTHER bands (the solo'd band is
-        // excluded from capture below). So `restore` only contains bands
-        // we should restore.
-        const newBands = bands.map(function(b){
-          if (restore[b.id] !== undefined) {
-            return Object.assign({}, b, { gain: restore[b.id] });
-          }
-          return b;
-        });
-        upd("tq", { bands: newBands });
-        preSoloGainsRef.current = null;
-      }
-    }
+    if (listenBandId) setSelectedBandId(listenBandId);
+  }, [listenBandId]);
+
+  // Clear LISTEN when the user closes/disables the plugin. Listen filter is
+  // ephemeral — saving a project with listen still active would be confusing
+  // ("why is my vocal band-passed?"). Better to always start fresh.
+  React.useEffect(function(){
+    if (!on && listenBandId) setListenBandId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [soloBandId]);
+  }, [on]);
 
   // Helper: update a single band's properties without disturbing others.
   // Most band-knob changes flow through here.
@@ -22666,15 +22634,6 @@ function _TQPluginInner({ fx, upd, Knob, trackId }) {
     });
     upd("tq", { bands: newBands });
   };
-
-  // Clear solo if TQ is turned off — otherwise preSoloGainsRef holds stale
-  // state and the bands stay at gain 0 even after the plugin is bypassed.
-  React.useEffect(function(){
-    if (!on && soloBandId) {
-      setSoloBandId(null);
-      // preSoloGainsRef cleanup is handled by the solo effect's else branch
-    }
-  }, [on, soloBandId]);
 
   // Selected band data
   const selBand = bands.find(function(b){ return b.id === selectedBandId; }) || bands[0];
@@ -22716,7 +22675,7 @@ function _TQPluginInner({ fx, upd, Knob, trackId }) {
           <TQFreqCurve
             trackId={trackId}
             bands={bands}
-            soloBandId={soloBandId}
+            listenBandId={listenBandId}
             selectedBandId={selectedBandId}
             width={340}
             height={88} />
@@ -22733,9 +22692,10 @@ function _TQPluginInner({ fx, upd, Knob, trackId }) {
             return (
               <button key={key}
                 onClick={function(){
-                  // Clear solo first so the preset's gain values aren't
-                  // immediately overwritten by the solo mute logic.
-                  if (soloBandId) setSoloBandId(null);
+                  // Clear LISTEN first — applying a preset on top of LISTEN
+                  // would be confusing because the listen filter would keep
+                  // band-passing audio with the new preset's values.
+                  if (listenBandId) setListenBandId(null);
                   // Deep-clone the preset bands so subsequent edits don't
                   // mutate TQ_PRESETS' shared state.
                   const cloned = p.bands.map(function(b){ return Object.assign({}, b); });
@@ -22764,15 +22724,18 @@ function _TQPluginInner({ fx, upd, Knob, trackId }) {
           {bands.map(function(b){
             const meta = TQ_BAND_META[b.id] || { code:"?", color:"#888" };
             const isSelected = b.id === selectedBandId;
-            const isSolo     = b.id === soloBandId;
-            const isActive   = b.on && (!soloBandId || isSolo);
+            const isListening = b.id === listenBandId;
+            // Active = band is on AND not muted by LISTEN. When LISTEN is
+            // engaged on band X, all OTHER bands' audio is band-passed away
+            // by the listen filter, so they're effectively inaudible —
+            // visually dim them to communicate this.
+            const isActive   = b.on && (!listenBandId || isListening);
             return (
               <button key={b.id}
                 onClick={function(){
-                  // If solo'd, don't allow navigation away — clicking
-                  // any tile while solo'd just re-selects the solo'd band.
-                  // User must clear solo to navigate other bands.
-                  if (soloBandId && b.id !== soloBandId) return;
+                  // LISTEN doesn't lock navigation — the user can browse
+                  // other bands' controls while listening to one specific
+                  // frequency range.
                   setSelectedBandId(b.id);
                 }}
                 style={{
@@ -22783,8 +22746,9 @@ function _TQPluginInner({ fx, upd, Knob, trackId }) {
                   border:"1px solid " + (isSelected ? meta.color : (b.on ? meta.color + "44" : "#1f1230")),
                   borderRadius:7,
                   padding:"6px 4px 5px",
-                  cursor: (soloBandId && b.id !== soloBandId) ? "not-allowed" : "pointer",
-                  opacity: (soloBandId && b.id !== soloBandId) ? 0.4 : 1,
+                  cursor: "pointer",
+                  // Dim non-listened bands during LISTEN mode (they're inaudible)
+                  opacity: (listenBandId && !isListening) ? 0.4 : 1,
                   display:"flex", flexDirection:"column", alignItems:"center", gap:4,
                   position:"relative",
                   transition:"all 0.15s",
@@ -22795,9 +22759,9 @@ function _TQPluginInner({ fx, upd, Knob, trackId }) {
                   background: isActive ? meta.color : "#2a1a4a",
                   boxShadow: isActive ? "0 0 4px " + meta.color : "none",
                 }} />
-                {/* Solo indicator top-left */}
-                {isSolo && (
-                  <div style={{ position:"absolute", top:2, left:3, fontSize:7, fontWeight:900, color:"#FCD34D", letterSpacing:0.5 }}>S</div>
+                {/* Listen indicator top-left — cyan "L" when listening to this band */}
+                {isListening && (
+                  <div style={{ position:"absolute", top:2, left:3, fontSize:7, fontWeight:900, color:"#22D3EE", letterSpacing:0.5 }}>L</div>
                 )}
                 {/* Band 2-letter code */}
                 <div style={{
@@ -22840,16 +22804,19 @@ function _TQPluginInner({ fx, upd, Knob, trackId }) {
                     borderRadius:5, color: selBand.on ? selMeta.color : "#4a3568",
                     fontSize:8, fontWeight:800, padding:"3px 7px", cursor:"pointer", letterSpacing:0.5,
                   }}>{selBand.on ? "ACTIVE" : "BYP"}</button>
-                {/* Solo */}
+                {/* Listen — band-passes the audio to ONLY this band's
+                    frequency range so the user can hear what this band is
+                    catching. Cyan because it's an analytical/scope tool, not
+                    a mute toggle. Toggles off when tapped again. */}
                 <button onClick={function(){
-                    setSoloBandId(function(prev){ return prev === selBand.id ? null : selBand.id; });
+                    setListenBandId(listenBandId === selBand.id ? null : selBand.id);
                   }}
                   style={{
-                    background: soloBandId === selBand.id ? "linear-gradient(180deg,#FCD34D,#F59E0B)" : "rgba(0,0,0,0.4)",
-                    border:"1px solid " + (soloBandId === selBand.id ? "#FCD34D" : "#2a1a4a"),
-                    borderRadius:5, color: soloBandId === selBand.id ? "#1a0f2e" : "#4a3568",
+                    background: listenBandId === selBand.id ? "linear-gradient(180deg,#22D3EE,#0891B2)" : "rgba(0,0,0,0.4)",
+                    border:"1px solid " + (listenBandId === selBand.id ? "#22D3EE" : "#2a1a4a"),
+                    borderRadius:5, color: listenBandId === selBand.id ? "#0a0418" : "#4a3568",
                     fontSize:8, fontWeight:800, padding:"3px 7px", cursor:"pointer", letterSpacing:0.5,
-                  }}>SOLO</button>
+                  }}>LISTEN</button>
               </div>
             </div>
 
@@ -26055,6 +26022,34 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
           bn.cfg = cfg;
         } catch(e) {}
       }
+      // ── Listen filter live update ──
+      // When listenBandId is set, configure as a bandpass at that band's freq
+      // (so user hears only that frequency range). When null, configure as a
+      // very-wide lowpass at 22kHz = transparent. Filter TYPE switches are
+      // free in Web Audio (no rebuild), just set the .type property.
+      if (live.tq.listenFilter) {
+        try {
+          const lid = fx.tq.listenBandId || null;
+          if (lid) {
+            const lb = bands.find(function(b){ return b.id === lid; });
+            if (lb) {
+              live.tq.listenFilter.type = "bandpass";
+              live.tq.listenFilter.frequency.setTargetAtTime(lb.freq, now, T);
+              live.tq.listenFilter.Q.setTargetAtTime(2.0, now, T);
+            } else {
+              // Listening to a band that doesn't exist — fall back to transparent
+              live.tq.listenFilter.type = "lowpass";
+              live.tq.listenFilter.frequency.setTargetAtTime(22000, now, T);
+              live.tq.listenFilter.Q.setTargetAtTime(0.7, now, T);
+            }
+          } else {
+            // No listen — transparent
+            live.tq.listenFilter.type = "lowpass";
+            live.tq.listenFilter.frequency.setTargetAtTime(22000, now, T);
+            live.tq.listenFilter.Q.setTargetAtTime(0.7, now, T);
+          }
+        } catch(e) {}
+      }
     }
   };
   const toggleMute = function (id) {
@@ -26395,7 +26390,39 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         tqBandNodes.push({ id:b.id, biquad, bp, det, detSink, fanout, intervalId, bandRef, cfg:b });
       }
 
-      liveNodes.tq = { bandNodes: tqBandNodes };
+      // ── LISTEN filter ──
+      // Sits UPSTREAM of all bands (signal hits it before entering the
+      // band chain). When listenBandId is null, configured as a wide
+      // lowpass at 22kHz = effectively transparent. When listenBandId is
+      // set, configured as a bandpass at that band's frequency with Q=2
+      // so the user hears ONLY that frequency range through the band's
+      // dynamic processing.
+      //
+      // Always built so live updates (applyFxLive) can configure it
+      // without a chain rebuild — toggling LISTEN is just an AudioParam
+      // ramp, no node creation.
+      const listenFilter = ctx.createBiquadFilter();
+      const initialListenId = tq.listenBandId || null;
+      if (initialListenId) {
+        const lb = bands.find(function(b){ return b.id === initialListenId; });
+        if (lb) {
+          listenFilter.type = "bandpass";
+          listenFilter.frequency.value = lb.freq;
+          listenFilter.Q.value = 2.0;
+        } else {
+          listenFilter.type = "lowpass";
+          listenFilter.frequency.value = 22000;
+          listenFilter.Q.value = 0.7;
+        }
+      } else {
+        // Transparent: very wide lowpass at the Nyquist edge passes everything.
+        listenFilter.type = "lowpass";
+        listenFilter.frequency.value = 22000;
+        listenFilter.Q.value = 0.7;
+      }
+      listenFilter.connect(node);  // listenFilter feeds INTO the upstream-most band fanout
+      node = listenFilter;
+      liveNodes.tq = { bandNodes: tqBandNodes, listenFilter: listenFilter };
     }
 
     // ── Compressor — always built; bypass when off via extreme settings ──
@@ -32126,6 +32153,31 @@ userPickedMicRef.current = true;
             if (section === "rcomp" && patch && patch.mode !== undefined &&
                 t.effects.rcomp && t.effects.rcomp.mode !== patch.mode) {
               changesTopology = true;
+            }
+            // TQ rescue: tracks loaded from projects created BEFORE TQ
+            // existed don't have `tq` in their effects. When the user
+            // adds TQ and toggles master ON, the spread above creates
+            // {tq: {on:true}} with NO bands — buildChain then sees an
+            // empty bands array and silently does nothing. Detect this
+            // case and inject the default bands so the plugin actually
+            // processes audio. Same for missing/empty bands.
+            if (section === "tq") {
+              const cur = newEffects.tq;
+              if (cur && (!Array.isArray(cur.bands) || cur.bands.length === 0)) {
+                newEffects = Object.assign({}, newEffects, {
+                  tq: Object.assign({ mode: "dyneq" }, cur, { bands: [
+                    { id:"plosive",  type:"cut",   on:true, freq:80,   q:1.4, gain:-6, threshold:-12, attack:0.002, release:0.080, name:"PLOSIVE" },
+                    { id:"mud",      type:"cut",   on:true, freq:250,  q:1.0, gain:-4, threshold:-18, attack:0.008, release:0.120, name:"MUD" },
+                    { id:"box",      type:"cut",   on:true, freq:600,  q:1.2, gain:-3, threshold:-15, attack:0.005, release:0.100, name:"BOX" },
+                    { id:"presence", type:"boost", on:false,freq:3000, q:1.0, gain:+3, threshold:-30, attack:0.020, release:0.200, name:"PRESENCE" },
+                    { id:"harsh",    type:"cut",   on:true, freq:3200, q:1.8, gain:-3, threshold:-12, attack:0.003, release:0.080, name:"HARSH" },
+                    { id:"deess",    type:"cut",   on:true, freq:7000, q:2.5, gain:-6, threshold:-14, attack:0.001, release:0.060, name:"DE-ESS" },
+                    { id:"air",      type:"boost", on:false,freq:12000,q:0.7, gain:+3, threshold:-32, attack:0.030, release:0.250, name:"AIR" },
+                  ]}),
+                });
+                // Bands appearing is a topology change (n bands == n nodes to build)
+                changesTopology = true;
+              }
             }
           }
 
