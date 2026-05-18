@@ -20899,6 +20899,160 @@ async function measureChainLatency(track, sampleRate) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TQ OFFLINE SIMULATION
+// ─────────────────────────────────────────────────────────────────────────────
+// Web Audio's DynamicsCompressor.reduction does NOT update meaningfully inside
+// OfflineAudioContext on iOS/Safari — the spec doesn't require real-time
+// metering properties to be updated during offline render. That means the
+// live polling loop (which drives TQ's biquad gains from det.reduction) can't
+// run in export, and CUT bands end up silent while BOOST bands stay pinned
+// at their full target gain.
+//
+// To get an export that sounds like the live playback, we precompute the
+// per-band gain envelope here in JavaScript, then schedule those values onto
+// each band's biquad.gain via setValueAtTime in buildChain (when the export
+// pathway calls it with opts.tqAutomation).
+//
+// The JS path mirrors the live path closely:
+//   1. JS biquad bandpass at the band's freq+Q produces the "detector input"
+//      signal at sample rate.
+//   2. Envelope follower with the band's attack/release smooths the magnitude.
+//   3. Reduction = max(0, envelopeDb - threshold) * (1 - 1/ratio). We use
+//      ratio=20 to match the live detector configuration.
+//   4. Final band gain: cut → target * min(1, r/6); boost → target * max(0, 1 - r/6).
+//      Same formula as the live polling loop.
+//
+// We downsample the resulting envelope to one value every STEP_SAMPLES samples
+// (~10ms at 48kHz) to keep the AudioParam event count manageable. AudioParam
+// schedules tens of thousands of events without issue, but 480k per band ×
+// 7 bands × multiple tracks would be silly. 10ms granularity is finer than
+// the human ear can resolve gain changes (~20-30ms perception threshold).
+function simulateTQBandGain(sourceSamples, bandCfg, sampleRate) {
+  const len = sourceSamples.length;
+  const f0 = bandCfg.freq;
+  const Q  = Math.max(0.6, bandCfg.q * 0.7);  // mirror live detector's bp Q
+
+  // ── 1. JS biquad bandpass coefficients (constant 0dB peak gain form) ──
+  // Standard RBJ cookbook biquad. We use direct form 1.
+  const w0     = 2 * Math.PI * f0 / sampleRate;
+  const cosw0  = Math.cos(w0);
+  const sinw0  = Math.sin(w0);
+  const alpha  = sinw0 / (2 * Q);
+  const b0n =  alpha;
+  const b1n =  0;
+  const b2n = -alpha;
+  const a0n =  1 + alpha;
+  const a1n = -2 * cosw0;
+  const a2n =  1 - alpha;
+  // Normalize so a0 = 1
+  const b0 = b0n / a0n;
+  const b1 = b1n / a0n;
+  const b2 = b2n / a0n;
+  const a1 = a1n / a0n;
+  const a2 = a2n / a0n;
+
+  // ── 2. Run bandpass + envelope follower in one pass to avoid an extra
+  //       allocation for the filtered buffer ──
+  // Attack/release coefficients for single-pole IIR envelope follower.
+  // exp(-1/(τ·fs)) is the standard form. When attack/release is 0, fall back
+  // to ~1 sample worth of smoothing to avoid division-by-zero edge cases.
+  const attackCoeff  = Math.exp(-1 / (Math.max(0.0001, bandCfg.attack)  * sampleRate));
+  const releaseCoeff = Math.exp(-1 / (Math.max(0.0001, bandCfg.release) * sampleRate));
+  const threshold = bandCfg.threshold;
+  const ratioCoeff = 1 - 1/20;  // 20:1 detector
+  const targetGain = bandCfg.gain;
+  const isCut = bandCfg.type === "cut";
+
+  // 10ms granularity for scheduled events. Round to integer sample step.
+  const STEP_MS = 10;
+  const STEP_SAMPLES = Math.max(1, Math.round(STEP_MS / 1000 * sampleRate));
+  const stepCount = Math.ceil(len / STEP_SAMPLES);
+  const times = new Float32Array(stepCount);
+  const gains = new Float32Array(stepCount);
+
+  // Biquad state (x[n-1], x[n-2], y[n-1], y[n-2])
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  // Envelope state
+  let env = 0;
+  let stepIdx = 0;
+  let nextStepSample = 0;
+
+  for (let i = 0; i < len; i++) {
+    const x0 = sourceSamples[i] || 0;
+    // Biquad bandpass — direct form 1
+    const y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+    x2 = x1; x1 = x0;
+    y2 = y1; y1 = y0;
+    // Envelope: rectify + attack/release smoothing
+    const rect = Math.abs(y0);
+    const coeff = rect > env ? attackCoeff : releaseCoeff;
+    env = rect + coeff * (env - rect);
+
+    if (i >= nextStepSample) {
+      // Convert envelope to dB. 20log10 with a tiny floor to avoid -Infinity.
+      const envDb = 20 * Math.log10(env + 1e-10);
+      const excess = Math.max(0, envDb - threshold);
+      const reduction = excess * ratioCoeff;
+      let bandGain;
+      if (isCut) {
+        bandGain = targetGain * Math.min(1, reduction / 6);
+      } else {
+        bandGain = targetGain * Math.max(0, 1 - reduction / 6);
+      }
+      times[stepIdx] = i / sampleRate;
+      gains[stepIdx] = bandGain;
+      stepIdx++;
+      nextStepSample += STEP_SAMPLES;
+    }
+  }
+
+  // Trim to actual filled length (the loop might not hit the very last step)
+  return {
+    times: times.subarray(0, stepIdx),
+    gains: gains.subarray(0, stepIdx),
+  };
+}
+
+// Build the per-track source signal that hits the TQ block. This is what we
+// analyse to compute each band's gain envelope. For accuracy we'd want to
+// model pan/makeup-gain/EQ that precede TQ, but for v1 we use the raw clip
+// audio mixed at clip startTimes — those upstream blocks aren't typically
+// dramatic enough to change the detector behavior noticeably.
+function buildTQSourceMono(track, totalDur, sampleRate) {
+  const buf = new Float32Array(Math.max(1, Math.ceil(totalDur * sampleRate)));
+  if (!track.clips) return buf;
+  for (const cl of track.clips) {
+    if (!cl.audioBuffer || cl.active === false) continue;
+    // Downmix to mono if stereo
+    const ab = cl.audioBuffer;
+    const ch0 = ab.getChannelData(0);
+    const ch1 = ab.numberOfChannels > 1 ? ab.getChannelData(1) : null;
+    const trimS = cl.trimStart || 0;
+    const trimE = cl.trimEnd !== undefined ? cl.trimEnd : ab.duration;
+    const dur = Math.max(0, trimE - trimS);
+    if (dur <= 0) continue;
+    const srcSampleOffset = Math.floor(trimS * ab.sampleRate);
+    const srcLen = Math.floor(dur * ab.sampleRate);
+    // If clip sample rate doesn't match, do nearest-neighbour resampling
+    // (rough but adequate for envelope analysis).
+    const sourceSR = ab.sampleRate;
+    const dstSampleOffset = Math.floor((cl.startTime || 0) * sampleRate);
+    const dstLen = Math.floor(dur * sampleRate);
+    for (let i = 0; i < dstLen; i++) {
+      const dstIdx = dstSampleOffset + i;
+      if (dstIdx >= buf.length) break;
+      // Map dst sample → source sample
+      const srcIdx = srcSampleOffset + Math.floor(i * sourceSR / sampleRate);
+      if (srcIdx >= ch0.length) break;
+      const s0 = ch0[srcIdx] || 0;
+      const s1 = ch1 ? (ch1[srcIdx] || 0) : s0;
+      buf[dstIdx] += (s0 + s1) * 0.5;
+    }
+  }
+  return buf;
+}
+
 function _TRottenMasterPluginInner({ fx, upd }) {
   const m  = fx.trotten || {};
   const on = !!m.on;
@@ -26375,10 +26529,14 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         // without rebuilding the chain.
         const bandRef = { gain: b.gain, type: b.type };
 
-        // ── Polling loop: read detector reduction, set biquad gain ──
-        // Run at ~33Hz (every 30ms). registerLive only — offline render is
-        // instantaneous and DynamicsCompressor's reduction property doesn't
-        // update meaningfully in OfflineAudioContext anyway.
+        // ── Polling loop (LIVE) vs Offline Automation (EXPORT) ──
+        // Live: poll det.reduction at 33Hz and set biquad.gain.
+        // Offline: DynamicsCompressor.reduction doesn't update meaningfully
+        // in OfflineAudioContext (iOS/Safari spec quirk). Instead we
+        // pre-compute a gain envelope in JS and schedule it onto biquad.gain
+        // via setValueAtTime. The simulation runs BEFORE this buildChain
+        // call (see simulateTQBandGain) and the result lands in
+        // opts.tqAutomation, keyed by band id.
         let intervalId = null;
         if (registerLive) {
           intervalId = setInterval(function(){
@@ -26399,6 +26557,26 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
               biquad.gain.setTargetAtTime(bandGain, ctx.currentTime, 0.030);
             } catch(e) {}
           }, 33);
+        } else if (opts && opts.tqAutomation && opts.tqAutomation[b.id]) {
+          // Offline render: schedule the pre-computed gain envelope.
+          // The automation arrives as {times: Float32Array, gains: Float32Array}.
+          // Times are in seconds RELATIVE to the source audio's t=0. The
+          // offline context starts everything later by `startupLead` (PDC
+          // headroom), and clips are scheduled at startupLead + clipStartTime
+          // - trackLatency. To keep the gain curve aligned with the audio
+          // hitting the biquad, we offset every event by opts.tqAutomationOffset
+          // (= startupLead, which approximates the average alignment well
+          // enough for typical chains; minor sub-frame error from downstream
+          // FX latency is inaudible).
+          const auto = opts.tqAutomation[b.id];
+          const tOff = opts.tqAutomationOffset || 0;
+          try {
+            // Anchor the start so the curve begins at the correct value.
+            biquad.gain.setValueAtTime(auto.gains[0] || 0, Math.max(0, tOff));
+            for (let i = 0; i < auto.times.length; i++) {
+              biquad.gain.setValueAtTime(auto.gains[i], auto.times[i] + tOff);
+            }
+          } catch(e) {}
         }
 
         tqBandNodes.push({ id:b.id, biquad, bp, det, detSink, fanout, intervalId, bandRef, cfg:b });
@@ -26415,8 +26593,12 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       // Always built so live updates (applyFxLive) can configure it
       // without a chain rebuild — toggling LISTEN is just an AudioParam
       // ramp, no node creation.
+      //
+      // EXPORT BEHAVIOR: LISTEN is a panel-level audition aid, not a
+      // mix decision. Force it OFF in offline render so the exported WAV
+      // is the full mix even if the user left LISTEN engaged.
       const listenFilter = ctx.createBiquadFilter();
-      const initialListenId = tq.listenBandId || null;
+      const initialListenId = registerLive ? (tq.listenBandId || null) : null;
       if (initialListenId) {
         const lb = bands.find(function(b){ return b.id === initialListenId; });
         if (lb) {
@@ -30253,7 +30435,31 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         // analyser allocation, no R-Comp ARC interval — clean offline render.
         // Connect to exportMaster (which applies masterVolume), NOT oc.destination.
         setExportMsg("Mixing " + (tr.name || "track") + "...");
-        const entry = buildChain(oc, exportMaster, tr, hasSolo, { registerLive: false });
+
+        // ── TQ offline simulation ──
+        // If this track has TQ enabled, precompute each band's gain envelope
+        // in JavaScript and pass to buildChain as tqAutomation. buildChain
+        // schedules those values onto each band's biquad.gain — the offline
+        // render then produces the same dynamic-EQ behavior as live, despite
+        // DynamicsCompressor.reduction being inert in OfflineAudioContext.
+        let tqAutomation = null;
+        if (tr.effects && tr.effects.tq && tr.effects.tq.on && tr.effects.tq.bands) {
+          const tqBands = tr.effects.tq.bands.filter(function(b){ return b.on; });
+          if (tqBands.length > 0) {
+            setExportMsg("Analyzing TQ for " + (tr.name || "track") + "...");
+            // Build per-track mono source for envelope analysis. The signal
+            // here is the raw mixed clip audio at clip startTimes — upstream
+            // pan/EQ are not modelled (their effect on detector behavior is
+            // typically minor for the modest defaults).
+            const sourceMono = buildTQSourceMono(tr, totalDur, SR);
+            tqAutomation = {};
+            for (const b of tqBands) {
+              tqAutomation[b.id] = simulateTQBandGain(sourceMono, b, SR);
+            }
+          }
+        }
+
+        const entry = buildChain(oc, exportMaster, tr, hasSolo, { registerLive: false, tqAutomation: tqAutomation, tqAutomationOffset: startupLead });
 
         // Per-track PDC: pull this track's clips back by its FX chain latency
         // so that audio EMERGES from the chain at the same wall-clock moment
