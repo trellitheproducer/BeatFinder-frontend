@@ -26332,15 +26332,19 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         det.release.value   = b.release;
         det.knee.value      = 6;
 
-        // The detector's output goes to a "dead-end" gain (zero gain, NOT
-        // connected to destination). Web Audio still processes the node
-        // when its input is connected — the `reduction` property keeps
-        // updating. We just don't want the detector's audio bleeding
-        // into the mix.
+        // CRITICAL: the detector's output must have a path to the
+        // AudioContext destination, or Web Audio won't actually run the
+        // compressor. The spec only "actively processes" nodes whose
+        // output reaches the destination. A dead-end connection causes
+        // `det.reduction` to stay at 0 forever — making cut bands appear
+        // to do nothing.
+        //
+        // We route through a silent gain (gain=0) to the destination so
+        // the compressor runs but contributes no audio to the mix.
         const detSink = ctx.createGain();
         detSink.gain.value = 0;
         det.connect(detSink);
-        // Intentionally NOT calling detSink.connect(...) — it's a dead end.
+        detSink.connect(ctx.destination);
 
         bp.connect(det);
 
