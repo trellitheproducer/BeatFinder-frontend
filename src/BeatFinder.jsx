@@ -21001,7 +21001,7 @@ async function measureChainLatency(track, sampleRate) {
 // schedules tens of thousands of events without issue, but 480k per band ×
 // 7 bands × multiple tracks would be silly. 10ms granularity is finer than
 // the human ear can resolve gain changes (~20-30ms perception threshold).
-function simulateTQBandGain(sourceSamples, bandCfg, sampleRate) {
+async function simulateTQBandGain(sourceSamples, bandCfg, sampleRate) {
   const len = sourceSamples.length;
   const f0 = bandCfg.freq;
   const Q  = Math.max(0.6, bandCfg.q * 0.7);  // mirror live detector's bp Q
@@ -21050,6 +21050,12 @@ function simulateTQBandGain(sourceSamples, bandCfg, sampleRate) {
   let env = 0;
   let stepIdx = 0;
   let nextStepSample = 0;
+  // Yield every ~200k samples (~4-5 seconds-worth of audio) so the export
+  // spinner can repaint during this potentially-long pass. Each yield is
+  // a setTimeout(0); the cost is microscopic but it lets the compositor
+  // get a paint frame in.
+  const YIELD_BLOCK = 200000;
+  let nextYieldSample = YIELD_BLOCK;
 
   for (let i = 0; i < len; i++) {
     const x0 = sourceSamples[i] || 0;
@@ -21097,6 +21103,11 @@ function simulateTQBandGain(sourceSamples, bandCfg, sampleRate) {
       gains[stepIdx] = bandGain;
       stepIdx++;
       nextStepSample += STEP_SAMPLES;
+    }
+    if (i >= nextYieldSample) {
+      // Yield to event loop so spinner can paint.
+      await new Promise(function(r){ setTimeout(r, 0); });
+      nextYieldSample += YIELD_BLOCK;
     }
   }
 
@@ -21154,7 +21165,7 @@ function buildTQSourceMono(track, totalDur, sampleRate) {
 // Uses the same biquad cookbook formulas as Web Audio's BiquadFilterNode
 // (constant 0dB peak for peaking, normalized gain for shelves) in direct
 // form 1. Mutates the input buffer in place and returns it.
-function applyEQPreFilter(samples, eq, sampleRate) {
+async function applyEQPreFilter(samples, eq, sampleRate) {
   const sr = sampleRate;
   // Defaults match the live engine.
   const hpfFreq = eq.hpfFreq || 80;
@@ -21267,6 +21278,8 @@ function applyEQPreFilter(samples, eq, sampleRate) {
       y2 = y1; y1 = y0;
       samples[i] = y0;
     }
+    // Yield between stages so the spinner can paint a frame.
+    await new Promise(function(r){ setTimeout(r, 0); });
   }
   return samples;
 }
@@ -30554,6 +30567,41 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   }, [isPlaying, isRecording, countIn, selectedTrackId, tracks]);
 
 
+  // Yieldable variant of audioBufferToWav. The original was a single sync
+  // loop that, for a multi-minute project, could block the main thread for
+  // 200-500ms — long enough to freeze the export spinner's CSS animation.
+  // This variant yields every N samples so the compositor can paint frames.
+  // Caller MUST await this.
+  const audioBufferToWavAsync = async function (buf) {
+    const nc=buf.numberOfChannels,sr=buf.sampleRate,len=buf.length,bl=len*nc*2;
+    const ab=new ArrayBuffer(44+bl),dv=new DataView(ab);
+    const ws=function(o,s){for(let i=0;i<s.length;i++)dv.setUint8(o+i,s.charCodeAt(i));};
+    ws(0,"RIFF");dv.setUint32(4,36+bl,true);ws(8,"WAVE");ws(12,"fmt ");
+    dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,nc,true);
+    dv.setUint32(24,sr,true);dv.setUint32(28,sr*nc*2,true);dv.setUint16(32,nc*2,true);
+    dv.setUint16(34,16,true);ws(36,"data");dv.setUint32(40,bl,true);
+    // Pre-grab channel data refs ONCE — getChannelData() inside the inner
+    // loop was a hot-path overhead that scaled with sample count.
+    const chans = [];
+    for (let c=0;c<nc;c++) chans.push(buf.getChannelData(c));
+    let off=44;
+    // Yield every ~50ms-worth of samples. 44100 * 0.05 = 2205 samples per
+    // chunk, but we use 4096 for clean power-of-two iteration cost.
+    const YIELD_EVERY = 4096;
+    for(let i=0;i<len;i++){
+      for(let c=0;c<nc;c++){
+        const s=Math.max(-1,Math.min(1,chans[c][i]));
+        dv.setInt16(off,s<0?s*0x8000:s*0x7FFF,true);off+=2;
+      }
+      if ((i & (YIELD_EVERY - 1)) === 0 && i > 0) {
+        // setTimeout(0) yields to the event loop; the spinner repaints
+        // before we resume.
+        await new Promise(function(r){ setTimeout(r, 0); });
+      }
+    }
+    return ab;
+  };
+
   // ── Export ────────────────────────────────────────────────────
   // Render an AudioBuffer to a WAV-format ArrayBuffer.
   // RETURNS AN ArrayBuffer (NOT a Blob) so it can be stored directly in
@@ -30692,11 +30740,19 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
             // see full bass and over-trigger. Apply the same biquad filters
             // here in JS so the simulator matches the live detector input.
             if (tr.effects.eq && tr.effects.eq.on) {
-              sourceMono = applyEQPreFilter(sourceMono, tr.effects.eq, SR);
+              sourceMono = await applyEQPreFilter(sourceMono, tr.effects.eq, SR);
+              // Yield so the spinner can repaint after a long EQ filter pass.
+              await new Promise(function(r){ setTimeout(r, 0); });
             }
             tqAutomation = {};
             for (const b of tqBands) {
-              tqAutomation[b.id] = simulateTQBandGain(sourceMono, b, SR);
+              tqAutomation[b.id] = await simulateTQBandGain(sourceMono, b, SR);
+              // Yield between bands. Each band loops over every sample of
+              // the track — that's tens of thousands of biquad+envelope ops
+              // per band, easily 100-500ms of sync work, during which the
+              // CSS animation on the export spinner freezes. Releasing the
+              // main thread every band lets the compositor paint a frame.
+              await new Promise(function(r){ setTimeout(r, 0); });
             }
           }
         }
@@ -30771,7 +30827,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
 
       // ── Encode to WAV and trigger download ──
       setExportMsg("Encoding...");
-      const wavBuf = audioBufferToWav(finalBuffer);
+      const wavBuf = await audioBufferToWavAsync(finalBuffer);
       const wavBlob = new Blob([wavBuf], { type: "audio/wav" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(wavBlob);
