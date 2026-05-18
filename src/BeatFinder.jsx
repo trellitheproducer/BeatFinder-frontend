@@ -470,40 +470,49 @@ function StereoVUMeter({ analyserNode, isActive }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function LogicVolumeFader({ value = 1, onChange }) {
   const trackRef  = React.useRef(null);
-  const dragging  = React.useRef(false);
-  const startX    = React.useRef(null);
-  const startVal  = React.useRef(null);
 
   // value 0..1.5 → pct 0..100 along fader
   const pct = Math.max(0, Math.min(100, (value / 1.5) * 100));
   // Unity (1.0) mark position
   const unityPct = (1 / 1.5) * 100;
 
-  const calcVal = (clientX) => {
-    const rect = trackRef.current.getBoundingClientRect();
-    const raw  = (clientX - rect.left) / rect.width;
-    return Math.max(0, Math.min(1.5, raw * 1.5));
-  };
-
+  // Use imperative listeners (like GBFader) so we don't compete with the
+  // synthesized click event that iOS Safari fires after pointer sequences.
+  // The previous React onClick-based pattern had a bug where, after a drag,
+  // iOS sometimes fired a click event with clientX = the pointerdown
+  // position (not the final pointerup position), causing onChange to snap
+  // the value back to where the drag STARTED.
   const onPointerDown = (e) => {
+    e.preventDefault();
     e.stopPropagation();
-    dragging.current = true;
-    startX.current   = e.clientX;
-    startVal.current = value;
-    trackRef.current.setPointerCapture(e.pointerId);
-  };
-  const onPointerMove = (e) => {
-    if (!dragging.current) return;
-    onChange(+calcVal(e.clientX).toFixed(3));
-  };
-  const onPointerUp = (e) => {
-    dragging.current = false;
+    const el = trackRef.current;
+    if (!el) return;
+    el.setPointerCapture(e.pointerId);
+    const rect = el.getBoundingClientRect();
+    const pid = e.pointerId;
+    // Compute value from any X within the track
+    const calc = function(clientX) {
+      const raw = (clientX - rect.left) / rect.width;
+      return Math.max(0, Math.min(1.5, raw * 1.5));
+    };
+    // Apply value at the touch-down point too (tap = jump to value)
+    onChange(+calc(e.clientX).toFixed(3));
+    const onMove = function(me) {
+      if (me.pointerId !== pid) return;
+      onChange(+calc(me.clientX).toFixed(3));
+    };
+    const onUp = function(ue) {
+      if (ue.pointerId !== pid) return;
+      el.releasePointerCapture(pid);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup",   onUp);
+      el.removeEventListener("pointercancel", onUp);
+    };
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup",   onUp);
+    el.addEventListener("pointercancel", onUp);
   };
   const onDoubleClick = (e) => { e.stopPropagation(); onChange(1); };
-  const onTrackClick = (e) => {
-    e.stopPropagation();
-    onChange(+calcVal(e.clientX).toFixed(3));
-  };
 
   const dbLabel = value <= 0.001 ? "-∞" : `${value >= 1 ? "+" : ""}${(20*Math.log10(value)).toFixed(1)}`;
 
@@ -512,10 +521,7 @@ function LogicVolumeFader({ value = 1, onChange }) {
       {/* Fader track */}
       <div
         ref={trackRef}
-        onClick={onTrackClick}
         onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
         onDoubleClick={onDoubleClick}
         title={`Volume: ${dbLabel} dB  (double-tap = unity)`}
         style={{
