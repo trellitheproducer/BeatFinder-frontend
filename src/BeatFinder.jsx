@@ -27551,12 +27551,75 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // ── Clip selection & drag state ───────────────────────────────
   // selectedClipId and dragRef declared at top of component (Rules of Hooks)
 
+  // Ref captures the originally-recorded startTime of the currently-selected
+  // clip. The nudge slider uses this as the "0" reference so the user can
+  // reset back to where the clip was at selection time. Updated whenever
+  // selectedClipId changes.
+  const selectedClipOriginalStartRef = useRef(0);
+
   const selectClip = function (clipId) {
+    // Capture the current startTime as the "original" baseline for the nudge slider.
+    // This way, the slider's reset-to-0 always returns the clip to its position at
+    // the moment of selection, regardless of how far it's been nudged so far.
+    try {
+      const tracksNow = tracksRef.current || [];
+      for (const tr of tracksNow) {
+        const cl = (tr.clips || []).find(function(c){ return c.id === clipId; });
+        if (cl) { selectedClipOriginalStartRef.current = cl.startTime || 0; break; }
+      }
+    } catch(e) { selectedClipOriginalStartRef.current = 0; }
     setSelectedClipId(clipId);
   };
 
   const deselectClip = function () {
     setSelectedClipId(null);
+  };
+
+  // Apply a nudge delta in MILLISECONDS to the selected clip's startTime.
+  // Used by the nudge slider. Clamps to [0, +∞) so clips can't go negative.
+  const nudgeSelectedClip = function (deltaMs) {
+    const id = selectedClipId;
+    if (!id) return;
+    const deltaSec = deltaMs / 1000;
+    setTracks(function(prev){
+      return prev.map(function(tr){
+        if (!tr.clips || tr.clips.length === 0) return tr;
+        let touched = false;
+        const newClips = tr.clips.map(function(cl){
+          if (cl.id !== id) return cl;
+          touched = true;
+          const ns = Math.max(0, (cl.startTime || 0) + deltaSec);
+          return Object.assign({}, cl, { startTime: ns });
+        });
+        if (!touched) return tr;
+        return Object.assign({}, tr, { clips: newClips });
+      });
+    });
+    setIsSaved(false);
+  };
+
+  // Set the nudge slider to a specific offset from the originally-recorded position.
+  // Different from nudgeSelectedClip which is an INCREMENTAL change — this is an
+  // ABSOLUTE position relative to the captured original.
+  const setSelectedClipNudge = function (offsetMs) {
+    const id = selectedClipId;
+    if (!id) return;
+    const orig = selectedClipOriginalStartRef.current || 0;
+    const target = Math.max(0, orig + offsetMs / 1000);
+    setTracks(function(prev){
+      return prev.map(function(tr){
+        if (!tr.clips || tr.clips.length === 0) return tr;
+        let touched = false;
+        const newClips = tr.clips.map(function(cl){
+          if (cl.id !== id) return cl;
+          touched = true;
+          return Object.assign({}, cl, { startTime: target });
+        });
+        if (!touched) return tr;
+        return Object.assign({}, tr, { clips: newClips });
+      });
+    });
+    setIsSaved(false);
   };
 
   const showClipMenu = function (track, clip, x, y) {
@@ -27600,6 +27663,11 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         if (targetTrack && targetTrack.id !== track.id) {
           moveClipToTrack(track.id, clip.id, targetTrack.id, { startTime: pendingStartT });
         }
+      }
+      // Re-capture the clip's new startTime as the nudge baseline so the
+      // bottom Nudge bar resets correctly after a horizontal drag.
+      if (selectedClipId === clip.id) {
+        try { selectedClipOriginalStartRef.current = pendingStartT; } catch(e) {}
       }
     };
     document.addEventListener("mousemove", onMove);
@@ -27862,6 +27930,14 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         if (targetTrack && targetTrack.id !== track.id) {
           moveClipToTrack(track.id, clip.id, targetTrack.id, { startTime: pendingStartT });
         }
+      }
+      // Re-capture the clip's new startTime as the nudge baseline so the
+      // bottom Nudge bar resets correctly after a horizontal drag.
+      if (selectedClipId === clip.id) {
+        try {
+          // The clip moved by pendingStartT - startStart. New origin = pendingStartT.
+          selectedClipOriginalStartRef.current = pendingStartT;
+        } catch(e) {}
       }
       dragRef.current = null;
       elem.removeEventListener("touchmove", onMove);
@@ -31271,6 +31347,91 @@ userPickedMicRef.current = true;
                 })()}
 
               </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ══ CLIP NUDGE BAR ══════════════════════════════════════════
+          Floating bar that appears when a clip is selected. Lets the user
+          shift the clip's startTime in fine increments (±5ms) without
+          having to drag horizontally on the timeline — useful for aligning
+          vocals to the beat after recording.
+
+          The slider is RELATIVE — its center (0) represents the clip's
+          startTime at the moment of selection. Moving the slider right
+          pushes the clip later in time; left pulls it earlier. Tap "Reset"
+          to snap back to the selection-time position.
+
+          Hidden when no clip is selected. Sits ABOVE the transport so it
+          doesn't block playback controls. Also hidden when FX panel is open
+          (the clip selection logic in that view uses different patterns). */}
+      {(function(){
+        if (!selectedClipId) return null;
+        if (fxTrackId) return null;  // hide while FX panel is open
+        // Find the selected clip to compute its current nudge offset (display only)
+        let currentOffsetMs = 0;
+        const tracksNow = tracksRef.current || [];
+        for (const tr of tracksNow) {
+          const cl = (tr.clips || []).find(function(c){ return c.id === selectedClipId; });
+          if (cl) {
+            const orig = selectedClipOriginalStartRef.current || 0;
+            currentOffsetMs = Math.round(((cl.startTime || 0) - orig) * 1000);
+            break;
+          }
+        }
+        // Clamp display to [-500, +500] but allow the actual value to exceed
+        const sliderValue = Math.max(-500, Math.min(500, currentOffsetMs));
+        return (
+          <div style={{
+            position:"fixed", left:0, right:0,
+            // Sit above the transport: transport is ~80px tall (varies with safe area).
+            // We use a fixed 76px lift so we don't depend on env() at this layer.
+            bottom: "calc(72px + max(env(safe-area-inset-bottom), 12px))",
+            background:"linear-gradient(180deg,rgba(20,15,35,0.95) 0%,rgba(15,10,25,0.97) 100%)",
+            borderTop:"1px solid rgba(124,58,237,0.2)",
+            borderBottom:"1px solid rgba(124,58,237,0.1)",
+            padding:"10px 14px",
+            zIndex:9050,
+            backdropFilter:"blur(8px)",
+            display:"flex", alignItems:"center", gap:12,
+            fontFamily:"'DM Sans',sans-serif",
+            boxShadow:"0 -4px 12px rgba(0,0,0,0.4)",
+          }}>
+            {/* Label + readout */}
+            <div style={{ minWidth:78, flexShrink:0 }}>
+              <div style={{ color:"#aaa", fontSize:9, fontWeight:700, letterSpacing:1.2, textTransform:"uppercase" }}>
+                Nudge Clip
+              </div>
+              <div style={{ color:currentOffsetMs===0?"#666":"#A78BFA", fontSize:14, fontWeight:800, fontFamily:"monospace", marginTop:2 }}>
+                {currentOffsetMs > 0 ? "+" : ""}{currentOffsetMs} ms
+              </div>
+            </div>
+            {/* Slider */}
+            <div style={{ flex:1, display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ color:"#555", fontSize:10, fontWeight:700, fontFamily:"monospace" }}>−500</span>
+              <input type="range" min={-500} max={500} step={5} value={sliderValue}
+                onChange={function(e){
+                  const v = parseInt(e.target.value, 10);
+                  setSelectedClipNudge(v);
+                }}
+                style={{ flex:1, accentColor:"#A78BFA" }} />
+              <span style={{ color:"#555", fontSize:10, fontWeight:700, fontFamily:"monospace" }}>+500</span>
+            </div>
+            {/* Fine control buttons + Reset */}
+            <div style={{ display:"flex", gap:4, flexShrink:0 }}>
+              <button onClick={function(){ nudgeSelectedClip(-5); }}
+                style={{ background:"#1a1530", border:"1px solid #2a2545", borderRadius:5, color:"#A78BFA", fontSize:10, fontWeight:800, padding:"5px 8px", cursor:"pointer", fontFamily:"monospace" }}>
+                −5
+              </button>
+              <button onClick={function(){ nudgeSelectedClip(5); }}
+                style={{ background:"#1a1530", border:"1px solid #2a2545", borderRadius:5, color:"#A78BFA", fontSize:10, fontWeight:800, padding:"5px 8px", cursor:"pointer", fontFamily:"monospace" }}>
+                +5
+              </button>
+              <button onClick={function(){ setSelectedClipNudge(0); }}
+                style={{ background:"#0a0814", border:"1px solid #2a2545", borderRadius:5, color:"#666", fontSize:10, fontWeight:700, padding:"5px 10px", cursor:"pointer" }}>
+                Reset
+              </button>
             </div>
           </div>
         );
