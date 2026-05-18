@@ -19064,30 +19064,61 @@ function WaveformCanvas({ audioBuffer, color, width, height, playedFraction, dim
 // =============================================================================
 // useHistory — undo/redo for tracks state
 // =============================================================================
+// IMPORTANT: This wraps the setter to record EVERY state change into the
+// past stack. The setter must support BOTH forms:
+//   • setState(newValue)        — direct value
+//   • setState(prev => fn(prev)) — functional updater (preferred form)
+//
+// Previously the functional form was broken — it pushed the function REFERENCE
+// to past instead of the computed value, AND each call recorded the same
+// pre-render value if multiple setState calls fired in one render cycle.
+// Result: undo only worked for the 2-3 most recent direct-value calls.
+//
+// The fix: use setStateRaw's own functional updater to capture the truly
+// current value before computing the new value, then push BOTH the prev
+// and compute the new value in a single transaction.
 function useHistory(initial) {
   const past    = useRef([]);
   const future  = useRef([]);
   const [state, setStateRaw] = React.useState(initial);
+  const HISTORY_LIMIT = 200;  // bumped from 50 — undo should be generous
 
-  const setState = function (newState) {
-    past.current.push(state);
-    if (past.current.length > 50) past.current.shift(); // cap at 50
-    future.current = [];
-    setStateRaw(newState);
+  const setState = function (next) {
+    // Use the functional form of setStateRaw to atomically read the truly
+    // current state. This works correctly even when multiple setState calls
+    // are batched together in one React render cycle.
+    setStateRaw(function(prev){
+      // Compute the new value (allowing both direct and functional forms)
+      const newValue = (typeof next === "function") ? next(prev) : next;
+      // Don't record no-op changes (e.g. same object reference back)
+      if (newValue === prev) return prev;
+      past.current.push(prev);
+      if (past.current.length > HISTORY_LIMIT) past.current.shift();
+      future.current = [];
+      return newValue;
+    });
   };
 
   const undo = function () {
     if (past.current.length === 0) return;
-    future.current.push(state);
-    const prev = past.current.pop();
-    setStateRaw(prev);
+    setStateRaw(function(prev){
+      const restored = past.current.pop();
+      if (restored === undefined) return prev;
+      future.current.push(prev);
+      if (future.current.length > HISTORY_LIMIT) future.current.shift();
+      return restored;
+    });
   };
 
   const redo = function () {
     if (future.current.length === 0) return;
-    past.current.push(state);
-    const next = future.current.pop();
-    setStateRaw(next);
+    setStateRaw(function(prev){
+      const restored = future.current.pop();
+      if (restored === undefined) return prev;
+      past.current.push(prev);
+      if (past.current.length > HISTORY_LIMIT) past.current.shift();
+      return restored;
+    });
   };
 
   const canUndo = past.current.length > 0;
@@ -26321,6 +26352,13 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
 
   const togglePlay = async function () {
     if (isPlaying) {
+      // If actively recording, pause should ALSO stop the recording.
+      // Previously: pause stopped only the beat playback and left the
+      // recorder running, silently capturing nothing useful.
+      if (isRecording) {
+        stopRecording();
+        return;  // stopRecording handles its own UI state + stops playback
+      }
       // Capture exact live position before tearing down audio graph
       const exactT = liveTimeRef.current > 0 ? liveTimeRef.current : currentTime;
       stopAll();
@@ -26344,8 +26382,18 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       } catch (resumeErr) {
         console.error("[Studio] AudioContext.resume() threw:", resumeErr);
       }
-      // Resume from the synced position — playheadAtRef was written by syncUItoTime
-      const startT = playheadAtRef.current;
+      // Resume from the synced position — playheadAtRef was written by syncUItoTime.
+      // BUT: if loop is enabled and the playhead isn't already inside the loop
+      // region, snap to loopIn so playback starts at the loop's beginning.
+      // Users expect "loop + play" to begin at the loop start, not from
+      // wherever the playhead happened to be.
+      let startT = playheadAtRef.current;
+      if (loopEnabled && loopOut > loopIn) {
+        if (startT < loopIn || startT >= loopOut) {
+          startT = loopIn;
+          syncUItoTime(startT);  // pre-position the playhead UI too
+        }
+      }
       doPlay(startT);
       setIsPlaying(true);
     }
@@ -31388,8 +31436,6 @@ userPickedMicRef.current = true;
             break;
           }
         }
-        // Clamp display to [-500, +500] but allow the actual value to exceed
-        const sliderValue = Math.max(-500, Math.min(500, currentOffsetMs));
         return (
           <div
             onClick={function(e){ e.stopPropagation(); }}
@@ -31428,24 +31474,27 @@ userPickedMicRef.current = true;
                 {currentOffsetMs > 0 ? "+" : ""}{currentOffsetMs} ms
               </div>
             </div>
-            {/* Slider — bigger touch target for mobile, prominent thumb */}
-            <div style={{ flex:1, display:"flex", alignItems:"center", gap:8 }}>
-              <span style={{ color:"#555", fontSize:10, fontWeight:700, fontFamily:"monospace" }}>−500</span>
-              <input type="range" min={-500} max={500} step={5} value={sliderValue}
-                onChange={function(e){
-                  const v = parseInt(e.target.value, 10);
-                  setSelectedClipNudge(v);
+            {/* Spacer — pushes buttons to the right */}
+            <div style={{ flex:1 }} />
+            {/* Nudge buttons — ±5 ms and ±50 ms increments, plus Reset.
+                Slider was removed — fiddly on mobile and the buttons give
+                clearer feedback via pulse + haptic. */}
+            <div style={{ display:"flex", gap:5, flexShrink:0, flexWrap:"nowrap" }}>
+              <button onClick={function(e){
+                  e.stopPropagation();
+                  nudgeSelectedClip(-50);
                   setNudgePulseTick(function(n){ return n + 1; });
-                  try { if (navigator.vibrate) navigator.vibrate(8); } catch(_){}
+                  try { if (navigator.vibrate) navigator.vibrate(14); } catch(_){}
                 }}
-                onTouchStart={function(e){ e.stopPropagation(); }}
-                onMouseDown={function(e){ e.stopPropagation(); }}
-                onPointerDown={function(e){ e.stopPropagation(); }}
-                style={{ flex:1, accentColor:"#A78BFA", height: 28 }} />
-              <span style={{ color:"#555", fontSize:10, fontWeight:700, fontFamily:"monospace" }}>+500</span>
-            </div>
-            {/* Fine control buttons + Reset — bigger tap targets, haptic feedback */}
-            <div style={{ display:"flex", gap:5, flexShrink:0 }}>
+                style={{
+                  background:"linear-gradient(180deg,#2a2050,#1a1535)",
+                  border:"1px solid #3a3060", borderRadius:7,
+                  color:"#A78BFA", fontSize:11, fontWeight:800,
+                  padding:"8px 9px", cursor:"pointer", fontFamily:"monospace",
+                  minWidth:42, boxShadow:"inset 0 1px 0 rgba(167,139,250,0.15)",
+                }}>
+                −50
+              </button>
               <button onClick={function(e){
                   e.stopPropagation();
                   nudgeSelectedClip(-5);
@@ -31475,6 +31524,21 @@ userPickedMicRef.current = true;
                   minWidth:40, boxShadow:"inset 0 1px 0 rgba(167,139,250,0.15)",
                 }}>
                 +5
+              </button>
+              <button onClick={function(e){
+                  e.stopPropagation();
+                  nudgeSelectedClip(50);
+                  setNudgePulseTick(function(n){ return n + 1; });
+                  try { if (navigator.vibrate) navigator.vibrate(14); } catch(_){}
+                }}
+                style={{
+                  background:"linear-gradient(180deg,#2a2050,#1a1535)",
+                  border:"1px solid #3a3060", borderRadius:7,
+                  color:"#A78BFA", fontSize:11, fontWeight:800,
+                  padding:"8px 9px", cursor:"pointer", fontFamily:"monospace",
+                  minWidth:42, boxShadow:"inset 0 1px 0 rgba(167,139,250,0.15)",
+                }}>
+                +50
               </button>
               <button onClick={function(e){
                   e.stopPropagation();
