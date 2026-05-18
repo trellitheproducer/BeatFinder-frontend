@@ -262,6 +262,14 @@ function BFProgressBar({ progress, label, sublabel }) {
 // VU METER COMPONENTS
 // =============================================================================
 
+// Module-scope flag for "Performance Mode" — set by StudioScreen via the
+// settings toggle. When true, visualization hooks short-circuit and avoid
+// running their rAF loops. Keeps audio engine 100% untouched. Used to free
+// up CPU on iOS during screen recording or on slower devices.
+let _performanceMode = false;
+function _setPerformanceMode(v) { _performanceMode = !!v; }
+function isPerformanceMode() { return _performanceMode; }
+
 // Shared hook: drives a real AnalyserNode and returns {level, peak, clipping}
 function useAnalyser(analyserNode, isActive) {
   const [level,    setLevel]    = React.useState(0);
@@ -289,6 +297,14 @@ function useAnalyser(analyserNode, isActive) {
     const bufLen = analyserNode.frequencyBinCount;
     const data   = new Float32Array(bufLen);
     const tick   = (now) => {
+      // Performance Mode short-circuit — if user has turned off visuals,
+      // skip the FFT read + state update and reschedule lazily. We still
+      // run the rAF so when the user toggles back on, we resume cleanly,
+      // but we do NO work per tick. ~5ms saved per frame × N tracks.
+      if (_performanceMode) {
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
       // Skip work entirely if not enough time has passed since last update
       if (now - lastUpdateRef.current < VU_INTERVAL_MS) {
         rafRef.current = requestAnimationFrame(tick);
@@ -23687,6 +23703,30 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // Calibration modal visibility. Opened from the "Calibrate" button next
   // to the FX offset slider in Studio Settings.
   const [calibrateOpen, setCalibrateOpen] = useState(false);
+  // Performance Mode — when enabled, all visualisations short-circuit:
+  //   • VU meters freeze (no FFT reads, no React state updates)
+  //   • Toolbar time display freezes (no 10Hz setCurrentTime calls)
+  //   • Playhead still moves smoothly via DOM ref (uses refs not state)
+  //   • Audio engine untouched
+  // Intended for screen recording, slow devices, or low-power mode.
+  // Persisted to localStorage as bf_perf_mode.
+  const [performanceMode, setPerformanceMode_state] = useState(function(){
+    try { return localStorage.getItem("bf_perf_mode") === "1"; } catch(e) { return false; }
+  });
+  // React setter wraps state setter — module-scope flag is synced via the
+  // effect below so all paths stay in agreement.
+  const setPerformanceMode = function(v){ setPerformanceMode_state(!!v); };
+  // Sync module-scope flag whenever React state changes. The module-scope
+  // _setPerformanceMode is what useAnalyser reads at module scope — without
+  // this sync, the toggle wouldn't affect VU meters.
+  React.useEffect(function(){
+    _setPerformanceMode(performanceMode);
+    try { localStorage.setItem("bf_perf_mode", performanceMode ? "1" : "0"); } catch(e) {}
+  }, [performanceMode]);
+  // On initial mount, also sync the module flag (handles localStorage restore
+  // before the effect fires). The effect above runs after first render but
+  // useAnalyser hooks in child components mount earlier in the tree.
+  React.useEffect(function(){ _setPerformanceMode(performanceMode); }, []);
   const fxUpdRef = useRef(null); // stable ref so memoized FX panel always calls latest upd
   const applyPresetRef = useRef(null); // stable ref so memoized FX panel always calls latest preset applier
   // FX-internal transport callbacks. The challenge: FxPanel is memo'd,
@@ -24764,14 +24804,13 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }
 
       if (!lastUIUpdate || ts - lastUIUpdate > 100) {
-        // Skip setCurrentTime while FX panel is open. The toolbar time
-        // display isn't visible in FX mode, and setting state every 100ms
-        // forces StudioScreen + FxPanel + FxPanelPlugins + all plugins
-        // to re-render at 10fps — that was choking the main thread enough
-        // that iOS Safari dropped tap events on transport buttons.
+        // Skip setCurrentTime while FX panel is open OR Performance Mode is on.
+        // The toolbar time display isn't visible in FX mode anyway, and in
+        // Performance Mode we deliberately freeze it to free CPU for the
+        // audio thread (used during screen recording or on slower devices).
         // The audio engine itself uses refs (playheadAtRef, liveTimeRef)
         // and is unaffected by skipping this React state update.
-        if (!fxTrackIdRef.current) {
+        if (!fxTrackIdRef.current && !_performanceMode) {
           setCurrentTime(t);
         }
         lastUIUpdate = ts;
@@ -29807,7 +29846,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                 different values (depends on headphones, FX chain length,
                 worklet latency). Use the Calibrate button for a guided
                 first-time setup. */}
-            <div style={{ margin:"0 16px 80px",background:"#1a1a1a",borderRadius:14 }}>
+            <div style={{ margin:"0 16px 24px",background:"#1a1a1a",borderRadius:14 }}>
               <div style={{ padding:"14px 16px 10px" }}>
                 <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10 }}>
                   <div>
@@ -29835,6 +29874,43 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
                   <button onClick={function(){ setFxRecOffsetMs(0); }}
                     style={{ background:"none",border:"1px solid #2a2a2a",borderRadius:6,color:"#666",fontSize:10,padding:"4px 10px",cursor:"pointer" }}>
                     Reset to 0 ms
+                  </button>
+                </div>
+              </div>
+            </div>
+            {/* ── Performance Mode toggle ──
+                When ON, freezes VU meters and the toolbar time display.
+                The playhead still moves smoothly (DOM-ref based, not React
+                state). Audio engine is untouched. Use when screen recording
+                or on slower devices. */}
+            <div style={{ margin:"0 16px 80px",background:"#1a1a1a",borderRadius:14 }}>
+              <div style={{ padding:"14px 16px" }}>
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:12 }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ color:"white",fontWeight:700,fontSize:13,display:"flex",alignItems:"center",gap:8 }}>
+                      Performance Mode
+                      {performanceMode && (
+                        <span style={{ background:"rgba(245,158,11,0.15)", color:"#F59E0B", fontSize:9, padding:"2px 6px", borderRadius:4, fontWeight:800, letterSpacing:0.5 }}>ON</span>
+                      )}
+                    </div>
+                    <div style={{ color:"#555",fontSize:11,marginTop:4,lineHeight:1.45 }}>
+                      Freezes VU meters and time display to free up CPU. Use during screen recording or on slower devices. Audio is unaffected.
+                    </div>
+                  </div>
+                  <button onClick={function(){ setPerformanceMode(!performanceMode); }}
+                    style={{
+                      width:52, height:30, borderRadius:15,
+                      background: performanceMode ? "linear-gradient(90deg,#F59E0B,#FBBF24)" : "#222",
+                      border: "1px solid " + (performanceMode ? "#FCD34D" : "#333"),
+                      cursor:"pointer", position:"relative", padding:0, flexShrink:0,
+                    }}>
+                    <div style={{
+                      position:"absolute", top:1, left: performanceMode ? 23 : 1,
+                      width:26, height:26, borderRadius:"50%",
+                      background: performanceMode ? "white" : "#666",
+                      transition:"left 0.15s",
+                      boxShadow:"0 1px 4px rgba(0,0,0,0.4)",
+                    }} />
                   </button>
                 </div>
               </div>
