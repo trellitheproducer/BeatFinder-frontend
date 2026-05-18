@@ -21146,6 +21146,131 @@ function buildTQSourceMono(track, totalDur, sampleRate) {
   return buf;
 }
 
+// Apply the parametric EQ (HPF, low-shelf, mid-peak, high-shelf, LPF) to a
+// mono Float32Array in JavaScript, matching what the live engine does to the
+// signal before it reaches TQ. Used to pre-filter the source for offline TQ
+// simulation so our detector input matches the live detector input.
+//
+// Uses the same biquad cookbook formulas as Web Audio's BiquadFilterNode
+// (constant 0dB peak for peaking, normalized gain for shelves) in direct
+// form 1. Mutates the input buffer in place and returns it.
+function applyEQPreFilter(samples, eq, sampleRate) {
+  const sr = sampleRate;
+  // Defaults match the live engine.
+  const hpfFreq = eq.hpfFreq || 80;
+  const hpfQ    = eq.hpfQ || 0.707;
+  const lowFreq = eq.lowFreq || 200;
+  const lowGain = eq.low || 0;
+  const midFreq = eq.midFreq || 1000;
+  const midGain = eq.mid || 0;
+  const midQ    = eq.midQ || 1.0;
+  const highFreq = eq.highFreq || 8000;
+  const highGain = eq.high || 0;
+  const lpfFreq = eq.lpfFreq || 18000;
+  const lpfQ    = eq.lpfQ || 0.707;
+
+  // ── Cookbook biquad coefficient helpers ──
+  // Reference: RBJ Audio EQ Cookbook (Robert Bristow-Johnson).
+  function highpassCoeffs(f0, Q) {
+    const w0 = 2 * Math.PI * f0 / sr;
+    const cw = Math.cos(w0), sw = Math.sin(w0);
+    const a = sw / (2 * Q);
+    const a0 = 1 + a;
+    return {
+      b0: ((1 + cw) / 2) / a0,
+      b1: -(1 + cw) / a0,
+      b2: ((1 + cw) / 2) / a0,
+      a1: (-2 * cw) / a0,
+      a2: (1 - a) / a0,
+    };
+  }
+  function lowpassCoeffs(f0, Q) {
+    const w0 = 2 * Math.PI * f0 / sr;
+    const cw = Math.cos(w0), sw = Math.sin(w0);
+    const a = sw / (2 * Q);
+    const a0 = 1 + a;
+    return {
+      b0: ((1 - cw) / 2) / a0,
+      b1: (1 - cw) / a0,
+      b2: ((1 - cw) / 2) / a0,
+      a1: (-2 * cw) / a0,
+      a2: (1 - a) / a0,
+    };
+  }
+  function peakingCoeffs(f0, Q, gainDb) {
+    const A = Math.pow(10, gainDb / 40);
+    const w0 = 2 * Math.PI * f0 / sr;
+    const cw = Math.cos(w0), sw = Math.sin(w0);
+    const a = sw / (2 * Q);
+    const a0 = 1 + a / A;
+    return {
+      b0: (1 + a * A) / a0,
+      b1: (-2 * cw) / a0,
+      b2: (1 - a * A) / a0,
+      a1: (-2 * cw) / a0,
+      a2: (1 - a / A) / a0,
+    };
+  }
+  function lowshelfCoeffs(f0, gainDb) {
+    const A = Math.pow(10, gainDb / 40);
+    const w0 = 2 * Math.PI * f0 / sr;
+    const cw = Math.cos(w0), sw = Math.sin(w0);
+    // Web Audio uses S=1 implicitly for shelves
+    const a = sw / 2 * Math.sqrt((A + 1/A) * 1 + 2);
+    const sqA2a = 2 * Math.sqrt(A) * a;
+    const a0 = (A + 1) + (A - 1) * cw + sqA2a;
+    return {
+      b0: (A * ((A + 1) - (A - 1) * cw + sqA2a)) / a0,
+      b1: (2 * A * ((A - 1) - (A + 1) * cw)) / a0,
+      b2: (A * ((A + 1) - (A - 1) * cw - sqA2a)) / a0,
+      a1: (-2 * ((A - 1) + (A + 1) * cw)) / a0,
+      a2: ((A + 1) + (A - 1) * cw - sqA2a) / a0,
+    };
+  }
+  function highshelfCoeffs(f0, gainDb) {
+    const A = Math.pow(10, gainDb / 40);
+    const w0 = 2 * Math.PI * f0 / sr;
+    const cw = Math.cos(w0), sw = Math.sin(w0);
+    const a = sw / 2 * Math.sqrt((A + 1/A) * 1 + 2);
+    const sqA2a = 2 * Math.sqrt(A) * a;
+    const a0 = (A + 1) - (A - 1) * cw + sqA2a;
+    return {
+      b0: (A * ((A + 1) + (A - 1) * cw + sqA2a)) / a0,
+      b1: (-2 * A * ((A - 1) + (A + 1) * cw)) / a0,
+      b2: (A * ((A + 1) + (A - 1) * cw - sqA2a)) / a0,
+      a1: (2 * ((A - 1) - (A + 1) * cw)) / a0,
+      a2: ((A + 1) - (A - 1) * cw - sqA2a) / a0,
+    };
+  }
+
+  // Stages to apply, in the same order as the live EQ chain:
+  // HPF → low-shelf → mid-peak → high-shelf → LPF.
+  // Skip a stage if its gain is 0dB (shelves/peaks) or its cutoff is at
+  // an extreme that makes it transparent.
+  const stages = [
+    hpfFreq > 20 ? highpassCoeffs(hpfFreq, hpfQ) : null,
+    Math.abs(lowGain) > 0.01 ? lowshelfCoeffs(lowFreq, lowGain) : null,
+    Math.abs(midGain) > 0.01 ? peakingCoeffs(midFreq, midQ, midGain) : null,
+    Math.abs(highGain) > 0.01 ? highshelfCoeffs(highFreq, highGain) : null,
+    lpfFreq < 22000 ? lowpassCoeffs(lpfFreq, lpfQ) : null,
+  ].filter(Boolean);
+
+  if (stages.length === 0) return samples;
+
+  // Apply each stage in series, direct form 1, in-place.
+  for (const s of stages) {
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    for (let i = 0; i < samples.length; i++) {
+      const x0 = samples[i];
+      const y0 = s.b0 * x0 + s.b1 * x1 + s.b2 * x2 - s.a1 * y1 - s.a2 * y2;
+      x2 = x1; x1 = x0;
+      y2 = y1; y1 = y0;
+      samples[i] = y0;
+    }
+  }
+  return samples;
+}
+
 function _TRottenMasterPluginInner({ fx, upd }) {
   const m  = fx.trotten || {};
   const on = !!m.on;
@@ -30557,11 +30682,18 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
           const tqBands = tr.effects.tq.bands.filter(function(b){ return b.on; });
           if (tqBands.length > 0) {
             setExportMsg("Analyzing TQ for " + (tr.name || "track") + "...");
-            // Build per-track mono source for envelope analysis. The signal
-            // here is the raw mixed clip audio at clip startTimes — upstream
-            // pan/EQ are not modelled (their effect on detector behavior is
-            // typically minor for the modest defaults).
-            const sourceMono = buildTQSourceMono(tr, totalDur, SR);
+            // Build per-track mono source for envelope analysis.
+            let sourceMono = buildTQSourceMono(tr, totalDur, SR);
+            // ── Pre-filter source through the parametric EQ ──
+            // The live TQ detector sees post-EQ audio (EQ runs before TQ in
+            // the chain). If we analyze raw clip audio, our detector triggers
+            // differently — e.g. a -4dB low-shelf @ 200Hz reduces the bass
+            // hitting live's PLOSIVE detector by ~4dB, but our JS sim would
+            // see full bass and over-trigger. Apply the same biquad filters
+            // here in JS so the simulator matches the live detector input.
+            if (tr.effects.eq && tr.effects.eq.on) {
+              sourceMono = applyEQPreFilter(sourceMono, tr.effects.eq, SR);
+            }
             tqAutomation = {};
             for (const b of tqBands) {
               tqAutomation[b.id] = simulateTQBandGain(sourceMono, b, SR);
@@ -30872,10 +31004,18 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       )}
 
       {exporting && (
-        <div style={{ position:"absolute",inset:0,zIndex:9000,background:"rgba(0,0,0,0.9)",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:20 }}>
+        <div style={{ position:"absolute",inset:0,zIndex:9000,background:"rgba(0,0,0,0.92)",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:18,padding:"32px" }}>
+          {/* Spinning loader ring */}
           <div style={{ width:52,height:52,borderRadius:"50%",border:"3px solid rgba(192,38,211,0.3)",borderTop:"3px solid #C026D3",animation:"bf-spin 0.8s linear infinite" }} />
-          <div style={{ color:"white",fontWeight:700,fontSize:16 }}>Exporting Mix</div>
-          <div style={{ color:"#888",fontSize:13 }}>{exportMsg}</div>
+          <div style={{ color:"white",fontWeight:700,fontSize:17 }}>Exporting Mix</div>
+          {/* Current step (e.g. "Mixing track 2...", "Rendering...", "Encoding...") */}
+          <div style={{ color:"#aaa",fontSize:13,minHeight:18,textAlign:"center" }}>{exportMsg}</div>
+          {/* Time-estimate hint — shown unless we're already done */}
+          {exportMsg !== "Done!" && !exportMsg.startsWith("Export failed") && (
+            <div style={{ color:"#666",fontSize:11,textAlign:"center",lineHeight:1.5,maxWidth:280,marginTop:4 }}>
+              This can take 2–3 minutes depending on track length and how many FX you have on. Keep the app open — leaving may interrupt the export.
+            </div>
+          )}
         </div>
       )}
 
