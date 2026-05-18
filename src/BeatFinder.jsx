@@ -468,7 +468,7 @@ function StereoVUMeter({ analyserNode, isActive }) {
 // LOGIC PRO VOLUME FADER  — horizontal slider with thumb, 0→1.5 range
 // Sits below the VU meters exactly like Logic's channel strip fader
 // ─────────────────────────────────────────────────────────────────────────────
-function LogicVolumeFader({ value = 1, onChange }) {
+function LogicVolumeFader({ value = 1, onChange, onBeginGesture, onEndGesture }) {
   const trackRef  = React.useRef(null);
 
   // value 0..1.5 → pct 0..100 along fader
@@ -495,6 +495,9 @@ function LogicVolumeFader({ value = 1, onChange }) {
       const raw = (clientX - rect.left) / rect.width;
       return Math.max(0, Math.min(1.5, raw * 1.5));
     };
+    // Open a history gesture so all pointermove updates coalesce into
+    // a single undo step instead of dozens of micro-positions.
+    if (onBeginGesture) try { onBeginGesture(); } catch(_) {}
     // Apply value at the touch-down point too (tap = jump to value)
     onChange(+calc(e.clientX).toFixed(3));
     const onMove = function(me) {
@@ -507,6 +510,7 @@ function LogicVolumeFader({ value = 1, onChange }) {
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("pointerup",   onUp);
       el.removeEventListener("pointercancel", onUp);
+      if (onEndGesture) try { onEndGesture(); } catch(_) {}
     };
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerup",   onUp);
@@ -574,7 +578,7 @@ function LogicVolumeFader({ value = 1, onChange }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // LOGIC PRO PAN KNOB  — rotary knob -1..+1, center-notched
 // ─────────────────────────────────────────────────────────────────────────────
-function LogicPanSlider({ value = 0, onChange }) {
+function LogicPanSlider({ value = 0, onChange, onBeginGesture, onEndGesture }) {
   const knobRef  = React.useRef(null);
   const startY   = React.useRef(null);
   const startVal = React.useRef(null);
@@ -592,6 +596,7 @@ function LogicPanSlider({ value = 0, onChange }) {
     e.stopPropagation(); e.preventDefault();
     startY.current = e.clientY; startVal.current = value;
     knobRef.current.setPointerCapture(e.pointerId);
+    if (onBeginGesture) try { onBeginGesture(); } catch(_) {}
   };
   const onPointerMove = (e) => {
     if (startY.current === null) return;
@@ -600,7 +605,11 @@ function LogicPanSlider({ value = 0, onChange }) {
     if (Math.abs(v) < 0.05) v = 0;
     onChange(+v.toFixed(3));
   };
-  const onPointerUp   = () => { startY.current = null; };
+  const onPointerUp   = () => {
+    if (startY.current === null) return;
+    startY.current = null;
+    if (onEndGesture) try { onEndGesture(); } catch(_) {}
+  };
   const onDoubleClick = (e) => { e.stopPropagation(); onChange(0); };
 
   const arcStart = toXY(0);
@@ -654,6 +663,7 @@ function LogicTrackHeader({
   updateTrack, analyserNode, isPlaying,
   isDragging, isDropTarget,
   onLongPressStart, onLongPressCancel, onDragMove, onDragEnd,
+  beginGesture, endGesture,
 }) {
   const [renaming, setRenaming] = React.useState(false);
   const [nameVal,  setNameVal]  = React.useState(track.name);
@@ -943,12 +953,16 @@ function LogicTrackHeader({
       <LogicVolumeFader
         value={track.volume ?? 1}
         onChange={v => updateTrack(track.id, { volume: v })}
+        onBeginGesture={beginGesture}
+        onEndGesture={endGesture}
       />
 
       {/* ── Row 4: Pan slider ── */}
       <LogicPanSlider
         value={track.pan || 0}
         onChange={v => updateTrack(track.id, { pan: v })}
+        onBeginGesture={beginGesture}
+        onEndGesture={endGesture}
       />
     </div>
   );
@@ -19108,6 +19122,24 @@ function useHistory(initial) {
   const [state, setStateRaw] = React.useState(initial);
   const HISTORY_LIMIT = 200;  // bumped from 50 — undo should be generous
 
+  // ── Gesture coalescing ──
+  // For drag/trim/scrub interactions, every pointermove would otherwise
+  // push a separate history entry. The user then has to mash undo through
+  // dozens of micro-steps to revert a single gesture.
+  //
+  // Pattern:
+  //   beginGesture()  — capture pre-gesture state; subsequent setState
+  //                     calls update state but DON'T push to past
+  //   setState(...)   — during gesture, mutates state silently
+  //   endGesture()    — push ONE past entry containing the pre-gesture
+  //                     snapshot. The whole drag becomes a single undo step.
+  //
+  // If beginGesture is never balanced by endGesture (e.g. browser tab
+  // killed mid-drag), the next setState OUTSIDE a gesture will still work
+  // — but the in-flight gesture entry is lost. Acceptable failure mode.
+  const gestureSnapshotRef = useRef(null);  // pre-gesture state, or null
+  const inGestureRef       = useRef(false);
+
   const setState = function (next) {
     // Use the functional form of setStateRaw to atomically read the truly
     // current state. This works correctly even when multiple setState calls
@@ -19117,6 +19149,12 @@ function useHistory(initial) {
       const newValue = (typeof next === "function") ? next(prev) : next;
       // Don't record no-op changes (e.g. same object reference back)
       if (newValue === prev) return prev;
+      if (inGestureRef.current) {
+        // Inside a gesture — update state but skip history push. The
+        // gestureSnapshotRef already holds the pre-gesture state, which
+        // will be pushed once on endGesture.
+        return newValue;
+      }
       past.current.push(prev);
       if (past.current.length > HISTORY_LIMIT) past.current.shift();
       future.current = [];
@@ -19124,7 +19162,41 @@ function useHistory(initial) {
     });
   };
 
+  const beginGesture = function () {
+    // Snapshot the CURRENT state (the one the user will undo back to).
+    // We can't read `state` here because it might be stale inside an event
+    // handler — use the functional setter trick to grab the truly current
+    // value without changing it.
+    setStateRaw(function(prev){
+      gestureSnapshotRef.current = prev;
+      return prev;  // no state change
+    });
+    inGestureRef.current = true;
+  };
+
+  const endGesture = function () {
+    if (!inGestureRef.current) return;
+    inGestureRef.current = false;
+    // Push the pre-gesture snapshot as a single history entry.
+    // Only push if the state actually changed during the gesture — comparing
+    // current state to the snapshot via the functional setter again.
+    setStateRaw(function(prev){
+      const snap = gestureSnapshotRef.current;
+      gestureSnapshotRef.current = null;
+      if (snap === undefined || snap === null) return prev;
+      if (snap === prev) return prev;  // gesture was a no-op
+      past.current.push(snap);
+      if (past.current.length > HISTORY_LIMIT) past.current.shift();
+      future.current = [];
+      return prev;
+    });
+  };
+
   const undo = function () {
+    // If we're mid-gesture and undo fires (rare — user hits the button
+    // while still dragging?), end the gesture first so the snapshot
+    // gets pushed. Then undo can pop it.
+    if (inGestureRef.current) endGesture();
     if (past.current.length === 0) return;
     setStateRaw(function(prev){
       const restored = past.current.pop();
@@ -19136,6 +19208,7 @@ function useHistory(initial) {
   };
 
   const redo = function () {
+    if (inGestureRef.current) endGesture();
     if (future.current.length === 0) return;
     setStateRaw(function(prev){
       const restored = future.current.pop();
@@ -19149,7 +19222,7 @@ function useHistory(initial) {
   const canUndo = past.current.length > 0;
   const canRedo = future.current.length > 0;
 
-  return [state, setState, undo, redo, canUndo, canRedo];
+  return [state, setState, undo, redo, canUndo, canRedo, beginGesture, endGesture];
 }
 
 // =============================================================================
@@ -23717,7 +23790,7 @@ function GBPanKnob({ pan, color, onChange }) {
   );
 }
 
-function GBFader({ vol, color, muted, onChange }) {
+function GBFader({ vol, color, muted, onChange, onBeginGesture, onEndGesture }) {
   const trackH = GB_FADER_H;
   const thumbY = trackH - Math.max(0, Math.min(1, vol / 1.5)) * trackH;
   const unityY = trackH - (1/1.5)*trackH;
@@ -23732,6 +23805,7 @@ function GBFader({ vol, color, muted, onChange }) {
     const rect = el.getBoundingClientRect();
     const pid  = e.pointerId;
     gbFaderDragging = true;
+    if (onBeginGesture) try { onBeginGesture(); } catch(_) {}
     function onM(me){
       if (me.pointerId !== pid) return;
       const dy = me.clientY - rect.top;
@@ -23744,6 +23818,7 @@ function GBFader({ vol, color, muted, onChange }) {
       el.releasePointerCapture(pid);
       el.removeEventListener("pointermove", onM);
       el.removeEventListener("pointerup",   onU);
+      if (onEndGesture) try { onEndGesture(); } catch(_) {}
     }
     el.addEventListener("pointermove", onM);
     el.addEventListener("pointerup",   onU);
@@ -24385,7 +24460,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   const PLAYHEAD_X  = 0;         // playhead flush with sidebar edge — no gap
 
   // ── Track array: [{id, name, type, audioBuffer, url, isMuted, isSoloed, startTime, duration}]
-  const [tracks, setTracks, undoTracks, redoTracks, canUndo, canRedo] = useHistory([]);
+  const [tracks, setTracks, undoTracks, redoTracks, canUndo, canRedo, beginTracksGesture, endTracksGesture] = useHistory([]);
   const [bpm,          setBpm]          = useState(120);
   const [timeSigNum,   setTimeSigNum]   = useState(4);
   const [zoom,         setZoom]         = useState(0.1); // start at 10% H-zoom
@@ -28972,6 +29047,11 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       const dx = me.clientX - startX;
       const dy = me.clientY - startY;
       if (!moved && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+      if (!moved) {
+        // First confirmed movement — open a history gesture so all
+        // pointermove updates coalesce into a single undo step.
+        beginTracksGesture();
+      }
       moved = true;
       // Horizontal: live-update startTime within current track
       pendingStartT = snapSecs(startT + dx / effectivePPS);
@@ -28997,6 +29077,8 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       // wipe out the existing baseline).
       if (moved) {
         try { rebaseClipNudgeOrigin(clip.id, pendingStartT); } catch(e) {}
+        // Close the history gesture — single undo step covers the drag.
+        endTracksGesture();
       }
     };
     document.addEventListener("mousemove", onMove);
@@ -29258,6 +29340,11 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       // Treat movement in either axis as a drag (cancels the long-press menu)
       if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
         clearTimeout(dragRef.current.lp);
+        if (!dragRef.current.moved) {
+          // First confirmed movement of this drag — open a history gesture
+          // so all subsequent updateClip calls coalesce into ONE undo step.
+          beginTracksGesture();
+        }
         dragRef.current.moved = true;
         if (isMultiDrag) {
           // Shift every selected clip by the same delta, keeping their relative positions
@@ -29300,6 +29387,9 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       // without movement shouldn't reset the baseline).
       if (dragRef.current && dragRef.current.moved) {
         try { rebaseClipNudgeOrigin(clip.id, pendingStartT); } catch(e) {}
+        // Close the history gesture — one undo entry now represents the
+        // entire drag (including row-change + nudge rebase).
+        endTracksGesture();
       }
       dragRef.current = null;
       elem.removeEventListener("touchmove", onMove);
@@ -31986,6 +32076,8 @@ userPickedMicRef.current = true;
                       onLongPressCancel={handleHeaderLongPressCancel}
                       onDragMove={handleHeaderDragMove}
                       onDragEnd={handleHeaderDragEnd}
+                      beginGesture={beginTracksGesture}
+                      endGesture={endTracksGesture}
                     />
                   </div>
                 );
@@ -32208,18 +32300,20 @@ userPickedMicRef.current = true;
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
                               startTrim();
+                              beginTracksGesture();
                               const x0=e.clientX, ts0=trimS, cs0=clip.startTime||0;
                               const mv=function(me){
                                 const d=(me.clientX-x0)/pps;
                                 const ts=Math.max(0,Math.min(ts0+d,trimE-0.05));
                                 updateClip(track.id,clip.id,{trimStart:+ts.toFixed(4),startTime:Math.max(0,+(cs0+(ts-ts0)).toFixed(4))});
                               };
-                              const up=function(){ endTrim(); document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
+                              const up=function(){ endTrim(); endTracksGesture(); document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
                               document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
                             }}
                             onTouchStart={function(e){
                               e.stopPropagation(); e.preventDefault();
                               startTrim();
+                              beginTracksGesture();
                               const x0=e.touches[0].clientX, ts0=trimS, cs0=clip.startTime||0;
                               const mv=function(ev){
                                 ev.preventDefault();
@@ -32227,7 +32321,7 @@ userPickedMicRef.current = true;
                                 const ts=Math.max(0,Math.min(ts0+d,trimE-0.05));
                                 updateClip(track.id,clip.id,{trimStart:+ts.toFixed(4),startTime:Math.max(0,+(cs0+(ts-ts0)).toFixed(4))});
                               };
-                              const up=function(){ endTrim(); document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
+                              const up=function(){ endTrim(); endTracksGesture(); document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
                               document.addEventListener("touchmove",mv,{passive:false});
                               document.addEventListener("touchend",up,{passive:true});
                             }}
@@ -32244,24 +32338,26 @@ userPickedMicRef.current = true;
                             onMouseDown={function(e){
                               e.stopPropagation(); e.preventDefault();
                               startTrim();
+                              beginTracksGesture();
                               const x0=e.clientX, te0=trimE;
                               const mv=function(me){
                                 const te=Math.max(trimS+0.05,Math.min(te0+(me.clientX-x0)/pps,bufDur));
                                 updateClip(track.id,clip.id,{trimEnd:+te.toFixed(4)});
                               };
-                              const up=function(){ endTrim(); document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
+                              const up=function(){ endTrim(); endTracksGesture(); document.removeEventListener("mousemove",mv); document.removeEventListener("mouseup",up); };
                               document.addEventListener("mousemove",mv); document.addEventListener("mouseup",up);
                             }}
                             onTouchStart={function(e){
                               e.stopPropagation(); e.preventDefault();
                               startTrim();
+                              beginTracksGesture();
                               const x0=e.touches[0].clientX, te0=trimE;
                               const mv=function(ev){
                                 ev.preventDefault();
                                 const newTE=Math.max(trimS+0.05,Math.min(te0+(ev.touches[0].clientX-x0)/pps,bufDur));
                                 updateClip(track.id,clip.id,{trimEnd:+newTE.toFixed(4)});
                               };
-                              const up=function(){ endTrim(); document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
+                              const up=function(){ endTrim(); endTracksGesture(); document.removeEventListener("touchmove",mv); document.removeEventListener("touchend",up); };
                               document.addEventListener("touchmove",mv,{passive:false});
                               document.addEventListener("touchend",up,{passive:true});
                             }}
@@ -32696,7 +32792,9 @@ userPickedMicRef.current = true;
                       {/* ── Fader + VU side by side ── */}
                       <div style={{ display:"flex", alignItems:"flex-start", gap:3, paddingBottom:6 }}>
                         <GBFader vol={vol} color="#636366" muted={muted}
-                          onChange={function(v){ updateTrack(t.id,{volume:v}); }} />
+                          onChange={function(v){ updateTrack(t.id,{volume:v}); }}
+                          onBeginGesture={beginTracksGesture}
+                          onEndGesture={endTracksGesture} />
                         <GBVUBars analyserNode={trackAnalysersRef.current[t.id]||null} active={active} />
                       </div>
 
