@@ -274,6 +274,25 @@ let _performanceMode = false;
 function _setPerformanceMode(v) { _performanceMode = !!v; }
 function isPerformanceMode() { return _performanceMode; }
 
+// ── Module-scope live-FX-node registry ───────────────────────────
+// StudioScreen owns the live FX nodes for each track (the actual Web Audio
+// graph). UI components like _TQPluginInner need to read live values from
+// these nodes (e.g. det.reduction for the gain reduction meters) but they
+// live outside StudioScreen's scope. This registry is the bridge: StudioScreen
+// publishes its live-nodes lookup once at mount, and any module-scope component
+// can call _getLiveFxNodes(trackId) to retrieve them.
+//
+// The lookup function returns the same object as fxNodesRef.current[trackId]
+// — so {tq: {bandNodes: [...]}, rcomp: {...}, etc.}. Components are responsible
+// for null-checking — the lookup may return undefined if the track isn't
+// currently playing (no live graph built yet).
+let _liveFxNodesLookup = null;
+function _registerLiveFxNodesLookup(fn) { _liveFxNodesLookup = fn; }
+function _getLiveFxNodes(trackId) {
+  if (!_liveFxNodesLookup) return null;
+  try { return _liveFxNodesLookup(trackId); } catch(e) { return null; }
+}
+
 // Shared hook: drives a real AnalyserNode and returns {level, peak, clipping}
 function useAnalyser(analyserNode, isActive) {
   const [level,    setLevel]    = React.useState(0);
@@ -19217,7 +19236,7 @@ class StudioErrorBoundary extends React.Component {
 }
 
 // ── Plugin chain panel — extracted from IIFE so useState is a valid hook call ──
-function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, analyserNode, isPlaying }) {
+function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, analyserNode, isPlaying, trackId }) {
   // EQPlugin / CompPlugin / ReverbPlugin / PitchPlugin are pure render helpers
   // defined here so they always have the correct fx/upd/Knob/graph refs.
   // Plugin sub-components are wrapped in React.memo at module scope,
@@ -19236,6 +19255,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
   const TRottenPlugin      = function(p){ return <_TRottenMasterPlugin {...p} />; };
   const BandpassPlugin     = function(p){ return <_BandpassPlugin {...p} />; };
   const PultecPlugin       = function(p){ return <_PultecPlugin {...p} />; };
+  const TQPlugin           = function(p){ return <_TQPlugin {...p} />; };
   // Phosphor-style plugin icons — each tailored to its FX type
   function PhosphorPluginIcon({ id, color = "#888", size = 22 }) {
     const paths = {
@@ -19285,6 +19305,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"trotten",      label:"T-Rotten Master",      sub:"Mastering · Analog warmth",       icon:"knobs", color:"#C8762A" },
     { key:"bandpass",     label:"GRM Bandpass",         sub:"Dual 6th-order · Resonance",      icon:"knobs", color:"#00b4d8" },
     { key:"pultec",       label:"Pultec EQP-1A",        sub:"Passive tube · Boost/Atten trick",icon:"knobs", color:"#D4A574" },
+    { key:"tq",           label:"TQ Vocal Dynamic",      sub:"7-Band · Dynamic EQ for rap",     icon:"knobs", color:"#A855F7" },
   ];
 
   const addPlugin = function(key) {
@@ -19324,6 +19345,7 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
     { key:"trotten",      label:"T-Rotten Master 19",  sub:"Analog warmth",   icon:"ph-master",      color:"#854d0e", cat:"DYNAMICS", tag:"MASTER" },
     { key:"bandpass",     label:"GRM Bandpass",        sub:"Dual 6th-order",  icon:"ph-bandpass",    color:"#0e7490", cat:"EQ",       tag:"FILTER" },
     { key:"pultec",       label:"Pultec EQP-1A",       sub:"Tube · Vintage",  icon:"ph-eq",          color:"#D4A574", cat:"EQ",       tag:"EFFECT" },
+    { key:"tq",           label:"TQ Vocal Dynamic",    sub:"7-Band Dyn EQ",   icon:"ph-eq",          color:"#A855F7", cat:"EQ",       tag:"EFFECT" },
   ];
 
   const visiblePlugins = FL_PLUGINS.filter(function(p){
@@ -19576,6 +19598,9 @@ function FxPanelPlugins({ fx, upd, eq5, EQGraph, CompGraph, ReverbViz, Knob, ana
 
           {/* Pultec EQP-1A plugin */}
           {key === "pultec" && <PultecPlugin fx={fx} upd={upd} Knob={Knob} />}
+
+          {/* TQ — Vocal Dynamic EQ plugin */}
+          {key === "tq" && <TQPlugin fx={fx} upd={upd} Knob={Knob} trackId={trackId} />}
 
           {/* Autotune plugin */}
           {key === "autotune" && <AutotunePlugin fx={fx} upd={upd} Knob={Knob} />}
@@ -20695,6 +20720,10 @@ async function measureChainLatency(track, sampleRate) {
 
   // Quick check: anything in the chain that could introduce latency?
   // If not, skip measurement entirely — biquad-only chains have zero latency.
+  // NOTE: TQ has DynamicsCompressors in its sidechain, BUT they're parallel
+  // to the audio path (used only for measurement, not in the audio signal).
+  // The audio path is biquads only → zero direct latency. So TQ is NOT in
+  // this list, even though it does compression internally.
   const hasLatencySource =
     (fx.compressor && fx.compressor.on) ||
     (fx.rcomp && fx.rcomp.on) ||
@@ -22176,6 +22205,705 @@ const _PultecPlugin = React.memo(_PultecPluginInner, function(prev, next) {
   return prev.fx.pultec === next.fx.pultec && prev.upd === next.upd;
 });
 
+// =============================================================================
+// TQ — VOCAL DYNAMIC EQ — 7-band sidechain-driven dynamic processor
+// UI panel design (Session 2):
+//   • Header: brand, ON/OFF, master mode (dyneq only for now — mb is Session 3)
+//   • Band tiles row: 7 mini cards, one per band, with live GR meter and on/off LED
+//   • Selected band detail: knobs for freq, Q, threshold, gain, attack, release
+//     + band type toggle (cut/boost) + per-band BYP and SOLO buttons
+//   • Each band has its own accent color so the UI tells you what you're working on
+//
+// Memoization: re-renders only when fx.tq, upd, or trackId change.
+// =============================================================================
+
+// Band metadata — colors keyed to what the band does. Each band has a 2-letter
+// short code that fits in mini tile + a descriptive subtitle for the detail header.
+// ── TQ Frequency Response Visualizer ───────────────────────────────────────
+// Canvas-based EQ curve showing each band's static peak/shelf shape PLUS
+// live gain adjustment from the sidechain detectors. Updates at ~20Hz so
+// users can SEE the dynamic EQ working in real time.
+//
+// Math (approximation — close enough for visualization, not DSP-accurate):
+//   Peaking band:  response(f) = g_eff / (1 + (q * (f/f0 - f0/f))^2)
+//   High shelf:    response(f) = g_eff / (1 + (f0/f)^4)
+//
+// `g_eff` is the EFFECTIVE current gain — for cut bands, this is
+//   targetGain * min(1, reduction/6); for boost bands, it's
+//   targetGain * max(0, 1 - reduction/6). Mirrors the polling-loop formula.
+//
+// When the track isn't playing or there's no live det, g_eff = 0 (no movement).
+// When playing, bars at each band's frequency show how much that band is
+// reducing/boosting right now — overlaid on the curve so you see both the
+// static intent and the live response.
+function TQFreqCurve({ trackId, bands, soloBandId, selectedBandId, width, height }) {
+  const canvasRef = React.useRef(null);
+  // Live reductions per band, polled at ~20Hz from the live detectors.
+  // Keep as a ref so we don't trigger re-renders on every poll tick —
+  // the draw loop reads the ref directly each frame.
+  const liveReductionsRef = React.useRef({});
+
+  React.useEffect(function(){
+    let alive = true;
+    const poll = function(){
+      try {
+        const liveNodes = _getLiveFxNodes(trackId);
+        if (liveNodes && liveNodes.tq && liveNodes.tq.bandNodes) {
+          const next = {};
+          for (const bn of liveNodes.tq.bandNodes) {
+            next[bn.id] = Math.abs(bn.det.reduction || 0);
+          }
+          liveReductionsRef.current = next;
+        } else {
+          liveReductionsRef.current = {};
+        }
+      } catch(e) { liveReductionsRef.current = {}; }
+    };
+    const intervalId = setInterval(poll, 50);
+    poll();
+    return function(){ alive = false; clearInterval(intervalId); };
+  }, [trackId]);
+
+  // Draw loop — uses requestAnimationFrame for smooth curve animation.
+  // Reads bands prop (static config) + liveReductionsRef.current (live state).
+  React.useEffect(function(){
+    let rafId = null;
+    const draw = function(){
+      const canvas = canvasRef.current;
+      if (!canvas) { rafId = requestAnimationFrame(draw); return; }
+      // Performance Mode short-circuit — skip drawing entirely but keep the
+      // rAF scheduled so we resume cleanly when user toggles back. Same
+      // pattern as useAnalyser.
+      if (_performanceMode) {
+        rafId = requestAnimationFrame(draw);
+        return;
+      }
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      // ── Background grid ──
+      ctx.strokeStyle = "rgba(168,85,247,0.06)";
+      ctx.lineWidth = 1;
+      // Horizontal: 0dB center, ±6dB and ±12dB lines
+      const midY = h / 2;
+      const dbToY = function(db){ return midY - (db / 12) * (h * 0.45); };
+      for (const db of [-12, -6, 0, 6, 12]) {
+        const y = dbToY(db);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+      // Vertical: log-spaced frequency markers (100Hz, 1k, 10k)
+      const fMin = 20, fMax = 20000;
+      const fToX = function(f){ return (Math.log10(f) - Math.log10(fMin)) / (Math.log10(fMax) - Math.log10(fMin)) * w; };
+      for (const f of [100, 1000, 10000]) {
+        const x = fToX(f);
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+      }
+      // 0dB centerline (slightly brighter)
+      ctx.strokeStyle = "rgba(168,85,247,0.15)";
+      ctx.beginPath();
+      ctx.moveTo(0, midY);
+      ctx.lineTo(w, midY);
+      ctx.stroke();
+
+      // ── Compute effective gain per band (static * live reduction modulation) ──
+      const reductions = liveReductionsRef.current;
+      const effectiveBands = bands.map(function(b){
+        if (!b.on) return null;
+        // Solo'd: only solo band contributes; others are muted (effective gain 0)
+        if (soloBandId && b.id !== soloBandId) return null;
+        const r = reductions[b.id] || 0;
+        let gEff;
+        if (b.type === "cut") {
+          gEff = b.gain * Math.min(1, r / 6);
+        } else {
+          gEff = b.gain * Math.max(0, 1 - r / 6);
+        }
+        return { id:b.id, freq:b.freq, q:b.q, gain:gEff, type:b.type, isAir:b.id === "air" };
+      }).filter(Boolean);
+
+      // ── Per-band curve calc ──
+      const respAt = function(f){
+        let total = 0;
+        for (const b of effectiveBands) {
+          if (b.isAir) {
+            // High-shelf approximation
+            total += b.gain / (1 + Math.pow(b.freq / f, 4));
+          } else {
+            // Peaking bell
+            const ratio = f / b.freq - b.freq / f;
+            total += b.gain / (1 + Math.pow(b.q * ratio, 2));
+          }
+        }
+        return total;
+      };
+
+      // ── Filled fill area under the curve ──
+      const samplesAcross = Math.max(80, Math.floor(w / 2));
+      ctx.beginPath();
+      ctx.moveTo(0, midY);
+      for (let i = 0; i <= samplesAcross; i++) {
+        const x = (i / samplesAcross) * w;
+        const f = Math.pow(10, Math.log10(fMin) + (i / samplesAcross) * (Math.log10(fMax) - Math.log10(fMin)));
+        const db = respAt(f);
+        const y = dbToY(db);
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(w, midY);
+      ctx.closePath();
+      const fill = ctx.createLinearGradient(0, 0, 0, h);
+      fill.addColorStop(0,   "rgba(168,85,247,0.22)");
+      fill.addColorStop(0.5, "rgba(168,85,247,0.08)");
+      fill.addColorStop(1,   "rgba(168,85,247,0.22)");
+      ctx.fillStyle = fill;
+      ctx.fill();
+
+      // ── Curve stroke on top ──
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i <= samplesAcross; i++) {
+        const x = (i / samplesAcross) * w;
+        const f = Math.pow(10, Math.log10(fMin) + (i / samplesAcross) * (Math.log10(fMax) - Math.log10(fMin)));
+        const db = respAt(f);
+        const y = dbToY(db);
+        if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
+      }
+      ctx.strokeStyle = "rgba(196,181,253,0.9)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // ── Per-band markers (dots at each band's freq, colored by band) ──
+      for (const b of bands) {
+        if (!b.on) continue;
+        const meta = TQ_BAND_META[b.id];
+        if (!meta) continue;
+        const x = fToX(b.freq);
+        const r = reductions[b.id] || 0;
+        let gEff;
+        if (b.type === "cut") {
+          gEff = b.gain * Math.min(1, r / 6);
+        } else {
+          gEff = b.gain * Math.max(0, 1 - r / 6);
+        }
+        const y = dbToY(gEff);
+        const isSel = b.id === selectedBandId;
+        const isSolo = soloBandId === b.id;
+        const dim = (soloBandId && !isSolo) ? 0.25 : 1.0;
+        // Halo for selected band
+        if (isSel) {
+          ctx.beginPath();
+          ctx.arc(x, y, 7, 0, Math.PI*2);
+          ctx.fillStyle = meta.color + "33";
+          ctx.fill();
+        }
+        // Marker dot
+        ctx.beginPath();
+        ctx.arc(x, y, isSel ? 4 : 3, 0, Math.PI*2);
+        ctx.fillStyle = meta.color + (dim < 1 ? "55" : "ff");
+        ctx.fill();
+        if (isSel) {
+          ctx.strokeStyle = "white";
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        }
+      }
+      rafId = requestAnimationFrame(draw);
+    };
+    rafId = requestAnimationFrame(draw);
+    return function(){ if (rafId) cancelAnimationFrame(rafId); };
+  }, [bands, soloBandId, selectedBandId]);
+
+  // Width/height respect the panel — match canvas backing to displayed size
+  // for crisp rendering on Retina/HiDPI displays.
+  const dpr = (typeof window !== "undefined") ? (window.devicePixelRatio || 1) : 1;
+  return (
+    <canvas
+      ref={canvasRef}
+      width={width * dpr}
+      height={height * dpr}
+      style={{ width: width + "px", height: height + "px", display:"block", borderRadius:8, background:"rgba(0,0,0,0.3)" }}
+    />
+  );
+}
+
+// ── TQ Presets ─────────────────────────────────────────────────────────────
+// Each preset is a fresh `bands` array tuned for a specific vocal style.
+// Applying a preset replaces the bands entirely (clean apply, not merge) so
+// any user-tweaked values get reset to the preset's intent.
+//
+// Tuning philosophy:
+//   VOCAL — balanced default; matches the on-load state. Conservative.
+//   RAP   — aggressive de-essing, strong harsh tamer, presence ON to lift
+//           quiet ad-libs, air OFF (rap prefers darker tonality).
+//   POP   — gentler everywhere, air ON for polish, presence ON for forward
+//           vocal, softer de-ess.
+//   LOOSE — high thresholds, catches only the worst peaks. Preserves character.
+//   TIGHT — low thresholds, larger gain targets, tames problem material.
+const TQ_PRESETS = {
+  vocal: {
+    label: "VOCAL", desc: "Balanced default",
+    bands: [
+      { id:"plosive",  type:"cut",   on:true,  freq:80,    q:1.4, gain:-6,  threshold:-12, attack:0.002, release:0.080, name:"PLOSIVE" },
+      { id:"mud",      type:"cut",   on:true,  freq:250,   q:1.0, gain:-4,  threshold:-18, attack:0.008, release:0.120, name:"MUD" },
+      { id:"box",      type:"cut",   on:true,  freq:600,   q:1.2, gain:-3,  threshold:-15, attack:0.005, release:0.100, name:"BOX" },
+      { id:"presence", type:"boost", on:false, freq:3000,  q:1.0, gain:+3,  threshold:-30, attack:0.020, release:0.200, name:"PRESENCE" },
+      { id:"harsh",    type:"cut",   on:true,  freq:3200,  q:1.8, gain:-3,  threshold:-12, attack:0.003, release:0.080, name:"HARSH" },
+      { id:"deess",    type:"cut",   on:true,  freq:7000,  q:2.5, gain:-6,  threshold:-14, attack:0.001, release:0.060, name:"DE-ESS" },
+      { id:"air",      type:"boost", on:false, freq:12000, q:0.7, gain:+3,  threshold:-32, attack:0.030, release:0.250, name:"AIR" },
+    ]
+  },
+  rap: {
+    label: "RAP", desc: "Aggressive · Hot delivery",
+    bands: [
+      { id:"plosive",  type:"cut",   on:true,  freq:90,    q:1.6, gain:-8,  threshold:-10, attack:0.001, release:0.060, name:"PLOSIVE" },
+      { id:"mud",      type:"cut",   on:true,  freq:300,   q:1.0, gain:-3,  threshold:-18, attack:0.008, release:0.120, name:"MUD" },
+      { id:"box",      type:"cut",   on:true,  freq:700,   q:1.4, gain:-4,  threshold:-14, attack:0.004, release:0.090, name:"BOX" },
+      { id:"presence", type:"boost", on:true,  freq:3500,  q:1.0, gain:+4,  threshold:-26, attack:0.015, release:0.180, name:"PRESENCE" },
+      { id:"harsh",    type:"cut",   on:true,  freq:3500,  q:2.0, gain:-5,  threshold:-10, attack:0.002, release:0.070, name:"HARSH" },
+      { id:"deess",    type:"cut",   on:true,  freq:7500,  q:2.8, gain:-8,  threshold:-12, attack:0.0008,release:0.050, name:"DE-ESS" },
+      { id:"air",      type:"boost", on:false, freq:12000, q:0.7, gain:+2,  threshold:-32, attack:0.030, release:0.250, name:"AIR" },
+    ]
+  },
+  pop: {
+    label: "POP", desc: "Polished · Bright",
+    bands: [
+      { id:"plosive",  type:"cut",   on:true,  freq:80,    q:1.4, gain:-5,  threshold:-14, attack:0.002, release:0.080, name:"PLOSIVE" },
+      { id:"mud",      type:"cut",   on:true,  freq:220,   q:0.9, gain:-3,  threshold:-20, attack:0.010, release:0.150, name:"MUD" },
+      { id:"box",      type:"cut",   on:true,  freq:550,   q:1.0, gain:-2,  threshold:-18, attack:0.006, release:0.110, name:"BOX" },
+      { id:"presence", type:"boost", on:true,  freq:2800,  q:0.9, gain:+4,  threshold:-32, attack:0.020, release:0.200, name:"PRESENCE" },
+      { id:"harsh",    type:"cut",   on:true,  freq:3000,  q:1.5, gain:-2,  threshold:-14, attack:0.004, release:0.090, name:"HARSH" },
+      { id:"deess",    type:"cut",   on:true,  freq:6800,  q:2.2, gain:-5,  threshold:-16, attack:0.0015,release:0.070, name:"DE-ESS" },
+      { id:"air",      type:"boost", on:true,  freq:12000, q:0.7, gain:+4,  threshold:-30, attack:0.025, release:0.220, name:"AIR" },
+    ]
+  },
+  loose: {
+    label: "LOOSE", desc: "Only the worst peaks",
+    bands: [
+      { id:"plosive",  type:"cut",   on:true,  freq:80,    q:1.4, gain:-4,  threshold:-6,  attack:0.002, release:0.080, name:"PLOSIVE" },
+      { id:"mud",      type:"cut",   on:true,  freq:250,   q:1.0, gain:-2,  threshold:-12, attack:0.010, release:0.150, name:"MUD" },
+      { id:"box",      type:"cut",   on:false, freq:600,   q:1.2, gain:-2,  threshold:-10, attack:0.006, release:0.110, name:"BOX" },
+      { id:"presence", type:"boost", on:false, freq:3000,  q:1.0, gain:+2,  threshold:-26, attack:0.020, release:0.200, name:"PRESENCE" },
+      { id:"harsh",    type:"cut",   on:true,  freq:3200,  q:1.6, gain:-2,  threshold:-8,  attack:0.004, release:0.090, name:"HARSH" },
+      { id:"deess",    type:"cut",   on:true,  freq:7000,  q:2.2, gain:-4,  threshold:-8,  attack:0.0015,release:0.070, name:"DE-ESS" },
+      { id:"air",      type:"boost", on:false, freq:12000, q:0.7, gain:+2,  threshold:-30, attack:0.030, release:0.250, name:"AIR" },
+    ]
+  },
+  tight: {
+    label: "TIGHT", desc: "Surgical · Problem source",
+    bands: [
+      { id:"plosive",  type:"cut",   on:true,  freq:80,    q:1.8, gain:-10, threshold:-18, attack:0.001, release:0.060, name:"PLOSIVE" },
+      { id:"mud",      type:"cut",   on:true,  freq:250,   q:1.2, gain:-6,  threshold:-24, attack:0.006, release:0.100, name:"MUD" },
+      { id:"box",      type:"cut",   on:true,  freq:600,   q:1.4, gain:-5,  threshold:-20, attack:0.004, release:0.090, name:"BOX" },
+      { id:"presence", type:"boost", on:false, freq:3000,  q:1.0, gain:+3,  threshold:-30, attack:0.020, release:0.200, name:"PRESENCE" },
+      { id:"harsh",    type:"cut",   on:true,  freq:3200,  q:2.2, gain:-6,  threshold:-18, attack:0.002, release:0.070, name:"HARSH" },
+      { id:"deess",    type:"cut",   on:true,  freq:7000,  q:3.0, gain:-10, threshold:-20, attack:0.0008,release:0.050, name:"DE-ESS" },
+      { id:"air",      type:"boost", on:false, freq:12000, q:0.7, gain:+2,  threshold:-32, attack:0.030, release:0.250, name:"AIR" },
+    ]
+  },
+};
+
+const TQ_BAND_META = {
+  plosive:  { code:"PL", color:"#EF4444", desc:"Plosive Tamer · low-freq P/B hits" },
+  mud:      { code:"MU", color:"#92400E", desc:"Mud Control · low-mid muddiness" },
+  box:      { code:"BX", color:"#A16207", desc:"Box · midrange boxy honk" },
+  presence: { code:"PR", color:"#22D3EE", desc:"Presence · upward lift in quiet passages" },
+  harsh:    { code:"HA", color:"#F97316", desc:"Harshness · upper-mid bite" },
+  deess:    { code:"DE", color:"#FACC15", desc:"De-Esser · sibilance" },
+  air:      { code:"AR", color:"#7DD3FC", desc:"Air · breath & sheen (upward)" },
+};
+
+// Mini gain-reduction meter for a band tile. Polls the live detector's
+// reduction property at ~20Hz and renders a vertical bar (top-down: more
+// reduction = taller red bar). When no live node available (track not playing),
+// shows a flat dark bar.
+function TQBandGRMeter({ trackId, bandId, color, height }) {
+  const [gr, setGr] = React.useState(0);
+  React.useEffect(function(){
+    let alive = true;
+    let intervalId = null;
+    const poll = function(){
+      try {
+        const liveNodes = _getLiveFxNodes(trackId);
+        const bandNode = liveNodes && liveNodes.tq && liveNodes.tq.bandNodes
+          ? liveNodes.tq.bandNodes.find(function(b){ return b.id === bandId; })
+          : null;
+        if (bandNode && bandNode.det) {
+          const r = Math.abs(bandNode.det.reduction || 0);
+          if (alive) setGr(r);
+        } else {
+          if (alive) setGr(0);
+        }
+      } catch(e) {}
+    };
+    intervalId = setInterval(poll, 50);  // 20Hz
+    poll();
+    return function(){ alive = false; if (intervalId) clearInterval(intervalId); };
+  }, [trackId, bandId]);
+  // Scale: 0dB = empty, 12dB = full. Most bands target -3 to -6dB so 12dB is generous headroom.
+  const pct = Math.min(1, gr / 12);
+  const h = height || 28;
+  return (
+    <div style={{ width:6, height:h, background:"rgba(0,0,0,0.4)", borderRadius:2, position:"relative", overflow:"hidden" }}>
+      <div style={{
+        position:"absolute", left:0, right:0, top:0,
+        height: (pct * 100) + "%",
+        background:"linear-gradient(180deg," + color + "ff," + color + "88)",
+        boxShadow: pct > 0.05 ? "0 0 4px " + color + "aa" : "none",
+        transition:"height 0.08s ease-out",
+      }} />
+    </div>
+  );
+}
+
+function _TQPluginInner({ fx, upd, Knob, trackId }) {
+  const tq = fx.tq || {};
+  const on = !!tq.on;
+  const bands = tq.bands || [];
+
+  // ── Legacy-track seed ──
+  // If this track was created before TQ existed in defaultEffects, fx.tq
+  // may be {} or have no bands array. Seed sensible defaults the first
+  // time this panel renders so the user has something to work with.
+  // Uses default vocal-tuned values matching defaultEffects(). Runs once.
+  React.useEffect(function(){
+    if (!tq.bands || tq.bands.length !== 7) {
+      // Seed in shape that matches defaultEffects so audio engine + UI agree.
+      const seedBands = [
+        { id:"plosive",  type:"cut",   on:true, freq:80,   q:1.4, gain:-6,  threshold:-12, attack:0.002, release:0.080, name:"PLOSIVE" },
+        { id:"mud",      type:"cut",   on:true, freq:250,  q:1.0, gain:-4,  threshold:-18, attack:0.008, release:0.120, name:"MUD" },
+        { id:"box",      type:"cut",   on:true, freq:600,  q:1.2, gain:-3,  threshold:-15, attack:0.005, release:0.100, name:"BOX" },
+        { id:"presence", type:"boost", on:false,freq:3000, q:1.0, gain:+3,  threshold:-30, attack:0.020, release:0.200, name:"PRESENCE" },
+        { id:"harsh",    type:"cut",   on:true, freq:3200, q:1.8, gain:-3,  threshold:-12, attack:0.003, release:0.080, name:"HARSH" },
+        { id:"deess",    type:"cut",   on:true, freq:7000, q:2.5, gain:-6,  threshold:-14, attack:0.001, release:0.060, name:"DE-ESS" },
+        { id:"air",      type:"boost", on:false,freq:12000,q:0.7, gain:+3,  threshold:-32, attack:0.030, release:0.250, name:"AIR" },
+      ];
+      upd("tq", { mode: tq.mode || "dyneq", bands: seedBands });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Local panel state ──
+  // Selected band — which one's detail is shown. Default: first ON band, else first.
+  const defaultSelected = React.useMemo(function(){
+    const firstOn = bands.find(function(b){ return b.on; });
+    return firstOn ? firstOn.id : (bands[0] ? bands[0].id : "deess");
+  }, [bands.length]);
+  const [selectedBandId, setSelectedBandId] = React.useState(defaultSelected);
+
+  // Solo state — when set, only this band is audible; others are bypassed
+  // (we mute their gain target to 0). Cleared when user picks "none".
+  // Stored locally to the panel; on tear-down or plugin off, it resets.
+  const [soloBandId, setSoloBandId] = React.useState(null);
+
+  // Apply solo: when a band is solo'd, mute all OTHER bands' gain targets.
+  // When solo is cleared, restore each band's original gain. The mutation
+  // happens in the TQ effects state itself so applyFxLive picks it up via
+  // the polling-loop's bandRef mutation path. We use a ref to remember the
+  // pre-solo gain values so we can restore on un-solo.
+  //
+  // KNOWN LIMITATION: while solo'd, the user can navigate to a non-solo'd
+  // band but its gain knob is locked at 0 (until un-solo restores). We
+  // mitigate this by force-selecting the solo'd band in the tile click
+  // handler — see the tile onClick below.
+  const preSoloGainsRef = React.useRef(null);
+  React.useEffect(function(){
+    if (soloBandId) {
+      // Force-select the solo'd band so the detail panel shows what's audible.
+      setSelectedBandId(soloBandId);
+      // Entering solo — capture current gains of OTHER bands, then zero them.
+      // We exclude the solo'd band from capture so that any gain adjustments
+      // the user makes to it during solo are NOT reverted on un-solo (the
+      // restore loop later only touches bands present in the capture).
+      if (!preSoloGainsRef.current) {
+        preSoloGainsRef.current = bands.reduce(function(acc, b){
+          if (b.id !== soloBandId) acc[b.id] = b.gain;
+          return acc;
+        }, {});
+      }
+      const newBands = bands.map(function(b){
+        if (b.id === soloBandId) return b;
+        // Set gain to 0 = no processing. The biquad sits at neutral gain.
+        return Object.assign({}, b, { gain: 0 });
+      });
+      upd("tq", { bands: newBands });
+    } else {
+      // Exiting solo — restore captured gains for NON-solo'd bands only.
+      // The solo'd band keeps its current gain (which may have been adjusted
+      // by the user during solo). Without this skip, adjustments made while
+      // solo'd get wiped out on un-solo.
+      if (preSoloGainsRef.current) {
+        const restore = preSoloGainsRef.current;
+        // We don't track which band WAS solo'd separately; instead, the
+        // pre-solo capture only includes OTHER bands (the solo'd band is
+        // excluded from capture below). So `restore` only contains bands
+        // we should restore.
+        const newBands = bands.map(function(b){
+          if (restore[b.id] !== undefined) {
+            return Object.assign({}, b, { gain: restore[b.id] });
+          }
+          return b;
+        });
+        upd("tq", { bands: newBands });
+        preSoloGainsRef.current = null;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [soloBandId]);
+
+  // Helper: update a single band's properties without disturbing others.
+  // Most band-knob changes flow through here.
+  const updBand = function(bandId, patch) {
+    const newBands = bands.map(function(b){
+      if (b.id !== bandId) return b;
+      return Object.assign({}, b, patch);
+    });
+    upd("tq", { bands: newBands });
+  };
+
+  // Clear solo if TQ is turned off — otherwise preSoloGainsRef holds stale
+  // state and the bands stay at gain 0 even after the plugin is bypassed.
+  React.useEffect(function(){
+    if (!on && soloBandId) {
+      setSoloBandId(null);
+      // preSoloGainsRef cleanup is handled by the solo effect's else branch
+    }
+  }, [on, soloBandId]);
+
+  // Selected band data
+  const selBand = bands.find(function(b){ return b.id === selectedBandId; }) || bands[0];
+  const selMeta = selBand ? TQ_BAND_META[selBand.id] : null;
+
+  return (
+    <div style={{
+      background:"linear-gradient(180deg,#1a0f2e 0%,#0e0820 100%)",
+      borderRadius:16, overflow:"hidden",
+      border:"2px solid " + (on ? "#A855F7" : "#2a2a2a"),
+      boxShadow: on ? "0 0 24px rgba(168,85,247,0.18), inset 0 1px 0 rgba(255,255,255,0.06)" : "inset 0 1px 0 rgba(255,255,255,0.03)",
+    }}>
+      {/* ── Header ── */}
+      <div style={{
+        background:"linear-gradient(180deg,#1f1340 0%,#150a30 100%)",
+        padding:"8px 14px", borderBottom:"1px solid #2a1a4a",
+        display:"flex", alignItems:"center", gap:8,
+      }}>
+        <div style={{ flex:1 }}>
+          <div style={{ color:"#C4B5FD", fontWeight:900, fontSize:12, letterSpacing:3, fontFamily:"monospace", lineHeight:1 }}>TQ</div>
+          <div style={{ color:"#4c2d80", fontSize:7, letterSpacing:2, fontFamily:"monospace", marginTop:2 }}>VOCAL DYNAMIC · 7-BAND</div>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{ width:8, height:8, borderRadius:"50%", background: on ? "#A855F7" : "#1a1a1a", boxShadow: on ? "0 0 6px #A855F7, 0 0 12px rgba(168,85,247,0.5)" : "none", transition:"all 0.2s" }} />
+          <button onClick={function(){ upd("tq",{on:!on}); }}
+            style={{ background: on ? "linear-gradient(180deg,#9333EA,#7E22CE)" : "linear-gradient(180deg,#2a2a2a,#222)", border:"1px solid " + (on ? "#A855F7" : "#333"), borderRadius:5, color:"white", fontSize:9, fontWeight:800, padding:"4px 12px", cursor:"pointer", letterSpacing:1, boxShadow: on ? "0 1px 0 rgba(255,255,255,0.1) inset" : "0 1px 3px rgba(0,0,0,0.5)" }}>
+            {on ? "ON" : "OFF"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding:"12px 12px 14px", opacity: on ? 1 : 0.4, transition:"opacity 0.2s" }}>
+        {/* ── Frequency response visualizer ──
+            Canvas showing the cumulative EQ curve PLUS live dot markers at
+            each band's frequency. Dots move vertically as detectors trigger,
+            showing the live dynamic behavior. The whole curve fills/un-fills
+            in real time. ~80px tall — enough to read on a phone. */}
+        <div style={{ marginBottom:10 }}>
+          <TQFreqCurve
+            trackId={trackId}
+            bands={bands}
+            soloBandId={soloBandId}
+            selectedBandId={selectedBandId}
+            width={340}
+            height={88} />
+        </div>
+        {/* ── Preset chips row ──
+            Five quick-tune chips that replace the bands array entirely with
+            curated values for that vocal style. Applying a preset wipes any
+            user adjustments — there's no merge. The "PRESET" label on the
+            left makes the row scannable; chips themselves are compact. */}
+        <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10, overflowX:"auto", paddingBottom:2 }}>
+          <div style={{ color:"#4c2d80", fontSize:8, fontWeight:800, letterSpacing:1.5, fontFamily:"monospace", flexShrink:0 }}>PRESET</div>
+          {Object.keys(TQ_PRESETS).map(function(key){
+            const p = TQ_PRESETS[key];
+            return (
+              <button key={key}
+                onClick={function(){
+                  // Clear solo first so the preset's gain values aren't
+                  // immediately overwritten by the solo mute logic.
+                  if (soloBandId) setSoloBandId(null);
+                  // Deep-clone the preset bands so subsequent edits don't
+                  // mutate TQ_PRESETS' shared state.
+                  const cloned = p.bands.map(function(b){ return Object.assign({}, b); });
+                  upd("tq", { bands: cloned });
+                }}
+                title={p.desc}
+                style={{
+                  flexShrink:0,
+                  background:"rgba(168,85,247,0.08)",
+                  border:"1px solid rgba(168,85,247,0.3)",
+                  borderRadius:6,
+                  color:"#C4B5FD",
+                  fontSize:9, fontWeight:800, letterSpacing:0.8,
+                  padding:"5px 10px",
+                  cursor:"pointer",
+                  fontFamily:"monospace",
+                  whiteSpace:"nowrap",
+                }}>
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+        {/* ── Band tiles row — 7 mini cards ── */}
+        <div style={{ display:"flex", gap:6, marginBottom:14 }}>
+          {bands.map(function(b){
+            const meta = TQ_BAND_META[b.id] || { code:"?", color:"#888" };
+            const isSelected = b.id === selectedBandId;
+            const isSolo     = b.id === soloBandId;
+            const isActive   = b.on && (!soloBandId || isSolo);
+            return (
+              <button key={b.id}
+                onClick={function(){
+                  // If solo'd, don't allow navigation away — clicking
+                  // any tile while solo'd just re-selects the solo'd band.
+                  // User must clear solo to navigate other bands.
+                  if (soloBandId && b.id !== soloBandId) return;
+                  setSelectedBandId(b.id);
+                }}
+                style={{
+                  flex:1, minWidth:0,
+                  background: isSelected
+                    ? "linear-gradient(180deg," + meta.color + "33," + meta.color + "11)"
+                    : "rgba(0,0,0,0.3)",
+                  border:"1px solid " + (isSelected ? meta.color : (b.on ? meta.color + "44" : "#1f1230")),
+                  borderRadius:7,
+                  padding:"6px 4px 5px",
+                  cursor: (soloBandId && b.id !== soloBandId) ? "not-allowed" : "pointer",
+                  opacity: (soloBandId && b.id !== soloBandId) ? 0.4 : 1,
+                  display:"flex", flexDirection:"column", alignItems:"center", gap:4,
+                  position:"relative",
+                  transition:"all 0.15s",
+                  boxShadow: isSelected ? "0 0 12px " + meta.color + "33" : "none",
+                }}>
+                {/* On/off LED top-right corner */}
+                <div style={{ position:"absolute", top:3, right:3, width:4, height:4, borderRadius:"50%",
+                  background: isActive ? meta.color : "#2a1a4a",
+                  boxShadow: isActive ? "0 0 4px " + meta.color : "none",
+                }} />
+                {/* Solo indicator top-left */}
+                {isSolo && (
+                  <div style={{ position:"absolute", top:2, left:3, fontSize:7, fontWeight:900, color:"#FCD34D", letterSpacing:0.5 }}>S</div>
+                )}
+                {/* Band 2-letter code */}
+                <div style={{
+                  color: isActive ? meta.color : "#3a2a55",
+                  fontSize:10, fontWeight:900, fontFamily:"monospace", letterSpacing:0.5, lineHeight:1,
+                }}>{meta.code}</div>
+                {/* Mini GR meter */}
+                <TQBandGRMeter trackId={trackId} bandId={b.id} color={meta.color} height={20} />
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ── Selected band detail ── */}
+        {selBand && selMeta && (
+          <div style={{
+            background:"rgba(0,0,0,0.25)",
+            border:"1px solid " + selMeta.color + "33",
+            borderRadius:10, padding:"10px 10px 12px",
+          }}>
+            {/* Detail header: band name + type toggle + bypass + solo */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8, gap:8 }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ color:selMeta.color, fontSize:11, fontWeight:900, letterSpacing:2, fontFamily:"monospace", lineHeight:1 }}>{selBand.name}</div>
+                <div style={{ color:"#4a3568", fontSize:8, marginTop:2, letterSpacing:0.3, lineHeight:1.3 }}>{selMeta.desc}</div>
+              </div>
+              <div style={{ display:"flex", gap:4, flexShrink:0 }}>
+                {/* Cut/Boost type toggle */}
+                <div style={{ display:"flex", gap:0, background:"#0a0418", border:"1px solid " + selMeta.color + "33", borderRadius:5, padding:1 }}>
+                  <button onClick={function(){ updBand(selBand.id, {type:"cut", gain: selBand.gain > 0 ? -3 : selBand.gain }); }}
+                    style={{ background: selBand.type === "cut" ? selMeta.color : "transparent", border:"none", borderRadius:3, color: selBand.type === "cut" ? "white" : "#4a3568", fontSize:8, fontWeight:800, padding:"3px 7px", cursor:"pointer", letterSpacing:0.5 }}>CUT</button>
+                  <button onClick={function(){ updBand(selBand.id, {type:"boost", gain: selBand.gain < 0 ? +3 : selBand.gain }); }}
+                    style={{ background: selBand.type === "boost" ? selMeta.color : "transparent", border:"none", borderRadius:3, color: selBand.type === "boost" ? "white" : "#4a3568", fontSize:8, fontWeight:800, padding:"3px 7px", cursor:"pointer", letterSpacing:0.5 }}>BOOST</button>
+                </div>
+                {/* Per-band on/off (BYP = bypassed, dim) */}
+                <button onClick={function(){ updBand(selBand.id, {on: !selBand.on}); }}
+                  style={{
+                    background: selBand.on ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.4)",
+                    border:"1px solid " + (selBand.on ? selMeta.color + "55" : "#2a1a4a"),
+                    borderRadius:5, color: selBand.on ? selMeta.color : "#4a3568",
+                    fontSize:8, fontWeight:800, padding:"3px 7px", cursor:"pointer", letterSpacing:0.5,
+                  }}>{selBand.on ? "ACTIVE" : "BYP"}</button>
+                {/* Solo */}
+                <button onClick={function(){
+                    setSoloBandId(function(prev){ return prev === selBand.id ? null : selBand.id; });
+                  }}
+                  style={{
+                    background: soloBandId === selBand.id ? "linear-gradient(180deg,#FCD34D,#F59E0B)" : "rgba(0,0,0,0.4)",
+                    border:"1px solid " + (soloBandId === selBand.id ? "#FCD34D" : "#2a1a4a"),
+                    borderRadius:5, color: soloBandId === selBand.id ? "#1a0f2e" : "#4a3568",
+                    fontSize:8, fontWeight:800, padding:"3px 7px", cursor:"pointer", letterSpacing:0.5,
+                  }}>SOLO</button>
+              </div>
+            </div>
+
+            {/* Knobs row 1: FREQ, Q, THRESH, GAIN */}
+            <div style={{ display:"flex", justifyContent:"space-around", overflow:"visible", marginBottom:4 }}>
+              <Knob label="FREQ"
+                value={Math.round(selBand.freq)}
+                min={selBand.id === "plosive" ? 40 : (selBand.id === "air" ? 8000 : 100)}
+                max={selBand.id === "plosive" ? 200 : (selBand.id === "air" ? 18000 : (selBand.id === "deess" ? 12000 : 8000))}
+                step={selBand.freq < 1000 ? 5 : 50}
+                unit="Hz" color={selMeta.color}
+                onChange={function(v){ updBand(selBand.id, {freq:v}); }} />
+              <Knob label="Q"
+                value={selBand.q}
+                min={0.4} max={6.0} step={0.1}
+                unit="" color={selMeta.color}
+                onChange={function(v){ updBand(selBand.id, {q:v}); }} />
+              <Knob label="THRESH"
+                value={selBand.threshold}
+                min={-60} max={0} step={1}
+                unit="dB" color={selMeta.color}
+                onChange={function(v){ updBand(selBand.id, {threshold:v}); }} />
+              <Knob label={selBand.type === "boost" ? "BOOST" : "CUT"}
+                value={selBand.gain}
+                min={selBand.type === "boost" ? 0 : -12}
+                max={selBand.type === "boost" ? 12 : 0}
+                step={0.5}
+                unit="dB" color={selMeta.color}
+                onChange={function(v){ updBand(selBand.id, {gain:v}); }} />
+            </div>
+            <div style={{ height:1, background:selMeta.color + "22", borderRadius:1, marginTop:6, marginBottom:6 }} />
+            {/* Knobs row 2: ATTACK, RELEASE */}
+            <div style={{ display:"flex", justifyContent:"space-around", overflow:"visible" }}>
+              <Knob label="ATTACK"
+                value={Math.round(selBand.attack * 1000)}
+                min={0.5} max={50} step={0.5}
+                unit="ms" color={selMeta.color}
+                onChange={function(v){ updBand(selBand.id, {attack:v/1000}); }} />
+              <Knob label="RELEASE"
+                value={Math.round(selBand.release * 1000)}
+                min={20} max={500} step={5}
+                unit="ms" color={selMeta.color}
+                onChange={function(v){ updBand(selBand.id, {release:v/1000}); }} />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+const _TQPlugin = React.memo(_TQPluginInner, function(prev, next) {
+  return prev.fx.tq === next.fx.tq && prev.upd === next.upd && prev.trackId === next.trackId;
+});
+
 // This is the correct way to prevent re-renders from the 30fps currentTime
 // here because this is a real component, not an IIFE or callback.
 // Re-renders ONLY when fx data, fxTrackId, trackName, or trackColor change.
@@ -22598,7 +23326,7 @@ const FxPanel = React.memo(function FxPanel({ fx, fxTrackId, trackName, trackCol
       </div>
       {/* Scrollable middle area — the FX content */}
       <div style={{ flex:1, minHeight:0, overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
-        <FxPanelPlugins fx={fx} upd={upd} eq5={eq5} EQGraph={EQGraph} CompGraph={CompGraph} ReverbViz={ReverbViz} Knob={Knob} analyserNode={analyserNode} isPlaying={isPlaying} />
+        <FxPanelPlugins fx={fx} upd={upd} eq5={eq5} EQGraph={EQGraph} CompGraph={CompGraph} ReverbViz={ReverbViz} Knob={Knob} analyserNode={analyserNode} isPlaying={isPlaying} trackId={fxTrackId} />
       </div>
       {/* ── FX-internal transport bar ─────────────────────────────────────
           Lives INSIDE the FX panel so iOS sees a single context: panel
@@ -23969,6 +24697,17 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   const masterGainRef      = useRef(null); // single master output
   const fxNodesRef    = useRef({});   // trackId → live audio node references
 
+  // Publish the live-fx-nodes lookup to module scope so plugin UIs at module
+  // scope (e.g. _TQPluginInner's gain reduction meters) can read the live
+  // detector values. The lookup function reads fxNodesRef on call, so it
+  // always returns the current snapshot — no stale closures.
+  React.useEffect(function(){
+    _registerLiveFxNodesLookup(function(trackId){
+      return fxNodesRef.current ? fxNodesRef.current[trackId] : null;
+    });
+    return function(){ _registerLiveFxNodesLookup(null); };
+  }, []);
+
   // ── Persistent FX chain cache ────────────────────────────────────────────
   // Each entry: { entry: AudioNode, fxSig: string }
   // entry = the upstream gain node that clips connect into for this track
@@ -24954,6 +25693,14 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       (e.autotune && e.autotune.on)    ? "a"  : "-",
       (e.rcomp && e.rcomp.mode)        || "-",  // r-comp warm/electro affects pre-stage
       (e.pultec && e.pultec.on)        ? "pt" : "--",
+      // TQ — signature includes plugin on/off PLUS each band's on flag PLUS
+      // its mode (cut/boost). Frequency/Q/threshold/attack/release all
+      // morph live without rebuild — only topology bits live here.
+      (e.tq && e.tq.on) ?
+        ("tq:" + (e.tq.mode || "dyneq") + ":" +
+         (e.tq.bands || []).map(function(b){
+           return (b.on ? "1" : "0") + b.type[0];
+         }).join("")) : "----",
     ].join("|");
   };
 
@@ -25276,6 +26023,39 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         live.pultec.ptHiAtten.gain.setTargetAtTime(      ptOn ? -(pt.hiAtten ?? 0) : 0,     now, T);
       } catch(e) {}
     }
+
+    // ── TQ — Vocal Dynamic EQ live updates ──
+    // Frequency, Q, threshold, attack, release morph live via AudioParam.
+    // Target gain and band type morph live via mutating bn.bandRef so the
+    // polling loop picks up new values on its next tick.
+    // Plugin on/off and per-band on/off live in fxSignature and trigger a
+    // chain rebuild (correct — we want to fully tear down the sidechain
+    // detector for off bands to save CPU).
+    if (live.tq && live.tq.bandNodes && fx.tq) {
+      const bands = fx.tq.bands || [];
+      for (const bn of live.tq.bandNodes) {
+        const cfg = bands.find(function(b){ return b.id === bn.id; });
+        if (!cfg) continue;
+        try {
+          // Audio path: peaking/shelf biquad
+          bn.biquad.frequency.setTargetAtTime(cfg.freq, now, T);
+          bn.biquad.Q.setTargetAtTime(cfg.q, now, T);
+          // (biquad.gain is driven by the polling loop — don't touch directly)
+          // Sidechain detector path
+          bn.bp.frequency.setTargetAtTime(cfg.freq, now, T);
+          bn.bp.Q.setTargetAtTime(Math.max(0.6, cfg.q * 0.7), now, T);
+          bn.det.threshold.setTargetAtTime(cfg.threshold, now, T);
+          bn.det.attack.setTargetAtTime(cfg.attack, now, T);
+          bn.det.release.setTargetAtTime(cfg.release, now, T);
+          // Live target-gain + band-type for the polling loop. Mutating
+          // bandRef here means the very next 33ms poll tick picks up the
+          // new values without any chain rebuild.
+          bn.bandRef.gain = cfg.gain;
+          bn.bandRef.type = cfg.type;
+          bn.cfg = cfg;
+        } catch(e) {}
+      }
+    }
   };
   const toggleMute = function (id) {
     setTracks(function(prev){
@@ -25489,6 +26269,133 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }
       // else: EQ off — node passes through unchanged. liveNodes.eq
       // is omitted; live-update code paths must null-check it.
+    }
+
+    // ── TQ — Vocal Dynamic EQ — 7-band sidechain-driven dynamic processor ──
+    // Each band lives as a peaking/shelf biquad IN SERIES on the audio path.
+    // A parallel SIDECHAIN path measures level at the band's frequency
+    // via bandpass + DynamicsCompressor; the compressor's `reduction`
+    // property is polled at ~30Hz and used to modulate the audio band's
+    // gain toward the user's target.
+    //
+    // Cut bands: when sidechain detects loud signal at the band's freq,
+    //            band gain dips toward `gain` (which is negative).
+    // Boost bands: "upward expansion" — when sidechain is QUIET, band gain
+    //              rises toward `gain` (which is positive). Implemented by
+    //              inverting the reduction-to-gain mapping.
+    //
+    // The polling interval is the same pattern used for R-Comp's ARC.
+    // Each band's polling is independent so bands respond at their own
+    // attack/release without cross-talk.
+    //
+    // Build cost: ~3 nodes per active band + 1 interval. For all 7 bands
+    // active that's ~21 nodes per track. Inactive bands skip allocation
+    // entirely — when TQ is OFF, no nodes are built and the audio
+    // path passes through unchanged.
+    if (fx.tq && fx.tq.on) {
+      const tq = fx.tq;
+      const bands = tq.bands || [];
+      const tqBandNodes = [];  // per-band {biquad, bp, det, intervalId, cfg}
+
+      for (let i = 0; i < bands.length; i++) {
+        const b = bands[i];
+        if (!b || !b.on) continue;
+
+        // ── Audio path: the actual EQ biquad ──
+        // Peaking filter at the band's frequency. Initial gain is 0 (transparent);
+        // the polling loop modulates it toward the target when sidechain triggers.
+        const biquad = ctx.createBiquadFilter();
+        // Air band uses high-shelf so it lifts everything above 12kHz, not just a bell
+        if (b.id === "air") {
+          biquad.type = "highshelf";
+        } else {
+          biquad.type = "peaking";
+        }
+        biquad.frequency.value = b.freq;
+        biquad.Q.value = b.q;
+        biquad.gain.value = 0;  // start transparent; sidechain drives it
+
+        // ── Sidechain detector path ──
+        // Tap the signal BEFORE the biquad processes it, bandpass it at the
+        // band's center frequency to measure ONLY that range's level, then
+        // feed into a DynamicsCompressor whose `reduction` we'll poll.
+        const bp = ctx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.value = b.freq;
+        bp.Q.value = Math.max(0.6, b.q * 0.7);  // detector bandwidth slightly wider than EQ Q
+
+        const det = ctx.createDynamicsCompressor();
+        det.threshold.value = b.threshold;
+        det.ratio.value     = 20;  // detector ratio is intentionally hot — we
+                                   // want a clear gain-reduction signal even
+                                   // for small over-threshold excursions
+        det.attack.value    = b.attack;
+        det.release.value   = b.release;
+        det.knee.value      = 6;
+
+        // The detector's output goes to a "dead-end" gain (zero gain, NOT
+        // connected to destination). Web Audio still processes the node
+        // when its input is connected — the `reduction` property keeps
+        // updating. We just don't want the detector's audio bleeding
+        // into the mix.
+        const detSink = ctx.createGain();
+        detSink.gain.value = 0;
+        det.connect(detSink);
+        // Intentionally NOT calling detSink.connect(...) — it's a dead end.
+
+        bp.connect(det);
+
+        // ── Topology wiring ──
+        // Upstream signal goes into a fanout gain. The fanout splits to:
+        //   (a) the audio biquad (in series, continues down the chain)
+        //   (b) the detector path (sidechain, measures level)
+        // The biquad then connects to `node` (whatever the previous band's
+        // fanout or downstream block is). This makes the next band's
+        // upstream the fanout of THIS band.
+        const fanout = ctx.createGain();
+        fanout.gain.value = 1;
+        fanout.connect(biquad);
+        fanout.connect(bp);
+        biquad.connect(node);
+        node = fanout;  // upstream connects here, fanning out
+
+        // ── Band config holder ──
+        // The polling loop reads target gain + band type from `bandRef`
+        // (mutable). applyFxLive mutates this object so live param tweaks
+        // (changing gain target or type) flow through to the next poll tick
+        // without rebuilding the chain.
+        const bandRef = { gain: b.gain, type: b.type };
+
+        // ── Polling loop: read detector reduction, set biquad gain ──
+        // Run at ~33Hz (every 30ms). registerLive only — offline render is
+        // instantaneous and DynamicsCompressor's reduction property doesn't
+        // update meaningfully in OfflineAudioContext anyway.
+        let intervalId = null;
+        if (registerLive) {
+          intervalId = setInterval(function(){
+            try {
+              const r = Math.abs(det.reduction || 0);  // dB of detector reduction
+              const targetGain = bandRef.gain;
+              const bandType   = bandRef.type;
+              let bandGain;
+              if (bandType === "cut") {
+                // Cut: gain dips from 0 toward target (negative) as r grows.
+                // Scale linearly: 0dB → 0%; 6dB → 100% of target cut.
+                bandGain = targetGain * Math.min(1, r / 6);
+              } else {
+                // Boost (upward expansion): full target when quiet (r~0),
+                // backs off to 0 as detector compresses (loud passages).
+                bandGain = targetGain * Math.max(0, 1 - r / 6);
+              }
+              biquad.gain.setTargetAtTime(bandGain, ctx.currentTime, 0.030);
+            } catch(e) {}
+          }, 33);
+        }
+
+        tqBandNodes.push({ id:b.id, biquad, bp, det, detSink, fanout, intervalId, bandRef, cfg:b });
+      }
+
+      liveNodes.tq = { bandNodes: tqBandNodes };
     }
 
     // ── Compressor — always built; bypass when off via extreme settings ──
@@ -26307,6 +27214,15 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         try { clearInterval(fxNodes.rcomp.arcTimer); } catch(e) {}
         fxNodes.rcomp.arcTimer = null;
       }
+      // Clean up TQ per-band polling intervals (one per active band).
+      if (fxNodes && fxNodes.tq && fxNodes.tq.bandNodes) {
+        for (const bn of fxNodes.tq.bandNodes) {
+          if (bn.intervalId) {
+            try { clearInterval(bn.intervalId); } catch(e) {}
+            bn.intervalId = null;
+          }
+        }
+      }
       delete chainsRef.current[trackId];
       delete fxNodesRef.current[trackId];
       delete gainNodesRef.current[trackId];
@@ -26767,6 +27683,31 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       pultec:     { on:false, lowFreq:60, lowBoost:0, lowAtten:0, hiFreq:5000, hiBoost:0, sharp:5, attenFreq:10000, hiAtten:0 },
       trotten:    { on:false, eqLow:0, eqMid:0, eqHigh:0, eqLowT:"shelf", eqMidT:"bell", eqHighT:"shelf", compThr:-15, compAmt:50, compMode:"auto", tapeDrv:5, tapeSat:5, tapeMode:"modern", limCeil:-0.5, limRel:0.5, limMode:"truepeak", inputGain:0, outputGain:0 },
       noiseremover: { on:false, threshold:-40, release:0.15, hold:0.08, hiss:0, lookahead:true },
+      // ── TQ — Vocal Dynamic EQ ──────────────────────────────────────
+      // 7-band dynamic EQ tuned for rap vocals. Each band has a sidechain
+      // detector (bandpass + compressor) measuring the level at the band's
+      // frequency. When the detector exceeds threshold, the band's gain
+      // moves toward `gain` (dB). Cut bands have negative target gain;
+      // boost bands have positive.
+      //
+      // Default state: TQ off, all bands ON internally (but plugin bypass
+      // skips the entire processing block until user enables it). Frequencies
+      // and Qs are tuned to where rap vocals actually have problems.
+      tq: { on:false, mode:"dyneq",
+        // mode "dyneq" = each band is a sidechain-driven dynamic biquad
+        // mode "mb" (future) = parallel multiband compressor topology
+        bands: [
+          // type "cut" = reduction is negative; "boost" = positive
+          // attack/release in seconds; threshold in dB
+          { id:"plosive",  type:"cut",   on:true, freq:80,   q:1.4, gain:-6,  threshold:-12, attack:0.002, release:0.080, name:"PLOSIVE" },
+          { id:"mud",      type:"cut",   on:true, freq:250,  q:1.0, gain:-4,  threshold:-18, attack:0.008, release:0.120, name:"MUD" },
+          { id:"box",      type:"cut",   on:true, freq:600,  q:1.2, gain:-3,  threshold:-15, attack:0.005, release:0.100, name:"BOX" },
+          { id:"presence", type:"boost", on:false,freq:3000, q:1.0, gain:+3,  threshold:-30, attack:0.020, release:0.200, name:"PRESENCE" },
+          { id:"harsh",    type:"cut",   on:true, freq:3200, q:1.8, gain:-3,  threshold:-12, attack:0.003, release:0.080, name:"HARSH" },
+          { id:"deess",    type:"cut",   on:true, freq:7000, q:2.5, gain:-6,  threshold:-14, attack:0.001, release:0.060, name:"DE-ESS" },
+          { id:"air",      type:"boost", on:false,freq:12000,q:0.7, gain:+3,  threshold:-32, attack:0.030, release:0.250, name:"AIR" },
+        ]
+      },
     };
   };
 
@@ -26837,8 +27778,9 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     // If old flat model passed in, wrap audioBuffer as a clip
     if (full.audioBuffer && full.clips.length === 0) {
       const buf = full.audioBuffer;
+      const st = full.startTime || 0;
       full.clips = [{ id:full.id+"_c0", audioBuffer:buf, url:full.url, blob:full.blob,
-        startTime:full.startTime||0, duration:buf.duration, trimStart:0, trimEnd:buf.duration,
+        startTime:st, nudgeOriginStart:st, duration:buf.duration, trimStart:0, trimEnd:buf.duration,
         label:"Main", active:true }];
       delete full.audioBuffer; delete full.url; delete full.blob; delete full.startTime; delete full.duration;
     }
@@ -26915,6 +27857,81 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     setIsSaved(false);
   };
 
+  // ── Slice a clip into two at a given timeline time ────────────────
+  // Non-destructive: both halves share the same audioBuffer, only
+  // trimStart/trimEnd boundaries differ. Snaps to grid if snap is on.
+  // Returns {ok, reason} — ok=false if the slice point isn't inside
+  // the clip's audible range.
+  //
+  // Math:
+  //   bufferSlicePoint = trimStart + (timelineTime - startTime)
+  //   Left:  { trimStart: same,         trimEnd: bufferSlicePoint }
+  //   Right: { startTime: timelineTime, trimStart: bufferSlicePoint, trimEnd: same }
+  //
+  // The right clip gets a new id (clipId + "_r") so React keys stay unique.
+  // The left clip keeps the original id so anything referencing it
+  // (selectedClipId, nudgeOriginStart's owner) stays valid.
+  const sliceClipAtTime = function (trackId, clipId, timelineTime) {
+    let outcome = { ok: false, reason: "not-found" };
+    setTracks(function (prev) {
+      return prev.map(function(t) {
+        if (t.id !== trackId) return t;
+        const idx = t.clips.findIndex(function(cl){ return cl.id === clipId; });
+        if (idx < 0) return t;
+        const cl = t.clips[idx];
+        if (!cl.audioBuffer) { outcome = { ok:false, reason:"no-buffer" }; return t; }
+
+        // Snap the slice point to grid (if enabled)
+        const snappedT = snapSecs(timelineTime);
+
+        const clipStart = cl.startTime || 0;
+        const trimS     = cl.trimStart || 0;
+        const trimE     = cl.trimEnd !== undefined ? cl.trimEnd : cl.audioBuffer.duration;
+        const clipEnd   = clipStart + (trimE - trimS);
+
+        // Slice point must be inside the clip's audible range, with a
+        // small margin so we don't create zero-length sub-clips that
+        // would be invisible and unselectable.
+        const MARGIN = 0.05;  // 50ms minimum on each side
+        if (snappedT <= clipStart + MARGIN || snappedT >= clipEnd - MARGIN) {
+          outcome = { ok:false, reason:"out-of-range" };
+          return t;
+        }
+
+        // Map timeline time → position inside the audioBuffer
+        const bufferSlicePoint = trimS + (snappedT - clipStart);
+
+        // Build the two new clips
+        const leftClip = Object.assign({}, cl, {
+          trimEnd: bufferSlicePoint,
+        });
+        const rightClip = Object.assign({}, cl, {
+          id: cl.id + "_r" + Date.now().toString(36),  // unique new id
+          startTime: snappedT,
+          trimStart: bufferSlicePoint,
+          // Re-baseline the right half's nudge origin to its new startTime
+          // so the Nudge bar shows 0 ms for the freshly-created right half.
+          nudgeOriginStart: snappedT,
+          // Label so user can see this is a slice
+          label: (cl.label || "Clip") + " (B)",
+        });
+        // Also rename the left half for clarity (only on first slice — if
+        // the label already ends in (A)/(B), leave it alone).
+        if (!/(A|B)\)$/.test(leftClip.label || "")) {
+          leftClip.label = (cl.label || "Clip") + " (A)";
+        }
+
+        // Replace the original with two clips
+        const newClips = t.clips.slice();
+        newClips.splice(idx, 1, leftClip, rightClip);
+        outcome = { ok:true };
+        return Object.assign({}, t, { clips: newClips });
+      });
+    });
+    setIsSaved(false);
+    return outcome;
+  };
+
   const removeClip = function (trackId, clipId) {
     setTracks(function (prev) {
       return prev.map(function(t) {
@@ -26978,6 +27995,12 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     if (fxNodes && fxNodes.rcomp && fxNodes.rcomp.arcTimer) {
       try { clearInterval(fxNodes.rcomp.arcTimer); } catch(e) {}
     }
+    // Clean TQ band polling intervals (matches teardownChain logic)
+    if (fxNodes && fxNodes.tq && fxNodes.tq.bandNodes) {
+      for (const bn of fxNodes.tq.bandNodes) {
+        if (bn.intervalId) { try { clearInterval(bn.intervalId); } catch(e) {} }
+      }
+    }
     delete chainsRef.current[id];
     delete fxNodesRef.current[id];
     delete gainNodesRef.current[id];
@@ -27023,7 +28046,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
           volume: 1, pan: 0,
           effects: defaultEffects(),
           color: type === "beat" ? "#C026D3" : VOCAL_COLORS[tracksRef.current.filter(function(t){return t.type==="vocal";}).length % VOCAL_COLORS.length],
-          clips: [{ id:tId+"_c0", audioBuffer:buf, url, startTime:0, duration:buf.duration,
+          clips: [{ id:tId+"_c0", audioBuffer:buf, url, startTime:0, nudgeOriginStart:0, duration:buf.duration,
             trimStart:0, trimEnd:buf.duration, label:"Main", active:true }],
         };
         setTracks(function(prev){ return [...prev, newTrack]; });
@@ -27479,6 +28502,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
           id: String(Date.now()) + "_rec",
           audioBuffer: buf, url, blob,
           startTime: clipStartTime,       // wall-clock anchor — do NOT adjust for silence
+          nudgeOriginStart: clipStartTime, // baseline for the per-clip nudge readout
           duration:  buf.duration,
           trimStart: leadingSilenceSec,   // skip silent warmup during playback only
           trimEnd:   buf.duration,
@@ -27607,23 +28631,24 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // ── Clip selection & drag state ───────────────────────────────
   // selectedClipId and dragRef declared at top of component (Rules of Hooks)
 
-  // Ref captures the originally-recorded startTime of the currently-selected
-  // clip. The nudge slider uses this as the "0" reference so the user can
-  // reset back to where the clip was at selection time. Updated whenever
-  // selectedClipId changes.
-  const selectedClipOriginalStartRef = useRef(0);
+  // ── Per-clip nudge model ──────────────────────────────────────────
+  // Each clip stores a `nudgeOriginStart` property — the startTime to
+  // treat as "0 ms" for the Nudge bar's readout. The readout shows the
+  // clip's CURRENT displacement from this origin, persists across
+  // selections, and survives save/load.
+  //
+  // Lifecycle of nudgeOriginStart:
+  //   • SET on clip creation (recording stop, file import, duplicate, etc.)
+  //     to whatever startTime the clip is placed at
+  //   • RE-BASELINED when the user horizontally drags the clip (intentional
+  //     reposition) — the new drop position becomes the new origin
+  //   • NOT touched by nudge buttons (±5, ±50, Reset) — the readout reflects
+  //     the offset they introduce
+  //
+  // Legacy clips without nudgeOriginStart fall back to using the clip's
+  // current startTime so the readout shows 0 ms instead of garbage.
 
   const selectClip = function (clipId) {
-    // Capture the current startTime as the "original" baseline for the nudge slider.
-    // This way, the slider's reset-to-0 always returns the clip to its position at
-    // the moment of selection, regardless of how far it's been nudged so far.
-    try {
-      const tracksNow = tracksRef.current || [];
-      for (const tr of tracksNow) {
-        const cl = (tr.clips || []).find(function(c){ return c.id === clipId; });
-        if (cl) { selectedClipOriginalStartRef.current = cl.startTime || 0; break; }
-      }
-    } catch(e) { selectedClipOriginalStartRef.current = 0; }
     setSelectedClipId(clipId);
   };
 
@@ -27631,8 +28656,30 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     setSelectedClipId(null);
   };
 
+  // Update a specific clip's nudgeOriginStart to a new baseline (typically
+  // the position it was just dropped at after a horizontal drag). After
+  // this, the Nudge bar's readout reads 0 ms for the clip — reflecting
+  // that it sits exactly at its new "origin."
+  const rebaseClipNudgeOrigin = function (clipId, newOrigin) {
+    if (!clipId) return;
+    setTracks(function(prev){
+      return prev.map(function(tr){
+        if (!tr.clips || tr.clips.length === 0) return tr;
+        let touched = false;
+        const newClips = tr.clips.map(function(cl){
+          if (cl.id !== clipId) return cl;
+          touched = true;
+          return Object.assign({}, cl, { nudgeOriginStart: newOrigin });
+        });
+        if (!touched) return tr;
+        return Object.assign({}, tr, { clips: newClips });
+      });
+    });
+  };
+
   // Apply a nudge delta in MILLISECONDS to the selected clip's startTime.
-  // Used by the nudge slider. Clamps to [0, +∞) so clips can't go negative.
+  // The nudge origin is unchanged so the readout reflects the new offset.
+  // Clamps startTime to [0, +∞).
   const nudgeSelectedClip = function (deltaMs) {
     const id = selectedClipId;
     if (!id) return;
@@ -27654,14 +28701,13 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     setIsSaved(false);
   };
 
-  // Set the nudge slider to a specific offset from the originally-recorded position.
-  // Different from nudgeSelectedClip which is an INCREMENTAL change — this is an
-  // ABSOLUTE position relative to the captured original.
+  // Set the selected clip's startTime to its nudgeOriginStart + offsetMs.
+  // Used by Reset (offsetMs=0). Reads nudgeOriginStart from the clip
+  // itself rather than a closure variable, so the baseline persists
+  // across selections.
   const setSelectedClipNudge = function (offsetMs) {
     const id = selectedClipId;
     if (!id) return;
-    const orig = selectedClipOriginalStartRef.current || 0;
-    const target = Math.max(0, orig + offsetMs / 1000);
     setTracks(function(prev){
       return prev.map(function(tr){
         if (!tr.clips || tr.clips.length === 0) return tr;
@@ -27669,6 +28715,8 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         const newClips = tr.clips.map(function(cl){
           if (cl.id !== id) return cl;
           touched = true;
+          const origin = (cl.nudgeOriginStart !== undefined) ? cl.nudgeOriginStart : (cl.startTime || 0);
+          const target = Math.max(0, origin + offsetMs / 1000);
           return Object.assign({}, cl, { startTime: target });
         });
         if (!touched) return tr;
@@ -27720,10 +28768,12 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
           moveClipToTrack(track.id, clip.id, targetTrack.id, { startTime: pendingStartT });
         }
       }
-      // Re-capture the clip's new startTime as the nudge baseline so the
-      // bottom Nudge bar resets correctly after a horizontal drag.
-      if (selectedClipId === clip.id) {
-        try { selectedClipOriginalStartRef.current = pendingStartT; } catch(e) {}
+      // Re-baseline the clip's nudge origin to its new drop position so
+      // Reset snaps back here, not to where it was first recorded. Done
+      // ONLY when the clip actually moved (a fail-to-move tap shouldn't
+      // wipe out the existing baseline).
+      if (moved) {
+        try { rebaseClipNudgeOrigin(clip.id, pendingStartT); } catch(e) {}
       }
     };
     document.addEventListener("mousemove", onMove);
@@ -27987,13 +29037,11 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
           moveClipToTrack(track.id, clip.id, targetTrack.id, { startTime: pendingStartT });
         }
       }
-      // Re-capture the clip's new startTime as the nudge baseline so the
-      // bottom Nudge bar resets correctly after a horizontal drag.
-      if (selectedClipId === clip.id) {
-        try {
-          // The clip moved by pendingStartT - startStart. New origin = pendingStartT.
-          selectedClipOriginalStartRef.current = pendingStartT;
-        } catch(e) {}
+      // Re-baseline the clip's nudge origin to its new drop position so
+      // Reset snaps back here. Only when the clip actually moved (a tap
+      // without movement shouldn't reset the baseline).
+      if (dragRef.current && dragRef.current.moved) {
+        try { rebaseClipNudgeOrigin(clip.id, pendingStartT); } catch(e) {}
       }
       dragRef.current = null;
       elem.removeEventListener("touchmove", onMove);
@@ -29442,6 +30490,34 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
               }} style={{ display:"flex",alignItems:"center",gap:12,width:"100%",padding:"13px 16px",background:"none",border:"none",borderBottom:"1px solid #111",color:"white",fontSize:14,cursor:"pointer" }}>
                 <span style={{ width:20,textAlign:"center" }}>⧉</span> Duplicate
               </button>
+              {/* Slice at playhead — splits the clip into two at the
+                  current play position. Snaps to grid if snap is enabled.
+                  Only shown when the playhead is inside the clip's audible
+                  range (with a 50ms margin from each edge to avoid creating
+                  invisibly-thin sub-clips). */}
+              {(function(){
+                const c = contextMenu.clip;
+                if (!c || !c.audioBuffer) return null;
+                const t = currentTime;
+                const trimS = c.trimStart || 0;
+                const trimE = c.trimEnd !== undefined ? c.trimEnd : c.audioBuffer.duration;
+                const startT = c.startTime || 0;
+                const endT = startT + (trimE - trimS);
+                if (t <= startT + 0.05 || t >= endT - 0.05) return null;  // out of range
+                const snappedT = snapSecs(t);
+                // If the snap moves the slice outside the clip, fall back to unsnapped
+                const sliceT = (snappedT > startT + 0.05 && snappedT < endT - 0.05) ? snappedT : t;
+                return (
+                  <button onClick={function(){
+                    sliceClipAtTime(contextMenu.track.id, contextMenu.clip.id, sliceT);
+                    setContextMenu(null);
+                    try { if (navigator.vibrate) navigator.vibrate(20); } catch(_){}
+                  }} style={{ display:"flex",alignItems:"center",gap:12,width:"100%",padding:"13px 16px",background:"none",border:"none",borderBottom:"1px solid #111",color:"white",fontSize:14,cursor:"pointer" }}>
+                    <span style={{ width:20,textAlign:"center" }}>✂</span>
+                    <span style={{ flex:1, textAlign:"left" }}>Slice at playhead{snapToGrid ? " (snap)" : ""}</span>
+                  </button>
+                );
+              })()}
               {/* Move to track above — preserves startTime so it lands in the same
                   timeline position, just on a different track. Useful when the
                   manual drag is fiddly (e.g. drifting horizontally when the user
@@ -31425,13 +32501,20 @@ userPickedMicRef.current = true;
       {(function(){
         if (!selectedClipId) return null;
         if (fxTrackId) return null;  // hide while FX panel is open
-        // Find the selected clip to compute its current nudge offset (display only)
+        if (contextMenu) return null;  // hide while clip context menu is open
+                                       // (Duplicate / Move / Delete menu sits
+                                       // above the timeline near where the
+                                       // nudge bar would render — overlap
+                                       // makes the menu unreadable)
+        // Find the selected clip and compute its current displacement from
+        // its persistent nudgeOriginStart. Fallback to current startTime
+        // for legacy clips so the readout shows 0 instead of garbage.
         let currentOffsetMs = 0;
         const tracksNow = tracksRef.current || [];
         for (const tr of tracksNow) {
           const cl = (tr.clips || []).find(function(c){ return c.id === selectedClipId; });
           if (cl) {
-            const orig = selectedClipOriginalStartRef.current || 0;
+            const orig = (cl.nudgeOriginStart !== undefined) ? cl.nudgeOriginStart : (cl.startTime || 0);
             currentOffsetMs = Math.round(((cl.startTime || 0) - orig) * 1000);
             break;
           }
