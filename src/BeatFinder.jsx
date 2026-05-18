@@ -21065,8 +21065,28 @@ function simulateTQBandGain(sourceSamples, bandCfg, sampleRate) {
     if (i >= nextStepSample) {
       // Convert envelope to dB. 20log10 with a tiny floor to avoid -Infinity.
       const envDb = 20 * Math.log10(env + 1e-10);
-      const excess = Math.max(0, envDb - threshold);
-      const reduction = excess * ratioCoeff;
+      // ── Soft knee ──
+      // DynamicsCompressor uses a 6dB soft knee by default — compression
+      // starts gradually at (threshold - 3) and reaches the ratio fully at
+      // (threshold + 3). A hard-knee approximation (excess = max(0, env -
+      // threshold)) under-cuts in the knee region by up to ~0.7dB at the
+      // threshold itself, which makes export sound less processed than
+      // live (vocals "loud", low-mids "muddy"). Match the live curve:
+      //
+      //   envDb < T-K/2:    reduction = 0
+      //   T-K/2..T+K/2:     reduction = ((envDb-(T-K/2))^2 / (2K)) * (1-1/ratio)
+      //   envDb > T+K/2:    reduction = (envDb - T) * (1-1/ratio)
+      const KNEE = 6; // dB (matches DynamicsCompressor default)
+      const HALF_KNEE = KNEE / 2;
+      let reduction;
+      if (envDb < threshold - HALF_KNEE) {
+        reduction = 0;
+      } else if (envDb < threshold + HALF_KNEE) {
+        const delta = envDb - (threshold - HALF_KNEE);
+        reduction = (delta * delta / (2 * KNEE)) * ratioCoeff;
+      } else {
+        reduction = (envDb - threshold) * ratioCoeff;
+      }
       let bandGain;
       if (isCut) {
         bandGain = targetGain * Math.min(1, reduction / 6);
@@ -30624,12 +30644,31 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       const a = document.createElement("a");
       a.href = URL.createObjectURL(wavBlob);
       a.download = (projectName || "project") + " - mix.wav";
+
+      // Tell the app-level RAF-gap recovery to skip "blank app reload"
+      // while iOS shows the Save-to-Files share sheet. Without this, the
+      // share sheet's multi-second backgrounding triggers safeReload(),
+      // which kicks the user back to home and away from their project.
+      //
+      // The flag is consumed by the bfcache watcher (see App component)
+      // and auto-cleared after a generous window in case the user
+      // cancels the share sheet without dismissing cleanly.
+      try {
+        sessionStorage.setItem("bf_share_sheet_active", String(Date.now()));
+      } catch(e) {}
+
       a.click();
       // Clean up the object URL after a moment
       setTimeout(function(){ try { URL.revokeObjectURL(a.href); } catch(e) {} }, 1000);
 
       setExportMsg("Done!");
       setTimeout(function(){ setExporting(false); setExportMsg(""); }, 2500);
+      // Clear share-sheet flag after 60s — generous window covering the
+      // most leisurely Save-to-Files navigation. Past that, fresh reloads
+      // are safe to recover normally.
+      setTimeout(function(){
+        try { sessionStorage.removeItem("bf_share_sheet_active"); } catch(e) {}
+      }, 60000);
     } catch (e) {
       console.error("[export] Failed:", e);
       setExportMsg("Export failed: " + (e.message || "unknown error"));
@@ -36225,6 +36264,20 @@ function BeatFinderInner() {
     }
 
     function checkAndRecover() {
+      // Skip recovery while iOS share sheet is up (Save to Files, etc.).
+      // The share sheet backgrounds the app for several seconds while the
+      // user picks a location and taps Save. When it dismisses, RAF
+      // resumes after a >800ms gap and the recovery would otherwise
+      // false-positive: app rect is briefly 0 during iOS's repaint, so
+      // safeReload() fires and bounces the user out of studio.
+      try {
+        const flag = sessionStorage.getItem("bf_share_sheet_active");
+        if (flag) {
+          // Older than 60s? expired — clear and proceed normally.
+          if (Date.now() - parseInt(flag, 10) < 60000) return;
+          sessionStorage.removeItem("bf_share_sheet_active");
+        }
+      } catch(e) {}
       if (isAppBlank()) safeReload();
     }
 
@@ -36343,15 +36396,33 @@ function BeatFinderInner() {
   };
   const [tab, setTab] = useState(function() {
     // Restore the active tab after an iOS background reload.
-    // Never open with studio on fresh load — user must navigate there intentionally.
+    // Never open with studio on fresh load — user must navigate there
+    // intentionally — UNLESS we know we were mid-export when the reload
+    // happened (Save-to-Files share sheet can cause iOS to reload Safari
+    // tabs in low-memory situations). In that case, restore the user to
+    // the studio so they don't lose their place after exporting.
     try {
       const saved = sessionStorage.getItem("bf_tab");
+      const shareSheetActive = sessionStorage.getItem("bf_share_sheet_active");
+      if (saved === "studio" && shareSheetActive) {
+        // Came back from a share sheet — restore studio.
+        return "studio";
+      }
       return (saved && saved !== "studio") ? saved : "home";
     } catch(e) { return "home"; }
   });
   // studioVisited: true once the user has navigated to Studio at least once this session.
   // StudioScreen only mounts after first visit — prevents mic permission firing on page load.
-  const [studioVisited, setStudioVisited] = useState(false);
+  // If we're restoring to studio (returning from share sheet), pre-flip this so
+  // StudioScreen actually mounts on first render — otherwise the user lands on
+  // a blank studio tab.
+  const [studioVisited, setStudioVisited] = useState(function() {
+    try {
+      const saved = sessionStorage.getItem("bf_tab");
+      const shareSheetActive = sessionStorage.getItem("bf_share_sheet_active");
+      return saved === "studio" && !!shareSheetActive;
+    } catch(e) { return false; }
+  });
   // Bumped whenever the user re-taps the Artists tab while already on it.
   // ArtistsScreen watches this and clears its internal selectedArtist state,
   // returning the user to the artist-list root.
