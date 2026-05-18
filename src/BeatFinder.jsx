@@ -22592,12 +22592,15 @@ function _TQPluginInner({ fx, upd, Knob, trackId }) {
   }, []);
 
   // ── Local panel state ──
-  // Selected band — which one's detail is shown. Default: first ON band, else first.
-  const defaultSelected = React.useMemo(function(){
-    const firstOn = bands.find(function(b){ return b.on; });
-    return firstOn ? firstOn.id : (bands[0] ? bands[0].id : "deess");
-  }, [bands.length]);
-  const [selectedBandId, setSelectedBandId] = React.useState(defaultSelected);
+  // Selected band — which one's detail is shown. Initialized lazily from the
+  // bands array on first render. Subsequent changes to bands DON'T fight the
+  // user's selection (e.g. applying a preset keeps the current selection).
+  // If selectedBandId ever points to a non-existent band, the detail render
+  // falls back to bands[0] (no state mutation needed).
+  const [selectedBandId, setSelectedBandId] = React.useState(function(){
+    const firstOn = (tq.bands || []).find(function(b){ return b.on; });
+    return firstOn ? firstOn.id : ((tq.bands && tq.bands[0]) ? tq.bands[0].id : "plosive");
+  });
 
   // ── LISTEN state ──
   // When set, the TQ chain inserts a bandpass filter at the chosen band's
@@ -22610,12 +22613,6 @@ function _TQPluginInner({ fx, upd, Knob, trackId }) {
   const setListenBandId = function(bandId) {
     upd("tq", { listenBandId: bandId });
   };
-
-  // When LISTEN is active, force-select that band so the detail panel shows
-  // what the user is hearing.
-  React.useEffect(function(){
-    if (listenBandId) setSelectedBandId(listenBandId);
-  }, [listenBandId]);
 
   // Clear LISTEN when the user closes/disables the plugin. Listen filter is
   // ephemeral — saving a project with listen still active would be confusing
