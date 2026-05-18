@@ -28858,6 +28858,18 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
 
     const onMove = function(te) {
       if (!selBoxRef.current) return;
+      // If a second finger lands while the lasso is active, the user is
+      // pinch-zooming. Abort the lasso so the native pinch can take over.
+      // We DON'T preventDefault here — that's the whole point: let the
+      // browser handle the gesture as a zoom.
+      if (te.touches && te.touches.length > 1) {
+        selBoxRef.current = null;
+        setSelBox(null);
+        setSelClipIds(new Set());
+        scrollEl.removeEventListener("touchmove", onMove);
+        scrollEl.removeEventListener("touchend", onEnd);
+        return;
+      }
       te.preventDefault();
       te.stopPropagation();
       const tx = te.touches[0].clientX;
@@ -28913,8 +28925,13 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       e.target.closest("[data-clipid]") ||
       e.target.closest("[data-trimhandle]")
     )) return;
+    // Bail entirely on multi-touch — the user is pinching to zoom, not
+    // attempting to lasso. Without this guard, the long-press timer would
+    // still fire 0.6s after the first finger landed, hijacking the pinch
+    // gesture and starting an unwanted selection box.
+    if (e.touches && e.touches.length > 1) return;
     // Called from onTouchStart on blank lane space.
-    // We start a 0.4s timer; if the finger doesn't move much, activate lasso.
+    // We start a 0.6s timer; if the finger doesn't move much, activate lasso.
     const touch = e.touches[0];
     const startX = touch.clientX;
     const startY = touch.clientY;
@@ -28927,6 +28944,13 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
 
     const cancelLP = function(te) {
       if (!longPressRef.current) return;
+      // Cancel immediately if a second finger lands during the long-press
+      // window — that's a pinch gesture, not a lasso intent.
+      if (te.touches && te.touches.length > 1) {
+        clearTimeout(longPressRef.current);
+        longPressRef.current = null;
+        return;
+      }
       // Cancel if finger moved more than 14px — gives the user normal
       // scroll headroom on iOS (10-12px is typical finger drift before
       // a scroll gesture commits). Previously 8px was too tight.
@@ -28937,13 +28961,24 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         longPressRef.current = null;
       }
     };
+    // Also watch touchstart globally so a SECOND finger landing during the
+    // long-press window cancels the lasso. touchmove alone misses the case
+    // where the user puts down a second finger but doesn't immediately move.
+    const cancelOnSecondTouch = function(te) {
+      if (longPressRef.current && te.touches && te.touches.length > 1) {
+        clearTimeout(longPressRef.current);
+        longPressRef.current = null;
+      }
+    };
     const cancelOnEnd = function() {
       if (longPressRef.current) { clearTimeout(longPressRef.current); longPressRef.current = null; }
-      document.removeEventListener("touchmove", cancelLP);
-      document.removeEventListener("touchend", cancelOnEnd);
+      document.removeEventListener("touchmove",  cancelLP);
+      document.removeEventListener("touchend",   cancelOnEnd);
+      document.removeEventListener("touchstart", cancelOnSecondTouch);
     };
-    document.addEventListener("touchmove", cancelLP, { passive: true });
-    document.addEventListener("touchend", cancelOnEnd, { passive: true });
+    document.addEventListener("touchmove",  cancelLP,            { passive: true });
+    document.addEventListener("touchstart", cancelOnSecondTouch, { passive: true });
+    document.addEventListener("touchend",   cancelOnEnd,         { passive: true });
   };
 
   const deleteSelectedClips = function() {
