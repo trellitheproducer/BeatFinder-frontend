@@ -28896,10 +28896,33 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         return;
       }
 
+      setExportMsg("Measuring FX latencies...");
+
+      // ── PDC: measure each track's FX chain latency for export too ──
+      // Same approach as live doPlay — without this, FX-laden vocals slip
+      // 5-30ms behind dry channels in the exported mix.
+      const exportLatencies = [];
+      let maxFxLatency = 0;
+      try {
+        const measureTasks = liveTracks.map(function(tr){
+          return measureChainLatency(tr, SR);
+        });
+        const results = await Promise.all(measureTasks);
+        for (let i = 0; i < results.length; i++) {
+          exportLatencies[i] = results[i] || 0;
+          if (results[i] > maxFxLatency) maxFxLatency = results[i];
+        }
+      } catch(measureErr) {
+        console.warn("[export] Latency measurement failed; no PDC applied:", measureErr);
+      }
+      // Buffer length needs to accommodate the lead-in too
+      const startupLead = Math.min(0.25, maxFxLatency + 0.02);
+      const ocLength = Math.ceil((totalDur + startupLead) * SR);
+
       setExportMsg("Building chains...");
 
-      // ── Create OfflineAudioContext ──
-      const oc = new OfflineAudioContext(2, Math.ceil(totalDur * SR), SR);
+      // ── Create OfflineAudioContext sized to include PDC lead-in ──
+      const oc = new OfflineAudioContext(2, ocLength, SR);
 
       // ── Register worklets if any track needs them ──
       const needsAutotune = liveTracks.some(function(t){ return t.effects && t.effects.autotune && t.effects.autotune.on; });
@@ -28913,9 +28936,16 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         await registerRNNoiseWorklet(oc);
       }
 
+      // ── Master gain stage (mirrors live's masterGainRef setup) ──
+      // Without this, the masterVolume fader setting is ignored in export.
+      const exportMaster = oc.createGain();
+      exportMaster.gain.value = masterVolume;
+      exportMaster.connect(oc.destination);
+
       // ── Build each track's chain and schedule its clips ──
       const hasSolo = liveTracks.some(function(t){ return t.isSoloed; });
-      for (const tr of liveTracks) {
+      for (let ti = 0; ti < liveTracks.length; ti++) {
+        const tr = liveTracks[ti];
         if (tr.isMuted) continue;
         if (hasSolo && !tr.isSoloed) continue;
         const clips = tr.clips || [];
@@ -28926,8 +28956,16 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         // Build the FX chain for this track using the unified buildChain.
         // registerLive: false ensures no React-ref side effects, no VU
         // analyser allocation, no R-Comp ARC interval — clean offline render.
+        // Connect to exportMaster (which applies masterVolume), NOT oc.destination.
         setExportMsg("Mixing " + (tr.name || "track") + "...");
-        const entry = buildChain(oc, oc.destination, tr, hasSolo, { registerLive: false });
+        const entry = buildChain(oc, exportMaster, tr, hasSolo, { registerLive: false });
+
+        // Per-track PDC: pull this track's clips back by its FX chain latency
+        // so that audio EMERGES from the chain at the same wall-clock moment
+        // across all tracks. The startupLead at the start of the timeline
+        // gives FX-heavy tracks enough headroom to be scheduled at
+        // (startTime - trackLatency) without going below 0.
+        const trackLatency = exportLatencies[ti] || 0;
 
         // Schedule each clip into the chain
         for (const cl of clips) {
@@ -28940,7 +28978,14 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
             const src = oc.createBufferSource();
             src.buffer = cl.audioBuffer;
             src.connect(entry);
-            src.start(cl.startTime || 0, trimS, trimDur);
+            // when = startupLead + clipStart - trackLatency
+            //   • startupLead shifts the whole project right by the worst latency
+            //   • trackLatency pulls this track's clips back, compensating its FX
+            //   • Net effect: every track's audio reaches exportMaster at the
+            //     same wall-clock time as if there were no FX latency.
+            let when = startupLead + (cl.startTime || 0) - trackLatency;
+            if (when < 0) when = 0;  // safety clamp
+            src.start(when, trimS, trimDur);
           } catch(clipErr) {
             console.warn("[export] Failed to schedule clip:", clipErr);
           }
@@ -28951,9 +28996,39 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       setExportMsg("Rendering...");
       const rendered = await oc.startRendering();
 
+      // ── Trim leading silence ──
+      // The startupLead at the beginning of the timeline shifts the audible
+      // start of the project to startupLead seconds in. Trim it off so the
+      // exported WAV starts at the first audible sample, not the lead-in pad.
+      let finalBuffer = rendered;
+      if (startupLead > 0.001) {
+        try {
+          const skipSamples = Math.round(startupLead * SR);
+          const newLen = rendered.length - skipSamples;
+          if (newLen > 0) {
+            const trimmed = new (window.OfflineAudioContext || OfflineAudioContext)(
+              rendered.numberOfChannels, newLen, rendered.sampleRate
+            );
+            // Use a regular AudioBuffer for the trimmed copy (don't need an
+            // OfflineAudioContext for that — just allocate buffer directly).
+            // The simplest: create a new AudioBuffer and copy channel data.
+            const trimmedBuf = oc.createBuffer(rendered.numberOfChannels, newLen, rendered.sampleRate);
+            for (let ch = 0; ch < rendered.numberOfChannels; ch++) {
+              const srcCh = rendered.getChannelData(ch);
+              const dstCh = trimmedBuf.getChannelData(ch);
+              for (let i = 0; i < newLen; i++) dstCh[i] = srcCh[skipSamples + i];
+            }
+            finalBuffer = trimmedBuf;
+          }
+        } catch(trimErr) {
+          console.warn("[export] Trim leading silence failed; shipping with pad:", trimErr);
+          finalBuffer = rendered;
+        }
+      }
+
       // ── Encode to WAV and trigger download ──
       setExportMsg("Encoding...");
-      const wavBuf = audioBufferToWav(rendered);
+      const wavBuf = audioBufferToWav(finalBuffer);
       const wavBlob = new Blob([wavBuf], { type: "audio/wav" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(wavBlob);
