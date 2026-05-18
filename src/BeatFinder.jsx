@@ -24749,6 +24749,12 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   const [countIn,      setCountIn]      = useState(0);
   const [exporting,    setExporting]    = useState(false);
   const [exportMsg,    setExportMsg]    = useState("");
+  // Export progress 0..1. Updated at known phase boundaries (preparing,
+  // measuring, mixing each track, TQ analysis, rendering, encoding). Used
+  // by the export overlay's progress bar — a CSS spinner alone freezes on
+  // iOS when the main thread is locked by heavy DSP work, so we drive a
+  // visible progress bar from explicit state writes instead.
+  const [exportProgress, setExportProgress] = useState(0);
   const [bpmDetecting, setBpmDetecting] = useState(false);
   const [detectedBpm,  setDetectedBpm]  = useState(null);
   // ── Advanced BPM engine state ─────────────────────────────────
@@ -30571,8 +30577,9 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // loop that, for a multi-minute project, could block the main thread for
   // 200-500ms — long enough to freeze the export spinner's CSS animation.
   // This variant yields every N samples so the compositor can paint frames.
-  // Caller MUST await this.
-  const audioBufferToWavAsync = async function (buf) {
+  // Caller MUST await this. Optional onProgress(fraction) callback fires
+  // periodically (0..1) so a UI bar can advance.
+  const audioBufferToWavAsync = async function (buf, onProgress) {
     const nc=buf.numberOfChannels,sr=buf.sampleRate,len=buf.length,bl=len*nc*2;
     const ab=new ArrayBuffer(44+bl),dv=new DataView(ab);
     const ws=function(o,s){for(let i=0;i<s.length;i++)dv.setUint8(o+i,s.charCodeAt(i));};
@@ -30597,6 +30604,9 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         // setTimeout(0) yields to the event loop; the spinner repaints
         // before we resume.
         await new Promise(function(r){ setTimeout(r, 0); });
+        if (onProgress) {
+          try { onProgress(i / len); } catch(e) {}
+        }
       }
     }
     return ab;
@@ -30629,9 +30639,22 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
 
 
   const exportMix = async function () {
-    setExporting(true); setExportMsg("Preparing...");
+    setExporting(true); setExportMsg("Preparing..."); setExportProgress(0.02);
     try {
-      const SR = 44100;
+      // ── Sample rate: match the live AudioContext to avoid resampling ──
+      // Previously hardcoded 44100. On iOS the live context typically runs
+      // at 48000 (the device's native rate), so rendering at 44100 forced
+      // Web Audio to resample every clip and node output — the on-board
+      // resampler is decent but not transparent, and the very top end
+      // (>14kHz region) loses sparkle in the process. Matching the live
+      // rate makes the export bit-identical to live in terms of frequency
+      // response.
+      //
+      // Fall back to 48000 if no live context is available, and clamp to
+      // a sensible range (some Android browsers report odd rates).
+      const liveActx = (typeof actxRef !== "undefined") && actxRef && actxRef.current;
+      const liveSR = liveActx && liveActx.sampleRate ? liveActx.sampleRate : 48000;
+      const SR = (liveSR >= 22050 && liveSR <= 96000) ? liveSR : 48000;
       const liveTracks = tracksRef.current || tracks || [];
 
       // ── Compute total project duration from clip endpoints ──
@@ -30656,7 +30679,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         return;
       }
 
-      setExportMsg("Measuring FX latencies...");
+      setExportMsg("Measuring FX latencies..."); setExportProgress(0.08);
 
       // ── PDC: measure each track's FX chain latency for export too ──
       // Same approach as live doPlay — without this, FX-laden vocals slip
@@ -30679,7 +30702,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       const startupLead = Math.min(0.25, maxFxLatency + 0.02);
       const ocLength = Math.ceil((totalDur + startupLead) * SR);
 
-      setExportMsg("Building chains...");
+      setExportMsg("Building chains..."); setExportProgress(0.15);
 
       // ── Create OfflineAudioContext sized to include PDC lead-in ──
       const oc = new OfflineAudioContext(2, ocLength, SR);
@@ -30688,11 +30711,11 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       const needsAutotune = liveTracks.some(function(t){ return t.effects && t.effects.autotune && t.effects.autotune.on; });
       const needsNoiseGate = liveTracks.some(function(t){ return t.effects && t.effects.noiseremover && t.effects.noiseremover.on; });
       if (needsAutotune) {
-        setExportMsg("Loading Autotune...");
+        setExportMsg("Loading Autotune..."); setExportProgress(0.18);
         await registerAutotuneWorklet(oc);
       }
       if (needsNoiseGate) {
-        setExportMsg("Loading Noise Gate...");
+        setExportMsg("Loading Noise Gate..."); setExportProgress(0.22);
         await registerRNNoiseWorklet(oc);
       }
 
@@ -30718,6 +30741,10 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
         // analyser allocation, no R-Comp ARC interval — clean offline render.
         // Connect to exportMaster (which applies masterVolume), NOT oc.destination.
         setExportMsg("Mixing " + (tr.name || "track") + "...");
+        // Track-mixing phase occupies 25%..60% of the bar. Each track
+        // advances the bar proportionally to its position in the loop so
+        // the user sees forward movement on every track.
+        setExportProgress(0.25 + 0.35 * (ti / Math.max(1, liveTracks.length)));
 
         // ── TQ offline simulation ──
         // If this track has TQ enabled, precompute each band's gain envelope
@@ -30730,6 +30757,9 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
           const tqBands = tr.effects.tq.bands.filter(function(b){ return b.on; });
           if (tqBands.length > 0) {
             setExportMsg("Analyzing TQ for " + (tr.name || "track") + "...");
+            // Bump the bar a bit so TQ analysis is visibly distinct from
+            // straight mixing (TQ is the longest sync per-track step).
+            setExportProgress(function(p){ return Math.max(p, 0.28 + 0.35 * (ti / Math.max(1, liveTracks.length)) + 0.02); });
             // Build per-track mono source for envelope analysis.
             let sourceMono = buildTQSourceMono(tr, totalDur, SR);
             // ── Pre-filter source through the parametric EQ ──
@@ -30745,7 +30775,8 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
               await new Promise(function(r){ setTimeout(r, 0); });
             }
             tqAutomation = {};
-            for (const b of tqBands) {
+            for (let bi = 0; bi < tqBands.length; bi++) {
+              const b = tqBands[bi];
               tqAutomation[b.id] = await simulateTQBandGain(sourceMono, b, SR);
               // Yield between bands. Each band loops over every sample of
               // the track — that's tens of thousands of biquad+envelope ops
@@ -30753,6 +30784,10 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
               // CSS animation on the export spinner freezes. Releasing the
               // main thread every band lets the compositor paint a frame.
               await new Promise(function(r){ setTimeout(r, 0); });
+              // Nudge the progress bar a hair so each completed band shows
+              // visible advancement. ~0.5% per band keeps total within the
+              // track's allotted slice of the bar.
+              setExportProgress(function(p){ return Math.min(0.59, p + 0.005); });
             }
           }
         }
@@ -30792,8 +30827,24 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }
 
       // ── Render ──
-      setExportMsg("Rendering...");
-      const rendered = await oc.startRendering();
+      setExportMsg("Rendering..."); setExportProgress(0.65);
+      // The actual offline render is a single browser-internal promise
+      // with no progress callbacks. To keep the bar visibly moving during
+      // this multi-second wait, creep it from 65% up to 89% via interval.
+      // Cancelled in `finally` regardless of outcome.
+      const renderTickHandle = setInterval(function(){
+        setExportProgress(function(p){
+          if (p >= 0.89) return p;
+          return p + 0.005;
+        });
+      }, 200);
+      let rendered;
+      try {
+        rendered = await oc.startRendering();
+      } finally {
+        clearInterval(renderTickHandle);
+      }
+      setExportProgress(0.90);
 
       // ── Trim leading silence ──
       // The startupLead at the beginning of the timeline shifts the audible
@@ -30826,8 +30877,11 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       }
 
       // ── Encode to WAV and trigger download ──
-      setExportMsg("Encoding...");
-      const wavBuf = await audioBufferToWavAsync(finalBuffer);
+      setExportMsg("Encoding..."); setExportProgress(0.92);
+      const wavBuf = await audioBufferToWavAsync(finalBuffer, function(frac){
+        // Encoding spans 92%..99% of the bar.
+        setExportProgress(0.92 + 0.07 * frac);
+      });
       const wavBlob = new Blob([wavBuf], { type: "audio/wav" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(wavBlob);
@@ -30849,8 +30903,8 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       // Clean up the object URL after a moment
       setTimeout(function(){ try { URL.revokeObjectURL(a.href); } catch(e) {} }, 1000);
 
-      setExportMsg("Done!");
-      setTimeout(function(){ setExporting(false); setExportMsg(""); }, 2500);
+      setExportMsg("Done!"); setExportProgress(1);
+      setTimeout(function(){ setExporting(false); setExportMsg(""); setExportProgress(0); }, 2500);
       // Clear share-sheet flag after 60s — generous window covering the
       // most leisurely Save-to-Files navigation. Past that, fresh reloads
       // are safe to recover normally.
@@ -30860,7 +30914,7 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
     } catch (e) {
       console.error("[export] Failed:", e);
       setExportMsg("Export failed: " + (e.message || "unknown error"));
-      setTimeout(function(){ setExporting(false); setExportMsg(""); }, 3500);
+      setTimeout(function(){ setExporting(false); setExportMsg(""); setExportProgress(0); }, 3500);
     }
   };
 
@@ -31060,13 +31114,34 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
       )}
 
       {exporting && (
-        <div style={{ position:"absolute",inset:0,zIndex:9000,background:"rgba(0,0,0,0.92)",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:18,padding:"32px" }}>
-          {/* Spinning loader ring */}
-          <div style={{ width:52,height:52,borderRadius:"50%",border:"3px solid rgba(192,38,211,0.3)",borderTop:"3px solid #C026D3",animation:"bf-spin 0.8s linear infinite" }} />
-          <div style={{ color:"white",fontWeight:700,fontSize:17 }}>Exporting Mix</div>
-          {/* Current step (e.g. "Mixing track 2...", "Rendering...", "Encoding...") */}
-          <div style={{ color:"#aaa",fontSize:13,minHeight:18,textAlign:"center" }}>{exportMsg}</div>
-          {/* Time-estimate hint — shown unless we're already done */}
+        <div style={{ position:"absolute",inset:0,zIndex:9000,background:"rgba(0,0,0,0.94)",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:18,padding:"32px" }}>
+          {/* Title */}
+          <div style={{ color:"white",fontWeight:800,fontSize:18,letterSpacing:0.2 }}>Exporting Mix</div>
+
+          {/* Progress bar — driven by setExportProgress(...) at known phase
+              boundaries, plus per-band bumps and a creeping interval during
+              the offline render. Unlike a CSS-animated spinner, this can
+              never freeze: every visible state change is an explicit React
+              render triggered by a useState write. iOS Safari will always
+              repaint between awaits, so the user sees forward motion. */}
+          <div style={{ width:"100%", maxWidth:280, height:8, background:"#1f1f23", borderRadius:6, overflow:"hidden", border:"1px solid #2a2a2e" }}>
+            <div style={{
+              height:"100%",
+              width: Math.round(Math.max(0.02, Math.min(1, exportProgress)) * 100) + "%",
+              background: "linear-gradient(90deg, #7C3AED, #C026D3)",
+              borderRadius:6,
+              transition: "width 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+              boxShadow: "0 0 8px rgba(192,38,211,0.5)",
+            }} />
+          </div>
+
+          {/* Percent + current step. Min-height keeps the line stable so
+              the bar doesn't jump as messages of varying length swap in. */}
+          <div style={{ color:"#bbb",fontSize:12,minHeight:18,textAlign:"center",fontFamily:"ui-monospace, SFMono-Regular, monospace" }}>
+            {Math.round(Math.max(0, Math.min(1, exportProgress)) * 100)}% — {exportMsg}
+          </div>
+
+          {/* Time-estimate hint */}
           {exportMsg !== "Done!" && !exportMsg.startsWith("Export failed") && (
             <div style={{ color:"#666",fontSize:11,textAlign:"center",lineHeight:1.5,maxWidth:280,marginTop:4 }}>
               This can take 2–3 minutes depending on track length and how many FX you have on. Keep the app open — leaving may interrupt the export.
