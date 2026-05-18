@@ -149,6 +149,10 @@ const LOADER_STYLE = `
     50%  { left: 30%;  width: 50%; }
     100% { left: 100%; width: 40%; }
   }
+  @keyframes bfNudgePulse {
+    0%   { transform: scale(1.18); filter: brightness(1.4); }
+    100% { transform: scale(1);    filter: brightness(1);   }
+  }
   .bf-progress-track {
     position: relative;
     width: 100%;
@@ -23964,6 +23968,10 @@ function StudioScreen({ user, onExit, savedLyrics, onEditLyric, onNewLyric, onRe
   // ── Clip/track selection state ───────────────────────────────────────────
   const [selectedTrackId, setSelectedTrackId] = useState(null); // which vocal track records into
   const [selectedClipId, setSelectedClipId] = useState(null);
+  // Ticks up by 1 every time the user nudges the selected clip. Used purely
+  // as a re-render trigger for the readout-pulse animation in the Nudge bar
+  // so the user gets visible confirmation that the tap registered.
+  const [nudgePulseTick, setNudgePulseTick] = useState(0);
   const dragRef = useRef(null);
 
   // ── Track reorder via long-press drag ────────────────────────────────────
@@ -31383,53 +31391,102 @@ userPickedMicRef.current = true;
         // Clamp display to [-500, +500] but allow the actual value to exceed
         const sliderValue = Math.max(-500, Math.min(500, currentOffsetMs));
         return (
-          <div style={{
-            position:"fixed", left:0, right:0,
-            // Sit above the transport: transport is ~80px tall (varies with safe area).
-            // We use a fixed 76px lift so we don't depend on env() at this layer.
-            bottom: "calc(72px + max(env(safe-area-inset-bottom), 12px))",
-            background:"linear-gradient(180deg,rgba(20,15,35,0.95) 0%,rgba(15,10,25,0.97) 100%)",
-            borderTop:"1px solid rgba(124,58,237,0.2)",
-            borderBottom:"1px solid rgba(124,58,237,0.1)",
-            padding:"10px 14px",
-            zIndex:9050,
-            backdropFilter:"blur(8px)",
-            display:"flex", alignItems:"center", gap:12,
-            fontFamily:"'DM Sans',sans-serif",
-            boxShadow:"0 -4px 12px rgba(0,0,0,0.4)",
-          }}>
-            {/* Label + readout */}
-            <div style={{ minWidth:78, flexShrink:0 }}>
+          <div
+            onClick={function(e){ e.stopPropagation(); }}
+            onMouseDown={function(e){ e.stopPropagation(); }}
+            onTouchStart={function(e){ e.stopPropagation(); }}
+            onPointerDown={function(e){ e.stopPropagation(); }}
+            style={{
+              position:"fixed", left:0, right:0,
+              // Sit above the transport: transport is ~80px tall (varies with safe area).
+              bottom: "calc(72px + max(env(safe-area-inset-bottom), 12px))",
+              background:"linear-gradient(180deg,rgba(20,15,35,0.95) 0%,rgba(15,10,25,0.97) 100%)",
+              borderTop:"1px solid rgba(124,58,237,0.2)",
+              borderBottom:"1px solid rgba(124,58,237,0.1)",
+              padding:"12px 14px",
+              zIndex:9050,
+              backdropFilter:"blur(8px)",
+              display:"flex", alignItems:"center", gap:12,
+              fontFamily:"'DM Sans',sans-serif",
+              boxShadow:"0 -4px 12px rgba(0,0,0,0.4)",
+            }}>
+            {/* Label + readout. Readout PULSES (scale + glow) every time the
+                value changes so the user gets clear visual confirmation. */}
+            <div style={{ minWidth:90, flexShrink:0 }}>
               <div style={{ color:"#aaa", fontSize:9, fontWeight:700, letterSpacing:1.2, textTransform:"uppercase" }}>
                 Nudge Clip
               </div>
-              <div style={{ color:currentOffsetMs===0?"#666":"#A78BFA", fontSize:14, fontWeight:800, fontFamily:"monospace", marginTop:2 }}>
+              <div
+                key={"nudge-readout-" + nudgePulseTick}
+                style={{
+                  color:currentOffsetMs===0?"#666":"#A78BFA",
+                  fontSize:16, fontWeight:900, fontFamily:"monospace",
+                  marginTop:2,
+                  textShadow: currentOffsetMs===0 ? "none" : "0 0 10px rgba(167,139,250,0.5)",
+                  animation: "bfNudgePulse 0.35s ease-out",
+                }}>
                 {currentOffsetMs > 0 ? "+" : ""}{currentOffsetMs} ms
               </div>
             </div>
-            {/* Slider */}
+            {/* Slider — bigger touch target for mobile, prominent thumb */}
             <div style={{ flex:1, display:"flex", alignItems:"center", gap:8 }}>
               <span style={{ color:"#555", fontSize:10, fontWeight:700, fontFamily:"monospace" }}>−500</span>
               <input type="range" min={-500} max={500} step={5} value={sliderValue}
                 onChange={function(e){
                   const v = parseInt(e.target.value, 10);
                   setSelectedClipNudge(v);
+                  setNudgePulseTick(function(n){ return n + 1; });
+                  try { if (navigator.vibrate) navigator.vibrate(8); } catch(_){}
                 }}
-                style={{ flex:1, accentColor:"#A78BFA" }} />
+                onTouchStart={function(e){ e.stopPropagation(); }}
+                onMouseDown={function(e){ e.stopPropagation(); }}
+                onPointerDown={function(e){ e.stopPropagation(); }}
+                style={{ flex:1, accentColor:"#A78BFA", height: 28 }} />
               <span style={{ color:"#555", fontSize:10, fontWeight:700, fontFamily:"monospace" }}>+500</span>
             </div>
-            {/* Fine control buttons + Reset */}
-            <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-              <button onClick={function(){ nudgeSelectedClip(-5); }}
-                style={{ background:"#1a1530", border:"1px solid #2a2545", borderRadius:5, color:"#A78BFA", fontSize:10, fontWeight:800, padding:"5px 8px", cursor:"pointer", fontFamily:"monospace" }}>
+            {/* Fine control buttons + Reset — bigger tap targets, haptic feedback */}
+            <div style={{ display:"flex", gap:5, flexShrink:0 }}>
+              <button onClick={function(e){
+                  e.stopPropagation();
+                  nudgeSelectedClip(-5);
+                  setNudgePulseTick(function(n){ return n + 1; });
+                  try { if (navigator.vibrate) navigator.vibrate(12); } catch(_){}
+                }}
+                style={{
+                  background:"linear-gradient(180deg,#2a2050,#1a1535)",
+                  border:"1px solid #3a3060", borderRadius:7,
+                  color:"#A78BFA", fontSize:12, fontWeight:800,
+                  padding:"8px 11px", cursor:"pointer", fontFamily:"monospace",
+                  minWidth:40, boxShadow:"inset 0 1px 0 rgba(167,139,250,0.15)",
+                }}>
                 −5
               </button>
-              <button onClick={function(){ nudgeSelectedClip(5); }}
-                style={{ background:"#1a1530", border:"1px solid #2a2545", borderRadius:5, color:"#A78BFA", fontSize:10, fontWeight:800, padding:"5px 8px", cursor:"pointer", fontFamily:"monospace" }}>
+              <button onClick={function(e){
+                  e.stopPropagation();
+                  nudgeSelectedClip(5);
+                  setNudgePulseTick(function(n){ return n + 1; });
+                  try { if (navigator.vibrate) navigator.vibrate(12); } catch(_){}
+                }}
+                style={{
+                  background:"linear-gradient(180deg,#2a2050,#1a1535)",
+                  border:"1px solid #3a3060", borderRadius:7,
+                  color:"#A78BFA", fontSize:12, fontWeight:800,
+                  padding:"8px 11px", cursor:"pointer", fontFamily:"monospace",
+                  minWidth:40, boxShadow:"inset 0 1px 0 rgba(167,139,250,0.15)",
+                }}>
                 +5
               </button>
-              <button onClick={function(){ setSelectedClipNudge(0); }}
-                style={{ background:"#0a0814", border:"1px solid #2a2545", borderRadius:5, color:"#666", fontSize:10, fontWeight:700, padding:"5px 10px", cursor:"pointer" }}>
+              <button onClick={function(e){
+                  e.stopPropagation();
+                  setSelectedClipNudge(0);
+                  setNudgePulseTick(function(n){ return n + 1; });
+                  try { if (navigator.vibrate) navigator.vibrate(6); } catch(_){}
+                }}
+                style={{
+                  background:"#0a0814", border:"1px solid #2a2545", borderRadius:7,
+                  color:"#888", fontSize:11, fontWeight:700,
+                  padding:"8px 12px", cursor:"pointer",
+                }}>
                 Reset
               </button>
             </div>
